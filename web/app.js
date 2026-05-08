@@ -1263,7 +1263,7 @@ window.addEventListener('message', e => {
   const d = e.data
   if (!d || !d.type) return
   if (d.type === 'openFile' && d.path) {
-    send({ type: 'open_file', path: d.path })
+    send({ type: 'file_open', path: d.path.replace(/^\/workspace\//, '') })
   } else if (d.type === 'sendChat' && d.text) {
     document.getElementById('chat-input').value = d.text
     if (!chatOpen) toggleChat()
