@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Base — Dashboard</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+/* ── Page layout ─────────────────────────────────────────────────────────── */
+#rag-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#rag-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────────── */
+#sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg1);
+  overflow: hidden;
+}
+
+#sidebar-header {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+#sidebar-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+
+#new-collection-btn {
+  background: none;
+  border: 1px solid var(--border2);
+  color: var(--text3);
+  font-size: 16px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.1s, border-color 0.1s;
+}
+#new-collection-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+#collections-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.collection-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 16px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.1s;
+  gap: 8px;
+}
+.collection-item:hover { background: var(--bg2); }
+.collection-item.active { background: var(--bg3); }
+
+.collection-name {
+  font-size: 13px;
+  color: var(--text);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.collection-count {
+  font-size: 10.5px;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+.collection-del {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+.collection-item:hover .collection-del { opacity: 1; }
+.collection-del:hover { color: var(--red); }
+
+#no-collections {
+  padding: 20px 16px;
+  font-size: 12px;
+  color: var(--text3);
+  text-align: center;
+}
+
+/* ── Content ──────────────────────────────────────────────────────────────── */
+#content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#content-header {
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+#content-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ── Upload zone ──────────────────────────────────────────────────────────── */
+#upload-zone {
+  border: 2px dashed var(--border2);
+  border-radius: 10px;
+  margin: 20px 24px 0;
+  padding: 28px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+#upload-zone:hover, #upload-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(107, 138, 253, 0.04);
+}
+#upload-zone.uploading {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+#upload-icon { font-size: 28px; margin-bottom: 8px; opacity: 0.5; }
+#upload-label {
+  font-size: 13px;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+#upload-hint { font-size: 11.5px; color: var(--text3); }
+#upload-input { display: none; }
+
+#upload-progress {
+  display: none;
+  margin: 12px 24px 0;
+  font-size: 12px;
+  color: var(--text3);
+  text-align: center;
+}
+#upload-progress.visible { display: block; }
+
+/* ── Documents table ──────────────────────────────────────────────────────── */
+#docs-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px 24px;
+  min-height: 0;
+}
+
+#docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+#docs-table th {
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text3);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+#docs-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text2);
+  vertical-align: middle;
+}
+#docs-table td:first-child { color: var(--text); font-family: var(--mono); font-size: 11.5px; }
+#docs-table tr:last-child td { border-bottom: none; }
+#docs-table tr:hover td { background: var(--bg2); }
+
+.doc-del-btn {
+  background: none;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+}
+.doc-del-btn:hover { color: var(--red); background: rgba(224,108,117,0.1); }
+
+#no-docs {
+  padding: 40px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text3);
+}
+
+#no-collection-selected {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text3);
+  font-size: 13px;
+}
+#no-collection-selected .icon { font-size: 36px; opacity: 0.2; }
+
+/* ── New collection modal ─────────────────────────────────────────────────── */
+#modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(3px);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#modal-overlay.visible { display: flex; }
+
+#modal {
+  background: var(--bg1);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 24px;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+#modal h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+#modal input {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--sans);
+  padding: 8px 12px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+#modal input:focus { border-color: var(--accent); }
+#modal-hint { font-size: 11.5px; color: var(--text3); margin-top: -6px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.btn {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  color: var(--text2);
+  font-size: 12.5px;
+  font-family: var(--sans);
+  padding: 7px 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.btn:hover { background: var(--bg4); color: var(--text); }
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover { background: #7c9bff; }
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+#toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  font-size: 12.5px;
+  color: var(--text);
+  z-index: 999;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+}
+#toast.visible { opacity: 1; transform: translateY(0); }
+#toast.error { border-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+<div id="rag-app">
+
+  <!-- Header -->
+  <header id="dash-header">
+    <div class="header-left">
+      <a href="/" style="text-decoration:none">
+        <span class="logo" style="cursor:pointer">Dashboard</span>
+      </a>
+      <span style="color:var(--text3);font-size:12px">›</span>
+      <span class="logo" style="color:var(--text2)">Knowledge Base</span>
+    </div>
+  </header>
+
+  <div id="rag-main">
+
+    <!-- Sidebar: collections -->
+    <aside id="sidebar">
+      <div id="sidebar-header">
+        <span id="sidebar-title">Collections</span>
+        <button id="new-collection-btn" title="New collection" onclick="openModal()">+</button>
+      </div>
+      <div id="collections-list"></div>
+    </aside>
+
+    <!-- Main content -->
+    <div id="content">
+      <div id="no-collection-selected">
+        <div class="icon">📚</div>
+        <div>Select a collection or create a new one</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- New collection modal -->
+<div id="modal-overlay" onclick="closeModal(event)">
+  <div id="modal">
+    <h3>New collection</h3>
+    <input id="modal-input" type="text" placeholder="e.g. my-docs" maxlength="60"
+           onkeydown="if(event.key==='Enter')createCollection()">
+    <div id="modal-hint">Letters, numbers, hyphens. Will be lowercased.</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="createCollection()">Create</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+let currentCollection = null
+let collections = []
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+checkStatus()
+
+async function checkStatus() {
+  try {
+    const res = await fetch('/api/rag/status')
+    const data = await res.json()
+    if (data.ready) {
+      document.getElementById('rag-status-bar')?.remove()
+      loadCollections()
+    } else {
+      showStatusBar(data.status || 'initializing…')
+      setTimeout(checkStatus, 2000)
+    }
+  } catch(e) {
+    showStatusBar('Could not reach the server…')
+    setTimeout(checkStatus, 3000)
+  }
+}
+
+function showStatusBar(msg) {
+  let bar = document.getElementById('rag-status-bar')
+  if (!bar) {
+    bar = document.createElement('div')
+    bar.id = 'rag-status-bar'
+    bar.style.cssText = `
+      position:fixed;bottom:0;left:0;right:0;
+      background:var(--bg2);border-top:1px solid var(--border2);
+      padding:10px 20px;font-size:12px;color:var(--text3);
+      display:flex;align-items:center;gap:10px;z-index:50;
+    `
+    bar.innerHTML = `
+      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
+                   background:var(--accent);animation:blink 1s step-end infinite"></span>
+      <span id="rag-status-msg"></span>
+    `
+    document.body.appendChild(bar)
+  }
+  document.getElementById('rag-status-msg').textContent = 'RAG — ' + msg
+}
+
+// ── Collections ───────────────────────────────────────────────────────────────
+
+async function loadCollections() {
+  try {
+    const res = await fetch('/api/rag/collections')
+    collections = await res.json()
+    if (!Array.isArray(collections)) collections = []
+    renderCollections()
+  } catch(e) {
+    showToast('Connection error: ' + e.message, true)
+  }
+}
+
+function renderCollections() {
+  const el = document.getElementById('collections-list')
+  if (collections.length === 0) {
+    el.innerHTML = '<div id="no-collections">No collections</div>'
+    return
+  }
+  el.innerHTML = collections.map(c => `
+    <div class="collection-item ${c.name === currentCollection ? 'active' : ''}"
+         onclick="selectCollection('${escHtml(c.name)}')">
+      <span class="collection-name">${escHtml(c.name)}</span>
+      <span class="collection-count">${c.doc_count} doc${c.doc_count !== 1 ? 's' : ''}</span>
+      <button class="collection-del" title="Delete collection"
+              onclick="event.stopPropagation();deleteCollection('${escHtml(c.name)}')">✕</button>
+    </div>
+  `).join('')
+}
+
+function selectCollection(name) {
+  currentCollection = name
+  renderCollections()
+  renderContent()
+  loadDocuments()
+}
+
+async function deleteCollection(name) {
+  if (!confirm(`Delete collection "${name}" and all its documents?`)) return
+  await fetch(`/api/rag/collections?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+  if (currentCollection === name) {
+    currentCollection = null
+    renderContentEmpty()
+  }
+  await loadCollections()
+}
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+
+async function loadDocuments() {
+  if (!currentCollection) return
+  try {
+    const res = await fetch(`/api/rag/documents?collection=${encodeURIComponent(currentCollection)}`)
+    const docs = await res.json()
+    renderDocuments(Array.isArray(docs) ? docs : [])
+  } catch(e) {
+    showToast('Failed to load documents', true)
+  }
+}
+
+function renderDocuments(docs) {
+  const area = document.getElementById('docs-area')
+  if (!area) return
+  if (docs.length === 0) {
+    area.innerHTML = '<div id="no-docs">No documents in this collection.<br>Drop a file in the zone above.</div>'
+    return
+  }
+  area.innerHTML = `
+    <table id="docs-table">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Size</th>
+          <th>Chunks</th>
+          <th>Updated</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${docs.map(d => `
+          <tr>
+            <td>${escHtml(d.filename)}</td>
+            <td>${fmtSize(d.size_bytes)}</td>
+            <td>${d.chunk_count}</td>
+            <td>${fmtDate(d.updated_at)}</td>
+            <td><button class="doc-del-btn" title="Delete" onclick="deleteDocument(${d.id})">✕</button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `
+}
+
+async function deleteDocument(id) {
+  await fetch(`/api/rag/document?id=${id}`, { method: 'DELETE' })
+  loadDocuments()
+  loadCollections()
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+
+async function saveDescription(value) {
+  const col = collections.find(c => c.name === currentCollection)
+  if (!col) return
+  col.description = value
+  await fetch('/api/rag/collections', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: currentCollection, description: value })
+  })
+}
+
+function renderContent() {
+  const col = collections.find(c => c.name === currentCollection)
+  const desc = col ? (col.description || '') : ''
+  const content = document.getElementById('content')
+  content.innerHTML = `
+    <div id="content-header">
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
+        <span id="content-title">📁 ${escHtml(currentCollection)}</span>
+        <input id="desc-input" type="text" value="${escHtml(desc)}"
+               placeholder="Description for the agent (e.g. internal API docs…)"
+               style="background:transparent;border:none;border-bottom:1px dashed var(--border2);
+                      color:var(--text3);font-size:11.5px;font-family:var(--sans);
+                      outline:none;padding:2px 0;width:100%">
+      </div>
+    </div>
+
+    <div id="upload-zone" onclick="document.getElementById('upload-input').click()">
+      <div id="upload-icon">⬆</div>
+      <div id="upload-label">Drop a file here or click to select</div>
+      <div id="upload-hint">PDF, DOCX, TXT, CSV, MD, JSON — max 50 MB</div>
+      <input id="upload-input" type="file" multiple
+             accept=".pdf,.docx,.txt,.csv,.md,.json,.tsv"
+             onchange="uploadFiles(this.files)">
+    </div>
+    <div id="upload-progress"></div>
+
+    <div id="docs-area"><div id="no-docs">Loading…</div></div>
+  `
+
+  const descInput = document.getElementById('desc-input')
+  descInput.addEventListener('blur', () => saveDescription(descInput.value.trim()))
+  descInput.addEventListener('keydown', e => { if (e.key === 'Enter') { descInput.blur() } })
+
+  const zone = document.getElementById('upload-zone')
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over') })
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'))
+  zone.addEventListener('drop', e => {
+    e.preventDefault()
+    zone.classList.remove('drag-over')
+    uploadFiles(e.dataTransfer.files)
+  })
+}
+
+function renderContentEmpty() {
+  document.getElementById('content').innerHTML = `
+    <div id="no-collection-selected">
+      <div class="icon">📚</div>
+      <div>Select a collection or create a new one</div>
+    </div>
+  `
+}
+
+async function uploadFiles(files) {
+  if (!files || files.length === 0) return
+  if (!currentCollection) { showToast('Select a collection first', true); return }
+
+  const zone = document.getElementById('upload-zone')
+  const progress = document.getElementById('upload-progress')
+  zone.classList.add('uploading')
+  progress.classList.add('visible')
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    progress.textContent = `Uploading ${i + 1}/${files.length}: ${file.name} — indexing…`
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('collection', currentCollection)
+      const res = await fetch('/api/rag/upload', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || res.statusText)
+      showToast(`✓ ${file.name} — ${data.chunks} chunks indexed`)
+    } catch(e) {
+      showToast(`Error ${file.name}: ${e.message}`, true)
+    }
+  }
+
+  zone.classList.remove('uploading')
+  progress.classList.remove('visible')
+  progress.textContent = ''
+  document.getElementById('upload-input').value = ''
+  await loadDocuments()
+  await loadCollections()
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+
+function openModal() {
+  document.getElementById('modal-overlay').classList.add('visible')
+  setTimeout(() => document.getElementById('modal-input').focus(), 50)
+}
+
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal-overlay')) return
+  document.getElementById('modal-overlay').classList.remove('visible')
+  document.getElementById('modal-input').value = ''
+}
+
+async function createCollection() {
+  const input = document.getElementById('modal-input')
+  const name = input.value.trim().toLowerCase().replace(/[^a-z0-9\-_]/g, '-').replace(/-+/g, '-')
+  if (!name) { input.focus(); return }
+
+  document.getElementById('modal-overlay').classList.remove('visible')
+  input.value = ''
+
+  // Collection is created implicitly on first upload — just select it
+  if (!collections.find(c => c.name === name)) {
+    collections.push({ name, doc_count: 0, chunk_count: 0 })
+    renderCollections()
+  }
+  selectCollection(name)
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function fmtDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
+let toastTimer = null
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast')
+  t.textContent = msg
+  t.className = 'visible' + (isError ? ' error' : '')
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { t.className = '' }, 3500)
+}
+</script>
+</body>
+</html>

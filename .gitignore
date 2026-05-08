@@ -1,0 +1,12 @@
+# Secrets
+.env
+
+# Claude
+.CLAUDE.md
+
+# Go binary
+/prism
+
+# Runtime-generated content
+web/plugins/
+workspace/

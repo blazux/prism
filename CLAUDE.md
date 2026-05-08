@@ -1,0 +1,70 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+```bash
+# Run the server locally (requires Ollama running and env vars set)
+go run .
+
+# Build
+go build ./...
+
+# Run all tests
+go test ./...
+
+# Run tests for a specific package
+go test ./internal/agent/...
+
+# Run a single test
+go test ./internal/agent/ -run TestStripThinkingBlocks_UnclosedTag
+
+# Run with Docker Compose (full stack)
+docker compose up -d
+
+# Rebuild after Go changes
+docker compose build server && docker compose up -d server
+```
+
+## Architecture
+
+PRISM is a self-hosted AI dashboard. The Go server (`main.go` → `internal/server`) embeds the frontend (`web/`) and orchestrates all subsystems.
+
+**Request flow:**
+1. Browser connects via WebSocket (`/ws?session=<id>`)
+2. `server.go` creates a per-connection `Client` with its own `Agent` instance
+3. Chat messages call `agent.Chat()` which loops: call Ollama → execute tool calls → feed results back → repeat (max 50 iterations)
+4. Events stream back to the browser as JSON over WebSocket
+
+**Key packages:**
+
+- `internal/agent` — `Agent` (conversation loop, system prompt assembly, history management) + `ToolExecutor` (all tool implementations). `ToolDefinitions` in `tools.go` is the authoritative list of built-in tools.
+- `internal/ollama` — HTTP client for the Ollama API (streaming chat, model listing, embeddings)
+- `internal/docker` — executes shell commands inside the `prism-workspace` container via the Docker socket
+- `internal/rag` — pgvector store (collections, documents, chunks) + embedder (calls Ollama) + chunker/parser
+- `internal/memory` — PostgreSQL-backed conversation history, session management, notifications, and LLM-based summarization (triggered automatically when history exceeds 40 messages)
+- `internal/customtools` — loads Python scripts from `$WORKSPACE_DIR/agent_tools/` as callable tools at runtime
+- `internal/server` — HTTP server, WebSocket hub, REST endpoints, plugin persistence
+
+**Persistence (PostgreSQL):**
+- `sessions` — named chat sessions
+- `conversation_history` — per-session message log (auto-summarized)
+- `agent_config` — key/value store for personality and conversation summaries
+- `rag_collections`, `rag_documents`, `rag_chunks` — RAG knowledge base
+- `notifications` — dashboard notification log
+
+**Widget system:**
+Widgets are self-contained HTML files saved to `$PLUGIN_DIR/<session_id>/<id>.html` with a companion `<id>.meta.json`. They are served as iframes. Widgets communicate with the dashboard via `window.parent.postMessage`. Background data is shared via `/workspace/widget_data/<name>.json` (served at `/data/<name>.json`).
+
+**Sessions:**
+Each WebSocket connection is scoped to a session ID (URL param). Each session has isolated history, personality, plugins, and notifications. The `default` session always exists and cannot be deleted.
+
+**System prompt:**
+Two-part: editable `personality` (stored in DB per session, modifiable via `update_system_prompt` tool) + protected `systemPromptCore` (widget rules, tool docs, API examples, hardcoded in `agent.go`).
+
+## Environment variables
+
+See `.env.example`. Key ones: `OLLAMA_URL`, `OLLAMA_MODEL`, `EMBED_MODEL`, `POSTGRES_URL`, `SEARXNG_URL`, `AGENT_CONTAINER` (default: `prism-workspace`), `WORKSPACE_DIR`, `PLUGIN_DIR`.
+
+Changing `EMBED_MODEL` requires resetting the RAG database (vector dimension is fixed per table).

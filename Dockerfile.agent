@@ -1,0 +1,40 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV TZ=Etc/GMT+4
+
+RUN apt-get update && apt-get install -y \
+    tzdata \
+    python3 python3-pip python3-venv python3-dev \
+    nodejs npm \
+    golang-go \
+    rustc cargo \
+    curl wget git vim nano \
+    build-essential make \
+    jq \
+    sqlite3 \
+    ffmpeg \
+    imagemagick \
+    cron \
+    && rm -rf /var/lib/apt/lists/*
+
+# Common Python packages for data science / web
+RUN pip3 install --no-cache-dir \
+    requests httpx \
+    numpy pandas \
+    matplotlib seaborn plotly \
+    flask fastapi uvicorn \
+    jupyter nbformat \
+    pytest black ruff
+
+# Playwright for browser automation (browser_exec tool)
+RUN pip3 install --no-cache-dir playwright && \
+    python3 -m playwright install chromium && \
+    python3 -m playwright install-deps chromium
+
+WORKDIR /workspace
+
+# Restore persisted crontab (survives container recreation) then start cron
+CMD ["sh", "-c", "[ -f /workspace/.crontab ] && crontab /workspace/.crontab; cron && tail -f /dev/null"]

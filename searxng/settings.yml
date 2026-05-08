@@ -1,0 +1,15 @@
+use_default_settings: true
+
+server:
+  # Change this in production
+  secret_key: "codingagent-searxng-secret"
+  limiter: false
+  image_proxy: false
+  port: 8080
+  bind_address: "0.0.0.0"
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json
