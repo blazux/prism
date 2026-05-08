@@ -22,15 +22,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Compute tags for server image
+        id: tags-server
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/prism:${{ github.ref_name }},${{ secrets.DOCKERHUB_USERNAME }}/prism:latest" >> $GITHUB_OUTPUT
+          else
+            echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/prism:unstable" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Compute tags for workspace image
+        id: tags-workspace
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/prism-workspace:${{ github.ref_name }},${{ secrets.DOCKERHUB_USERNAME }}/prism-workspace:latest" >> $GITHUB_OUTPUT
+          else
+            echo "tags=${{ secrets.DOCKERHUB_USERNAME }}/prism-workspace:unstable" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build & push server image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/prism:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/prism:${{ github.ref_name }}
+          tags: ${{ steps.tags-server.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -40,8 +56,6 @@ jobs:
           context: .
           file: Dockerfile.agent
           push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/prism-workspace:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/prism-workspace:${{ github.ref_name }}
+          tags: ${{ steps.tags-workspace.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

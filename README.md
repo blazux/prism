@@ -66,10 +66,10 @@ PRISM gives you a local AI assistant that can actually *do* things, not just cha
 ## Quick start
 
 ```bash
-git clone https://github.com/yourname/prism
+git clone https://github.com/blazux/prism
 cd prism
 cp .env.example .env   # edit to point at your Ollama instance
-docker compose up -d --build
+docker compose up -d
 ```
 
 Open [http://localhost:48080](http://localhost:48080).

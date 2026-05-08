@@ -2,9 +2,7 @@ name: prism
 
 services:
   server:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: blazux/prism:latest
     ports:
       - "48080:8080"
     volumes:
@@ -28,9 +26,7 @@ services:
 
   # Agent workspace container — the AI executes code here
   workspace:
-    build:
-      context: .
-      dockerfile: Dockerfile.agent
+    image: blazux/prism-workspace:latest
     container_name: prism-workspace
     volumes:
       - workspace:/workspace
