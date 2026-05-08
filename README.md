@@ -6,6 +6,16 @@
 
 A self-hosted AI workspace that runs entirely on your own hardware. No cloud, no API keys, no data leaving your machine.
 
+<img src="gui.png" width="700" alt="PRISM dashboard">
+
+<details>
+<summary>More screenshots</summary>
+
+<img src="chat.png" width="700" alt="Chat with the agent">
+<img src="settings.png" width="700" alt="Agent settings">
+
+</details>
+
 ---
 
 ## What you can do with it
