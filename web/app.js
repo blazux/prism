@@ -27,7 +27,7 @@ function initGrid() {
     column: 12,
     cellHeight: 25,
     handle: '.widget-header',
-    margin: 14,
+    margin: 6,
     float: false,
     disableOneColumnMode: true,
   }, '#widget-grid')
@@ -1312,55 +1312,10 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
   })
 }
 
-// ─── Zoom ─────────────────────────────────────────────────────────────────────
-
-const ZOOM_KEY = 'dashboard-zoom'
-const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 2.0]
-let dashZoom = parseFloat(localStorage.getItem(ZOOM_KEY) || '1') || 1
-
-function applyZoom() {
-  const gridEl = document.getElementById('widget-grid')
-  if (!gridEl) return
-  if (dashZoom === 1) {
-    gridEl.style.transform = ''
-    gridEl.style.width = ''
-    gridEl.style.transformOrigin = ''
-  } else {
-    gridEl.style.transformOrigin = 'top left'
-    gridEl.style.transform = `scale(${dashZoom})`
-    gridEl.style.width = ''
-  }
-  const label = document.getElementById('zoom-label')
-  if (label) label.textContent = Math.round(dashZoom * 100) + '%'
-  const outBtn = document.getElementById('zoom-out-btn')
-  const inBtn  = document.getElementById('zoom-in-btn')
-  if (outBtn) outBtn.disabled = dashZoom <= ZOOM_STEPS[0]
-  if (inBtn)  inBtn.disabled  = dashZoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1]
-  localStorage.setItem(ZOOM_KEY, String(dashZoom))
-  window.dispatchEvent(new Event('resize'))
-}
-
-window.zoomOut = function() {
-  const prev = [...ZOOM_STEPS].reverse().find(z => z < dashZoom - 0.001)
-  if (prev !== undefined) { dashZoom = prev; applyZoom() }
-}
-
-window.zoomIn = function() {
-  const next = ZOOM_STEPS.find(z => z > dashZoom + 0.001)
-  if (next !== undefined) { dashZoom = next; applyZoom() }
-}
-
-document.getElementById('dashboard').addEventListener('wheel', e => {
-  if (!e.ctrlKey) return
-  e.preventDefault()
-  if (e.deltaY < 0) zoomIn()
-  else zoomOut()
-}, { passive: false })
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 initGrid()
-applyZoom()
 // Force GridStack to recalculate column widths after first paint
 requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
 connect()
@@ -1372,7 +1327,4 @@ document.addEventListener('keydown', e => {
     if (configOpen) toggleConfig()
     else if (chatOpen) toggleChat()
   }
-  if (e.ctrlKey && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomIn() }
-  if (e.ctrlKey && e.key === '-') { e.preventDefault(); zoomOut() }
-  if (e.ctrlKey && e.key === '0') { e.preventDefault(); dashZoom = 1; applyZoom() }
 })

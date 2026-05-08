@@ -352,7 +352,7 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 20px;
+  padding: 10px;
 }
 
 /* ── Empty state ─────────────────────────────────────────────────────────── */
@@ -437,19 +437,19 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
-  height: 36px;
+  padding: 0 8px;
+  height: 20px;
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  gap: 8px;
+  gap: 6px;
   cursor: grab;
   user-select: none;
 }
 .widget-header:active { cursor: grabbing; }
 
 .widget-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text2);
   letter-spacing: 0.03em;
@@ -464,9 +464,9 @@ body {
   border: none;
   color: var(--text3);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 12px;
   line-height: 1;
-  padding: 2px 4px;
+  padding: 1px 3px;
   border-radius: 4px;
   flex-shrink: 0;
   opacity: 0;
@@ -498,18 +498,31 @@ body {
 /* ── GridStack resize handles ─────────────────────────────────────────────── */
 
 .grid-stack-item > .ui-resizable-se {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   right: 0;
   bottom: 0;
-  background: linear-gradient(135deg, transparent 55%, var(--border2) 55%);
+  background: none;
   border-radius: 0 0 10px 0;
   opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
+  transition: opacity 0.15s;
+}
+.grid-stack-item > .ui-resizable-se::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 10px;
+  height: 10px;
+  border-bottom: 2.5px solid var(--border2);
+  border-right: 2.5px solid var(--border2);
+  border-radius: 0 0 100% 0;
+  transform: rotate(45deg);
+  transition: border-color 0.15s;
 }
 .grid-stack-item:hover > .ui-resizable-se { opacity: 1; }
-.grid-stack-item > .ui-resizable-se:hover {
-  background: linear-gradient(135deg, transparent 55%, var(--accent) 55%);
+.grid-stack-item > .ui-resizable-se:hover::after {
+  border-color: var(--accent);
 }
 .grid-stack-item > .ui-resizable-s,
 .grid-stack-item > .ui-resizable-e {
@@ -518,38 +531,6 @@ body {
 
 /* ── Zoom control ────────────────────────────────────────────────────────── */
 
-#zoom-control {
-  display: flex;
-  align-items: center;
-  background: var(--bg2);
-  border: 1px solid var(--border2);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-#zoom-control button {
-  background: none;
-  border: none;
-  color: var(--text3);
-  font-size: 16px;
-  width: 26px;
-  height: 26px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: color 0.15s, background 0.15s;
-  line-height: 1;
-  flex-shrink: 0;
-}
-#zoom-control button:hover:not(:disabled) { color: var(--text); background: var(--bg3); }
-#zoom-control button:disabled { opacity: 0.3; cursor: default; }
-#zoom-label {
-  font-size: 11px;
-  color: var(--text3);
-  min-width: 34px;
-  text-align: center;
-  user-select: none;
-}
 
 /* ── File editor ─────────────────────────────────────────────────────────── */
 
