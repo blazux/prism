@@ -1,6 +1,9 @@
 # Secrets
 .env
 
+# Local dev overrides
+docker-compose.override.yml
+
 # Claude
 .CLAUDE.md
 

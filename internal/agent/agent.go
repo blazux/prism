@@ -145,6 +145,28 @@ Show a toast notification:
 Use these instead of inventing fetch-based APIs that don't exist. Example — "Open in editor" button:
   <button onclick="window.parent.postMessage({type:'openFile', path:'/workspace/scripts/run.py'},'*')">Open in editor</button>
 
+## Calling custom tools from a widget
+
+Widgets can call any registered custom tool directly via HTTP — no need to go through the agent.
+
+  POST /api/tool/<tool_name>
+  Content-Type: application/json
+  Body: { ...tool parameters... }
+  Response: { "output": "..." }
+
+Example — a widget button that triggers a custom tool:
+  async function runTool() {
+    const res = await fetch('/api/tool/my_tool', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ param1: 'value1' })
+    })
+    const data = await res.json()
+    console.log(data.output)
+  }
+
+Use this when a widget needs to trigger an action or fetch live data from a Python tool interactively (button click, refresh, etc.).
+
 ## Other guidelines
 - For web tasks: web_search first, then fetch_url for static pages, browser_exec only when JS rendering is needed
 - For scheduled tasks: write and test the script first, then cron_add with output to /workspace/logs/<name>.log

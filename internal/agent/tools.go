@@ -727,13 +727,21 @@ func (e *ToolExecutor) addUIPlugin(id, title, content string, cols, height int) 
 
 func (e *ToolExecutor) removeUIPlugin(id string) (string, error) {
 	metaPath := filepath.Join(e.pluginDir, id+".meta.json")
+	htmlPath := filepath.Join(e.pluginDir, id+".html")
+
+	_, metaErr := os.Stat(metaPath)
+	_, htmlErr := os.Stat(htmlPath)
+	if os.IsNotExist(metaErr) && os.IsNotExist(htmlErr) {
+		return "", fmt.Errorf("widget '%s' does not exist", id)
+	}
+
 	if b, err := os.ReadFile(metaPath); err == nil {
 		var m pluginMeta
 		if json.Unmarshal(b, &m) == nil && m.Locked {
 			return "", fmt.Errorf("widget '%s' is locked by the user and cannot be removed", id)
 		}
 	}
-	os.Remove(filepath.Join(e.pluginDir, id+".html"))
+	os.Remove(htmlPath)
 	os.Remove(metaPath)
 
 	if e.onPluginRem != nil {

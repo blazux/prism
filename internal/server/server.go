@@ -4,13 +4,14 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"fmt"
 	"sync"
 	"time"
 
@@ -142,6 +143,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/models", s.handleModels)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/tools", s.handleTools)
+	mux.HandleFunc("/api/tool/", s.handleToolCall)
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/sessions/", s.handleSessionByID)
 	mux.HandleFunc("/api/notify", s.handleExternalNotify)
@@ -723,6 +725,50 @@ func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"custom": s.customMgr.All(),
 	})
+}
+
+func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if r.Method != "POST" {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := strings.TrimPrefix(r.URL.Path, "/api/tool/")
+	if name == "" {
+		http.Error(w, "tool name required", http.StatusBadRequest)
+		return
+	}
+
+	tool := s.customMgr.Get(name)
+	if tool == nil {
+		http.Error(w, "tool not found", http.StatusNotFound)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) == 0 {
+		body = []byte("{}")
+	}
+	if !json.Valid(body) {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	escape := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+	cmd := fmt.Sprintf("python3 /workspace/agent_tools/%s %s", escape(tool.Filename), escape(string(body)))
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	out, execErr := s.docker.Exec(ctx, cmd, 30*time.Second)
+	resp := map[string]interface{}{"output": out}
+	if execErr != nil {
+		resp["error"] = execErr.Error()
+	}
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) broadcastTools() {
