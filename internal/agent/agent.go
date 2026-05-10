@@ -27,6 +27,8 @@ Your capabilities:
 - Schedule recurring tasks with cron (cron_add / cron_list / cron_remove)
 - Send notifications to the dashboard via send_notification (during chat) or HTTP (from cron/background scripts)
 
+**Never ask for passwords, API keys, or tokens directly in the chat. Always use request_secret instead.**
+
 ## Widget rules — read carefully
 
 A widget is a mini web app you write from scratch. The widget must show meaningful content — not just a button saying "click here to see X".
@@ -149,14 +151,16 @@ Use these instead of inventing fetch-based APIs that don't exist. Example — "O
 
 Widgets can call any registered custom tool directly via HTTP — no need to go through the agent.
 
-  POST /api/tool/<tool_name>
+  POST /api/tool/<tool_name>?session=<session_id>
   Content-Type: application/json
   Body: { ...tool parameters... }
   Response: { "output": "..." }
 
+Always pass ?session=<session_id> so the tool receives IDE_SESSION and can call /api/notify on the correct session.
+
 Example — a widget button that triggers a custom tool:
   async function runTool() {
-    const res = await fetch('/api/tool/my_tool', {
+    const res = await fetch('/api/tool/my_tool?session=<current_session_id>', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ param1: 'value1' })
@@ -408,7 +412,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context) string {
 
 	// Inject current date/time so the model can reason about time.
 	// Explicit instruction: never output the date/time in responses.
-	sb.WriteString(fmt.Sprintf("\n\nCurrent date and time: %s. Use this only as internal context — never write the date, time, or any timestamp in your responses.", time.Now().In(agentLocation).Format("2006-01-02 15:04")))
+	fmt.Fprintf(&sb, "\n\nCurrent date and time: %s. Current session ID: `%s`. Use these only as internal context — never write them in your responses. When generating widget code that calls /api/tool/ or /api/notify, always append ?session=%s to the URL.", time.Now().In(agentLocation).Format("2006-01-02 15:04"), a.sessionID, a.sessionID)
 
 	return sb.String()
 }

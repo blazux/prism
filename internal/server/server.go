@@ -757,13 +757,22 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
+	if sessionID == "" {
+		sessionID = "default"
+	}
+	env := map[string]string{
+		"IDE_SESSION": sessionID,
+		"IDE_URL":     "http://server:8080",
+	}
+
 	escape := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 	cmd := fmt.Sprintf("python3 /workspace/agent_tools/%s %s", escape(tool.Filename), escape(string(body)))
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	out, execErr := s.docker.Exec(ctx, cmd, 30*time.Second)
+	out, execErr := s.docker.ExecWithEnv(ctx, cmd, 30*time.Second, env)
 	resp := map[string]interface{}{"output": out}
 	if execErr != nil {
 		resp["error"] = execErr.Error()

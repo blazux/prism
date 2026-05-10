@@ -1269,7 +1269,27 @@ window.addEventListener('message', e => {
     if (!chatOpen) toggleChat()
     sendChat()
   } else if (d.type === 'notify' && d.message) {
-    addNotification({ title: 'Widget', message: d.message, level: d.level || 'info' })
+    fetch('/api/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session: currentSessionID,
+        title: d.title || 'Widget',
+        message: d.message,
+        level: d.level || 'info'
+      })
+    }).then(r => r.json()).then(data => {
+      receiveNotification({
+        id: data.id,
+        title: d.title || 'Widget',
+        message: d.message,
+        level: d.level || 'info',
+        read: false,
+        createdAt: new Date().toISOString()
+      })
+    }).catch(() => {
+      showToast({ title: d.title || 'Widget', message: d.message, level: d.level || 'info' })
+    })
   }
 })
 
