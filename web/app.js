@@ -99,6 +99,7 @@ function handleServerMsg(msg) {
     case 'notification':           receiveNotification(msg); break
     case 'notifications_history':  loadNotificationsHistory(msg.notifications); break
     case 'notifications_read':     markNotificationsReadLocal(); break
+    case 'notification_deleted':   removeNotificationLocal(msg.id); break
     case 'error':           appendError(msg.content); break
     case 'tools_list':
     case 'tools_updated':
@@ -513,17 +514,28 @@ function renderNotifPanel() {
         <div class="notif-title">${escHtml(n.title)}</div>
         ${n.message ? `<div class="notif-msg">${escHtml(n.message)}</div>` : ''}
       </div>
-      <span class="notif-time">${timeStr}</span>`
+      <span class="notif-time">${timeStr}</span>
+      <button class="notif-delete" onclick="deleteNotification(${n.id})" title="Delete">✕</button>`
     list.appendChild(el)
   }
 }
 
-function markAllNotifRead() {
+window.markAllNotifRead = function() {
   send({ type: 'mark_notifications_read' })
+}
+
+window.deleteNotification = function(id) {
+  send({ type: 'delete_notification', id: String(id) })
 }
 
 function markNotificationsReadLocal() {
   notifications.forEach(n => n.read = true)
+  renderNotifPanel()
+  renderNotifBadge()
+}
+
+function removeNotificationLocal(id) {
+  notifications = notifications.filter(n => String(n.id) !== String(id))
   renderNotifPanel()
   renderNotifBadge()
 }

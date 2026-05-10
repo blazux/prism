@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -596,6 +597,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				ms.MarkNotificationsRead(context.Background(), client.sessionID)
 			}
 			client.sendJSON(map[string]interface{}{"type": "notifications_read"})
+
+		case "delete_notification":
+			if ms != nil && msg.ID != "" {
+				if id, err := strconv.ParseInt(msg.ID, 10, 64); err == nil {
+					ms.DeleteNotification(context.Background(), client.sessionID, id)
+				}
+			}
+			client.sendJSON(map[string]interface{}{"type": "notification_deleted", "id": msg.ID})
 
 		case "set_model":
 			model = msg.Model

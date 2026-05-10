@@ -286,6 +286,13 @@ body {
 .notif-title { font-size: 12.5px; color: var(--text); font-weight: 500; }
 .notif-msg   { font-size: 11px; color: var(--text2); margin-top: 2px; }
 .notif-time  { font-size: 10px; color: var(--text3); flex-shrink: 0; }
+.notif-delete {
+  background: none; border: none; color: var(--text3); cursor: pointer;
+  font-size: 11px; padding: 0 2px; flex-shrink: 0; opacity: 0;
+  transition: color 0.15s, opacity 0.15s;
+}
+.notif-item:hover .notif-delete { opacity: 1; }
+.notif-delete:hover { color: var(--red); }
 
 /* ── Toast notifications ─────────────────────────────────────────────────── */
 

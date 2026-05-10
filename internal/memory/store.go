@@ -172,6 +172,11 @@ func (s *Store) MarkNotificationsRead(ctx context.Context, sessionID string) err
 	return err
 }
 
+func (s *Store) DeleteNotification(ctx context.Context, sessionID string, id int64) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM notifications WHERE id = $1 AND session_id = $2`, id, sessionID)
+	return err
+}
+
 // ─── Session management ───────────────────────────────────────────────────────
 
 type Session struct {
