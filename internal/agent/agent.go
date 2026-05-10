@@ -386,7 +386,8 @@ func (a *Agent) saveMessageToDB(ctx context.Context, msg ollama.Message) {
 }
 
 // agentLocation is the timezone used for all timestamps shown to the model.
-var agentLocation = time.FixedZone("GMT-4", -4*60*60)
+// Relies on the TZ environment variable being set at the container/process level.
+var agentLocation = time.Local
 
 // buildSystemPrompt assembles the full system prompt for the current request.
 func (a *Agent) buildSystemPrompt(ctx context.Context) string {

@@ -4,6 +4,7 @@ import (
 	"embed"
 	"log"
 	"os"
+	_ "time/tzdata" // embed IANA timezone database so TZ env var works without tzdata installed
 
 	"prism/internal/server"
 )

@@ -17,6 +17,7 @@ services:
       - AGENT_CONTAINER=${AGENT_CONTAINER}
       - WORKSPACE_DIR=${WORKSPACE_DIR}
       - PLUGIN_DIR=${PLUGIN_DIR}
+      - TZ=${TZ:-UTC}
     extra_hosts:
       - "host-gateway:host-gateway"
     depends_on:
@@ -30,6 +31,8 @@ services:
     container_name: prism-workspace
     volumes:
       - workspace:/workspace
+    environment:
+      - TZ=${TZ:-UTC}
     restart: unless-stopped
 
   postgres:
