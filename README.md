@@ -89,10 +89,13 @@ All configuration is done via environment variables (set in `docker-compose.yml`
 | `SEARXNG_URL` | SearXNG instance URL (optional) | `http://searxng:8080` |
 | `WORKSPACE_DIR` | Agent workspace directory | `/workspace` |
 | `PLUGIN_DIR` | Widget storage directory | `/workspace/.plugins` |
+| `TZ` | Timezone for the agent and cron jobs | `America/New_York`, `Europe/Paris` |
 
 > **The only required changes are `OLLAMA_URL` and the model names** — everything else (Postgres, SearXNG, paths) works out of the box with the default Docker Compose setup and can be left untouched unless you have specific needs.
 
 > **Note on embedding models:** the vector dimension is detected automatically at startup by probing the model. If you change the embedding model, you need to reset the RAG database (the vector dimension is fixed per table).
+
+> **Note on timezone:** `TZ` defaults to `UTC`. Set it to your local timezone (IANA format, e.g. `America/New_York`, `Europe/Paris`, `Asia/Tokyo`) so that cron schedules and agent timestamps match your local time. For a fixed offset without daylight saving, use `Etc/GMT+4` (note: POSIX convention inverts the sign — `Etc/GMT+4` = UTC-4).
 
 ---
 
