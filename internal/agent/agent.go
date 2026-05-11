@@ -213,6 +213,16 @@ print("result")
 
 Steps: 1) Write and test the script with exec_command first. 2) Call register_tool with filename and code. 3) The tool appears immediately in the admin panel and in your tool list. Use list_tools to see registered custom tools.
 
+## MCP servers (mcp_add_server / mcp_remove_server / mcp_list_servers)
+
+You can connect external MCP servers at runtime to extend your capabilities with third-party tools.
+
+- **mcp_add_server(name, url, auth_secret?)** — Connect a server. Fetches its tool list immediately; those tools become callable in subsequent turns. If the server requires authentication, store the API key with request_secret first and pass the secret name as auth_secret.
+- **mcp_remove_server(name)** — Disconnect and remove a server.
+- **mcp_list_servers()** — List all configured servers and their tools.
+
+Once connected, MCP tools appear in your tool list and can be called like any built-in tool. If a tool name conflicts with a built-in, the built-in takes priority.
+
 Workspace is at /workspace in the container.`
 
 type Event struct {
@@ -243,8 +253,9 @@ type Agent struct {
 	model         string
 	history       []ollama.Message
 	toolSeq       int // monotonically increasing tool call ID across all iterations
-	activeTools   []ollama.Tool
+	disabledTools []string
 	ragCtxFn      func() string // returns live RAG context block for system prompt
+	mcpCtxFn      func() string // returns MCP servers context block for system prompt
 	memStore      *memory.Store
 	sessionID     string
 	personality   string // editable section of the system prompt
@@ -255,14 +266,26 @@ type Agent struct {
 // to inject into the system prompt on every chat turn.
 func (a *Agent) SetRAGContextFn(fn func() string) { a.ragCtxFn = fn }
 
+// SetMCPContextFn registers a callback that returns the MCP servers section
+// to inject into the system prompt on every chat turn.
+func (a *Agent) SetMCPContextFn(fn func() string) { a.mcpCtxFn = fn }
+
+// SetActiveTools stores the list of disabled tool names. buildToolList() uses
+// this on every callOllama() call so tools added mid-conversation take effect immediately.
 func (a *Agent) SetActiveTools(disabledNames []string) {
-	if len(disabledNames) == 0 {
-		a.activeTools = nil // nil = use all tools dynamically
-		return
+	a.disabledTools = disabledNames
+}
+
+// buildToolList assembles the full tool list for the current call, minus any
+// disabled tools. Called on every Ollama request so dynamic tools (custom Python
+// scripts, MCP tools) are always up-to-date without requiring a session restart.
+func (a *Agent) buildToolList() []ollama.Tool {
+	all := append(append([]ollama.Tool{}, ToolDefinitions...), a.executor.AllDynamicTools()...)
+	if len(a.disabledTools) == 0 {
+		return all
 	}
-	all := append(append([]ollama.Tool{}, ToolDefinitions...), a.executor.CustomOllamaTools()...)
-	disabled := make(map[string]bool, len(disabledNames))
-	for _, n := range disabledNames {
+	disabled := make(map[string]bool, len(a.disabledTools))
+	for _, n := range a.disabledTools {
 		disabled[n] = true
 	}
 	filtered := make([]ollama.Tool, 0, len(all))
@@ -271,7 +294,7 @@ func (a *Agent) SetActiveTools(disabledNames []string) {
 			filtered = append(filtered, t)
 		}
 	}
-	a.activeTools = filtered
+	return filtered
 }
 
 // New creates a new Agent. personality is the editable system prompt section loaded
@@ -411,6 +434,14 @@ func (a *Agent) buildSystemPrompt(ctx context.Context) string {
 		}
 	}
 
+	// Inject MCP server context
+	if a.mcpCtxFn != nil {
+		if extra := a.mcpCtxFn(); extra != "" {
+			sb.WriteString("\n\n")
+			sb.WriteString(extra)
+		}
+	}
+
 	// Inject current date/time so the model can reason about time.
 	// Explicit instruction: never output the date/time in responses.
 	fmt.Fprintf(&sb, "\n\nCurrent date and time: %s. Current session ID: `%s`. Use these only as internal context — never write them in your responses. When generating widget code that calls /api/tool/ or /api/notify, always append ?session=%s to the URL.", time.Now().In(agentLocation).Format("2006-01-02 15:04"), a.sessionID, a.sessionID)
@@ -538,10 +569,7 @@ func (a *Agent) callOllama(ctx context.Context, events chan<- Event) (string, []
 		{Role: "system", Content: prompt},
 	}, a.history...)
 
-	tools := a.activeTools
-	if tools == nil {
-		tools = append(append([]ollama.Tool{}, ToolDefinitions...), a.executor.CustomOllamaTools()...)
-	}
+	tools := a.buildToolList()
 	req := ollama.ChatRequest{
 		Model:    a.model,
 		Messages: messages,

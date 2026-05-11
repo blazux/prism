@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings — PRISM</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link rel="stylesheet" href="/style.css">
+<style>
+html, body { height: 100%; overflow: hidden; margin: 0; }
+#settings-app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── Main layout ──────────────────────────────────────────────────────────── */
+#settings-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Left nav ─────────────────────────────────────────────────────────────── */
+#settings-nav {
+  width: 192px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg1);
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  cursor: pointer;
+  color: var(--text3);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 0;
+  transition: color 0.15s, background 0.15s;
+  user-select: none;
+}
+.nav-item:hover { color: var(--text); background: var(--bg2); }
+.nav-item.active { color: var(--text); background: var(--bg3); }
+.nav-icon { font-size: 14px; width: 18px; text-align: center; }
+
+/* ── Content area ─────────────────────────────────────────────────────────── */
+#settings-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.settings-page {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+  min-height: 0;
+}
+.settings-page-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 16px;
+}
+
+/* ── RAG tab: internal layout ─────────────────────────────────────────────── */
+#rag-tab {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+#rag-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg1);
+  overflow: hidden;
+}
+#rag-sidebar-header {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+#rag-sidebar-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+#new-collection-btn {
+  background: none;
+  border: 1px solid var(--border2);
+  color: var(--text3);
+  font-size: 16px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.1s, border-color 0.1s;
+}
+#new-collection-btn:hover { color: var(--accent); border-color: var(--accent); }
+#collections-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+.collection-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+  gap: 8px;
+}
+.collection-item:hover { background: var(--bg2); }
+.collection-item.active { background: var(--bg3); }
+.collection-name { font-size: 13px; color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.collection-count { font-size: 10.5px; color: var(--text3); flex-shrink: 0; }
+.collection-del {
+  background: none; border: none; color: var(--text3); font-size: 13px;
+  cursor: pointer; padding: 2px 4px; border-radius: 3px;
+  opacity: 0; transition: opacity 0.1s, color 0.1s; flex-shrink: 0;
+}
+.collection-item:hover .collection-del { opacity: 1; }
+.collection-del:hover { color: var(--red); }
+#rag-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+#rag-content-header {
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 12px;
+}
+#upload-zone {
+  border: 2px dashed var(--border2);
+  border-radius: 10px;
+  margin: 16px 24px 0;
+  padding: 24px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+#upload-zone:hover, #upload-zone.drag-over { border-color: var(--accent); background: rgba(107,138,253,0.04); }
+#upload-zone.uploading { pointer-events: none; opacity: 0.6; }
+#upload-icon { font-size: 24px; margin-bottom: 6px; opacity: 0.5; }
+#upload-label { font-size: 13px; color: var(--text2); margin-bottom: 4px; }
+#upload-hint { font-size: 11.5px; color: var(--text3); }
+#upload-input { display: none; }
+#upload-progress { display: none; margin: 10px 24px 0; font-size: 12px; color: var(--text3); text-align: center; }
+#upload-progress.visible { display: block; }
+#docs-area { flex: 1; overflow-y: auto; padding: 16px 24px 24px; min-height: 0; }
+#docs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+#docs-table th {
+  text-align: left; font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3);
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+}
+#docs-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); color: var(--text2); vertical-align: middle; }
+#docs-table td:first-child { color: var(--text); font-family: var(--mono); font-size: 11.5px; }
+#docs-table tr:last-child td { border-bottom: none; }
+#docs-table tr:hover td { background: var(--bg2); }
+.doc-del-btn {
+  background: none; border: none; color: var(--text3); cursor: pointer;
+  font-size: 13px; padding: 3px 6px; border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+}
+.doc-del-btn:hover { color: var(--red); background: rgba(224,108,117,0.1); }
+#no-collection-msg {
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 10px; color: var(--text3); font-size: 13px;
+  padding: 40px 0; flex: 1;
+}
+#no-collection-msg .icon { font-size: 36px; opacity: 0.2; }
+
+/* ── Modal ────────────────────────────────────────────────────────────────── */
+#modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(3px); z-index: 100;
+  display: none; align-items: center; justify-content: center;
+}
+#modal-overlay.visible { display: flex; }
+#modal {
+  background: var(--bg1); border: 1px solid var(--border2);
+  border-radius: 10px; padding: 24px; width: 340px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+#modal h3 { font-size: 13px; font-weight: 700; color: var(--text); margin: 0; }
+#modal input {
+  background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius);
+  color: var(--text); font-size: 13px; font-family: var(--sans);
+  padding: 8px 12px; outline: none; width: 100%; box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+#modal input:focus { border-color: var(--accent); }
+#modal-hint { font-size: 11.5px; color: var(--text3); margin-top: -6px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.btn {
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--text2);
+  font-size: 12.5px; font-family: var(--sans); padding: 7px 16px;
+  border-radius: var(--radius); cursor: pointer; transition: background 0.1s, color 0.1s;
+}
+.btn:hover { background: var(--bg4); color: var(--text); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: #7c9bff; }
+
+/* ── Toast ────────────────────────────────────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 24px; right: 24px; background: var(--bg3);
+  border: 1px solid var(--border2); border-radius: var(--radius);
+  padding: 10px 16px; font-size: 12.5px; color: var(--text); z-index: 999;
+  opacity: 0; transform: translateY(8px); transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+}
+#toast.visible { opacity: 1; transform: translateY(0); }
+#toast.error { border-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+<div id="settings-app">
+
+  <header id="dash-header">
+    <div class="header-left">
+      <a id="back-link" href="/" style="display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--text3);font-size:12.5px;transition:color .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Dashboard
+      </a>
+      <span style="color:var(--text3);font-size:12px">›</span>
+      <span class="logo" style="color:var(--text2);font-size:13px;font-weight:600">Settings</span>
+      <span id="session-badge" style="font-size:10.5px;color:var(--text3);background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:2px 7px;margin-left:4px"></span>
+    </div>
+  </header>
+
+  <div id="settings-main">
+
+    <nav id="settings-nav">
+      <div class="nav-item active" data-tab="tools">
+        <span class="nav-icon">⚒</span> Tools
+      </div>
+      <div class="nav-item" data-tab="mcp">
+        <span class="nav-icon">⬡</span> MCP
+      </div>
+      <div class="nav-item" data-tab="secrets">
+        <span class="nav-icon">🔑</span> Secrets
+      </div>
+      <div class="nav-item" data-tab="rag">
+        <span class="nav-icon">📚</span> RAG
+      </div>
+    </nav>
+
+    <div id="settings-content">
+      <!-- rendered by JS -->
+    </div>
+
+  </div>
+</div>
+
+<!-- New collection modal -->
+<div id="modal-overlay" onclick="closeModal(event)">
+  <div id="modal">
+    <h3>New collection</h3>
+    <input id="modal-input" type="text" placeholder="e.g. my-docs" maxlength="60"
+           onkeydown="if(event.key==='Enter')createCollection()">
+    <div id="modal-hint">Letters, numbers, hyphens. Will be lowercased.</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="createCollection()">Create</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const SESSION = new URLSearchParams(window.location.search).get('session') || 'default'
+const CONFIG_KEY = 'agent-config'
+let currentTab = window.location.hash.replace('#', '') || 'tools'
+let customTools = []
+let mcpServers = []
+
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+
+document.getElementById('session-badge').textContent = SESSION
+document.getElementById('back-link').href = '/'
+
+document.querySelectorAll('.nav-item').forEach(el => {
+  el.classList.toggle('active', el.dataset.tab === currentTab)
+  el.addEventListener('click', () => switchTab(el.dataset.tab))
+})
+
+requestAnimationFrame(() => renderTab(currentTab))
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+
+function switchTab(tab) {
+  currentTab = tab
+  window.location.hash = tab
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === tab)
+  })
+  renderTab(tab)
+}
+
+function renderTab(tab) {
+  const content = document.getElementById('settings-content')
+  content.innerHTML = ''
+  if (tab === 'tools')   renderToolsTab(content)
+  else if (tab === 'mcp')     renderMCPTab(content)
+  else if (tab === 'secrets') renderSecretsTab(content)
+  else if (tab === 'rag')     renderRAGTab(content)
+}
+
+// ── Shared helpers ─────────────────────────────────────────────────────────────
+
+function getConfig() {
+  try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}') } catch { return {} }
+}
+function getDisabled() { return new Set(getConfig().disabled || []) }
+function isEnabled(id) { return !getDisabled().has(id) }
+function setEnabled(id, on) {
+  const cfg = getConfig()
+  const d = new Set(cfg.disabled || [])
+  on ? d.delete(id) : d.add(id)
+  cfg.disabled = [...d]
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg))
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
+function makeToolCard(id, name, desc, subtext) {
+  const on = isEnabled(id)
+  const card = document.createElement('div')
+  card.className = 'config-tool-card' + (on ? '' : ' disabled')
+  card.id = `tool-card-${CSS.escape(id)}`
+  card.innerHTML = `
+    <div class="config-tool-info">
+      <div class="config-tool-name">${escHtml(name)}</div>
+      <div class="config-tool-desc">${escHtml(desc)}</div>
+      ${subtext ? `<span class="config-tool-id">${escHtml(subtext)}</span>` : ''}
+    </div>
+    <label class="toggle-switch" title="${on ? 'Disable' : 'Enable'}">
+      <input type="checkbox" ${on ? 'checked' : ''} data-id="${escHtml(id)}">
+      <span class="toggle-track"></span>
+    </label>`
+  card.querySelector('input').addEventListener('change', function() {
+    setEnabled(this.dataset.id, this.checked)
+    card.classList.toggle('disabled', !this.checked)
+  })
+  return card
+}
+
+function makeSectionHeader(icon, color, label) {
+  const hdr = document.createElement('div')
+  hdr.className = 'config-cat-header'
+  hdr.innerHTML = `<span class="config-cat-icon" style="color:${color}">${icon}</span><span class="config-cat-name">${escHtml(label)}</span>`
+  return hdr
+}
+
+// ── Tools tab ─────────────────────────────────────────────────────────────────
+
+const TOOL_CATEGORIES = [
+  {
+    name: 'Dashboard', icon: '⊞', color: 'var(--accent)',
+    tools: [
+      { id: 'add_ui_plugin',    name: 'Create widget',  desc: 'Generate and add an HTML/JS panel to the dashboard' },
+      { id: 'remove_ui_plugin', name: 'Remove widget',  desc: 'Remove an existing widget from the dashboard' },
+    ]
+  },
+  {
+    name: 'Files', icon: '📁', color: 'var(--yellow)',
+    tools: [
+      { id: 'write_file', name: 'Write file',      desc: 'Create or edit a file in the workspace' },
+      { id: 'read_file',  name: 'Read file',        desc: 'Read the contents of a file' },
+      { id: 'list_files', name: 'List files',       desc: 'List the contents of a directory' },
+      { id: 'open_file',  name: 'Open in editor',   desc: 'Open a file in the IDE editor' },
+    ]
+  },
+  {
+    name: 'System', icon: '⚡', color: 'var(--orange)',
+    tools: [
+      { id: 'exec_command', name: 'Run command',   desc: 'Run a shell command in the Docker container' },
+      { id: 'apt_install',  name: 'Install (apt)', desc: 'Install system packages with apt-get' },
+      { id: 'pip_install',  name: 'Install (pip)', desc: 'Install Python packages with pip' },
+    ]
+  },
+  {
+    name: 'Web', icon: '🌐', color: 'var(--green)',
+    tools: [
+      { id: 'web_search',   name: 'Web search',      desc: 'Search the web via SearXNG' },
+      { id: 'fetch_url',    name: 'Fetch URL',        desc: 'Download and parse the text content of a page' },
+      { id: 'browser_exec', name: 'Headless browser', desc: 'Open a URL in Chromium for JS-heavy sites' },
+    ]
+  },
+  {
+    name: 'Scheduling', icon: '⏰', color: 'var(--red)',
+    tools: [
+      { id: 'cron_list',   name: 'List jobs',  desc: 'List all scheduled cron jobs' },
+      { id: 'cron_add',    name: 'Add job',    desc: 'Schedule a recurring command' },
+      { id: 'cron_remove', name: 'Remove job', desc: 'Remove a scheduled job by name' },
+    ]
+  },
+]
+
+async function renderToolsTab(container) {
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  container.appendChild(page)
+
+  // Built-in categories
+  for (const cat of TOOL_CATEGORIES) {
+    const section = document.createElement('div')
+    section.className = 'config-section'
+    section.appendChild(makeSectionHeader(cat.icon, cat.color, cat.name))
+    const grid = document.createElement('div')
+    grid.className = 'config-tools-grid'
+    for (const t of cat.tools) grid.appendChild(makeToolCard(t.id, t.name, t.desc, t.id))
+    section.appendChild(grid)
+    page.appendChild(section)
+  }
+
+  // Custom tools
+  try {
+    const res = await fetch('/api/tools')
+    const data = await res.json()
+    customTools = data.custom || []
+  } catch { customTools = [] }
+
+  if (customTools.length > 0) {
+    const section = document.createElement('div')
+    section.className = 'config-section'
+    section.appendChild(makeSectionHeader('🔧', 'var(--green)', 'Custom Tools'))
+    const grid = document.createElement('div')
+    grid.className = 'config-tools-grid'
+    for (const t of customTools) grid.appendChild(makeToolCard(t.name, t.name, t.description || '', t.filename))
+    section.appendChild(grid)
+    page.appendChild(section)
+  }
+
+  // MCP tools
+  try {
+    const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+    const data = await res.json()
+    mcpServers = data.servers || []
+  } catch { mcpServers = [] }
+
+  const enabledMCP = mcpServers.filter(s => s.enabled && s.tools && s.tools.length > 0)
+  if (enabledMCP.length > 0) {
+    const section = document.createElement('div')
+    section.className = 'config-section'
+    section.appendChild(makeSectionHeader('⬡', 'var(--accent)', 'MCP Tools'))
+    for (const srv of enabledMCP) {
+      const label = document.createElement('div')
+      label.className = 'config-mcp-server-label'
+      label.textContent = srv.name
+      section.appendChild(label)
+      const grid = document.createElement('div')
+      grid.className = 'config-tools-grid'
+      for (const t of srv.tools) grid.appendChild(makeToolCard(t.name, t.name, t.description || '', null))
+      section.appendChild(grid)
+    }
+    page.appendChild(section)
+  }
+}
+
+// ── MCP tab ───────────────────────────────────────────────────────────────────
+
+async function renderMCPTab(container) {
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  container.appendChild(page)
+
+  const [serversRes, secretsRes] = await Promise.allSettled([
+    fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`).then(r => r.json()),
+    fetch('/api/secrets').then(r => r.json()),
+  ])
+  mcpServers = serversRes.status === 'fulfilled' ? (serversRes.value.servers || []) : []
+  const secretNames = secretsRes.status === 'fulfilled' ? (secretsRes.value.secrets || []) : []
+
+  renderMCPServerList(page)
+
+  // Add server form
+  const secretOptions = secretNames.length > 0
+    ? secretNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('')
+    : '<option value="" disabled>Aucun secret disponible</option>'
+
+  const addForm = document.createElement('div')
+  addForm.className = 'mcp-add-form'
+  addForm.innerHTML = `
+    <div class="mcp-add-title">Ajouter un serveur MCP</div>
+    <div class="mcp-add-fields">
+      <input id="mcp-add-name" class="mcp-input" type="text" placeholder="Nom (ex: filesystem)" autocomplete="off">
+      <input id="mcp-add-url" class="mcp-input" type="url" placeholder="URL (ex: http://localhost:3000)" autocomplete="off">
+      <select id="mcp-add-secret" class="mcp-input">
+        <option value="">— Sans authentification —</option>
+        ${secretOptions}
+      </select>
+    </div>
+    <button id="mcp-add-btn" class="mcp-add-submit">Connecter</button>
+    <div id="mcp-add-status" class="mcp-add-status"></div>`
+  page.appendChild(addForm)
+  document.getElementById('mcp-add-btn').addEventListener('click', addMCPServer)
+}
+
+function renderMCPServerList(page) {
+  let listEl = document.getElementById('mcp-server-list')
+  if (!listEl) {
+    listEl = document.createElement('div')
+    listEl.id = 'mcp-server-list'
+    page.insertBefore(listEl, page.firstChild)
+  }
+  listEl.innerHTML = ''
+
+  if (mcpServers.length === 0) {
+    listEl.innerHTML = '<div class="mcp-empty">Aucun serveur MCP configuré.</div>'
+    return
+  }
+  for (const srv of mcpServers) {
+    const card = document.createElement('div')
+    card.className = 'mcp-server-card'
+    const toolCount = srv.tools ? srv.tools.length : 0
+    card.innerHTML = `
+      <div class="mcp-server-header">
+        <div class="mcp-server-info">
+          <span class="mcp-server-name">${escHtml(srv.name)}</span>
+          <span class="mcp-server-url">${escHtml(srv.url)}</span>
+        </div>
+        <div class="mcp-server-actions">
+          <span class="mcp-tool-count">${toolCount} outil${toolCount !== 1 ? 's' : ''}</span>
+          <label class="toggle-switch" title="${srv.enabled ? 'Désactiver' : 'Activer'}">
+            <input type="checkbox" ${srv.enabled ? 'checked' : ''} data-srv-id="${escHtml(srv.id)}">
+            <span class="toggle-track"></span>
+          </label>
+          <button class="mcp-server-del" title="Supprimer" data-srv-id="${escHtml(srv.id)}">✕</button>
+        </div>
+      </div>`
+
+    if (toolCount > 0) {
+      const toolsSection = document.createElement('div')
+      toolsSection.className = 'mcp-server-tool-grid'
+      if (!srv.enabled) toolsSection.style.opacity = '0.4'
+      const grid = document.createElement('div')
+      grid.className = 'config-tools-grid'
+      for (const t of srv.tools) {
+        grid.appendChild(makeToolCard(t.name, t.name, t.description || '', null))
+      }
+      toolsSection.appendChild(grid)
+      card.appendChild(toolsSection)
+    }
+
+    card.querySelector('input[type=checkbox]').addEventListener('change', function() {
+      patchMCPServer(this.dataset.srvId, this.checked)
+    })
+    card.querySelector('.mcp-server-del').addEventListener('click', function() {
+      deleteMCPServer(this.dataset.srvId)
+    })
+    listEl.appendChild(card)
+  }
+}
+
+async function addMCPServer() {
+  const name   = document.getElementById('mcp-add-name').value.trim()
+  const url    = document.getElementById('mcp-add-url').value.trim()
+  const secret = document.getElementById('mcp-add-secret').value.trim()
+  const status = document.getElementById('mcp-add-status')
+  const btn    = document.getElementById('mcp-add-btn')
+  if (!name || !url) { status.textContent = 'Nom et URL requis.'; status.className = 'mcp-add-status error'; return }
+  btn.disabled = true
+  status.textContent = 'Connexion…'; status.className = 'mcp-add-status'
+  try {
+    const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, url, authSecret: secret || undefined }),
+    })
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    status.textContent = `✓ ${data.count} outil(s) chargé(s)`; status.className = 'mcp-add-status ok'
+    document.getElementById('mcp-add-name').value = ''
+    document.getElementById('mcp-add-url').value = ''
+    document.getElementById('mcp-add-secret').value = ''
+    // Reload list
+    const r2 = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+    mcpServers = (await r2.json()).servers || []
+    renderMCPServerList(document.querySelector('.settings-page'))
+  } catch(e) {
+    status.textContent = 'Erreur : ' + e.message; status.className = 'mcp-add-status error'
+  } finally { btn.disabled = false }
+}
+
+async function patchMCPServer(id, enabled) {
+  await fetch(`/api/mcp/servers/${encodeURIComponent(id)}?session=${encodeURIComponent(SESSION)}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  }).catch(console.error)
+  const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+  mcpServers = (await res.json()).servers || []
+  renderMCPServerList(document.querySelector('.settings-page'))
+}
+
+async function deleteMCPServer(id) {
+  if (!confirm('Supprimer ce serveur MCP ?')) return
+  await fetch(`/api/mcp/servers/${encodeURIComponent(id)}?session=${encodeURIComponent(SESSION)}`, { method: 'DELETE' }).catch(console.error)
+  const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+  mcpServers = (await res.json()).servers || []
+  renderMCPServerList(document.querySelector('.settings-page'))
+}
+
+// ── Secrets tab ───────────────────────────────────────────────────────────────
+
+async function renderSecretsTab(container) {
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  container.appendChild(page)
+
+  const section = document.createElement('div')
+  section.className = 'config-section'
+  section.innerHTML = `
+    <div class="config-cat-header">
+      <span class="config-cat-icon" style="color:var(--accent)">🔑</span>
+      <span class="config-cat-name">Secrets</span>
+    </div>
+    <div id="secrets-list" class="config-secrets-list">
+      <span style="color:var(--text3);font-size:12px">Chargement…</span>
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--text3);line-height:1.6">
+      Les secrets sont ajoutés via l'agent avec
+      <code style="background:var(--bg2);padding:1px 6px;border-radius:3px;font-size:11px">request_secret</code>.
+      Ils sont stockés chiffrés en base et jamais exposés en clair.
+    </div>`
+  page.appendChild(section)
+
+  try {
+    const res = await fetch('/api/secrets')
+    const data = await res.json()
+    const names = data.secrets || []
+    const list = document.getElementById('secrets-list')
+    if (names.length === 0) {
+      list.innerHTML = '<span style="color:var(--text3);font-size:12px">Aucun secret stocké.</span>'
+    } else {
+      list.innerHTML = ''
+      for (const name of names) {
+        const row = document.createElement('div')
+        row.className = 'config-secret-row'
+        row.id = `secret-row-${CSS.escape(name)}`
+        row.innerHTML = `
+          <div class="config-secret-info">
+            <span class="config-secret-name">${escHtml(name)}</span>
+            <span class="config-secret-env">$${escHtml(name.toUpperCase().replace(/[^A-Z0-9]/g,'_'))}</span>
+          </div>
+          <button class="config-secret-del" title="Supprimer" data-name="${escHtml(name)}">✕</button>`
+        row.querySelector('button').addEventListener('click', async function() {
+          const n = this.dataset.name
+          if (!confirm(`Supprimer le secret "${n}" ?`)) return
+          await fetch(`/api/secrets/${encodeURIComponent(n)}`, { method: 'DELETE' })
+          document.getElementById(`secret-row-${CSS.escape(n)}`)?.remove()
+        })
+        list.appendChild(row)
+      }
+    }
+  } catch {
+    const list = document.getElementById('secrets-list')
+    if (list) list.innerHTML = '<span style="color:var(--text3);font-size:12px">Indisponible (Postgres requis).</span>'
+  }
+}
+
+// ── RAG tab ───────────────────────────────────────────────────────────────────
+
+let currentCollection = null
+let collections = []
+
+async function renderRAGTab(container) {
+  // Check RAG status first
+  try {
+    const res = await fetch('/api/rag/status')
+    const data = await res.json()
+    if (!data.ready) {
+      const msg = document.createElement('div')
+      msg.style.cssText = 'padding:40px 24px;color:var(--text3);font-size:13px'
+      msg.textContent = 'RAG not ready: ' + (data.status || 'initializing…')
+      container.appendChild(msg)
+      setTimeout(() => renderTab('rag'), 2000)
+      return
+    }
+  } catch { /* ignore, render anyway */ }
+
+  const tab = document.createElement('div')
+  tab.id = 'rag-tab'
+  container.appendChild(tab)
+
+  // Sidebar
+  const sidebar = document.createElement('aside')
+  sidebar.id = 'rag-sidebar'
+  sidebar.innerHTML = `
+    <div id="rag-sidebar-header">
+      <span id="rag-sidebar-title">Collections</span>
+      <button id="new-collection-btn" title="New collection" onclick="openModal()">+</button>
+    </div>
+    <div id="collections-list"></div>`
+  tab.appendChild(sidebar)
+
+  // Content
+  const content = document.createElement('div')
+  content.id = 'rag-content'
+  content.innerHTML = `<div id="no-collection-msg"><div class="icon">📚</div><div>Select a collection or create a new one</div></div>`
+  tab.appendChild(content)
+
+  await loadCollections()
+}
+
+async function loadCollections() {
+  try {
+    const res = await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`)
+    collections = await res.json()
+    if (!Array.isArray(collections)) collections = []
+    renderCollections()
+  } catch(e) { showToast('Connection error: ' + e.message, true) }
+}
+
+function renderCollections() {
+  const el = document.getElementById('collections-list')
+  if (!el) return
+  if (collections.length === 0) {
+    el.innerHTML = '<div style="padding:20px 16px;font-size:12px;color:var(--text3);text-align:center">No collections</div>'
+    return
+  }
+  el.innerHTML = ''
+  for (const c of collections) {
+    const item = document.createElement('div')
+    item.className = 'collection-item' + (c.name === currentCollection ? ' active' : '')
+    item.innerHTML = `
+      <span class="collection-name">${escHtml(c.name)}</span>
+      <span class="collection-count">${c.doc_count} doc${c.doc_count !== 1 ? 's' : ''}</span>
+      <button class="collection-del" title="Delete">✕</button>`
+    item.addEventListener('click', () => selectCollection(c.name))
+    item.querySelector('.collection-del').addEventListener('click', e => {
+      e.stopPropagation(); deleteCollection(c.name)
+    })
+    el.appendChild(item)
+  }
+}
+
+function selectCollection(name) {
+  currentCollection = name
+  renderCollections()
+  renderRAGContent()
+  loadDocuments()
+}
+
+async function deleteCollection(name) {
+  if (!confirm(`Delete collection "${name}" and all its documents?`)) return
+  await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+  if (currentCollection === name) {
+    currentCollection = null
+    const content = document.getElementById('rag-content')
+    if (content) content.innerHTML = `<div id="no-collection-msg"><div class="icon">📚</div><div>Select a collection or create a new one</div></div>`
+  }
+  await loadCollections()
+}
+
+function renderRAGContent() {
+  const col = collections.find(c => c.name === currentCollection)
+  const desc = col ? (col.description || '') : ''
+  const content = document.getElementById('rag-content')
+  if (!content) return
+  content.innerHTML = `
+    <div id="rag-content-header">
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
+        <span style="font-size:14px;font-weight:600;color:var(--text)">📁 ${escHtml(currentCollection)}</span>
+        <input id="desc-input" type="text" value="${escHtml(desc)}"
+               placeholder="Description for the agent (e.g. internal API docs…)"
+               style="background:transparent;border:none;border-bottom:1px dashed var(--border2);
+                      color:var(--text3);font-size:11.5px;font-family:var(--sans);
+                      outline:none;padding:2px 0;width:100%">
+      </div>
+    </div>
+    <div id="upload-zone">
+      <div id="upload-icon">⬆</div>
+      <div id="upload-label">Drop a file here or click to select</div>
+      <div id="upload-hint">PDF, DOCX, TXT, CSV, MD, JSON — max 50 MB</div>
+      <input id="upload-input" type="file" multiple accept=".pdf,.docx,.txt,.csv,.md,.json,.tsv"
+             onchange="uploadFiles(this.files)">
+    </div>
+    <div id="upload-progress"></div>
+    <div id="docs-area"><div style="padding:20px;color:var(--text3);font-size:13px">Loading…</div></div>`
+
+  document.getElementById('upload-zone').addEventListener('click', () => document.getElementById('upload-input').click())
+  const zone = document.getElementById('upload-zone')
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over') })
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'))
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); uploadFiles(e.dataTransfer.files) })
+  const di = document.getElementById('desc-input')
+  di.addEventListener('blur', () => saveDescription(di.value.trim()))
+  di.addEventListener('keydown', e => { if (e.key === 'Enter') di.blur() })
+}
+
+async function saveDescription(value) {
+  const col = collections.find(c => c.name === currentCollection)
+  if (!col) return
+  col.description = value
+  await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: currentCollection, description: value })
+  })
+}
+
+async function loadDocuments() {
+  if (!currentCollection) return
+  try {
+    const res = await fetch(`/api/rag/documents?collection=${encodeURIComponent(currentCollection)}`)
+    const docs = await res.json()
+    renderDocuments(Array.isArray(docs) ? docs : [])
+  } catch { showToast('Failed to load documents', true) }
+}
+
+function renderDocuments(docs) {
+  const area = document.getElementById('docs-area')
+  if (!area) return
+  if (docs.length === 0) {
+    area.innerHTML = '<div style="padding:24px 0;text-align:center;font-size:13px;color:var(--text3)">No documents in this collection.<br>Drop a file in the zone above.</div>'
+    return
+  }
+  area.innerHTML = `
+    <table id="docs-table">
+      <thead><tr><th>File</th><th>Size</th><th>Chunks</th><th>Updated</th><th></th></tr></thead>
+      <tbody>${docs.map(d => `
+        <tr>
+          <td>${escHtml(d.filename)}</td>
+          <td>${fmtSize(d.size_bytes)}</td>
+          <td>${d.chunk_count}</td>
+          <td>${fmtDate(d.updated_at)}</td>
+          <td><button class="doc-del-btn" title="Delete" data-id="${d.id}">✕</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`
+  area.querySelectorAll('.doc-del-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteDocument(Number(btn.dataset.id)))
+  })
+}
+
+async function deleteDocument(id) {
+  await fetch(`/api/rag/document?id=${id}`, { method: 'DELETE' })
+  loadDocuments(); loadCollections()
+}
+
+async function uploadFiles(files) {
+  if (!files || files.length === 0) return
+  if (!currentCollection) { showToast('Select a collection first', true); return }
+  const zone = document.getElementById('upload-zone')
+  const progress = document.getElementById('upload-progress')
+  zone.classList.add('uploading'); progress.classList.add('visible')
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    progress.textContent = `Uploading ${i+1}/${files.length}: ${file.name}…`
+    try {
+      const form = new FormData()
+      form.append('file', file); form.append('collection', currentCollection); form.append('session', SESSION)
+      const res = await fetch('/api/rag/upload', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || res.statusText)
+      showToast(`✓ ${file.name} — ${data.chunks} chunks indexed`)
+    } catch(e) { showToast(`Error ${file.name}: ${e.message}`, true) }
+  }
+  zone.classList.remove('uploading'); progress.classList.remove('visible'); progress.textContent = ''
+  document.getElementById('upload-input').value = ''
+  await loadDocuments(); await loadCollections()
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+
+function openModal() {
+  document.getElementById('modal-overlay').classList.add('visible')
+  setTimeout(() => document.getElementById('modal-input').focus(), 50)
+}
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal-overlay')) return
+  document.getElementById('modal-overlay').classList.remove('visible')
+  document.getElementById('modal-input').value = ''
+}
+async function createCollection() {
+  const input = document.getElementById('modal-input')
+  const name = input.value.trim().toLowerCase().replace(/[^a-z0-9\-_]/g,'-').replace(/-+/g,'-')
+  if (!name) { input.focus(); return }
+  document.getElementById('modal-overlay').classList.remove('visible')
+  input.value = ''
+  if (!collections.find(c => c.name === name)) {
+    collections.push({ name, doc_count: 0, chunk_count: 0 })
+    renderCollections()
+  }
+  selectCollection(name)
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+
+function fmtSize(b) {
+  if (b < 1024) return b + ' B'
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB'
+  return (b/1048576).toFixed(1) + ' MB'
+}
+function fmtDate(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleDateString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric' })
+}
+
+let toastTimer = null
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast')
+  t.textContent = msg; t.className = 'visible' + (isError ? ' error' : '')
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { t.className = '' }, 3500)
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('modal-overlay').classList.remove('visible')
+})
+</script>
+</body>
+</html>

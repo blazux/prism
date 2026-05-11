@@ -9,13 +9,12 @@ let currentAssistantEl = null
 let currentAssistantContent = ''
 const widgets = new Map()
 let grid = null
-let customTools = []
 let pendingImages = [] // base64 strings (without data-URL prefix) waiting to be sent
 let currentSessionID = localStorage.getItem('active-session') || 'default'
 
-function updateRagLink() {
-  const link = document.getElementById('rag-link')
-  if (link) link.href = `/rag.html?session=${encodeURIComponent(currentSessionID)}`
+function updateSettingsLink() {
+  const link = document.getElementById('settings-link')
+  if (link) link.href = `/settings.html?session=${encodeURIComponent(currentSessionID)}#tools`
 }
 let sessionMenuOpen = false
 let batchLoading = false
@@ -108,9 +107,7 @@ function handleServerMsg(msg) {
     case 'error':           appendError(msg.content); break
     case 'tools_list':
     case 'tools_updated':
-      customTools = msg.custom || []
-      if (configOpen) renderConfig()
-      updateConfigStats()
+    case 'mcp_updated':
       break
     case 'secret_request': showSecretDialog(msg.name, msg.description); break
     case 'open_file':    break
@@ -457,6 +454,9 @@ function formatToolInput(tool, inp) {
     case 'cron_add':          return `${inp.schedule} → ${inp.name}`
     case 'cron_remove':          return `remove: ${inp.name}`
     case 'update_system_prompt': return `✏️ update personality`
+    case 'mcp_add_server':    return `⬡ ${inp.name} — ${inp.url}`
+    case 'mcp_remove_server': return `⬡ remove: ${inp.name}`
+    case 'mcp_list_servers':  return '(list MCP servers)'
     default: return JSON.stringify(inp)
   }
 }
@@ -700,7 +700,7 @@ function renderSessionSwitcher(sessions) {
 function switchToSession(id) {
   currentSessionID = id
   localStorage.setItem('active-session', id)
-  updateRagLink()
+  updateSettingsLink()
   clearChat()
   for (const wid of [...widgets.keys()]) removeWidget(wid)
   pendingImages = []
@@ -803,239 +803,13 @@ document.addEventListener('paste', e => {
   }
 })
 
-// ─── Agent config ─────────────────────────────────────────────────────────────
+// ─── Shared config helpers (read by app.js when sending chat messages) ────────
 
 const CONFIG_KEY = 'agent-config'
-let configOpen = false
-
-const TOOL_CATEGORIES = [
-  {
-    name: 'Dashboard',
-    icon: '⊞',
-    color: 'var(--accent)',
-    tools: [
-      { id: 'add_ui_plugin',    name: 'Create widget',  desc: 'Generate and add an HTML/JS panel to the dashboard' },
-      { id: 'remove_ui_plugin', name: 'Remove widget',  desc: 'Remove an existing widget from the dashboard' },
-    ]
-  },
-  {
-    name: 'Files',
-    icon: '📁',
-    color: 'var(--yellow)',
-    tools: [
-      { id: 'write_file',  name: 'Write file',       desc: 'Create or edit a file in the workspace' },
-      { id: 'read_file',   name: 'Read file',         desc: 'Read the contents of a file' },
-      { id: 'list_files',  name: 'List files',        desc: 'List the contents of a directory' },
-      { id: 'open_file',   name: 'Open in editor',    desc: 'Open a file in the IDE editor' },
-    ]
-  },
-  {
-    name: 'System',
-    icon: '⚡',
-    color: 'var(--orange)',
-    tools: [
-      { id: 'exec_command', name: 'Run command',    desc: 'Run a shell command in the Docker container' },
-      { id: 'apt_install',  name: 'Install (apt)',  desc: 'Install system packages with apt-get' },
-      { id: 'pip_install',  name: 'Install (pip)',  desc: 'Install Python packages with pip' },
-    ]
-  },
-  {
-    name: 'Web',
-    icon: '🌐',
-    color: 'var(--green)',
-    tools: [
-      { id: 'web_search',   name: 'Web search',       desc: 'Search the web via SearXNG (self-hosted)' },
-      { id: 'fetch_url',    name: 'Fetch URL',         desc: 'Download and parse the text content of a page' },
-      { id: 'browser_exec', name: 'Headless browser',  desc: 'Open a URL in Chromium for JS-heavy sites' },
-    ]
-  },
-  {
-    name: 'Scheduling',
-    icon: '⏰',
-    color: 'var(--red)',
-    tools: [
-      { id: 'cron_list',   name: 'List jobs',    desc: 'List all scheduled cron jobs' },
-      { id: 'cron_add',    name: 'Add job',       desc: 'Schedule a recurring command (cron expression)' },
-      { id: 'cron_remove', name: 'Remove job',    desc: 'Remove a scheduled job by name' },
-    ]
-  },
-]
-
 function getConfig() {
-  try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}') }
-  catch { return {} }
+  try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}') } catch { return {} }
 }
-
-function getDisabledTools() {
-  return getConfig().disabled || []
-}
-
-function isToolEnabled(toolId) {
-  return !getDisabledTools().includes(toolId)
-}
-
-function setToolEnabled(toolId, enabled) {
-  const cfg = getConfig()
-  const disabled = new Set(cfg.disabled || [])
-  if (enabled) disabled.delete(toolId)
-  else disabled.add(toolId)
-  cfg.disabled = [...disabled]
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg))
-  updateConfigStats()
-}
-
-function updateConfigStats() {
-  const total = TOOL_CATEGORIES.reduce((s, c) => s + c.tools.length, 0) + customTools.length
-  const disabled = getDisabledTools().length
-  const el = document.getElementById('config-stats')
-  if (el) el.textContent = `${total - disabled} / ${total} enabled`
-}
-
-function renderConfig() {
-  const body = document.getElementById('config-body')
-  body.innerHTML = ''
-  for (const cat of TOOL_CATEGORIES) {
-    const section = document.createElement('div')
-    section.className = 'config-section'
-
-    const catHdr = document.createElement('div')
-    catHdr.className = 'config-cat-header'
-    catHdr.innerHTML = `<span class="config-cat-icon" style="color:${cat.color}">${cat.icon}</span><span class="config-cat-name">${escHtml(cat.name)}</span>`
-    section.appendChild(catHdr)
-
-    const grid = document.createElement('div')
-    grid.className = 'config-tools-grid'
-
-    for (const tool of cat.tools) {
-      const enabled = isToolEnabled(tool.id)
-      const card = document.createElement('div')
-      card.className = 'config-tool-card' + (enabled ? '' : ' disabled')
-      card.id = `config-tool-${tool.id}`
-      card.innerHTML = `
-        <div class="config-tool-info">
-          <div class="config-tool-name">${escHtml(tool.name)}</div>
-          <div class="config-tool-desc">${escHtml(tool.desc)}</div>
-          <span class="config-tool-id">${escHtml(tool.id)}</span>
-        </div>
-        <label class="toggle-switch" title="${enabled ? 'Disable' : 'Enable'}">
-          <input type="checkbox" ${enabled ? 'checked' : ''} data-tool="${escHtml(tool.id)}">
-          <span class="toggle-track"></span>
-        </label>`
-      card.querySelector('input').addEventListener('change', function() {
-        onToolToggle(this.dataset.tool, this.checked)
-      })
-      grid.appendChild(card)
-    }
-    section.appendChild(grid)
-    body.appendChild(section)
-  }
-
-  // Custom tools section
-  if (customTools.length > 0) {
-    const section = document.createElement('div')
-    section.className = 'config-section'
-
-    const catHdr = document.createElement('div')
-    catHdr.className = 'config-cat-header'
-    catHdr.innerHTML = `<span class="config-cat-icon" style="color:var(--green)">🔧</span><span class="config-cat-name">Custom Tools</span>`
-    section.appendChild(catHdr)
-
-    const toolGrid = document.createElement('div')
-    toolGrid.className = 'config-tools-grid'
-
-    for (const tool of customTools) {
-      const enabled = isToolEnabled(tool.name)
-      const card = document.createElement('div')
-      card.className = 'config-tool-card' + (enabled ? '' : ' disabled')
-      card.id = `config-tool-${tool.name}`
-      card.innerHTML = `
-        <div class="config-tool-info">
-          <div class="config-tool-name">${escHtml(tool.name)}</div>
-          <div class="config-tool-desc">${escHtml(tool.description || '')}</div>
-          <span class="config-tool-id">${escHtml(tool.filename)}</span>
-        </div>
-        <label class="toggle-switch" title="${enabled ? 'Disable' : 'Enable'}">
-          <input type="checkbox" ${enabled ? 'checked' : ''} data-tool="${escHtml(tool.name)}">
-          <span class="toggle-track"></span>
-        </label>`
-      card.querySelector('input').addEventListener('change', function() {
-        onToolToggle(this.dataset.tool, this.checked)
-      })
-      toolGrid.appendChild(card)
-    }
-    section.appendChild(toolGrid)
-    body.appendChild(section)
-  }
-
-  // Secrets section — loaded async from REST API
-  const secretsSection = document.createElement('div')
-  secretsSection.className = 'config-section'
-  secretsSection.id = 'config-secrets-section'
-  secretsSection.innerHTML = `
-    <div class="config-cat-header">
-      <span class="config-cat-icon" style="color:var(--accent)">🔑</span>
-      <span class="config-cat-name">Secrets</span>
-    </div>
-    <div id="config-secrets-list" class="config-secrets-list">
-      <span style="color:var(--text3);font-size:12px">Chargement…</span>
-    </div>
-    <div style="margin-top:8px;font-size:11.5px;color:var(--text3);line-height:1.5">
-      Ajout via l'agent : <code style="background:var(--bg2);padding:1px 5px;border-radius:3px;font-size:11px">request_secret</code>
-    </div>`
-  body.appendChild(secretsSection)
-  loadConfigSecrets()
-
-  updateConfigStats()
-}
-
-async function loadConfigSecrets() {
-  const list = document.getElementById('config-secrets-list')
-  if (!list) return
-  try {
-    const res = await fetch('/api/secrets')
-    const data = await res.json()
-    const names = data.secrets || []
-    if (names.length === 0) {
-      list.innerHTML = '<span style="color:var(--text3);font-size:12px">Aucun secret stocké.</span>'
-      return
-    }
-    list.innerHTML = ''
-    for (const name of names) {
-      const row = document.createElement('div')
-      row.className = 'config-secret-row'
-      row.id = `secret-row-${CSS.escape(name)}`
-      row.innerHTML = `
-        <div class="config-secret-info">
-          <span class="config-secret-name">${escHtml(name)}</span>
-          <span class="config-secret-env">$${escHtml(name.toUpperCase().replace(/[^A-Z0-9]/g, '_'))}</span>
-        </div>
-        <button class="config-secret-del" title="Supprimer" onclick="deleteSecret(${JSON.stringify(name)})">✕</button>`
-      list.appendChild(row)
-    }
-  } catch {
-    if (list) list.innerHTML = '<span style="color:var(--text3);font-size:12px">Indisponible (Postgres requis).</span>'
-  }
-}
-
-window.deleteSecret = async function(name) {
-  if (!confirm(`Supprimer le secret "${name}" ?`)) return
-  await fetch(`/api/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' })
-  loadConfigSecrets()
-}
-
-window.onToolToggle = function(toolId, enabled) {
-  setToolEnabled(toolId, enabled)
-  const card = document.getElementById(`config-tool-${toolId}`)
-  if (card) card.classList.toggle('disabled', !enabled)
-}
-
-window.toggleConfig = function() {
-  configOpen = !configOpen
-  if (configOpen) renderConfig()
-  document.getElementById('config-overlay').classList.toggle('visible', configOpen)
-  document.getElementById('config-panel').classList.toggle('open', configOpen)
-  document.getElementById('config-btn').classList.toggle('active', configOpen)
-}
+function getDisabledTools() { return getConfig().disabled || [] }
 
 // ─── Model selector ───────────────────────────────────────────────────────────
 
@@ -1373,7 +1147,7 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
 initGrid()
 // Force GridStack to recalculate column widths after first paint
 requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
-updateRagLink()
+updateSettingsLink()
 connect()
 loadModels()
 setInterval(loadModels, 30000)
@@ -1382,7 +1156,6 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (editorPath) closeEditor()
     else if (notifPanelOpen) toggleNotifPanel()
-    else if (configOpen) toggleConfig()
     else if (chatOpen) toggleChat()
   }
 })

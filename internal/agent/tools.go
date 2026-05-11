@@ -14,6 +14,7 @@ import (
 
 	"prism/internal/customtools"
 	"prism/internal/docker"
+	"prism/internal/mcp"
 	"prism/internal/memory"
 	"prism/internal/ollama"
 	"prism/internal/rag"
@@ -405,6 +406,48 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "mcp_add_server",
+			Description: "Connect a remote MCP (Model Context Protocol) server and make its tools available to you. The server is tested immediately; its tools appear in your toolbox right away. For authenticated servers, call request_secret first to store the token, then pass its name as auth_secret.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"name":        {Type: "string", Description: "Short display name for this server (e.g. 'github', 'linear')"},
+					"url":         {Type: "string", Description: "HTTP endpoint of the MCP server (e.g. https://api.githubcopilot.com/mcp/)"},
+					"auth_secret": {Type: "string", Description: "Optional: name of a stored secret whose value is used as a Bearer token (e.g. 'github_token'). Use request_secret to create it first."},
+				},
+				Required: []string{"name", "url"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "mcp_remove_server",
+			Description: "Disconnect and remove an MCP server by name.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"name": {Type: "string", Description: "Name of the MCP server to remove"},
+				},
+				Required: []string{"name"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "mcp_list_servers",
+			Description: "List all configured MCP servers and their available tools.",
+			Parameters: ollama.ToolParameters{
+				Type:       "object",
+				Properties: map[string]ollama.ToolProperty{},
+				Required:   []string{},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name: "update_system_prompt",
 			Description: "Update your personality and behavior. This modifies how you present yourself and interact with the user. " +
 				"IMPORTANT: Only the personality/behavior section is editable — the core technical capabilities, tools, widget rules, and API documentation are protected and cannot be changed. " +
@@ -429,12 +472,14 @@ type ToolExecutor struct {
 	ragStore         *rag.Store
 	ragEmbedder      *rag.Embedder
 	customMgr        *customtools.Manager
+	mcpMgr           *mcp.Manager
 	memStore         *memory.Store
 	onPluginAdd      func(id, title, content string, cols, height int)
 	onPluginRem      func(id string)
 	onOpenFile       func(path string)
 	onFileChange     func()
 	onToolsReload    func()
+	onMCPReload      func()
 	onNotification   func(title, message, level string)
 	onSecretRequest  func(ctx context.Context, name, description string) error
 }
@@ -458,11 +503,25 @@ func (e *ToolExecutor) SetCustomTools(mgr *customtools.Manager, onReload func())
 	e.onToolsReload = onReload
 }
 
+func (e *ToolExecutor) SetMCPManager(mgr *mcp.Manager, onReload func()) {
+	e.mcpMgr = mgr
+	e.onMCPReload = onReload
+}
+
 func (e *ToolExecutor) CustomOllamaTools() []ollama.Tool {
 	if e.customMgr == nil {
 		return nil
 	}
 	return e.customMgr.ToOllamaTools()
+}
+
+// AllDynamicTools returns custom Python tools + MCP tools combined.
+func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
+	tools := e.CustomOllamaTools()
+	if e.mcpMgr != nil {
+		tools = append(tools, e.mcpMgr.ToOllamaTools(e.sessionID)...)
+	}
+	return tools
 }
 
 func (e *ToolExecutor) SetPluginDir(dir string)   { e.pluginDir = dir }
@@ -571,11 +630,21 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return e.listSecrets(ctx)
 	case "delete_secret":
 		return e.deleteSecret(ctx, str("name"))
+	case "mcp_add_server":
+		return e.mcpAddServer(ctx, str("name"), str("url"), str("auth_secret"))
+	case "mcp_remove_server":
+		return e.mcpRemoveServer(ctx, str("name"))
+	case "mcp_list_servers":
+		return e.mcpListServers(ctx)
 	default:
 		if e.customMgr != nil {
 			if ct := e.customMgr.Get(name); ct != nil {
 				return e.execCustomTool(ctx, ct, rawArgs)
 			}
+		}
+		// Route to MCP server if the tool is provided by one
+		if e.mcpMgr != nil && e.mcpMgr.HasTool(e.sessionID, name) {
+			return e.mcpMgr.CallTool(ctx, e.sessionID, name, rawArgs)
 		}
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1309,6 +1378,71 @@ func (e *ToolExecutor) deleteSecret(ctx context.Context, name string) (string, e
 		return fmt.Sprintf("Error: %v", err), nil
 	}
 	return fmt.Sprintf("Secret '%s' deleted.", name), nil
+}
+
+// ─── MCP tools ────────────────────────────────────────────────────────────────
+
+func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret string) (string, error) {
+	if e.mcpMgr == nil {
+		return "MCP not available (Postgres required)", nil
+	}
+	if name == "" || url == "" {
+		return "", fmt.Errorf("name and url are required")
+	}
+	tools, err := e.mcpMgr.Connect(ctx, e.sessionID, name, url, authSecret)
+	if err != nil {
+		return fmt.Sprintf("Failed to connect MCP server '%s': %v", name, err), nil
+	}
+	if e.onMCPReload != nil {
+		e.onMCPReload()
+	}
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+	return fmt.Sprintf("MCP server '%s' connected — %d tools available: %s",
+		name, len(tools), strings.Join(names, ", ")), nil
+}
+
+func (e *ToolExecutor) mcpRemoveServer(ctx context.Context, name string) (string, error) {
+	if e.mcpMgr == nil {
+		return "MCP not available", nil
+	}
+	if err := e.mcpMgr.Remove(ctx, e.sessionID, name); err != nil {
+		return fmt.Sprintf("Error: %v", err), nil
+	}
+	if e.onMCPReload != nil {
+		e.onMCPReload()
+	}
+	return fmt.Sprintf("MCP server '%s' removed.", name), nil
+}
+
+func (e *ToolExecutor) mcpListServers(ctx context.Context) (string, error) {
+	if e.mcpMgr == nil {
+		return "MCP not available (Postgres required).", nil
+	}
+	servers, err := e.mcpMgr.List(ctx, e.sessionID)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err), nil
+	}
+	if len(servers) == 0 {
+		return "No MCP servers configured. Use mcp_add_server to connect one.", nil
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "MCP servers (%d):\n", len(servers))
+	for _, srv := range servers {
+		status := "enabled"
+		if !srv.Enabled {
+			status = "disabled"
+		}
+		toolNames := make([]string, len(srv.Tools))
+		for i, t := range srv.Tools {
+			toolNames[i] = t.Name
+		}
+		fmt.Fprintf(&sb, "  • %s [%s] — %d tools: %s\n    URL: %s\n",
+			srv.Name, status, len(srv.Tools), strings.Join(toolNames, ", "), srv.URL)
+	}
+	return sb.String(), nil
 }
 
 // ─── HTML extraction ──────────────────────────────────────────────────────────

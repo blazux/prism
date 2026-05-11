@@ -86,6 +86,18 @@ func (s *Store) initSchema(ctx context.Context) error {
 			value      TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS mcp_servers (
+			id          TEXT NOT NULL,
+			session_id  TEXT NOT NULL,
+			name        TEXT NOT NULL,
+			url         TEXT NOT NULL,
+			auth_secret TEXT NOT NULL DEFAULT '',
+			enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+			tools_json  JSONB NOT NULL DEFAULT '[]',
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (session_id, id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS mcp_servers_session_idx ON mcp_servers(session_id)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.pool.Exec(ctx, stmt); err != nil {
@@ -232,6 +244,9 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM agent_config WHERE key LIKE $1`, "%_"+id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM mcp_servers WHERE session_id = $1`, id); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, id); err != nil {
@@ -506,4 +521,67 @@ func (s *Store) GetAllSecrets(ctx context.Context) (map[string]string, error) {
 		result[name] = value
 	}
 	return result, rows.Err()
+}
+
+// ─── MCP servers ──────────────────────────────────────────────────────────────
+
+// MCPServerRow is the raw DB record for an MCP server configuration.
+type MCPServerRow struct {
+	ID         string
+	SessionID  string
+	Name       string
+	URL        string
+	AuthSecret string
+	Enabled    bool
+	ToolsJSON  []byte
+	CreatedAt  time.Time
+}
+
+func (s *Store) MCPUpsertServer(ctx context.Context, sessionID, id, name, url, authSecret string, enabled bool, toolsJSON []byte) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO mcp_servers (id, session_id, name, url, auth_secret, enabled, tools_json, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+		ON CONFLICT (session_id, id) DO UPDATE
+		SET name        = EXCLUDED.name,
+		    url         = EXCLUDED.url,
+		    auth_secret = EXCLUDED.auth_secret,
+		    enabled     = EXCLUDED.enabled,
+		    tools_json  = EXCLUDED.tools_json,
+		    created_at  = NOW()
+	`, id, sessionID, name, url, authSecret, enabled, toolsJSON)
+	return err
+}
+
+func (s *Store) MCPDeleteServer(ctx context.Context, sessionID, id string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM mcp_servers WHERE session_id = $1 AND id = $2`, sessionID, id)
+	return err
+}
+
+func (s *Store) MCPListServers(ctx context.Context, sessionID string) ([]MCPServerRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, session_id, name, url, auth_secret, enabled, tools_json, created_at
+		FROM mcp_servers
+		WHERE session_id = $1
+		ORDER BY created_at ASC
+	`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []MCPServerRow
+	for rows.Next() {
+		var r MCPServerRow
+		if err := rows.Scan(&r.ID, &r.SessionID, &r.Name, &r.URL, &r.AuthSecret, &r.Enabled, &r.ToolsJSON, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) MCPSetEnabled(ctx context.Context, sessionID, id string, enabled bool) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE mcp_servers SET enabled = $1 WHERE session_id = $2 AND id = $3
+	`, enabled, sessionID, id)
+	return err
 }
