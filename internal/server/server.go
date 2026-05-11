@@ -217,7 +217,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if s.ragStore != nil {
 		ragStore := s.ragStore
 		ragContextFn = func() string {
-			cols, err := ragStore.ListCollections(context.Background())
+			cols, err := ragStore.ListCollections(context.Background(), sessionID)
 			if err != nil || len(cols) == 0 {
 				return ""
 			}
@@ -1066,7 +1066,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.ragStore != nil {
 		ragStore := s.ragStore
 		ag.SetRAGContextFn(func() string {
-			cols, err := ragStore.ListCollections(context.Background())
+			cols, err := ragStore.ListCollections(context.Background(), sessionID)
 			if err != nil || len(cols) == 0 {
 				return ""
 			}

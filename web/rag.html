@@ -343,6 +343,7 @@
       </a>
       <span style="color:var(--text3);font-size:12px">›</span>
       <span class="logo" style="color:var(--text2)">Knowledge Base</span>
+      <span id="session-badge" style="font-size:10.5px;color:var(--text3);background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:2px 7px;margin-left:4px"></span>
     </div>
   </header>
 
@@ -387,8 +388,11 @@
 <script>
 let currentCollection = null
 let collections = []
+const SESSION = new URLSearchParams(window.location.search).get('session') || 'default'
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+
+document.getElementById('session-badge').textContent = SESSION
 
 checkStatus()
 
@@ -434,7 +438,7 @@ function showStatusBar(msg) {
 
 async function loadCollections() {
   try {
-    const res = await fetch('/api/rag/collections')
+    const res = await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`)
     collections = await res.json()
     if (!Array.isArray(collections)) collections = []
     renderCollections()
@@ -469,7 +473,7 @@ function selectCollection(name) {
 
 async function deleteCollection(name) {
   if (!confirm(`Delete collection "${name}" and all its documents?`)) return
-  await fetch(`/api/rag/collections?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+  await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
   if (currentCollection === name) {
     currentCollection = null
     renderContentEmpty()
@@ -535,7 +539,7 @@ async function saveDescription(value) {
   const col = collections.find(c => c.name === currentCollection)
   if (!col) return
   col.description = value
-  await fetch('/api/rag/collections', {
+  await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: currentCollection, description: value })
@@ -610,6 +614,7 @@ async function uploadFiles(files) {
       const form = new FormData()
       form.append('file', file)
       form.append('collection', currentCollection)
+      form.append('session', SESSION)
       const res = await fetch('/api/rag/upload', { method: 'POST', body: form })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || res.statusText)

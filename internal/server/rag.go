@@ -127,9 +127,14 @@ func (s *Server) handleRAGCollections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
+	if sessionID == "" {
+		sessionID = "default"
+	}
+
 	switch r.Method {
 	case http.MethodGet:
-		cols, err := s.ragStore.ListCollections(r.Context())
+		cols, err := s.ragStore.ListCollections(r.Context(), sessionID)
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -160,7 +165,7 @@ func (s *Server) handleRAGCollections(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "invalid body (need name + description)", http.StatusBadRequest)
 			return
 		}
-		if err := s.ragStore.SetCollectionDescription(r.Context(), body.Name, body.Description); err != nil {
+		if err := s.ragStore.SetCollectionDescription(r.Context(), body.Name, sessionID, body.Description); err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -240,6 +245,11 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 	// Sanitize collection name
 	collection = sanitizeName(collection)
 
+	uploadSession := sanitizeSessionID(r.FormValue("session"))
+	if uploadSession == "" {
+		uploadSession = "default"
+	}
+
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		jsonError(w, "missing file field", http.StatusBadRequest)
@@ -295,6 +305,8 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "store: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Register collection ownership for this session (no-op if already exists)
+	_ = s.ragStore.EnsureCollection(r.Context(), collection, uploadSession)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":         true,

@@ -12,6 +12,11 @@ let grid = null
 let customTools = []
 let pendingImages = [] // base64 strings (without data-URL prefix) waiting to be sent
 let currentSessionID = localStorage.getItem('active-session') || 'default'
+
+function updateRagLink() {
+  const link = document.getElementById('rag-link')
+  if (link) link.href = `/rag.html?session=${encodeURIComponent(currentSessionID)}`
+}
 let sessionMenuOpen = false
 let batchLoading = false
 let batchLoadingTimer = null
@@ -658,6 +663,23 @@ function renderSessionSwitcher(sessions) {
     nameBtn.onclick = () => { closeSessionMenu(); if (sess.id !== currentSessionID) switchToSession(sess.id) }
     row.appendChild(nameBtn)
 
+    const rename = document.createElement('button')
+    rename.className = 'session-del-btn'
+    rename.title = 'Rename'
+    rename.textContent = '✎'
+    rename.onclick = async (e) => {
+      e.stopPropagation()
+      const newName = prompt('Rename session:', sess.name)
+      if (!newName || newName.trim() === sess.name) return
+      await fetch(`/api/sessions/${sess.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() })
+      })
+      loadSessions()
+    }
+    row.appendChild(rename)
+
     if (sess.id !== currentSessionID) {
       const del = document.createElement('button')
       del.className = 'session-del-btn'
@@ -678,6 +700,7 @@ function renderSessionSwitcher(sessions) {
 function switchToSession(id) {
   currentSessionID = id
   localStorage.setItem('active-session', id)
+  updateRagLink()
   clearChat()
   for (const wid of [...widgets.keys()]) removeWidget(wid)
   pendingImages = []
@@ -1350,13 +1373,16 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
 initGrid()
 // Force GridStack to recalculate column widths after first paint
 requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
+updateRagLink()
 connect()
 loadModels()
 setInterval(loadModels, 30000)
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    if (configOpen) toggleConfig()
+    if (editorPath) closeEditor()
+    else if (notifPanelOpen) toggleNotifPanel()
+    else if (configOpen) toggleConfig()
     else if (chatOpen) toggleChat()
   }
 })

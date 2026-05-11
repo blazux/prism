@@ -1127,9 +1127,13 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 		return "", fmt.Errorf("collection, source, and content are required")
 	}
 
+	// Ensure collection is registered for this session
+	if err := e.ragStore.EnsureCollection(ctx, collection, e.sessionID); err != nil {
+		return fmt.Sprintf("ERROR registering collection: %v", err), nil
+	}
 	// Create/update collection description if provided
 	if description != "" {
-		if err := e.ragStore.SetCollectionDescription(ctx, collection, description); err != nil {
+		if err := e.ragStore.SetCollectionDescription(ctx, collection, e.sessionID, description); err != nil {
 			return fmt.Sprintf("ERROR setting collection description: %v", err), nil
 		}
 	}
@@ -1156,7 +1160,7 @@ func (e *ToolExecutor) ragListCollections(ctx context.Context) (string, error) {
 		return "RAG not available (Postgres not configured)", nil
 	}
 
-	cols, err := e.ragStore.ListCollections(ctx)
+	cols, err := e.ragStore.ListCollections(ctx, e.sessionID)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}

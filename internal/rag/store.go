@@ -32,6 +32,7 @@ type Document struct {
 // Collection is a named group of documents with aggregate stats.
 type Collection struct {
 	Name        string    `json:"name"`
+	SessionID   string    `json:"session_id"`
 	Description string    `json:"description"`
 	DocCount    int       `json:"doc_count"`
 	ChunkCount  int       `json:"chunk_count"`
@@ -97,8 +98,17 @@ func (s *Store) initSchema(ctx context.Context) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS rag_collections (
 			name        TEXT PRIMARY KEY,
-			description TEXT NOT NULL DEFAULT ''
+			description TEXT NOT NULL DEFAULT '',
+			session_id  TEXT NOT NULL DEFAULT 'default'
 		)`,
+		// Migration: add session_id to existing tables
+		`ALTER TABLE rag_collections ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT 'default'`,
+		// Migration: assign existing collections to 'default' session
+		`INSERT INTO rag_collections (name, session_id, description)
+		 SELECT DISTINCT collection, 'default', ''
+		 FROM rag_documents
+		 WHERE collection NOT IN (SELECT name FROM rag_collections)
+		 ON CONFLICT DO NOTHING`,
 
 		`CREATE TABLE IF NOT EXISTS rag_documents (
 			id          BIGSERIAL PRIMARY KEY,
@@ -179,20 +189,22 @@ func (s *Store) UpsertDocument(ctx context.Context, collection, filename, fileHa
 	return tx.Commit(ctx)
 }
 
-// ListCollections returns all collections with aggregate stats and descriptions.
-func (s *Store) ListCollections(ctx context.Context) ([]Collection, error) {
+// ListCollections returns all collections for the given session with aggregate stats.
+func (s *Store) ListCollections(ctx context.Context, sessionID string) ([]Collection, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT
-		    COALESCE(rc.name, d.collection)   AS name,
-		    COALESCE(rc.description, '')       AS description,
-		    COUNT(DISTINCT d.id)               AS doc_count,
-		    COALESCE(SUM(d.chunk_count), 0)    AS chunk_count,
-		    MAX(d.updated_at)                  AS updated_at
-		FROM rag_documents d
-		LEFT JOIN rag_collections rc ON rc.name = d.collection
-		GROUP BY rc.name, d.collection, rc.description
-		ORDER BY name
-	`)
+		    rc.name,
+		    rc.session_id,
+		    rc.description,
+		    COUNT(DISTINCT d.id)            AS doc_count,
+		    COALESCE(SUM(d.chunk_count), 0) AS chunk_count,
+		    MAX(d.updated_at)               AS updated_at
+		FROM rag_collections rc
+		LEFT JOIN rag_documents d ON d.collection = rc.name
+		WHERE rc.session_id = $1
+		GROUP BY rc.name, rc.session_id, rc.description
+		ORDER BY rc.name
+	`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +213,7 @@ func (s *Store) ListCollections(ctx context.Context) ([]Collection, error) {
 	var cols []Collection
 	for rows.Next() {
 		var c Collection
-		if err := rows.Scan(&c.Name, &c.Description, &c.DocCount, &c.ChunkCount, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.Name, &c.SessionID, &c.Description, &c.DocCount, &c.ChunkCount, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		cols = append(cols, c)
@@ -209,13 +221,23 @@ func (s *Store) ListCollections(ctx context.Context) ([]Collection, error) {
 	return cols, rows.Err()
 }
 
-// SetCollectionDescription upserts the description for a collection.
-func (s *Store) SetCollectionDescription(ctx context.Context, name, description string) error {
+// SetCollectionDescription upserts the description for a collection, scoped to a session.
+func (s *Store) SetCollectionDescription(ctx context.Context, name, sessionID, description string) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO rag_collections (name, description)
-		VALUES ($1, $2)
+		INSERT INTO rag_collections (name, session_id, description)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
-	`, name, description)
+	`, name, sessionID, description)
+	return err
+}
+
+// EnsureCollection registers a collection for a session without changing its description.
+func (s *Store) EnsureCollection(ctx context.Context, name, sessionID string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO rag_collections (name, session_id, description)
+		VALUES ($1, $2, '')
+		ON CONFLICT DO NOTHING
+	`, name, sessionID)
 	return err
 }
 
