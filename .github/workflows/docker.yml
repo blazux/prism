@@ -46,6 +46,7 @@ jobs:
           context: .
           file: Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.tags-server.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -56,6 +57,7 @@ jobs:
           context: .
           file: Dockerfile.agent
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.tags-workspace.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
