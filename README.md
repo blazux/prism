@@ -4,7 +4,7 @@
 
 *Also known as: Probably Runs Interesting Stuff Magically*
 
-A self-hosted AI workspace that runs entirely on your own hardware. No cloud, no API keys, no data leaving your machine.
+Yes, another AI dashboard. Except this one runs entirely on your own hardware — no cloud, no API keys, no data leaving your machine — and has the slightly unsettling property of being able to modify its own environment.
 
 <img src="gui.png" width="700" alt="PRISM dashboard">
 
@@ -18,27 +18,15 @@ A self-hosted AI workspace that runs entirely on your own hardware. No cloud, no
 
 ---
 
-## What you can do with it
+## The idea
 
-PRISM gives you a local AI assistant that can actually *do* things, not just chat. It runs in a sandboxed environment and has access to a growing set of capabilities:
+This started as frustration with tools like [OpenClaw](https://openclaw.ai) and [Hermes](https://hermes-agent.nousresearch.com) — both promising, both Node.js (make of that what you will), and both operating on the same fundamental assumption: the agent lives somewhere in the background, has direct access to your disk, and you talk to it through a chat box that it has absolutely no influence over. Which is fine, until you realize that a truly useful agent should be able to shape its own workspace, not just occupy it.
 
-**Code & automation** — Ask the agent to write and run code, install packages, execute shell commands, and schedule recurring tasks with cron. It can build fully functional scripts and services directly in the workspace.
+PRISM is built around a different premise: the agent has actual agency over its environment. It runs code in a sandboxed workspace (not on your host machine — you're welcome), builds interactive widgets and pins them directly to the dashboard it lives in, schedules tasks, searches the web, queries a private knowledge base, and — if it needs a capability it doesn't have — it can define new tools and use them immediately, or connect a remote MCP server and configure it entirely on its own.
 
-**Dashboard widgets** — The agent can create interactive widgets (HTML/JS) and pin them to a drag-and-drop dashboard. Live data feeds, clocks, monitoring panels, custom tools — anything that renders in a browser.
+You ask it to monitor something, it builds a widget. You ask it to set up a GitHub integration, it connects the MCP server, fetches its auth token, and gets to work. You ask it to remember a document, it indexes it with embeddings and will bring it up when relevant.
 
-**Web & research** — The agent can search the web via a self-hosted SearXNG instance, fetch and parse URLs, and browse pages. Combine this with the knowledge base to build a private research assistant.
-
-**Knowledge base (RAG)** — Upload documents (PDF, Markdown, plain text) and the agent will index them locally with embeddings. It searches the knowledge base automatically when relevant, keeping your data entirely private.
-
-**Browser automation** — The agent can control a browser to interact with web pages, fill forms, scrape content, and automate repetitive tasks.
-
-**Notifications & scheduling** — The agent can send notifications to the dashboard and schedule them for later, making it useful for reminders and monitoring.
-
-**Extensible tools** — The agent can define and register its own new tools at runtime, extending its own capabilities without touching the code.
-
-**Secrets** — Sensitive values (API keys, passwords) can be stored securely and accessed by the agent on demand without exposing them in the conversation.
-
-**Persistent memory** — Conversation history is stored per session and automatically summarized when it gets long. Each session can have its own personality and context.
+Is this a great idea? Probably. Does it make you slightly nervous? It should. That's how you know it's doing something real.
 
 ---
 
@@ -91,7 +79,7 @@ All configuration is done via environment variables (set in `docker-compose.yml`
 | `PLUGIN_DIR` | Widget storage directory | `/workspace/.plugins` |
 | `TZ` | Timezone for the agent and cron jobs | `America/New_York`, `Europe/Paris` |
 
-> **The only required changes are `OLLAMA_URL` and the model names** — everything else (Postgres, SearXNG, paths) works out of the box with the default Docker Compose setup and can be left untouched unless you have specific needs.
+> **The only required changes are `OLLAMA_URL` and the model names** — everything else works out of the box with the default Docker Compose setup.
 
 > **Note on embedding models:** the vector dimension is detected automatically at startup by probing the model. If you change the embedding model, you need to reset the RAG database (the vector dimension is fixed per table).
 
