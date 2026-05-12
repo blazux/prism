@@ -22,7 +22,7 @@ let batchLoadingTimer = null
 let notifications = []   // [{id, title, message, level, read, createdAt}]
 let notifPanelOpen = false
 
-const LAYOUT_KEY = 'dashboard-layout'
+const layoutKey = () => `dashboard-layout:${currentSessionID}`
 
 // ─── GridStack ────────────────────────────────────────────────────────────────
 
@@ -51,11 +51,11 @@ function saveLayout() {
   const nodes = grid.save(false)
   const layout = {}
   nodes.forEach(n => { if (n.id) layout[n.id] = { x: n.x, y: n.y, w: n.w, h: n.h } })
-  localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout))
+  localStorage.setItem(layoutKey(), JSON.stringify(layout))
 }
 
 function loadWidgetPos(elemId) {
-  try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}')[elemId] ?? null }
+  try { return JSON.parse(localStorage.getItem(layoutKey()) || '{}')[elemId] ?? null }
   catch { return null }
 }
 
@@ -698,11 +698,12 @@ function renderSessionSwitcher(sessions) {
 }
 
 function switchToSession(id) {
+  batchLoading = true
+  clearChat()
+  for (const wid of [...widgets.keys()]) removeWidget(wid)
   currentSessionID = id
   localStorage.setItem('active-session', id)
   updateSettingsLink()
-  clearChat()
-  for (const wid of [...widgets.keys()]) removeWidget(wid)
   pendingImages = []
   renderImagePreviews()
   notifications = []
