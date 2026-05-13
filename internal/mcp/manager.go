@@ -25,12 +25,14 @@ type ServerConfig struct {
 
 // Manager manages per-session MCP server configurations backed by the DB.
 type Manager struct {
-	mu    sync.RWMutex
-	store *memory.Store
+	mu        sync.RWMutex
+	store     *memory.Store
+	clientsMu sync.Mutex
+	clients   map[string]*Client // keyed by "sessionID:serverID", populated lazily
 }
 
 func NewManager(ms *memory.Store) *Manager {
-	return &Manager{store: ms}
+	return &Manager{store: ms, clients: make(map[string]*Client)}
 }
 
 // SetStore updates the backing store (called when Postgres becomes available).
@@ -82,6 +84,11 @@ func (m *Manager) Connect(ctx context.Context, sessionID, name, url, authSecret 
 	if err := ms.MCPUpsertServer(ctx, sessionID, id, name, url, authSecret, true, toolsJSON); err != nil {
 		return nil, fmt.Errorf("save server: %w", err)
 	}
+
+	m.clientsMu.Lock()
+	m.clients[sessionID+":"+id] = client
+	m.clientsMu.Unlock()
+
 	return tools, nil
 }
 
@@ -91,6 +98,9 @@ func (m *Manager) RemoveByID(ctx context.Context, sessionID, id string) error {
 	if ms == nil {
 		return fmt.Errorf("database not available")
 	}
+	m.clientsMu.Lock()
+	delete(m.clients, sessionID+":"+id)
+	m.clientsMu.Unlock()
 	return ms.MCPDeleteServer(ctx, sessionID, id)
 }
 
@@ -217,10 +227,35 @@ func (m *Manager) CallTool(ctx context.Context, sessionID, toolName string, args
 					authHeader = "Bearer " + val
 				}
 			}
-			return NewClient(srv.URL, authHeader).CallTool(ctx, toolName, args)
+			client, err := m.getOrInitClient(ctx, sessionID, srv.ID, srv.URL, authHeader)
+			if err != nil {
+				return "", fmt.Errorf("connect to MCP server %q: %w", srv.Name, err)
+			}
+			return client.CallTool(ctx, toolName, args)
 		}
 	}
 	return "", fmt.Errorf("unknown MCP tool: %s", toolName)
+}
+
+// getOrInitClient returns a cached initialized client, creating one if needed.
+func (m *Manager) getOrInitClient(ctx context.Context, sessionID, serverID, url, authHeader string) (*Client, error) {
+	key := sessionID + ":" + serverID
+	m.clientsMu.Lock()
+	client, ok := m.clients[key]
+	m.clientsMu.Unlock()
+	if ok {
+		return client, nil
+	}
+	client = NewClient(url, authHeader)
+	initCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := client.Initialize(initCtx); err != nil {
+		return nil, err
+	}
+	m.clientsMu.Lock()
+	m.clients[key] = client
+	m.clientsMu.Unlock()
+	return client, nil
 }
 
 // toOllamaTool converts an MCP tool definition to Ollama's format.

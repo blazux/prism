@@ -1197,20 +1197,36 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method != "GET" {
-		http.Error(w, "method not allowed", 405)
-		return
-	}
+	switch r.Method {
+	case "GET":
+		names, err := ms.ListSecretNames(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if names == nil {
+			names = []string{}
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"secrets": names})
 
-	names, err := ms.ListSecretNames(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+	case "POST":
+		var body struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" || body.Value == "" {
+			http.Error(w, "name and value required", 400)
+			return
+		}
+		if err := ms.SetSecret(r.Context(), body.Name, body.Value); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+
+	default:
+		http.Error(w, "method not allowed", 405)
 	}
-	if names == nil {
-		names = []string{}
-	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"secrets": names})
 }
 
 func (s *Server) handleSecretByName(w http.ResponseWriter, r *http.Request) {
