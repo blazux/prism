@@ -82,12 +82,18 @@ func New(cfg Config) *Server {
 }
 
 func (s *Server) Start() error {
+	// Load or generate the AES-256 encryption key for secrets.
+	encKey, err := memory.LoadOrGenerateKey(filepath.Join(s.cfg.WorkspaceDir, ".secret_key"))
+	if err != nil {
+		return fmt.Errorf("secret key: %w", err)
+	}
+
 	// Initialize memory store (agent config + conversation history)
 	if s.cfg.PostgresURL != "" {
 		go func() {
 			for attempt := 1; ; attempt++ {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				ms, err := memory.NewStore(ctx, s.cfg.PostgresURL)
+				ms, err := memory.NewStore(ctx, s.cfg.PostgresURL, encKey)
 				cancel()
 				if err == nil {
 					s.mu.Lock()
@@ -544,7 +550,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "file_open":
-			content, err := os.ReadFile(filepath.Join(s.cfg.WorkspaceDir, filepath.Clean(msg.Path)))
+			fullPath, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
+			if err != nil {
+				client.sendJSON(map[string]interface{}{"type": "error", "content": "invalid path"})
+				continue
+			}
+			content, err := os.ReadFile(fullPath)
 			if err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": err.Error()})
 			} else {
@@ -554,13 +565,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "file_save":
+			fullPath, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
+			if err != nil {
+				client.sendJSON(map[string]interface{}{"type": "error", "content": "invalid path"})
+				continue
+			}
 			var payload struct {
 				Content string `json:"content"`
 			}
 			json.Unmarshal(msg.Data, &payload)
-			path := filepath.Join(s.cfg.WorkspaceDir, filepath.Clean(msg.Path))
-			os.MkdirAll(filepath.Dir(path), 0755)
-			if err := os.WriteFile(path, []byte(payload.Content), 0644); err != nil {
+			os.MkdirAll(filepath.Dir(fullPath), 0755)
+			if err := os.WriteFile(fullPath, []byte(payload.Content), 0644); err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": err.Error()})
 			} else {
 				client.sendJSON(map[string]interface{}{"type": "saved", "path": msg.Path})
@@ -569,8 +584,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "file_delete":
-			path := filepath.Join(s.cfg.WorkspaceDir, filepath.Clean(msg.Path))
-			os.Remove(path)
+			fullPath, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
+			if err != nil {
+				continue
+			}
+			os.Remove(fullPath)
 			tree := s.buildFileTree(s.cfg.WorkspaceDir)
 			client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
 
@@ -1384,6 +1402,17 @@ func (s *Server) broadcastMCP(sessionID string) {
 			}
 		}
 	}
+}
+
+// safeWorkspacePath joins workspaceDir with untrusted user-supplied path and
+// returns an error if the result escapes the workspace directory.
+func safeWorkspacePath(workspaceDir, untrustedPath string) (string, error) {
+	full := filepath.Join(workspaceDir, filepath.Clean(untrustedPath))
+	rel, err := filepath.Rel(workspaceDir, full)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("invalid path")
+	}
+	return full, nil
 }
 
 // sanitizeSessionID turns a string into a safe session ID slug.

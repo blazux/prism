@@ -678,8 +678,19 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 	return out, nil
 }
 
+// normalizeWorkspacePath strips the /workspace prefix that models often include
+// when they should be passing a path relative to the workspace root.
+func normalizeWorkspacePath(path string) string {
+	path = strings.TrimPrefix(path, "/workspace/")
+	path = strings.TrimPrefix(path, "/workspace")
+	if path == "" {
+		path = "."
+	}
+	return path
+}
+
 func (e *ToolExecutor) writeFile(path, content string) (string, error) {
-	path = filepath.Clean(path)
+	path = filepath.Clean(normalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
 	}
@@ -699,7 +710,7 @@ func (e *ToolExecutor) writeFile(path, content string) (string, error) {
 }
 
 func (e *ToolExecutor) readFile(path string) (string, error) {
-	path = filepath.Clean(path)
+	path = filepath.Clean(normalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
 	}
@@ -717,7 +728,7 @@ func (e *ToolExecutor) readFile(path string) (string, error) {
 }
 
 func (e *ToolExecutor) listFiles(path string) (string, error) {
-	path = filepath.Clean(path)
+	path = filepath.Clean(normalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
 	}
@@ -995,9 +1006,15 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command stri
 	if name == "" || schedule == "" || command == "" {
 		return "", fmt.Errorf("name, schedule, and command are required")
 	}
-	// Reject newlines in name to prevent crontab injection
+	// Reject newlines in any field to prevent crontab injection
 	if strings.ContainsAny(name, "\n\r") {
 		return "", fmt.Errorf("name must not contain newlines")
+	}
+	if strings.ContainsAny(schedule, "\n\r") {
+		return "", fmt.Errorf("schedule must not contain newlines")
+	}
+	if strings.ContainsAny(command, "\n\r") {
+		return "", fmt.Errorf("command must not contain newlines")
 	}
 
 	current, _ := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)

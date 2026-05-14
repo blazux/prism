@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"prism/internal/ollama"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -27,10 +29,11 @@ type HistoryEntry struct {
 }
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	encKey []byte // AES-256 key for encrypting secret values
 }
 
-func NewStore(ctx context.Context, connStr string) (*Store, error) {
+func NewStore(ctx context.Context, connStr string, encKey []byte) (*Store, error) {
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
 		return nil, fmt.Errorf("pgxpool: %w", err)
@@ -39,7 +42,7 @@ func NewStore(ctx context.Context, connStr string) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("postgres ping: %w", err)
 	}
-	s := &Store{pool: pool}
+	s := &Store{pool: pool, encKey: encKey}
 	if err := s.initSchema(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
@@ -260,7 +263,7 @@ func (s *Store) GetConfig(ctx context.Context, key string) (string, bool, error)
 	var value string
 	err := s.pool.QueryRow(ctx, `SELECT value FROM agent_config WHERE key = $1`, key).Scan(&value)
 	if err != nil {
-		if strings.Contains(err.Error(), "no rows") {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", false, nil
 		}
 		return "", false, err
@@ -464,22 +467,30 @@ func summaryKey(sessionID string) string {
 // ─── Secrets ──────────────────────────────────────────────────────────────────
 
 func (s *Store) SetSecret(ctx context.Context, name, value string) error {
-	_, err := s.pool.Exec(ctx, `
+	encrypted, err := encryptValue(s.encKey, value)
+	if err != nil {
+		return fmt.Errorf("encrypt secret: %w", err)
+	}
+	_, err = s.pool.Exec(ctx, `
 		INSERT INTO secrets (name, value, created_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value, created_at = NOW()
-	`, name, value)
+	`, name, encrypted)
 	return err
 }
 
 func (s *Store) GetSecret(ctx context.Context, name string) (string, bool, error) {
-	var value string
-	err := s.pool.QueryRow(ctx, `SELECT value FROM secrets WHERE name = $1`, name).Scan(&value)
+	var encrypted string
+	err := s.pool.QueryRow(ctx, `SELECT value FROM secrets WHERE name = $1`, name).Scan(&encrypted)
 	if err != nil {
-		if strings.Contains(err.Error(), "no rows") {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", false, nil
 		}
 		return "", false, err
+	}
+	value, err := decryptValue(s.encKey, encrypted)
+	if err != nil {
+		return "", false, fmt.Errorf("decrypt secret %q: %w", name, err)
 	}
 	return value, true, nil
 }
@@ -514,9 +525,13 @@ func (s *Store) GetAllSecrets(ctx context.Context) (map[string]string, error) {
 	defer rows.Close()
 	result := make(map[string]string)
 	for rows.Next() {
-		var name, value string
-		if err := rows.Scan(&name, &value); err != nil {
+		var name, encrypted string
+		if err := rows.Scan(&name, &encrypted); err != nil {
 			return nil, err
+		}
+		value, err := decryptValue(s.encKey, encrypted)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt secret %q: %w", name, err)
 		}
 		result[name] = value
 	}
