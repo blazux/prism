@@ -171,6 +171,14 @@ Example — a widget button that triggers a custom tool:
 
 Use this when a widget needs to trigger an action or fetch live data from a Python tool interactively (button click, refresh, etc.).
 
+## Widget self-verification (mandatory)
+
+After every add_ui_plugin call you MUST verify the widget works:
+1. Fetch the widget URL (e.g. with fetch_url or browser_exec) or inspect the rendered HTML to confirm it loads without errors.
+2. If the widget fetches external data, check that the API call succeeds and returns expected data.
+3. If anything is broken — blank content, JS error, failed fetch, wrong layout — fix the code and call add_ui_plugin again with the corrected version.
+4. Only tell the user the widget is ready once you have confirmed it works correctly. Never hand off a widget you haven't verified yourself.
+
 ## Other guidelines
 - For web tasks: web_search first, then fetch_url for static pages, browser_exec only when JS rendering is needed
 - For scheduled tasks: write and test the script first, then cron_add with output to /workspace/logs/<name>.log

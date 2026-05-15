@@ -1274,6 +1274,51 @@ body {
   justify-content: center;
 }
 
+/* File attachment chip in the preview bar */
+.file-preview-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg4);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 4px 24px 4px 8px;
+  font-size: 12px;
+  color: var(--text2);
+  max-width: 160px;
+  height: 64px;
+  box-sizing: border-box;
+}
+.file-preview-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* File chips inside a sent chat message */
+.chat-msg-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.chat-msg-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg4);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--text2);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Row with attach button + textarea + send */
 .chat-input-row {
   display: flex;

@@ -157,6 +157,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/tool/", s.handleToolCall)
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/sessions/", s.handleSessionByID)
+	mux.HandleFunc("/api/chat/upload", s.handleChatFileUpload)
 	mux.HandleFunc("/api/notify", s.handleExternalNotify)
 	mux.HandleFunc("/api/chat", s.handleChatHTTP)
 	mux.HandleFunc("/api/secrets", s.handleSecrets)
@@ -172,6 +173,12 @@ func (s *Server) Start() error {
 
 // ─── WebSocket ───────────────────────────────────────────────────────────────
 
+// ChatFile holds the name and parsed text content of a user-uploaded file.
+type ChatFile struct {
+	Name string `json:"name"`
+	Text string `json:"text"`
+}
+
 type WSMessage struct {
 	Type          string          `json:"type"`
 	Content       string          `json:"content,omitempty"`
@@ -182,6 +189,7 @@ type WSMessage struct {
 	Model         string          `json:"model,omitempty"`
 	DisabledTools []string        `json:"disabledTools,omitempty"`
 	Images        []string        `json:"images,omitempty"` // base64 image strings for multimodal
+	Files         []ChatFile      `json:"files,omitempty"`  // parsed text file attachments
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -541,7 +549,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.mu.Unlock()
 
 			client.ag.SetActiveTools(msg.DisabledTools)
-			go s.handleChat(ctx, client, msg.Content, msg.Images, msg.Model)
+			content := msg.Content
+			for _, f := range msg.Files {
+				content = fmt.Sprintf("=== Attached file: %s ===\n%s\n\n", f.Name, f.Text) + content
+			}
+			go s.handleChat(ctx, client, content, msg.Images, msg.Model)
 
 		case "cancel":
 			if client.cancelFn != nil {
@@ -705,6 +717,55 @@ func (s *Server) handleChat(ctx context.Context, client *Client, content string,
 			client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
 		}
 	}
+}
+
+// handleChatFileUpload parses an uploaded file and returns its text content so
+// the frontend can include it in the next chat message.
+func (s *Server) handleChatFileUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10 MB
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "file too large (max 10 MB)", http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "missing file field", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	tmp, err := os.CreateTemp("", "prism-chat-upload-*"+ext)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := io.Copy(tmp, file); err != nil {
+		tmp.Close()
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	tmp.Close()
+
+	text, err := rag.ParseFile(tmp.Name())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("could not parse file: %v", err), http.StatusUnprocessableEntity)
+		return
+	}
+
+	// Guard against enormous files that would blow out the model context window.
+	const maxChars = 100_000
+	if len(text) > maxChars {
+		text = text[:maxChars] + "\n[... truncated at 100 000 characters ...]"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"name": header.Filename, "text": text})
 }
 
 // ─── REST API ─────────────────────────────────────────────────────────────────

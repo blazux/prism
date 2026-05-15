@@ -10,6 +10,7 @@ let currentAssistantContent = ''
 const widgets = new Map()
 let grid = null
 let pendingImages = [] // base64 strings (without data-URL prefix) waiting to be sent
+let pendingFiles  = [] // {name, text} parsed file attachments waiting to be sent
 let currentSessionID = localStorage.getItem('active-session') || 'default'
 
 function updateSettingsLink() {
@@ -245,18 +246,20 @@ document.querySelectorAll('.empty-examples span').forEach(el => {
 function sendChat() {
   const input = document.getElementById('chat-input')
   const text = input.value.trim()
-  if ((!text && pendingImages.length === 0) || isStreaming) return
+  if ((!text && pendingImages.length === 0 && pendingFiles.length === 0) || isStreaming) return
 
-  appendUserMessage(text, pendingImages)
+  appendUserMessage(text, pendingImages, pendingFiles)
   input.value = ''
   autoResizeTextarea(input)
 
   const images = pendingImages.slice()
+  const files  = pendingFiles.slice()
   pendingImages = []
-  renderImagePreviews()
+  pendingFiles  = []
+  renderPreviews()
 
   setStreaming(true)
-  send({ type: 'chat', content: text, images: images.length ? images : undefined, disabledTools: getDisabledTools() })
+  send({ type: 'chat', content: text, images: images.length ? images : undefined, files: files.length ? files : undefined, disabledTools: getDisabledTools() })
 }
 
 window.sendChat = sendChat
@@ -269,7 +272,7 @@ window.handleChatKey = function(e) {
   setTimeout(() => autoResizeTextarea(e.target), 0)
 }
 
-window.resetChat  = function() { send({ type: 'reset_chat' }); pendingImages = []; renderImagePreviews() }
+window.resetChat  = function() { send({ type: 'reset_chat' }); pendingImages = []; pendingFiles = []; renderPreviews() }
 
 window.cancelChat = function() {
   send({ type: 'cancel' })
@@ -300,7 +303,7 @@ function fmtTime(date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-function appendUserMessage(text, images) {
+function appendUserMessage(text, images, files) {
   const msgs = document.getElementById('chat-messages')
   const div = document.createElement('div')
   div.className = 'chat-msg user'
@@ -310,8 +313,14 @@ function appendUserMessage(text, images) {
       images.map(b64 => `<img src="data:image/png;base64,${b64}" alt="image">`).join('') +
       '</div>'
   }
+  let filesHtml = ''
+  if (files && files.length > 0) {
+    filesHtml = '<div class="chat-msg-files">' +
+      files.map(f => `<span class="chat-msg-file-chip" title="${escHtml(f.name)}">📄 ${escHtml(f.name)}</span>`).join('') +
+      '</div>'
+  }
   const timeStr = fmtTime(new Date())
-  div.innerHTML = `<div class="chat-msg-role">You <span class="chat-msg-time">${timeStr}</span></div>${imagesHtml}<div class="chat-msg-content">${escHtml(text)}</div>`
+  div.innerHTML = `<div class="chat-msg-role">You <span class="chat-msg-time">${timeStr}</span></div>${imagesHtml}${filesHtml}<div class="chat-msg-content">${escHtml(text)}</div>`
   msgs.appendChild(div)
   scrollChat()
 }
@@ -705,7 +714,8 @@ function switchToSession(id) {
   localStorage.setItem('active-session', id)
   updateSettingsLink()
   pendingImages = []
-  renderImagePreviews()
+  pendingFiles  = []
+  renderPreviews()
   notifications = []
   renderNotifPanel()
   renderNotifBadge()
@@ -752,25 +762,53 @@ document.addEventListener('click', e => {
   }
 })
 
-// ─── Image upload ─────────────────────────────────────────────────────────────
+// ─── File / Image upload ──────────────────────────────────────────────────────
+
+// Router: images go into pendingImages, text/doc files are uploaded for parsing.
+function addAttachment(file) {
+  if (!file) return
+  if (file.type.startsWith('image/')) {
+    addImageFromFile(file)
+  } else {
+    addFileAttachment(file)
+  }
+}
+window.addAttachment = addAttachment
 
 function addImageFromFile(file) {
   if (!file || !file.type.startsWith('image/')) return
   const reader = new FileReader()
   reader.onload = e => {
-    // Strip the data-URL prefix to get raw base64
     const b64 = e.target.result.split(',')[1]
     pendingImages.push(b64)
-    renderImagePreviews()
+    renderPreviews()
   }
   reader.readAsDataURL(file)
 }
 
-function renderImagePreviews() {
+async function addFileAttachment(file) {
+  const form = new FormData()
+  form.append('file', file)
+  try {
+    const res = await fetch('/api/chat/upload', { method: 'POST', body: form })
+    if (!res.ok) {
+      const msg = await res.text()
+      alert(`Could not attach "${file.name}": ${msg}`)
+      return
+    }
+    const { name, text } = await res.json()
+    pendingFiles.push({ name, text })
+    renderPreviews()
+  } catch (err) {
+    alert(`Could not attach "${file.name}": ${err}`)
+  }
+}
+
+function renderPreviews() {
   const container = document.getElementById('image-previews')
   if (!container) return
   container.innerHTML = ''
-  if (pendingImages.length === 0) {
+  if (pendingImages.length === 0 && pendingFiles.length === 0) {
     container.style.display = 'none'
     return
   }
@@ -784,10 +822,23 @@ function renderImagePreviews() {
     btn.className = 'img-preview-remove'
     btn.textContent = '×'
     btn.title = 'Remove'
-    btn.addEventListener('click', () => { pendingImages.splice(i, 1); renderImagePreviews() })
+    btn.addEventListener('click', () => { pendingImages.splice(i, 1); renderPreviews() })
     wrap.appendChild(img)
     wrap.appendChild(btn)
     container.appendChild(wrap)
+  })
+  pendingFiles.forEach((f, i) => {
+    const chip = document.createElement('div')
+    chip.className = 'file-preview-chip'
+    chip.title = f.name
+    chip.innerHTML = `<span class="file-preview-name">📄 ${escHtml(f.name)}</span>`
+    const btn = document.createElement('button')
+    btn.className = 'img-preview-remove'
+    btn.textContent = '×'
+    btn.title = 'Remove'
+    btn.addEventListener('click', () => { pendingFiles.splice(i, 1); renderPreviews() })
+    chip.appendChild(btn)
+    container.appendChild(chip)
   })
 }
 
