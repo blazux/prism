@@ -10,10 +10,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/xuri/excelize/v2"
 )
 
 // ParseFile extracts plain text from a file based on its extension.
-// Supported: .txt .md .csv .json (raw read), .pdf (pdftotext), .docx (zip+xml).
+// Supported: .txt .md .csv .json (raw read), .pdf (pdftotext), .docx (zip+xml), .xlsx (excelize).
 func ParseFile(path string) (string, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
@@ -21,6 +23,8 @@ func ParseFile(path string) (string, error) {
 		return parsePDF(path)
 	case ".docx":
 		return parseDOCX(path)
+	case ".xlsx":
+		return parseXLSX(path)
 	default:
 		// txt, md, csv, json, etc. — read as-is
 		data, err := os.ReadFile(path)
@@ -65,6 +69,39 @@ func parseDOCX(path string) (string, error) {
 		return extractDocxText(data), nil
 	}
 	return "", fmt.Errorf("word/document.xml not found in docx archive")
+}
+
+// parseXLSX reads an Excel workbook and renders each sheet as a CSV-like table
+// with a header line, separated by blank lines. Formula cells emit their
+// computed value, not the formula itself. Images and charts are ignored.
+func parseXLSX(path string) (string, error) {
+	f, err := excelize.OpenFile(path)
+	if err != nil {
+		return "", fmt.Errorf("open xlsx: %w", err)
+	}
+	defer f.Close()
+
+	var sb strings.Builder
+	for _, sheet := range f.GetSheetList() {
+		rows, err := f.GetRows(sheet)
+		if err != nil {
+			return "", fmt.Errorf("read sheet %q: %w", sheet, err)
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString("Sheet: ")
+		sb.WriteString(sheet)
+		sb.WriteByte('\n')
+		for _, row := range rows {
+			sb.WriteString(strings.Join(row, ","))
+			sb.WriteByte('\n')
+		}
+	}
+	return strings.TrimSpace(sb.String()), nil
 }
 
 // extractDocxText parses the OOXML document.xml and collects text runs (<w:t>),

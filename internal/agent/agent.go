@@ -174,10 +174,10 @@ Use this when a widget needs to trigger an action or fetch live data from a Pyth
 ## Widget self-verification (mandatory)
 
 After every add_ui_plugin call you MUST verify the widget works:
-1. Fetch the widget URL (e.g. with fetch_url or browser_exec) or inspect the rendered HTML to confirm it loads without errors.
-2. If the widget fetches external data, check that the API call succeeds and returns expected data.
-3. If anything is broken — blank content, JS error, failed fetch, wrong layout — fix the code and call add_ui_plugin again with the corrected version.
-4. Only tell the user the widget is ready once you have confirmed it works correctly. Never hand off a widget you haven't verified yourself.
+1. Read back the widget file with file_open: the widget HTML is saved at $PLUGIN_DIR/<session_id>/<id>.html and served at /plugins/<session_id>/<id>.html. Use your current session ID (available at the bottom of this prompt). Confirm the file exists and contains valid HTML — check for unclosed tags, broken script blocks, and that any required window.parent.postMessage calls are present.
+2. If the widget fetches data from /data/<name>.json, use fetch_url on that endpoint to confirm it returns valid JSON.
+3. If anything looks broken — missing structure, bad JS, wrong layout — fix the code and call add_ui_plugin again with the corrected version.
+4. Only tell the user the widget is ready once you have confirmed the file is valid. Never use /widget/<id> — that route does not exist.
 
 ## Other guidelines
 - For web tasks: web_search first, then fetch_url for static pages, browser_exec only when JS rendering is needed
