@@ -1292,9 +1292,35 @@ func (e *ToolExecutor) listTools() (string, error) {
 }
 
 func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Tool, rawArgs json.RawMessage) (string, error) {
-	cmd := fmt.Sprintf("python3 /workspace/agent_tools/%s %s",
-		shellEscape(tool.Filename), shellEscape(string(rawArgs)))
-	return e.execCommand(ctx, cmd)
+	session := e.sessionID
+	if session == "" {
+		session = "default"
+	}
+	env := map[string]string{
+		"IDE_SESSION": session,
+		"IDE_URL":     "http://server:8080",
+	}
+	if e.memStore != nil {
+		if secrets, err := e.memStore.GetAllSecrets(ctx); err == nil {
+			for name, value := range secrets {
+				env[toEnvVarName(name)] = value
+			}
+		}
+	}
+	// Pass the JSON payload via stdin to avoid shell argument-length limits (ARG_MAX).
+	// The one-liner shim injects stdin into sys.argv[1] so tools are unchanged.
+	cmd := fmt.Sprintf(
+		"cd /workspace && python3 -c 'import sys,runpy;sys.argv=[sys.argv[1],open(\"/dev/stdin\").read()];runpy.run_path(sys.argv[0])' %s",
+		shellEscape("/workspace/agent_tools/"+tool.Filename),
+	)
+	out, err := e.docker.ExecWithStdin(ctx, cmd, []byte(rawArgs), 2*time.Minute, env)
+	if err != nil {
+		return fmt.Sprintf("ERROR: %v\nOutput: %s", err, out), nil
+	}
+	if len(out) > 8000 {
+		out = out[:4000] + "\n...[truncated]...\n" + out[len(out)-4000:]
+	}
+	return out, nil
 }
 
 func shellEscape(s string) string {

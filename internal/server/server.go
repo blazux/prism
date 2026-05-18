@@ -8,7 +8,10 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -170,6 +173,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/mcp/servers", s.handleMCPServers)
 	mux.HandleFunc("/api/mcp/servers/", s.handleMCPServerByID)
 	s.registerRAGRoutes(mux)
+
+	// Reverse proxy to services running inside the workspace container
+	mux.HandleFunc("/proxy/", s.handleWorkspaceProxy)
 
 	addr := ":" + s.cfg.Port
 	log.Printf("Listening on %s", addr)
@@ -902,13 +908,18 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 		"IDE_URL":     "http://server:8080",
 	}
 
+	// Pass the JSON payload via stdin to avoid shell argument-length limits (ARG_MAX).
+	// The one-liner shim injects stdin into sys.argv[1] so tools are unchanged.
 	escape := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
-	cmd := fmt.Sprintf("python3 /workspace/agent_tools/%s %s", escape(tool.Filename), escape(string(body)))
+	cmd := fmt.Sprintf(
+		"python3 -c 'import sys,runpy;sys.argv=[sys.argv[1],open(\"/dev/stdin\").read()];runpy.run_path(sys.argv[0])' %s",
+		escape("/workspace/agent_tools/"+tool.Filename),
+	)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 
-	out, execErr := s.docker.ExecWithEnv(ctx, cmd, 30*time.Second, env)
+	out, execErr := s.docker.ExecWithStdin(ctx, cmd, body, 2*time.Minute, env)
 	resp := map[string]interface{}{"output": out}
 	if execErr != nil {
 		resp["error"] = execErr.Error()
@@ -1658,5 +1669,82 @@ func (c *Client) writePump() {
 			}
 		}
 	}
+}
+
+// ─── Workspace proxy ──────────────────────────────────────────────────────────
+
+// handleWorkspaceProxy reverse-proxies /proxy/<port>/... to the workspace
+// container so widgets can reach services (e.g. ComfyUI on :8188) without
+// exposing extra ports to the host.
+func (s *Server) handleWorkspaceProxy(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/proxy/")
+	idx := strings.Index(trimmed, "/")
+	var portStr, subPath string
+	if idx < 0 {
+		portStr = trimmed
+		subPath = "/"
+	} else {
+		portStr = trimmed[:idx]
+		subPath = trimmed[idx:]
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		http.Error(w, "invalid port", http.StatusBadRequest)
+		return
+	}
+
+	targetHost := fmt.Sprintf("%s:%d", s.cfg.AgentContainer, port)
+
+	// WebSocket: hijack + raw TCP tunnel so the upgrade handshake passes through.
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		s.tunnelWebSocket(w, r, targetHost, subPath)
+		return
+	}
+
+	targetURL := &url.URL{Scheme: "http", Host: targetHost}
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.Director = func(req *http.Request) {
+		req.URL.Scheme = "http"
+		req.URL.Host = targetHost
+		req.URL.Path = subPath
+		req.Host = targetHost
+	}
+	proxy.FlushInterval = -1 // stream responses immediately (SSE / chunked)
+	proxy.ServeHTTP(w, r)
+}
+
+func (s *Server) tunnelWebSocket(w http.ResponseWriter, r *http.Request, targetHost, subPath string) {
+	dst, err := net.DialTimeout("tcp", targetHost, 10*time.Second)
+	if err != nil {
+		http.Error(w, "workspace service unreachable", http.StatusBadGateway)
+		return
+	}
+	defer dst.Close()
+
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+		return
+	}
+	src, _, err := hj.Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer src.Close()
+
+	// Re-send the original upgrade request to the target.
+	fwd := r.Clone(r.Context())
+	fwd.URL = &url.URL{Path: subPath, RawQuery: r.URL.RawQuery}
+	fwd.RequestURI = ""
+	if err := fwd.Write(dst); err != nil {
+		return
+	}
+
+	done := make(chan struct{}, 2)
+	go func() { io.Copy(dst, src); done <- struct{}{} }()
+	go func() { io.Copy(src, dst); done <- struct{}{} }()
+	<-done
 }
 

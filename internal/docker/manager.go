@@ -107,6 +107,33 @@ func (m *Manager) ExecWithEnv(ctx context.Context, command string, timeout time.
 	return m.run(ctx, "docker", args...)
 }
 
+// ExecWithStdin runs a command in the container with stdin attached, bypassing
+// shell argument-length limits for large payloads (images, documents, etc.).
+func (m *Manager) ExecWithStdin(ctx context.Context, command string, stdin []byte, timeout time.Duration, env map[string]string) (string, error) {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	args := []string{"exec", "-i"}
+	for k, v := range env {
+		args = append(args, "-e", k+"="+v)
+	}
+	args = append(args, m.containerName, "bash", "-c", command)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdin = bytes.NewReader(stdin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
 func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string, <-chan error) {
 	outCh := make(chan string, 100)
 	errCh := make(chan error, 1)

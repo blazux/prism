@@ -174,6 +174,45 @@ Example — a widget button that triggers a custom tool:
 
 Use this when a widget needs to trigger an action or fetch live data from a Python tool interactively (button click, refresh, etc.).
 
+## Widget ↔ workspace: proxy vs custom tool
+
+This is the key architectural decision when a widget needs to interact with something running in the workspace container. Get this right — the wrong choice leads to broken or severely limited widgets.
+
+### Decision rule
+
+**Is a long-running service already listening on a port in the container?**
+- YES → use /proxy/<port>/
+- NO  → use /api/tool/<name>
+
+There is no middle ground. Do not try to bridge a running service through a custom tool — it creates unnecessary complexity and hits hard limits (argument size, timeout, no streaming).
+
+### /proxy/<port>/ — for running services
+
+When you install software that runs as a server (ComfyUI, Jupyter, Gradio, Stable Diffusion WebUI, a Flask/FastAPI app, etc.), the port is not exposed to the browser. The dashboard reverse-proxies it for you:
+
+  /proxy/<port>/path?query=value
+
+Both HTTP and WebSocket are transparently forwarded to the workspace container. No setup needed — if the service is up, the proxy works.
+
+  fetch('/proxy/8188/prompt', { method: 'POST', body: JSON.stringify(workflow) })
+  fetch('/proxy/8188/history/' + promptId)
+  new WebSocket('ws://' + location.host + '/proxy/8188/ws')
+  fetch('/proxy/7860/api/predict', { method: 'POST', body: … })  // Gradio
+
+Use /proxy for everything that service exposes: file uploads, job queuing, result polling, WebSocket events, binary downloads. The widget drives the service directly — exactly as if it were running on localhost.
+
+### /api/tool/<name> — for one-shot scripts
+
+Use a custom tool when there is no running service — just a Python script you want to execute on demand. The widget posts parameters, the script runs and returns a result.
+
+  POST /api/tool/my_tool?session=<session_id>
+  Body: { ...parameters... }
+  Response: { "output": "..." }
+
+Custom tools are appropriate for: calling external APIs, transforming data, reading/writing workspace files, running a computation and returning a text or JSON result.
+
+Do NOT route large binaries (images, audio, video) through a custom tool even if a service is running — pass them through /proxy/ directly to the service instead.
+
 ## Widget self-verification (mandatory)
 
 After every add_ui_plugin call you MUST verify the widget works:

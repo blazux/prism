@@ -103,12 +103,6 @@ func (s *Store) initSchema(ctx context.Context) error {
 		)`,
 		// Migration: add session_id to existing tables
 		`ALTER TABLE rag_collections ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT 'default'`,
-		// Migration: assign existing collections to 'default' session
-		`INSERT INTO rag_collections (name, session_id, description)
-		 SELECT DISTINCT collection, 'default', ''
-		 FROM rag_documents
-		 WHERE collection NOT IN (SELECT name FROM rag_collections)
-		 ON CONFLICT DO NOTHING`,
 
 		`CREATE TABLE IF NOT EXISTS rag_documents (
 			id          BIGSERIAL PRIMARY KEY,
@@ -137,6 +131,13 @@ func (s *Store) initSchema(ctx context.Context) error {
 		// personal knowledge bases with tens of thousands of chunks.
 		`CREATE INDEX IF NOT EXISTS rag_chunks_collection_idx
 			ON rag_chunks (collection)`,
+
+		// Migration: backfill rag_collections from rag_documents for pre-existing rows
+		`INSERT INTO rag_collections (name, session_id, description)
+		 SELECT DISTINCT collection, 'default', ''
+		 FROM rag_documents
+		 WHERE collection NOT IN (SELECT name FROM rag_collections)
+		 ON CONFLICT DO NOTHING`,
 	}
 
 	for _, stmt := range stmts {
