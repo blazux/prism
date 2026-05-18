@@ -332,6 +332,21 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "browser_act",
+			Description: `Interact with a web page using a sequence of actions. Session cookies and storage are persisted across calls (per session), so you can log in once and reuse the authenticated state. Use for form submission, login flows, multi-step navigation, or scraping pages that require interaction. Returns a JSON array with the result of each action. Supported action types: navigate {url}, click {selector}, type {selector, text}, clear {selector}, select {selector, value}, wait_for {selector}, screenshot {full_page?}, evaluate {expression}, get_text {selector}.`,
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"url":     {Type: "string", Description: "Initial URL to navigate to before running actions. Omit to reuse the current session page."},
+					"actions": {Type: "array", Description: `List of action objects to execute in order. Each object must have a "type" field. Examples: {"type":"click","selector":"#submit"}, {"type":"type","selector":"input[name=q]","text":"hello"}, {"type":"screenshot"}, {"type":"evaluate","expression":"document.title"}, {"type":"get_text","selector":".result"}, {"type":"wait_for","selector":".loaded"}, {"type":"navigate","url":"https://..."}, {"type":"select","selector":"select#lang","value":"fr"}, {"type":"clear","selector":"#search"}.`},
+				},
+				Required: []string{"actions"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "schedule_notification",
 			Description: "Schedule a notification to be delivered after a delay. Use this for reminders, countdowns, or any alert that should appear in the future. More reliable than nohup/sleep in a shell script.",
 			Parameters: ollama.ToolParameters{
@@ -526,6 +541,7 @@ func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
 
 func (e *ToolExecutor) SetPluginDir(dir string)   { e.pluginDir = dir }
 func (e *ToolExecutor) SetSessionID(id string)    { e.sessionID = id }
+func (e *ToolExecutor) WorkspaceDir() string      { return e.workspaceDir }
 func (e *ToolExecutor) SetMemoryStore(ms *memory.Store) { e.memStore = ms }
 func (e *ToolExecutor) SetNotificationCallback(fn func(title, message, level string)) {
 	e.onNotification = fn
@@ -602,6 +618,8 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return e.webSearch(ctx, str("query"))
 	case "browser_exec":
 		return e.browserExec(ctx, str("url"), str("script"))
+	case "browser_act":
+		return e.browserAct(ctx, str("url"), args["actions"])
 	case "rag_search":
 		limitFloat, _ := args["limit"].(float64)
 		limit := int(limitFloat)
@@ -988,6 +1006,132 @@ func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (
 	}
 	if len(out) > 8000 {
 		out = out[:8000] + "\n...[truncated]"
+	}
+	return out, nil
+}
+
+const browserActScript = `import json, os, time
+from playwright.sync_api import sync_playwright
+
+INPUT_FILE = os.environ['BROWSER_ACT_INPUT']
+SESSION_FILE = os.environ['BROWSER_ACT_SESSION']
+SCREENSHOT_DIR = '/workspace/.screenshots'
+os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+
+with open(INPUT_FILE) as f:
+    config = json.load(f)
+
+start_url = config.get('url')
+actions = config.get('actions') or []
+results = []
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True,
+        args=['--no-sandbox','--disable-dev-shm-usage','--disable-gpu'])
+    ctx_opts = {}
+    if os.path.exists(SESSION_FILE):
+        ctx_opts['storage_state'] = SESSION_FILE
+    context = browser.new_context(**ctx_opts)
+    page = context.new_page()
+
+    if start_url:
+        page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
+        page.wait_for_timeout(500)
+        results.append({'action':'navigate','status':'ok','url':page.url})
+
+    for action in actions:
+        atype = action.get('type','')
+        try:
+            if atype == 'navigate':
+                page.goto(action['url'], wait_until='domcontentloaded', timeout=30000)
+                page.wait_for_timeout(500)
+                results.append({'action':'navigate','status':'ok','url':page.url})
+            elif atype == 'click':
+                page.click(action['selector'], timeout=10000)
+                page.wait_for_timeout(300)
+                results.append({'action':'click','selector':action['selector'],'status':'ok'})
+            elif atype == 'type':
+                page.fill(action['selector'], action['text'], timeout=10000)
+                results.append({'action':'type','selector':action['selector'],'status':'ok'})
+            elif atype == 'clear':
+                page.fill(action['selector'], '', timeout=10000)
+                results.append({'action':'clear','selector':action['selector'],'status':'ok'})
+            elif atype == 'select':
+                page.select_option(action['selector'], action['value'], timeout=10000)
+                results.append({'action':'select','selector':action['selector'],'status':'ok'})
+            elif atype == 'wait_for':
+                page.wait_for_selector(action['selector'], timeout=15000)
+                results.append({'action':'wait_for','selector':action['selector'],'status':'ok'})
+            elif atype == 'screenshot':
+                fname = str(int(time.time()*1000)) + '.png'
+                path = os.path.join(SCREENSHOT_DIR, fname)
+                page.screenshot(path=path, full_page=bool(action.get('full_page')))
+                results.append({'action':'screenshot','status':'ok','url':'/screenshots/'+fname})
+            elif atype == 'evaluate':
+                result = page.evaluate(action['expression'])
+                results.append({'action':'evaluate','status':'ok','result':result})
+            elif atype == 'get_text':
+                sel = action.get('selector','body')
+                text = page.inner_text(sel, timeout=10000)
+                results.append({'action':'get_text','selector':sel,'status':'ok','text':text[:4000]})
+            else:
+                results.append({'action':atype,'status':'error','error':'unknown action type'})
+        except Exception as e:
+            results.append({'action':atype,'status':'error','error':str(e)})
+
+    context.storage_state(path=SESSION_FILE)
+    context.close()
+    browser.close()
+
+print(json.dumps(results, default=str, indent=2))
+`
+
+func (e *ToolExecutor) browserAct(ctx context.Context, rawURL string, rawActions interface{}) (string, error) {
+	if rawURL != "" {
+		u, err := url.Parse(rawURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			return "", fmt.Errorf("invalid URL: must start with http:// or https://")
+		}
+	}
+
+	sessionID := e.sessionID
+	if sessionID == "" {
+		sessionID = "default"
+	}
+
+	type actInput struct {
+		URL     string      `json:"url,omitempty"`
+		Actions interface{} `json:"actions"`
+	}
+	inputJSON, err := json.Marshal(actInput{URL: rawURL, Actions: rawActions})
+	if err != nil {
+		return "", fmt.Errorf("marshal actions: %w", err)
+	}
+
+	inputFile := filepath.Join(e.workspaceDir, ".browser_act_"+sessionID+".json")
+	sessionFile := "/workspace/.browser_session_" + sessionID + ".json"
+
+	if err := os.WriteFile(inputFile, inputJSON, 0644); err != nil {
+		return "", fmt.Errorf("write input: %w", err)
+	}
+	defer os.Remove(inputFile)
+
+	scriptPath := filepath.Join(e.workspaceDir, ".browser_act.py")
+	if err := os.WriteFile(scriptPath, []byte(browserActScript), 0644); err != nil {
+		return "", fmt.Errorf("write script: %w", err)
+	}
+
+	containerInput := "/workspace/.browser_act_" + sessionID + ".json"
+	cmd := fmt.Sprintf(
+		"BROWSER_ACT_INPUT=%s BROWSER_ACT_SESSION=%s python3 /workspace/.browser_act.py 2>&1",
+		containerInput, sessionFile,
+	)
+	out, err := e.docker.Exec(ctx, cmd, 90*time.Second)
+	if err != nil {
+		return fmt.Sprintf("browser_act failed: %v\n%s", err, out), nil
+	}
+	if len(out) > 12000 {
+		out = out[:12000] + "\n...[truncated]"
 	}
 	return out, nil
 }

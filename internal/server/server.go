@@ -144,6 +144,11 @@ func (s *Server) Start() error {
 	os.MkdirAll(widgetDataDir, 0755)
 	mux.Handle("/data/", http.StripPrefix("/data/", http.FileServer(http.Dir(widgetDataDir))))
 
+	// Browser automation screenshots — served at /screenshots/<file>
+	screenshotsDir := filepath.Join(s.cfg.WorkspaceDir, ".screenshots")
+	os.MkdirAll(screenshotsDir, 0755)
+	mux.Handle("/screenshots/", http.StripPrefix("/screenshots/", http.FileServer(http.Dir(screenshotsDir))))
+
 	// WebSocket
 	mux.HandleFunc("/ws", s.handleWS)
 

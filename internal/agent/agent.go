@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,7 +25,7 @@ const systemPromptCore = `
 Your capabilities:
 - Add widget cards to the dashboard (add_ui_plugin) — self-contained HTML/JS panels
 - Search the web (web_search) and fetch pages as readable text (fetch_url)
-- Automate a real Chromium browser for JS-heavy pages (browser_exec)
+- Automate a real Chromium browser: fetch JS-heavy pages (browser_exec) or run interactive sequences — click, type, screenshot, login flows (browser_act)
 - Execute shell commands, read/write files, install packages in the workspace
 - Schedule recurring tasks with cron (cron_add / cron_list / cron_remove)
 - Send notifications to the dashboard via send_notification (during chat) or HTTP (from cron/background scripts)
@@ -180,7 +183,7 @@ After every add_ui_plugin call you MUST verify the widget works:
 4. Only tell the user the widget is ready once you have confirmed the file is valid. Never use /widget/<id> — that route does not exist.
 
 ## Other guidelines
-- For web tasks: web_search first, then fetch_url for static pages, browser_exec only when JS rendering is needed
+- For web tasks: web_search → fetch_url (static) → browser_exec (JS rendering) → browser_act (interaction: login, forms, clicks). browser_act persists cookies per session so you can log in once and reuse the state across calls. Screenshots are served at /screenshots/<filename> — always display them inline with markdown: ![description](/screenshots/filename.png)
 - For scheduled tasks: write and test the script first, then cron_add with output to /workspace/logs/<name>.log
 - Be concise
 
@@ -544,12 +547,41 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			}
 
 			toolMsg := ollama.Message{Role: "tool", Content: result}
+			if tc.Function.Name == "browser_act" {
+				toolMsg.Images = extractScreenshotImages(result, a.executor.WorkspaceDir())
+			}
 			a.history = append(a.history, toolMsg)
 			a.saveMessageToDB(ctx, toolMsg)
 		}
 	}
 
 	events <- Event{Type: "error", Content: "Max iterations reached — the agent may be looping. Start a new chat."}
+}
+
+// extractScreenshotImages parses a browser_act JSON result, reads any screenshot
+// files, and returns them as base64-encoded strings for multimodal models.
+func extractScreenshotImages(result, workspaceDir string) []string {
+	var actions []struct {
+		Action string `json:"action"`
+		Status string `json:"status"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(result), &actions); err != nil {
+		return nil
+	}
+	var images []string
+	for _, a := range actions {
+		if a.Action != "screenshot" || a.Status != "ok" || a.URL == "" {
+			continue
+		}
+		fname := strings.TrimPrefix(a.URL, "/screenshots/")
+		data, err := os.ReadFile(filepath.Join(workspaceDir, ".screenshots", fname))
+		if err != nil {
+			continue
+		}
+		images = append(images, base64.StdEncoding.EncodeToString(data))
+	}
+	return images
 }
 
 // handleUpdateSystemPrompt processes the update_system_prompt tool call.

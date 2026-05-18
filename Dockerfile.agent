@@ -29,10 +29,11 @@ RUN pip3 install --no-cache-dir \
     jupyter nbformat \
     pytest black ruff
 
-# Playwright for browser automation (browser_exec tool)
+# Playwright for browser automation (browser_exec / browser_act tools)
 RUN pip3 install --no-cache-dir playwright && \
     python3 -m playwright install chromium && \
-    python3 -m playwright install-deps chromium
+    python3 -m playwright install-deps chromium && \
+    mkdir -p /workspace/.screenshots
 
 WORKDIR /workspace
 
