@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -48,7 +49,8 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama embed returned %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ollama embed returned %d (model=%s): %s", resp.StatusCode, e.model, bytes.TrimSpace(body))
 	}
 
 	var result struct {

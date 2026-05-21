@@ -66,7 +66,7 @@ function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(currentSessionID)}`)
 
-  ws.onopen  = () => { batchLoading = true }
+  ws.onopen  = () => { clearChat(); batchLoading = true }
   ws.onclose = () => { setContainerBadge('unknown'); setTimeout(connect, 2000) }
   ws.onerror = () => {}
   ws.onmessage = (e) => {

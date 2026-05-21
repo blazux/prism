@@ -915,7 +915,7 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	// The one-liner shim injects stdin into sys.argv[1] so tools are unchanged.
 	escape := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 	cmd := fmt.Sprintf(
-		"python3 -c 'import sys,runpy;sys.argv=[sys.argv[1],open(\"/dev/stdin\").read()];runpy.run_path(sys.argv[0])' %s",
+		"python3 -c 'import sys,runpy;sys.argv=[sys.argv[1],open(\"/dev/stdin\").read()];runpy.run_path(sys.argv[0],run_name=\"__main__\")' %s",
 		escape("/workspace/agent_tools/"+tool.Filename),
 	)
 

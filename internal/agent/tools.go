@@ -1327,7 +1327,7 @@ func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Too
 	// Pass the JSON payload via stdin to avoid shell argument-length limits (ARG_MAX).
 	// The one-liner shim injects stdin into sys.argv[1] so tools are unchanged.
 	cmd := fmt.Sprintf(
-		"cd /workspace && python3 -c 'import sys,runpy;sys.argv=[sys.argv[1],open(\"/dev/stdin\").read()];runpy.run_path(sys.argv[0])' %s",
+		"cd /workspace && python3 -c 'import sys,runpy;sys.argv=[sys.argv[1],open(\"/dev/stdin\").read()];runpy.run_path(sys.argv[0],run_name=\"__main__\")' %s",
 		shellEscape("/workspace/agent_tools/"+tool.Filename),
 	)
 	out, err := e.docker.ExecWithStdin(ctx, cmd, []byte(rawArgs), 2*time.Minute, env)
