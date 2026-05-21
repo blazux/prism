@@ -293,6 +293,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if ragContextFn != nil {
 		client.ag.SetRAGContextFn(ragContextFn)
 	}
+	client.ag.SetLearningsCtxFn(func(ctx context.Context, query string) string {
+		return executor.SearchLearnings(ctx, query)
+	})
 	mcpMgr := s.mcpMgr
 	client.ag.SetMCPContextFn(func() string {
 		servers, err := mcpMgr.List(context.Background(), sessionID)
@@ -1220,6 +1223,9 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 			return sb.String()
 		})
 	}
+	ag.SetLearningsCtxFn(func(ctx context.Context, query string) string {
+		return executor.SearchLearnings(ctx, query)
+	})
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()

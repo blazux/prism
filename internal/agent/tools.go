@@ -286,6 +286,21 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "save_learning",
+			Description: "Save a lesson learned from this conversation to the permanent agent-learnings knowledge base. Call this when the user confirms that something complex finally worked, or when a non-obvious solution was found. The lesson will be automatically retrieved in future conversations when relevant.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"title":   {Type: "string", Description: "Short descriptive title (e.g. 'ComfyUI install on prism-workspace')"},
+					"content": {Type: "string", Description: "The full lesson: what the problem was, what failed, what finally worked, and any gotchas to remember."},
+				},
+				Required: []string{"title", "content"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name: "register_tool",
 			Description: "Create a new callable backend tool by writing a Python script to the agent_tools directory. " +
 				"The script MUST contain exactly this comment on a single line (valid JSON, no line break): " +
@@ -633,6 +648,8 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return e.ragListCollections(ctx)
 	case "rag_list_documents":
 		return e.ragListDocuments(ctx, str("collection"))
+	case "save_learning":
+		return e.saveLearning(ctx, str("title"), str("content"))
 	case "schedule_notification":
 		delayFloat, _ := args["delay_seconds"].(float64)
 		return e.scheduleNotification(str("title"), str("message"), str("level"), int(delayFloat))
@@ -1459,6 +1476,67 @@ func (e *ToolExecutor) ragListDocuments(ctx context.Context, collection string) 
 			d.Filename, d.ChunkCount, d.SizeBytes, d.UpdatedAt.Format("2006-01-02 15:04"))
 	}
 	return sb.String(), nil
+}
+
+// ─── Learnings tool ───────────────────────────────────────────────────────────
+
+const learningsCollection = "agent-learnings"
+
+func (e *ToolExecutor) saveLearning(ctx context.Context, title, content string) (string, error) {
+	if e.ragStore == nil || e.ragEmbedder == nil {
+		return "RAG not available (Postgres not configured)", nil
+	}
+	if title == "" || content == "" {
+		return "", fmt.Errorf("title and content are required")
+	}
+
+	if err := e.ragStore.EnsureCollection(ctx, learningsCollection, "default"); err != nil {
+		return fmt.Sprintf("ERROR registering collection: %v", err), nil
+	}
+
+	full := title + "\n\n" + content
+	chunks := rag.SplitText(full)
+	if len(chunks) == 0 {
+		return "Content produced no chunks after splitting.", nil
+	}
+
+	embeddings, err := e.ragEmbedder.EmbedBatch(ctx, chunks)
+	if err != nil {
+		return fmt.Sprintf("ERROR embedding content: %v", err), nil
+	}
+
+	if err := e.ragStore.UpsertDocument(ctx, learningsCollection, title, "", int64(len(full)), chunks, embeddings); err != nil {
+		return fmt.Sprintf("ERROR storing learning: %v", err), nil
+	}
+
+	return fmt.Sprintf("Learning %q saved to agent-learnings (%d chunks).", title, len(chunks)), nil
+}
+
+// SearchLearnings queries the agent-learnings collection and returns a formatted
+// string suitable for injection into the system prompt. Returns "" if nothing relevant.
+func (e *ToolExecutor) SearchLearnings(ctx context.Context, query string) string {
+	if e.ragStore == nil || e.ragEmbedder == nil || query == "" {
+		return ""
+	}
+
+	embedding, err := e.ragEmbedder.Embed(ctx, query)
+	if err != nil {
+		return ""
+	}
+
+	results, err := e.ragStore.Search(ctx, learningsCollection, embedding, 3)
+	if err != nil || len(results) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, r := range results {
+		if r.Score < 0.55 {
+			continue
+		}
+		fmt.Fprintf(&sb, "### %s\n%s\n\n", r.Filename, r.Content)
+	}
+	return sb.String()
 }
 
 // ─── Notification tool ────────────────────────────────────────────────────────
