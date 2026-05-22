@@ -293,6 +293,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if ragContextFn != nil {
 		client.ag.SetRAGContextFn(ragContextFn)
 	}
+	client.ag.SetUserProfileFn(func() string {
+		return executor.GetUserProfile(context.Background())
+	})
 	client.ag.SetLearningsCtxFn(func(ctx context.Context, query string) string {
 		return executor.SearchLearnings(ctx, query)
 	})
@@ -1223,6 +1226,9 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 			return sb.String()
 		})
 	}
+	ag.SetUserProfileFn(func() string {
+		return executor.GetUserProfile(context.Background())
+	})
 	ag.SetLearningsCtxFn(func(ctx context.Context, query string) string {
 		return executor.SearchLearnings(ctx, query)
 	})

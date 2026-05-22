@@ -309,6 +309,30 @@ func (s *Store) Search(ctx context.Context, collection string, embedding []float
 	return results, rows.Err()
 }
 
+// AllContent returns all chunk content from a collection, ordered by document then chunk index.
+// Used to retrieve small collections (e.g. user profile) in full without a semantic search.
+func (s *Store) AllContent(ctx context.Context, collection string) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT c.content FROM rag_chunks c
+		 JOIN rag_documents d ON d.id = c.document_id
+		 WHERE c.collection = $1
+		 ORDER BY d.filename, c.chunk_index`,
+		collection)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []string
+	for rows.Next() {
+		var content string
+		if err := rows.Scan(&content); err != nil {
+			return nil, err
+		}
+		result = append(result, content)
+	}
+	return result, rows.Err()
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

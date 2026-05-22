@@ -286,6 +286,21 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "save_user_info",
+			Description: "Save a personal fact about the user to their permanent profile. Call this whenever the user explicitly states something about themselves: preferences, job, age, hobbies, dietary restrictions, family, location, etc. Use a short stable topic key (e.g. 'diet', 'job', 'music-tastes') — saving the same topic overwrites the previous value.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"topic":   {Type: "string", Description: "Short stable key for this fact (e.g. 'diet', 'job', 'location', 'hobbies'). Same topic = update."},
+					"content": {Type: "string", Description: "The fact as stated by the user (e.g. 'Vegetarian, dislikes cilantro, loves spicy food')."},
+				},
+				Required: []string{"topic", "content"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "save_learning",
 			Description: "Save a lesson learned from this conversation to the permanent agent-learnings knowledge base. Call this when the user confirms that something complex finally worked, or when a non-obvious solution was found. The lesson will be automatically retrieved in future conversations when relevant.",
 			Parameters: ollama.ToolParameters{
@@ -648,6 +663,8 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return e.ragListCollections(ctx)
 	case "rag_list_documents":
 		return e.ragListDocuments(ctx, str("collection"))
+	case "save_user_info":
+		return e.saveUserInfo(ctx, str("topic"), str("content"))
 	case "save_learning":
 		return e.saveLearning(ctx, str("title"), str("content"))
 	case "schedule_notification":
@@ -1535,6 +1552,61 @@ func (e *ToolExecutor) SearchLearnings(ctx context.Context, query string) string
 			continue
 		}
 		fmt.Fprintf(&sb, "### %s\n%s\n\n", r.Filename, r.Content)
+	}
+	return sb.String()
+}
+
+// ─── User profile tool ────────────────────────────────────────────────────────
+
+const userProfileCollection = "user-profile"
+
+func (e *ToolExecutor) saveUserInfo(ctx context.Context, topic, content string) (string, error) {
+	if e.ragStore == nil || e.ragEmbedder == nil {
+		return "RAG not available (Postgres not configured)", nil
+	}
+	if topic == "" || content == "" {
+		return "", fmt.Errorf("topic and content are required")
+	}
+
+	if err := e.ragStore.EnsureCollection(ctx, userProfileCollection, "default"); err != nil {
+		return fmt.Sprintf("ERROR registering collection: %v", err), nil
+	}
+
+	full := topic + "\n\n" + content
+	chunks := rag.SplitText(full)
+	if len(chunks) == 0 {
+		return "Content produced no chunks after splitting.", nil
+	}
+
+	embeddings, err := e.ragEmbedder.EmbedBatch(ctx, chunks)
+	if err != nil {
+		return fmt.Sprintf("ERROR embedding content: %v", err), nil
+	}
+
+	if err := e.ragStore.UpsertDocument(ctx, userProfileCollection, topic, "", int64(len(full)), chunks, embeddings); err != nil {
+		return fmt.Sprintf("ERROR storing user info: %v", err), nil
+	}
+
+	return fmt.Sprintf("User info %q saved to profile.", topic), nil
+}
+
+// GetUserProfile retrieves the full user profile from the user-profile collection.
+// The profile is always injected in full (no semantic search) since it's small
+// and potentially relevant to any conversation.
+func (e *ToolExecutor) GetUserProfile(ctx context.Context) string {
+	if e.ragStore == nil {
+		return ""
+	}
+
+	chunks, err := e.ragStore.AllContent(ctx, userProfileCollection)
+	if err != nil || len(chunks) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, c := range chunks {
+		sb.WriteString(c)
+		sb.WriteString("\n")
 	}
 	return sb.String()
 }

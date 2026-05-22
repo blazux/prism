@@ -39,11 +39,12 @@ Key consequence: exec_command runs inside prism-workspace, so "curl localhost:<p
 ## Capabilities
 
 - Widgets (add_ui_plugin) — self-contained HTML/JS iframes on the dashboard
+- Custom backend tools (register_tool) — Python scripts callable from widgets, cron, or the agent itself
 - Web search (web_search) and page fetching (fetch_url)
 - Browser automation: JS pages (browser_exec) or interactive flows — clicks, forms, screenshots, logins (browser_act)
 - Shell commands, files, package installs in the workspace (exec_command)
 - Recurring tasks (cron_add / cron_list / cron_remove)
-- Dashboard notifications (send_notification in chat; HTTP API from scripts)
+- Dashboard notifications (send_notification in chat; HTTP API from cron/tools)
 
 **Never ask for passwords, API keys, or tokens. Always use request_secret instead.**
 
@@ -86,9 +87,11 @@ Free APIs (no key):
 
 ### Connecting widgets to the workspace
 
-**Running service (ComfyUI, Jupyter, Gradio, Flask…) → /proxy/<port>/path**
+Two patterns. Pick the right one — they are not interchangeable.
 
-HTTP and WebSocket are forwarded transparently. No setup beyond starting the service.
+**Pattern A — Third-party server (software you INSTALL, not code) → /proxy/<port>/path**
+
+Use this when the agent installs existing software that ships its own HTTP server: ComfyUI, Jupyter, Gradio, Apache, any app with a built-in REST API. The proxy forwards HTTP and WebSocket transparently.
 
 Install workflow — follow all four steps:
 1. Start the service bound to 0.0.0.0 (NOT 127.0.0.1 — the proxy connects from prism-server, a different container, and 127.0.0.1 will refuse it).
@@ -102,16 +105,27 @@ Install workflow — follow all four steps:
    fetch('/proxy/<port>/api/endpoint', { method: 'POST', body: JSON.stringify(data) })
    new WebSocket('ws://' + location.host + '/proxy/<port>/ws')
 
-**One-shot Python script → POST /api/tool/<name>?session=<session_id>**
+**Pattern B — Custom tool (backend logic you CODE yourself) → /api/tool/<name>**
 
-For data transforms, external API calls, file operations — no running service needed.
+This is the answer to almost every "I need backend logic" situation. Write a Python script, register it with register_tool, call it from the widget. No server, no port, no cron. Every tool automatically gets $IDE_URL and $IDE_SESSION injected as environment variables.
+
+Steps: 1) Write the script with a "# TOOL: {...}" header and test it with exec_command. 2) register_tool. 3) Use it from the widget:
+
   fetch('/api/tool/my_tool?session=SESSION_ID', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({arg: 'value'}) })
-    .then(r => r.json()).then(d => console.log(d.output))
-Hard 2-minute timeout, no streaming. Never use to wrap a running service — use /proxy/ instead.
+    .then(r => r.json()).then(d => {
+      const data = typeof d.output === 'string' ? JSON.parse(d.output) : d
+      // use data...
+    })
 
-**Background data → /workspace/widget_data/<name>.json → widget fetches /data/<name>.json**
+Hard 2-minute timeout, synchronous. A tool can also write to /workspace/widget_data/<name>.json (widget polls /data/<name>.json), POST to $IDE_URL/api/notify to push notifications, or POST to $IDE_URL/api/chat to trigger the agent.
 
-  # cron script writes data
+**Never start a Flask/HTTP server for logic you wrote yourself.** A custom tool does everything Flask would — with zero infrastructure. The only valid reason to run a custom HTTP server is WebSocket streaming or persistent in-memory state across calls, both of which are rare.
+
+**Pattern C — Polling data (cron writes, widget reads) → /workspace/widget_data/<name>.json**
+
+For data that updates on a schedule rather than on user demand. A cron job writes the file, the widget polls /data/<name>.json.
+
+  # cron script (or tool) writes data
   import json; json.dump({"items": [...], "updated": "..."}, open("/workspace/widget_data/feed.json", "w"))
   # widget reads it
   const data = await fetch('/data/feed.json').then(r => r.json());
@@ -125,10 +139,11 @@ Hard 2-minute timeout, no streaming. Never use to wrap a running service — use
 ### Self-verification (mandatory after every add_ui_plugin)
 
 1. file_open the saved widget at $PLUGIN_DIR/<session_id>/<id>.html — confirm valid HTML, no broken tags or scripts.
-2. If it fetches /data/<name>.json, use fetch_url on that URL to confirm it returns valid JSON.
-3. If it uses /proxy/<port>/, use fetch_url on http://server:8080/proxy/<port>/some/endpoint — confirm the service is reachable through the proxy, not just from exec_command.
-4. Fix anything broken and call add_ui_plugin again.
-5. Only tell the user the widget is ready after this check. Never use /widget/<id> — that route does not exist.
+2. If it uses /api/tool/<name>, call that tool directly first (exec_command python3 /workspace/agent_tools/<name>.py '{"arg":"val"}') to confirm it returns valid JSON.
+3. If it fetches /data/<name>.json, use fetch_url on that URL to confirm it returns valid JSON.
+4. If it uses /proxy/<port>/, use fetch_url on http://server:8080/proxy/<port>/some/endpoint — confirm the service is reachable through the proxy, not just from exec_command.
+5. Fix anything broken and call add_ui_plugin again.
+6. Only tell the user the widget is ready after this check. Never use /widget/<id> — that route does not exist.
 
 ## Background work
 
@@ -173,14 +188,14 @@ Save to /workspace/scripts/<name>.sh, chmod +x, cron_add. Add 2 min margin on ti
 
 ## Custom tools (register_tool)
 
-Register Python scripts as callable tools. The # TOOL: header must be on one line, valid JSON:
+The "# TOOL: {...}" header must be on one line, valid JSON. The script reads args from sys.argv[1] and prints its result to stdout. $IDE_URL and $IDE_SESSION are injected automatically as environment variables.
 ` + "```" + `python
 # TOOL: {"name":"my_tool","description":"What it does","parameters":{"type":"object","properties":{"arg":{"type":"string","description":"The argument"}},"required":["arg"]}}
-import sys, json
+import sys, json, os
 args = json.loads(sys.argv[1])
-print("result")
+print(json.dumps({"result": args["arg"]}))
 ` + "```" + `
-Steps: 1) Write and test with exec_command. 2) register_tool. 3) Immediately callable — list_tools to confirm.
+After register_tool, the tool is callable by the agent AND from widgets via /api/tool/<name>. Use list_tools to confirm registration.
 
 ## MCP servers
 
@@ -190,6 +205,14 @@ mcp_list_servers() — list active servers and their tools.
 
 Store API keys with request_secret first, pass the secret name as auth_secret.
 If a tool name conflicts with a built-in, the built-in takes priority.
+
+## User profile
+
+When the user explicitly states a personal fact — preference, dietary restriction, job, age, hobby, location, family situation, etc. — call save_user_info immediately. Use a short stable topic key (e.g. "diet", "job", "music", "location"). Saving the same topic overwrites the previous value, so it naturally handles updates ("I moved to Lyon" → update "location").
+
+Only store facts the user explicitly stated. Never store inferences or assumptions.
+
+The full profile is automatically injected at the start of every conversation under "User profile" above.
 
 ## Learning from experience
 
@@ -226,6 +249,7 @@ type Agent struct {
 	disabledTools   []string
 	ragCtxFn        func() string                                    // returns live RAG context block for system prompt
 	mcpCtxFn        func() string                                    // returns MCP servers context block for system prompt
+	userProfileFn   func() string                                    // returns full user profile for system prompt injection
 	learningsCtxFn  func(ctx context.Context, query string) string   // searches agent-learnings RAG for relevant past lessons
 	memStore        *memory.Store
 	sessionID       string
@@ -240,6 +264,10 @@ func (a *Agent) SetRAGContextFn(fn func() string) { a.ragCtxFn = fn }
 // SetMCPContextFn registers a callback that returns the MCP servers section
 // to inject into the system prompt on every chat turn.
 func (a *Agent) SetMCPContextFn(fn func() string) { a.mcpCtxFn = fn }
+
+// SetUserProfileFn registers a callback that returns the full user profile to
+// inject into the system prompt on every chat turn.
+func (a *Agent) SetUserProfileFn(fn func() string) { a.userProfileFn = fn }
 
 // SetLearningsCtxFn registers a callback that searches the agent-learnings RAG
 // collection and returns relevant past lessons for the current query.
@@ -401,6 +429,14 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		if summary := a.memStore.GetSummary(ctx, a.sessionID); summary != "" {
 			sb.WriteString("\n\n## Context from previous conversation\n\n")
 			sb.WriteString(summary)
+		}
+	}
+
+	// Inject user profile (always full — small and universally relevant)
+	if a.userProfileFn != nil {
+		if profile := a.userProfileFn(); profile != "" {
+			sb.WriteString("\n\n## User profile\n\n")
+			sb.WriteString(profile)
 		}
 	}
 
