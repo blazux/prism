@@ -627,9 +627,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		case "remove_plugin":
 			if msg.ID != "" {
-				os.Remove(filepath.Join(sessionPluginDir, msg.ID+".html"))
-				os.Remove(filepath.Join(sessionPluginDir, msg.ID+".meta.json"))
+				if err := os.Remove(filepath.Join(sessionPluginDir, msg.ID+".html")); err != nil && !os.IsNotExist(err) {
+					log.Printf("[remove_plugin] delete html %s: %v", msg.ID, err)
+				}
+				if err := os.Remove(filepath.Join(sessionPluginDir, msg.ID+".meta.json")); err != nil && !os.IsNotExist(err) {
+					log.Printf("[remove_plugin] delete meta %s: %v", msg.ID, err)
+				}
 				client.sendJSON(map[string]interface{}{"type": "plugin_unload", "id": msg.ID})
+				client.ag.InjectNote("[Dashboard] The user removed widget '" + msg.ID + "' from the dashboard. It no longer exists.")
 			}
 
 		case "lock_plugin":
@@ -926,9 +931,16 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	out, execErr := s.docker.ExecWithStdin(ctx, cmd, body, 2*time.Minute, env)
-	resp := map[string]interface{}{"output": out}
-	if execErr != nil {
-		resp["error"] = execErr.Error()
+	// If the tool printed valid JSON, return it directly so widgets don't need a double-parse.
+	// Otherwise wrap in {"output": "..."} for plain-text results.
+	var resp map[string]interface{}
+	if execErr == nil && json.Unmarshal([]byte(strings.TrimSpace(out)), &resp) == nil {
+		// valid JSON — resp is already set
+	} else {
+		resp = map[string]interface{}{"output": out}
+		if execErr != nil {
+			resp["error"] = execErr.Error()
+		}
 	}
 	json.NewEncoder(w).Encode(resp)
 }
@@ -1117,7 +1129,7 @@ func (s *Server) handleExternalNotify(w http.ResponseWriter, r *http.Request) {
 //	{"session":"default","message":"Analyse les CVE…","model":"llama3"}
 //
 // The agent runs to completion (max 10 min), saves the exchange to DB history,
-// fires any send_notification calls normally, and returns the final response.
+// fires any notify calls normally, and returns the final response.
 // Secrets (request_secret) are not available in this headless mode.
 func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {

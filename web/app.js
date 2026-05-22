@@ -111,7 +111,7 @@ function handleServerMsg(msg) {
     case 'mcp_updated':
       break
     case 'secret_request': showSecretDialog(msg.name, msg.description); break
-    case 'open_file':    break
+    case 'open_file':    break  // handled via file_content callback
     case 'file_content': openEditor(msg.path, msg.content); break
     case 'saved':       editorOnSaved(msg.path); break
     case 'file_tree': case 'file_changed': break
@@ -454,11 +454,15 @@ function formatToolInput(tool, inp) {
     case 'list_files':        return `ls ${inp.path || '.'}`
     case 'apt_install':       return `apt install ${inp.packages}`
     case 'pip_install':       return `pip install ${inp.packages}`
-    case 'add_ui_plugin':     return `"${inp.title}" — cols=${inp.cols||1} height=${inp.height||280}px`
-    case 'remove_ui_plugin':  return `remove widget: ${inp.id}`
+    case 'add_widget':        return `"${inp.title}" — cols=${inp.cols||1} height=${inp.height||280}px`
+    case 'remove_widget':     return `remove widget: ${inp.id}`
     case 'fetch_url':         return inp.url
     case 'web_search':        return `🔍 ${inp.query}`
-    case 'browser_exec':      return `🌐 ${inp.url}`
+    case 'browser_get':       return `🌐 ${inp.url}`
+    case 'notify':            return inp.delay_seconds > 0 ? `🔔 in ${inp.delay_seconds}s — ${inp.title}` : `🔔 ${inp.title}`
+    case 'rag_list':          return inp.collection ? `rag: ${inp.collection}` : 'rag: list collections'
+    case 'rag_search':        return `rag: "${inp.query}" in ${inp.collection}`
+    case 'rag_ingest':        return `rag: ingest "${inp.source}" → ${inp.collection}`
     case 'cron_list':         return '(list jobs)'
     case 'cron_add':          return `${inp.schedule} → ${inp.name}`
     case 'cron_remove':          return `remove: ${inp.name}`

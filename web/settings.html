@@ -386,8 +386,8 @@ const TOOL_CATEGORIES = [
   {
     name: 'Dashboard', icon: '⊞', color: 'var(--accent)',
     tools: [
-      { id: 'add_ui_plugin',    name: 'Create widget',  desc: 'Generate and add an HTML/JS panel to the dashboard' },
-      { id: 'remove_ui_plugin', name: 'Remove widget',  desc: 'Remove an existing widget from the dashboard' },
+      { id: 'add_widget',    name: 'Create widget',  desc: 'Generate and add an HTML/JS panel to the dashboard' },
+      { id: 'remove_widget', name: 'Remove widget',  desc: 'Remove an existing widget from the dashboard' },
     ]
   },
   {
@@ -396,7 +396,7 @@ const TOOL_CATEGORIES = [
       { id: 'write_file', name: 'Write file',      desc: 'Create or edit a file in the workspace' },
       { id: 'read_file',  name: 'Read file',        desc: 'Read the contents of a file' },
       { id: 'list_files', name: 'List files',       desc: 'List the contents of a directory' },
-      { id: 'open_file',  name: 'Open in editor',   desc: 'Open a file in the IDE editor' },
+      { id: 'show_in_editor',  name: 'Show in editor',   desc: 'Open a file in the editor for the user to see' },
     ]
   },
   {
@@ -410,17 +410,27 @@ const TOOL_CATEGORIES = [
   {
     name: 'Web', icon: '🌐', color: 'var(--green)',
     tools: [
-      { id: 'web_search',   name: 'Web search',      desc: 'Search the web via SearXNG' },
-      { id: 'fetch_url',    name: 'Fetch URL',        desc: 'Download and parse the text content of a page' },
-      { id: 'browser_exec', name: 'Headless browser', desc: 'Open a URL in Chromium for JS-heavy sites' },
+      { id: 'web_search',  name: 'Web search',      desc: 'Search the web via SearXNG' },
+      { id: 'fetch_url',   name: 'Fetch URL',        desc: 'Download and parse the text content of a page' },
+      { id: 'browser_get', name: 'Headless browser', desc: 'Open a URL in Chromium for JS-heavy sites' },
+      { id: 'browser_act', name: 'Browser actions',  desc: 'Click, type, screenshot — full browser interaction' },
     ]
   },
   {
     name: 'Scheduling', icon: '⏰', color: 'var(--red)',
     tools: [
-      { id: 'cron_list',   name: 'List jobs',  desc: 'List all scheduled cron jobs' },
-      { id: 'cron_add',    name: 'Add job',    desc: 'Schedule a recurring command' },
-      { id: 'cron_remove', name: 'Remove job', desc: 'Remove a scheduled job by name' },
+      { id: 'cron_list',   name: 'List jobs',    desc: 'List all scheduled cron jobs' },
+      { id: 'cron_add',    name: 'Add job',       desc: 'Schedule a recurring command' },
+      { id: 'cron_remove', name: 'Remove job',    desc: 'Remove a scheduled job by name' },
+      { id: 'notify',      name: 'Notification',  desc: 'Send or schedule a dashboard notification' },
+    ]
+  },
+  {
+    name: 'Knowledge (RAG)', icon: '📚', color: 'var(--muted)',
+    tools: [
+      { id: 'rag_ingest', name: 'Add document', desc: 'Index a document for semantic search' },
+      { id: 'rag_search', name: 'Search',       desc: 'Search a RAG collection by meaning' },
+      { id: 'rag_list',   name: 'List',         desc: 'List collections or documents inside one' },
     ]
   },
 ]

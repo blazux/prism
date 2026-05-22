@@ -111,16 +111,16 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "add_ui_plugin",
-			Description: "Add a widget card to the personal dashboard. Widgets are self-contained HTML/JS panels rendered in iframes. Use cols to control width and height for card height. Match the dark theme: bg #0e0e10, text #e8e8f0, accent #6b8afd, border #232328.",
+			Name:        "add_widget",
+			Description: "Add a widget to the dashboard. A widget is a self-contained HTML/JS panel displayed in an iframe. See the widget guidelines in the system prompt for styling and API rules.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"id":      {Type: "string", Description: "Unique widget ID (alphanumeric, no spaces)"},
+					"id":      {Type: "string", Description: "Unique widget ID (alphanumeric, hyphens and underscores only, no spaces)"},
 					"title":   {Type: "string", Description: "Widget title shown in the card header"},
-					"content": {Type: "string", Description: "Complete self-contained HTML for the widget (include <style> and <script> tags). Use fetch() to call external APIs. Add setInterval() for live-updating data."},
-					"cols":    {Type: "integer", Description: "Grid column span: 1=small (default), 2=medium, 3=full-width"},
-					"height":  {Type: "integer", Description: "Widget body height in pixels (default: 280)"},
+					"content": {Type: "string", Description: "Complete self-contained HTML for the widget (include <style> and <script> tags as needed)"},
+					"cols":    {Type: "integer", Description: "Width: 1=small (default), 2=medium, 3=full-width"},
+					"height":  {Type: "integer", Description: "Height in pixels (default: 280)"},
 				},
 				Required: []string{"id", "title", "content"},
 			},
@@ -129,12 +129,12 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "remove_ui_plugin",
-			Description: "Remove a plugin panel from the IDE interface.",
+			Name:        "remove_widget",
+			Description: "Remove a widget from the dashboard by its ID.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"id": {Type: "string", Description: "Plugin ID to remove"},
+					"id": {Type: "string", Description: "Widget ID to remove"},
 				},
 				Required: []string{"id"},
 			},
@@ -143,8 +143,8 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "open_file",
-			Description: "Open a file in the IDE editor.",
+			Name:        "show_in_editor",
+			Description: "Open a file in the user's editor. Does not return the file content — use read_file for that.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -200,7 +200,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "fetch_url",
-			Description: "Fetch a URL and return its readable text content. Good for static pages: docs, articles, GitHub, Wikipedia, APIs. For JS-heavy SPAs use browser_exec instead.",
+			Description: "Fetch a URL and return its readable text content. Good for static pages: docs, articles, GitHub, Wikipedia, APIs. For JS-heavy SPAs use browser_get instead.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -214,7 +214,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "web_search",
-			Description: "Search the web. Returns titles, URLs, and snippets for the top results. Use fetch_url or browser_exec to read a full page afterwards.",
+			Description: "Search the web. Returns titles, URLs, and snippets for the top results. Use fetch_url or browser_get to read a full page afterwards.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -244,14 +244,13 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "rag_ingest",
-			Description: "Add a text document to the RAG knowledge base. The content is chunked, embedded, and stored so it can be retrieved later with rag_search. Use this to persist knowledge, lessons learned, best practices, or any reference material across sessions.",
+			Description: "Add a text document to a RAG collection so it can be retrieved later with rag_search. Use this for user-provided documents, reference material, or any content the user wants to query. For agent learnings use save_learning instead.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"collection":  {Type: "string", Description: "Name of the collection to store the document in (created automatically if it doesn't exist)"},
-					"source":      {Type: "string", Description: "A descriptive name for this document (e.g. 'security-scanning-best-practices', 'cve-methodology')"},
-					"content":     {Type: "string", Description: "The full text content to index"},
-					"description": {Type: "string", Description: "Optional description of the collection (only used when creating a new collection)"},
+					"collection": {Type: "string", Description: "Collection name (created automatically if it doesn't exist)"},
+					"source":     {Type: "string", Description: "A descriptive name for this document (e.g. 'api-docs', 'meeting-notes-2025')"},
+					"content":    {Type: "string", Description: "The full text content to index"},
 				},
 				Required: []string{"collection", "source", "content"},
 			},
@@ -260,26 +259,14 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "rag_list_collections",
-			Description: "List all collections in the RAG knowledge base with their document and chunk counts.",
-			Parameters: ollama.ToolParameters{
-				Type:       "object",
-				Properties: map[string]ollama.ToolProperty{},
-				Required:   []string{},
-			},
-		},
-	},
-	{
-		Type: "function",
-		Function: ollama.ToolFunction{
-			Name:        "rag_list_documents",
-			Description: "List all documents indexed in a specific RAG collection.",
+			Name:        "rag_list",
+			Description: "List RAG collections (no args), or list documents inside a specific collection (pass collection name).",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"collection": {Type: "string", Description: "Name of the collection to inspect"},
+					"collection": {Type: "string", Description: "Collection name — omit to list all collections, provide to list its documents"},
 				},
-				Required: []string{"collection"},
+				Required: []string{},
 			},
 		},
 	},
@@ -287,12 +274,12 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "save_user_info",
-			Description: "Save a personal fact about the user to their permanent profile. Call this whenever the user explicitly states something about themselves: preferences, job, age, hobbies, dietary restrictions, family, location, etc. Use a short stable topic key (e.g. 'diet', 'job', 'music-tastes') — saving the same topic overwrites the previous value.",
+			Description: "Save a fact about the user to their permanent profile. Call this whenever the user explicitly states something about themselves. Same topic overwrites the previous value.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"topic":   {Type: "string", Description: "Short stable key for this fact (e.g. 'diet', 'job', 'location', 'hobbies'). Same topic = update."},
-					"content": {Type: "string", Description: "The fact as stated by the user (e.g. 'Vegetarian, dislikes cilantro, loves spicy food')."},
+					"topic":   {Type: "string", Description: "Short stable key, e.g. 'diet', 'job', 'location', 'hobbies'"},
+					"content": {Type: "string", Description: "The fact as stated by the user"},
 				},
 				Required: []string{"topic", "content"},
 			},
@@ -317,11 +304,11 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name: "register_tool",
-			Description: "Create a new callable backend tool by writing a Python script to the agent_tools directory. " +
-				"The script MUST contain exactly this comment on a single line (valid JSON, no line break): " +
+			Description: "Write a Python script that becomes a callable tool. " +
+				"The script must start with exactly this comment (one line, valid JSON): " +
 				"# TOOL: {\"name\":\"...\",\"description\":\"...\",\"parameters\":{\"type\":\"object\",\"properties\":{\"arg\":{\"type\":\"string\",\"description\":\"...\"}},\"required\":[\"arg\"]}}. " +
-				"The script receives its arguments as a JSON string in sys.argv[1] and must print its result to stdout. " +
-				"After registration the tool appears in the admin panel and is immediately callable.",
+				"Arguments arrive as a JSON string in sys.argv[1]. Print the result to stdout. " +
+				"The tool is immediately callable after registration.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -347,8 +334,8 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "browser_exec",
-			Description: "Open a URL in a headless Chromium browser (Playwright). Use for JS-heavy pages, SPAs, or sites that block plain HTTP. Optionally evaluate a JavaScript expression in the page context to extract specific data.",
+			Name:        "browser_get",
+			Description: "Fetch a URL using a headless Chromium browser (Playwright). Use for JS-heavy pages, SPAs, or sites that block plain HTTP. Optionally evaluate a JavaScript expression to extract specific data.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -363,7 +350,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "browser_act",
-			Description: `Interact with a web page using a sequence of actions. Session cookies and storage are persisted across calls (per session), so you can log in once and reuse the authenticated state. Use for form submission, login flows, multi-step navigation, or scraping pages that require interaction. Returns a JSON array with the result of each action. Supported action types: navigate {url}, click {selector}, type {selector, text}, clear {selector}, select {selector, value}, wait_for {selector}, screenshot {full_page?}, evaluate {expression}, get_text {selector}.`,
+			Description: `Interact with a web page using a sequence of actions. Cookies persist across calls so you can log in once and reuse the session. Use for login flows, form submission, multi-step navigation, or any site requiring interaction.`,
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -377,31 +364,15 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "schedule_notification",
-			Description: "Schedule a notification to be delivered after a delay. Use this for reminders, countdowns, or any alert that should appear in the future. More reliable than nohup/sleep in a shell script.",
+			Name:        "notify",
+			Description: "Send a notification to the dashboard (appears as a toast and in the bell). Set delay_seconds for reminders — more reliable than nohup/sleep.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"title":         {Type: "string", Description: "Short notification title"},
 					"message":       {Type: "string", Description: "Optional detail message"},
 					"level":         {Type: "string", Description: "Severity: info (default), success, warning, error"},
-					"delay_seconds": {Type: "integer", Description: "Delay in seconds before the notification is sent (e.g. 120 for 2 minutes)"},
-				},
-				Required: []string{"title", "delay_seconds"},
-			},
-		},
-	},
-	{
-		Type: "function",
-		Function: ollama.ToolFunction{
-			Name: "send_notification",
-			Description: "Send a notification to the dashboard. Use this to alert the user about important events, completed tasks, or monitoring results — especially from cron scripts running in the background. The notification appears as a toast and in the notification bell.",
-			Parameters: ollama.ToolParameters{
-				Type: "object",
-				Properties: map[string]ollama.ToolProperty{
-					"title":   {Type: "string", Description: "Short notification title (e.g. 'Backup terminé', 'Prix AAPL : $215')"},
-					"message": {Type: "string", Description: "Optional detail message"},
-					"level":   {Type: "string", Description: "Severity: info (default), success, warning, error"},
+					"delay_seconds": {Type: "integer", Description: "Delay before sending (0 = immediate, e.g. 120 = 2 minutes from now)"},
 				},
 				Required: []string{"title"},
 			},
@@ -452,7 +423,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "mcp_add_server",
-			Description: "Connect a remote MCP (Model Context Protocol) server and make its tools available to you. The server is tested immediately; its tools appear in your toolbox right away. For authenticated servers, call request_secret first to store the token, then pass its name as auth_secret.",
+			Description: "Connect a remote MCP (Model Context Protocol) server and make its tools available to you. The server is tested immediately; its tools appear in your toolbox right away. For authenticated servers, call request_secret first to store the token, then pass its name as auth_secret. If a tool name conflicts with a built-in, the built-in takes priority.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -494,9 +465,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name: "update_system_prompt",
-			Description: "Update your personality and behavior. This modifies how you present yourself and interact with the user. " +
-				"IMPORTANT: Only the personality/behavior section is editable — the core technical capabilities, tools, widget rules, and API documentation are protected and cannot be changed. " +
-				"Use this when the user asks you to change your tone, name, language, or general behavior.",
+			Description: "Update your personality: name, tone, language, and behavior. Use this when the user asks you to change how you talk or present yourself.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -620,7 +589,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return e.aptInstall(ctx, str("packages"))
 	case "pip_install":
 		return e.pipInstall(ctx, str("packages"))
-	case "add_ui_plugin":
+	case "add_widget":
 		colsFloat, _ := args["cols"].(float64)
 		cols := int(colsFloat)
 		if cols < 1 || cols > 3 {
@@ -632,9 +601,9 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 			height = 280
 		}
 		return e.addUIPlugin(str("id"), str("title"), str("content"), cols, height)
-	case "remove_ui_plugin":
+	case "remove_widget":
 		return e.removeUIPlugin(str("id"))
-	case "open_file":
+	case "show_in_editor":
 		return e.openFile(str("path"))
 	case "cron_list":
 		return e.cronList(ctx)
@@ -646,7 +615,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return e.fetchURL(ctx, str("url"))
 	case "web_search":
 		return e.webSearch(ctx, str("query"))
-	case "browser_exec":
+	case "browser_get":
 		return e.browserExec(ctx, str("url"), str("script"))
 	case "browser_act":
 		return e.browserAct(ctx, str("url"), args["actions"])
@@ -658,19 +627,22 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		}
 		return e.ragSearch(ctx, str("query"), str("collection"), limit)
 	case "rag_ingest":
-		return e.ragIngest(ctx, str("collection"), str("source"), str("content"), str("description"))
-	case "rag_list_collections":
+		return e.ragIngest(ctx, str("collection"), str("source"), str("content"), "")
+	case "rag_list":
+		if col := str("collection"); col != "" {
+			return e.ragListDocuments(ctx, col)
+		}
 		return e.ragListCollections(ctx)
-	case "rag_list_documents":
-		return e.ragListDocuments(ctx, str("collection"))
 	case "save_user_info":
 		return e.saveUserInfo(ctx, str("topic"), str("content"))
 	case "save_learning":
 		return e.saveLearning(ctx, str("title"), str("content"))
-	case "schedule_notification":
+	case "notify":
 		delayFloat, _ := args["delay_seconds"].(float64)
-		return e.scheduleNotification(str("title"), str("message"), str("level"), int(delayFloat))
-	case "send_notification":
+		delay := int(delayFloat)
+		if delay > 0 {
+			return e.scheduleNotification(str("title"), str("message"), str("level"), delay)
+		}
 		return e.sendNotification(str("title"), str("message"), str("level"))
 	case "register_tool":
 		return e.registerTool(str("filename"), str("code"))
@@ -1036,7 +1008,7 @@ func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (
 
 	out, err := e.docker.Exec(ctx, cmd, 60*time.Second)
 	if err != nil {
-		return fmt.Sprintf("browser_exec failed: %v\n%s", err, out), nil
+		return fmt.Sprintf("browser_get failed: %v\n%s", err, out), nil
 	}
 	if len(out) > 8000 {
 		out = out[:8000] + "\n...[truncated]"

@@ -36,16 +36,6 @@ The browser only talks to prism-server. Access routes:
 
 Key consequence: exec_command runs inside prism-workspace, so "curl localhost:<port>" reaches a service directly — bypassing the proxy entirely. Always verify services through the proxy, not with exec_command curl.
 
-## Capabilities
-
-- Widgets (add_ui_plugin) — self-contained HTML/JS iframes on the dashboard
-- Custom backend tools (register_tool) — Python scripts callable from widgets, cron, or the agent itself
-- Web search (web_search) and page fetching (fetch_url)
-- Browser automation: JS pages (browser_exec) or interactive flows — clicks, forms, screenshots, logins (browser_act)
-- Shell commands, files, package installs in the workspace (exec_command)
-- Recurring tasks (cron_add / cron_list / cron_remove)
-- Dashboard notifications (send_notification in chat; HTTP API from cron/tools)
-
 **Never ask for passwords, API keys, or tokens. Always use request_secret instead.**
 
 ## Widgets
@@ -112,8 +102,7 @@ This is the answer to almost every "I need backend logic" situation. Write a Pyt
 Steps: 1) Write the script with a "# TOOL: {...}" header and test it with exec_command. 2) register_tool. 3) Use it from the widget:
 
   fetch('/api/tool/my_tool?session=SESSION_ID', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({arg: 'value'}) })
-    .then(r => r.json()).then(d => {
-      const data = typeof d.output === 'string' ? JSON.parse(d.output) : d
+    .then(r => r.json()).then(data => {
       // use data...
     })
 
@@ -136,20 +125,20 @@ For data that updates on a schedule rather than on user demand. A cron job write
   window.parent.postMessage({ type: 'sendChat', text: 'Analyse foo.py' }, '*')       // send to AI chat
   window.parent.postMessage({ type: 'notify', level: 'success', message: '…' }, '*') // toast (info/success/warning/error)
 
-### Self-verification (mandatory after every add_ui_plugin)
+### Self-verification (mandatory after every add_widget)
 
-1. file_open the saved widget at $PLUGIN_DIR/<session_id>/<id>.html — confirm valid HTML, no broken tags or scripts.
+1. read_file the saved widget at /workspace/.plugins/<session_id>/<id>.html — confirm valid HTML, no broken tags or scripts.
 2. If it uses /api/tool/<name>, call that tool directly first (exec_command python3 /workspace/agent_tools/<name>.py '{"arg":"val"}') to confirm it returns valid JSON.
 3. If it fetches /data/<name>.json, use fetch_url on that URL to confirm it returns valid JSON.
 4. If it uses /proxy/<port>/, use fetch_url on http://server:8080/proxy/<port>/some/endpoint — confirm the service is reachable through the proxy, not just from exec_command.
-5. Fix anything broken and call add_ui_plugin again.
+5. Fix anything broken and call add_widget again.
 6. Only tell the user the widget is ready after this check. Never use /widget/<id> — that route does not exist.
 
 ## Background work
 
 ### Notifications from cron scripts
 
-Cron jobs run in prism-workspace and cannot call send_notification directly. Use the HTTP API ($IDE_URL and $IDE_SESSION are auto-injected into every cron job):
+Cron jobs run in prism-workspace and cannot call notify directly. Use the HTTP API ($IDE_URL and $IDE_SESSION are auto-injected into every cron job):
 
   curl -s -X POST "$IDE_URL/api/notify" \
     -H "Content-Type: application/json" \
@@ -157,62 +146,22 @@ Cron jobs run in prism-workspace and cannot call send_notification directly. Use
 
 Levels: info, success, warning, error.
 
-### Triggering the agent from cron
-
-  curl -s -X POST "$IDE_URL/api/chat" \
-    -H "Content-Type: application/json" \
-    -d "{\"session\":\"$IDE_SESSION\",\"message\":\"Your task. End with: send a notification with the result.\"}"
-
-The agent runs up to 10 minutes. request_secret is not available in this mode.
-
 ### Web and browser tasks
 
-web_search → fetch_url (static pages) → browser_exec (JS-heavy pages) → browser_act (interactive: clicks, forms, login flows).
+web_search → fetch_url (static pages) → browser_get (JS-heavy pages) → browser_act (interactive: clicks, forms, login flows).
 browser_act persists cookies per session — log in once and reuse across calls.
 Screenshots are saved to /workspace/.screenshots/ and served at /screenshots/<file> — display inline: ![desc](/screenshots/file.png)
 
-## Reminders
+### Reminders and custom tools
 
-One-shot → always use schedule_notification (server-side, 100% reliable):
-  schedule_notification(title="…", message="…", level="info", delay_seconds=120)
-Never use nohup/sleep/curl for reminders — fragile and fails silently.
-
-One-shot via cron (self-removing):
-` + "```" + `bash
-#!/bin/sh
-curl -s -X POST "$IDE_URL/api/notify" -H "Content-Type: application/json" \
-  -d "{\"session\":\"$IDE_SESSION\",\"title\":\"Reminder\",\"message\":\"Details\",\"level\":\"info\"}"
-crontab -l 2>/dev/null | grep -v "# agent-job: job-name-here" | crontab -
-` + "```" + `
-Save to /workspace/scripts/<name>.sh, chmod +x, cron_add. Add 2 min margin on timing.
-
-## Custom tools (register_tool)
-
-The "# TOOL: {...}" header must be on one line, valid JSON. The script reads args from sys.argv[1] and prints its result to stdout. $IDE_URL and $IDE_SESSION are injected automatically as environment variables.
-` + "```" + `python
-# TOOL: {"name":"my_tool","description":"What it does","parameters":{"type":"object","properties":{"arg":{"type":"string","description":"The argument"}},"required":["arg"]}}
-import sys, json, os
-args = json.loads(sys.argv[1])
-print(json.dumps({"result": args["arg"]}))
-` + "```" + `
+One-shot reminders → notify(delay_seconds=N) — server-side, reliable. Never use nohup/sleep/curl.
 After register_tool, the tool is callable by the agent AND from widgets via /api/tool/<name>. Use list_tools to confirm registration.
-
-## MCP servers
-
-mcp_add_server(name, url, auth_secret?) — connects a server; its tools become callable immediately.
-mcp_remove_server(name) — disconnect.
-mcp_list_servers() — list active servers and their tools.
-
-Store API keys with request_secret first, pass the secret name as auth_secret.
-If a tool name conflicts with a built-in, the built-in takes priority.
 
 ## User profile
 
 When the user explicitly states a personal fact — preference, dietary restriction, job, age, hobby, location, family situation, etc. — call save_user_info immediately. Use a short stable topic key (e.g. "diet", "job", "music", "location"). Saving the same topic overwrites the previous value, so it naturally handles updates ("I moved to Lyon" → update "location").
 
 Only store facts the user explicitly stated. Never store inferences or assumptions.
-
-The full profile is automatically injected at the start of every conversation under "User profile" above.
 
 ## Learning from experience
 
@@ -273,6 +222,15 @@ func (a *Agent) SetUserProfileFn(fn func() string) { a.userProfileFn = fn }
 // collection and returns relevant past lessons for the current query.
 func (a *Agent) SetLearningsCtxFn(fn func(ctx context.Context, query string) string) {
 	a.learningsCtxFn = fn
+}
+
+// InjectNote appends a user-role message to the conversation history and saves it
+// to the DB. Use this to inform the agent of UI-driven events (e.g. widget deleted
+// by the user) so its context stays accurate across turns.
+func (a *Agent) InjectNote(content string) {
+	msg := ollama.Message{Role: "user", Content: content}
+	a.history = append(a.history, msg)
+	a.saveMessageToDB(context.Background(), msg)
 }
 
 // SetActiveTools stores the list of disabled tool names. buildToolList() uses
@@ -692,11 +650,6 @@ func (a *Agent) emitToolSideEffects(toolName string, rawArgs json.RawMessage, ev
 
 	// plugin_load / plugin_unload are sent directly by the server.go callbacks — no duplicate here
 	switch toolName {
-	case "open_file":
-		events <- Event{
-			Type: "open_file",
-			Path: str("path"),
-		}
 	case "write_file":
 		events <- Event{
 			Type: "file_changed",
