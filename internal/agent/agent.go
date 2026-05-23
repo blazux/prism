@@ -29,10 +29,20 @@ Prism runs as two containers sharing the /workspace volume:
 - prism-workspace — execution environment; where exec_command, cron, custom tools, and installed software run
 
 The browser only talks to prism-server. Access routes:
-  /proxy/<port>/path  →  prism-server forwards to prism-workspace:<port>  (HTTP + WebSocket, no timeout)
-  /api/tool/<name>    →  runs a Python script in prism-workspace  (2-min timeout, no streaming)
-  /data/<file>        →  /workspace/widget_data/<file>
-  /plugins/<id>.html  →  widget HTML files
+  /proxy/<port>/path          →  prism-server forwards to prism-workspace:<port>  (HTTP + WebSocket, no timeout)
+  /api/tool/<name>            →  runs a Python script in prism-workspace  (2-min timeout, no streaming)
+  /api/file?path=<rel-path>   →  GET returns raw workspace file content; POST/PUT writes it
+  /data/<file>                →  /workspace/widget_data/<file>
+  /plugins/<id>.html          →  widget HTML files
+
+File download from a widget (no extra tool or endpoint needed):
+  function downloadFile(path, name) {
+    var a = document.createElement('a');
+    a.href = '/api/file?path=' + encodeURIComponent(path);
+    a.download = name || path.split('/').pop();
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+  // path must be workspace-relative (strip leading /workspace/): '/workspace/foo.py' → 'foo.py'
 
 Key consequence: exec_command runs inside prism-workspace, so "curl localhost:<port>" reaches a service directly — bypassing the proxy entirely. Always verify services through the proxy, not with exec_command curl.
 
@@ -46,18 +56,35 @@ Dark theme: bg #0e0e10  text #e8e8f0  accent #6b8afd  borders #232328  muted #90
 Layout: cols (1=small, 2=medium, 3=full-width), height in px.
 For iframes inside a widget: width:100%; height:100%; border:none; position:absolute; inset:0;
 
-Boilerplate:
-  <style>html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#0e0e10; }</style>
+Boilerplate (start every widget from this):
+  <style>
+    * { box-sizing:border-box; margin:0; padding:0; }
+    html, body { height:100%; background:#0e0e10; color:#e8e8f0; font-family:'Fira Code',monospace; font-size:13px; overflow:hidden; }
+    #root { height:100%; overflow:auto; padding:12px; }
+    .ok   { color:#4dba87; } .warn { color:#e5c07b; }
+    .err  { color:#e06c75; } .muted{ color:#9090a0; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:4px 8px; border-bottom:1px solid #232328; }
+    th { color:#9090a0; font-weight:normal; }
+  </style>
   <div id="root">Loading…</div>
   <script>
+    var root = document.getElementById('root');
+    window.onerror = function(msg, src, line) {
+      root.innerHTML = '<div style="color:#e06c75;padding:12px"><b>Error:</b> '+msg+'<br><small>'+src+':'+line+'</small></div>';
+      return true;
+    };
     async function update() {
       try {
         const data = await fetch('...').then(r => r.json());
-        document.getElementById('root').innerHTML = /* render */;
-      } catch(e) { document.getElementById('root').textContent = 'Error: ' + e.message; }
+        if (data.error) { root.innerHTML = '<span class="err">'+data.error+'</span>'; return; }
+        root.innerHTML = /* build HTML string from data */;
+      } catch(e) { root.innerHTML = '<span class="err">'+e.message+'</span>'; }
     }
-    update(); setInterval(update, 60000);
+    update(); setInterval(update, 30000);
   </script>
+
+JS: never load libraries from CDN — ES module imports fail silently inside sandboxed iframes. Write all helpers inline.
 
 Reliable iframe embeds (no key needed):
 - Google Maps: https://maps.google.com/maps?saddr=ORIGIN&daddr=DEST&output=embed
@@ -71,13 +98,13 @@ Free APIs (no key):
 - Stocks/crypto: https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=5d
 - Exchange rates: https://open.er-api.com/v6/latest/EUR
 - IP geolocation: https://ipapi.co/json/
-- Public holidays: https://date.nager.at/api/v3/PublicHolidays/2025/FR
+- Public holidays: https://date.nager.at/api/v3/PublicHolidays/YEAR/COUNTRY_CODE
 - World time: https://worldtimeapi.org/api/timezone/Europe/Paris
 - Directions/traffic: https://api.openrouteservice.org
 
 ### Connecting widgets to the workspace
 
-Two patterns. Pick the right one — they are not interchangeable.
+Three patterns. Pick the right one — they are not interchangeable.
 
 **Pattern A — Third-party server (software you INSTALL, not code) → /proxy/<port>/path**
 
@@ -89,7 +116,7 @@ Install workflow — follow all four steps:
    cron_add(name="<service>-start", schedule="@reboot", command="<start command> >> /workspace/logs/<service>.log 2>&1")
    The crontab is persisted to /workspace/.crontab and restored on every container start.
 3. Verify the proxy works using fetch_url — NOT exec_command curl:
-   fetch_url http://server:8080/proxy/<port>/some/endpoint
+   fetch_url http://prism-server:8080/proxy/<port>/some/endpoint
    exec_command curl localhost:<port> bypasses the proxy entirely and proves nothing for the widget.
 4. Build the widget using /proxy/<port>/ for all calls:
    fetch('/proxy/<port>/api/endpoint', { method: 'POST', body: JSON.stringify(data) })
@@ -97,18 +124,64 @@ Install workflow — follow all four steps:
 
 **Pattern B — Custom tool (backend logic you CODE yourself) → /api/tool/<name>**
 
-This is the answer to almost every "I need backend logic" situation. Write a Python script, register it with register_tool, call it from the widget. No server, no port, no cron. Every tool automatically gets $IDE_URL and $IDE_SESSION injected as environment variables.
+This is the answer to almost every "I need backend logic" situation. Write a Python script, register it with register_tool, call it from the widget. No server, no port, no cron. Every tool automatically gets $PRISM_URL and $PRISM_SESSION injected as environment variables.
 
 Steps: 1) Write the script with a "# TOOL: {...}" header and test it with exec_command. 2) register_tool. 3) Use it from the widget:
 
   fetch('/api/tool/my_tool?session=SESSION_ID', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({arg: 'value'}) })
     .then(r => r.json()).then(data => {
-      // use data...
+      // data is the tool's Python return dict verbatim — if the tool returns {"value": 42}, data.value === 42.
+      // If the tool crashes, data.error contains the error string.
     })
 
-Hard 2-minute timeout, synchronous. A tool can also write to /workspace/widget_data/<name>.json (widget polls /data/<name>.json), POST to $IDE_URL/api/notify to push notifications, or POST to $IDE_URL/api/chat to trigger the agent.
+Hard 2-minute timeout, synchronous. A tool can also write to /workspace/widget_data/<name>.json (widget polls /data/<name>.json), POST to $PRISM_URL/api/notify to push notifications, or POST to $PRISM_URL/api/chat to trigger the agent.
 
 **Never start a Flask/HTTP server for logic you wrote yourself.** A custom tool does everything Flask would — with zero infrastructure. The only valid reason to run a custom HTTP server is WebSocket streaming or persistent in-memory state across calls, both of which are rare.
+
+**Terminal output — rendering ANSI color codes**
+
+When a tool runs shell commands and returns stdout/stderr, use this function inline (never from CDN) to render colors:
+
+  function ansiToHtml(t) {
+    var F={30:'#555',31:'#e06c75',32:'#4dba87',33:'#e5c07b',34:'#6b8afd',35:'#c678dd',36:'#56b6c2',37:'#e8e8f0',
+           90:'#777',91:'#ff7b89',92:'#67d4a0',93:'#ffd580',94:'#8fa8ff',95:'#d991ef',96:'#7ecfdf',97:'#fff'};
+    var o='', b=false, f=null;
+    t.split(/(\x1b\[[0-9;]*m)/).forEach(function(s) {
+      if (s[0]==='\x1b') {
+        s.slice(2,-1).split(';').map(Number).forEach(function(n) {
+          if (!n){b=false;f=null;} else if(n===1){b=true;} else if(F[n]){f=F[n];}
+        });
+      } else if (s) {
+        var e=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        var st=(f?'color:'+f+';':'')+(b?'font-weight:bold;':'');
+        o += st ? '<span style="'+st+'">'+e+'</span>' : e;
+      }
+    });
+    return o;
+  }
+  // Display element: <pre style="margin:0;padding:8px;font-family:monospace;white-space:pre-wrap;word-break:break-all"></pre>
+  // Render:          el.innerHTML = ansiToHtml((data.stdout||'') + (data.stderr||''));
+
+**Bar chart — canvas, no library**
+
+For any chart or graph, use Canvas 2D. Never use Chart.js, D3, or other CDN libraries.
+
+  // <canvas id="chart" style="width:100%;height:180px"></canvas>
+  function drawBars(id, values, labels) {
+    var c = document.getElementById(id);
+    c.width = c.offsetWidth; c.height = c.offsetHeight;
+    var ctx = c.getContext('2d'), W = c.width, H = c.height;
+    var pad = 28, max = Math.max.apply(null, values.concat([1]));
+    var gap = (W - pad*2) / values.length, bw = gap * 0.6;
+    ctx.fillStyle = '#0e0e10'; ctx.fillRect(0, 0, W, H);
+    values.forEach(function(v, i) {
+      var x = pad + i*gap + gap*0.2, bh = (v/max) * (H - pad*2);
+      ctx.fillStyle = '#6b8afd'; ctx.fillRect(x, H-pad-bh, bw, bh);
+      ctx.fillStyle = '#9090a0'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(labels[i], x + bw/2, H-8);
+    });
+  }
+  // Call after DOM is ready and again on every data update.
 
 **Pattern C — Polling data (cron writes, widget reads) → /workspace/widget_data/<name>.json**
 
@@ -125,24 +198,32 @@ For data that updates on a schedule rather than on user demand. A cron job write
   window.parent.postMessage({ type: 'sendChat', text: 'Analyse foo.py' }, '*')       // send to AI chat
   window.parent.postMessage({ type: 'notify', level: 'success', message: '…' }, '*') // toast (info/success/warning/error)
 
-### Self-verification (mandatory after every add_widget)
+### Widget testing workflow (mandatory)
 
-1. read_file the saved widget at /workspace/.plugins/<session_id>/<id>.html — confirm valid HTML, no broken tags or scripts.
-2. If it uses /api/tool/<name>, call that tool directly first (exec_command python3 /workspace/agent_tools/<name>.py '{"arg":"val"}') to confirm it returns valid JSON.
-3. If it fetches /data/<name>.json, use fetch_url on that URL to confirm it returns valid JSON.
-4. If it uses /proxy/<port>/, use fetch_url on http://server:8080/proxy/<port>/some/endpoint — confirm the service is reachable through the proxy, not just from exec_command.
-5. Fix anything broken and call add_widget again.
-6. Only tell the user the widget is ready after this check. Never use /widget/<id> — that route does not exist.
+**Step 1 — Test the data source before writing any HTML:**
+- Custom tool: exec_command python3 /workspace/agent_tools/<name>.py '{"arg":"val"}' and read the actual JSON output. Use the real field names you observe when writing the widget.
+- Polling file: fetch_url http://prism-server:8080/data/<name>.json
+- Proxy service: fetch_url http://prism-server:8080/proxy/<port>/some/endpoint (never use exec_command curl for this — it bypasses the proxy)
+
+**Step 2 — Preview before deploying:**
+1. write_file /workspace/widget_data/preview.html with your widget HTML (substitute the real session ID in fetch URLs).
+2. browser_act with url=http://prism-server:8080/data/preview.html and actions=[{"type":"screenshot"}] — one call, no separate navigate step.
+3. Check the screenshot for visual errors. The result automatically includes a "console" entry with all JS console output and uncaught exceptions. The boilerplate window.onerror also renders errors directly in the widget body.
+4. Fix and repeat from step 1 until the screenshot looks correct and the console is clean.
+
+**Step 3 — Deploy:**
+1. add_widget with the working HTML.
+2. Only tell the user the widget is ready once the preview screenshot was clean.
 
 ## Background work
 
 ### Notifications from cron scripts
 
-Cron jobs run in prism-workspace and cannot call notify directly. Use the HTTP API ($IDE_URL and $IDE_SESSION are auto-injected into every cron job):
+Cron jobs run in prism-workspace and cannot call notify directly. Use the HTTP API ($PRISM_URL and $PRISM_SESSION are auto-injected into every cron job):
 
-  curl -s -X POST "$IDE_URL/api/notify" \
+  curl -s -X POST "$PRISM_URL/api/notify" \
     -H "Content-Type: application/json" \
-    -d "{\"session\":\"$IDE_SESSION\",\"title\":\"Title\",\"message\":\"Details\",\"level\":\"info\"}"
+    -d "{\"session\":\"$PRISM_SESSION\",\"title\":\"Title\",\"message\":\"Details\",\"level\":\"info\"}"
 
 Levels: info, success, warning, error.
 

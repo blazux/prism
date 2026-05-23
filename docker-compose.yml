@@ -1,7 +1,7 @@
 name: prism
 
 services:
-  server:
+  prism-server:
     image: blazux/prism:latest
     ports:
       - "48080:8080"
@@ -20,6 +20,7 @@ services:
       - TZ=${TZ:-UTC}
     extra_hosts:
       - "host-gateway:host-gateway"
+    container_name: prism-server
     depends_on:
       - searxng
       - postgres
@@ -33,6 +34,11 @@ services:
       - workspace:/workspace
     environment:
       - TZ=${TZ:-UTC}
+      - TERM=xterm-256color
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+      - PAGER=cat
+      - COLORTERM=truecolor
     restart: unless-stopped
 
   postgres:

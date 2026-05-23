@@ -350,12 +350,12 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "browser_act",
-			Description: `Interact with a web page using a sequence of actions. Cookies persist across calls so you can log in once and reuse the session. Use for login flows, form submission, multi-step navigation, or any site requiring interaction.`,
+			Description: `Interact with a web page using a sequence of actions. Cookies persist across calls so you can log in once and reuse the session. Use for login flows, form submission, multi-step navigation, widget preview/debugging, or any site requiring interaction. Console messages (console.log, console.error, uncaught exceptions) are always captured automatically and returned as a {"action":"console","messages":[...]} entry — no special action needed.`,
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"url":     {Type: "string", Description: "Initial URL to navigate to before running actions. Omit to reuse the current session page."},
-					"actions": {Type: "array", Description: `List of action objects to execute in order. Each object must have a "type" field. Examples: {"type":"click","selector":"#submit"}, {"type":"type","selector":"input[name=q]","text":"hello"}, {"type":"screenshot"}, {"type":"evaluate","expression":"document.title"}, {"type":"get_text","selector":".result"}, {"type":"wait_for","selector":".loaded"}, {"type":"navigate","url":"https://..."}, {"type":"select","selector":"select#lang","value":"fr"}, {"type":"clear","selector":"#search"}.`},
+					"actions": {Type: "array", Description: `List of action objects to execute in order. Each object must have a "type" field. Examples: {"type":"click","selector":"#submit"}, {"type":"type","selector":"input[name=q]","text":"hello"}, {"type":"screenshot"}, {"type":"evaluate","expression":"document.title"}, {"type":"get_text","selector":".result"}, {"type":"wait_for","selector":".loaded"}, {"type":"navigate","url":"https://..."}, {"type":"select","selector":"select#lang","value":"fr"}, {"type":"clear","selector":"#search"}. Console output is captured automatically — do not add a "console" action, it does not exist.`},
 				},
 				Required: []string{"actions"},
 			},
@@ -682,8 +682,8 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 		session = "default"
 	}
 	env := map[string]string{
-		"IDE_SESSION": session,
-		"IDE_URL":     "http://server:8080",
+		"PRISM_SESSION": session,
+		"PRISM_URL":     "http://prism-server:8080",
 	}
 	if e.memStore != nil {
 		if secrets, err := e.memStore.GetAllSecrets(ctx); err == nil {
@@ -1039,6 +1039,9 @@ with sync_playwright() as p:
         ctx_opts['storage_state'] = SESSION_FILE
     context = browser.new_context(**ctx_opts)
     page = context.new_page()
+    console_msgs = []
+    page.on('console', lambda msg: console_msgs.append({'level': msg.type, 'text': msg.text}))
+    page.on('pageerror', lambda err: console_msgs.append({'level': 'error', 'text': str(err)}))
 
     if start_url:
         page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
@@ -1089,6 +1092,8 @@ with sync_playwright() as p:
     context.close()
     browser.close()
 
+if console_msgs:
+    results.append({'action': 'console', 'messages': console_msgs})
 print(json.dumps(results, default=str, indent=2))
 `
 
@@ -1179,13 +1184,13 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command stri
 	if session == "" {
 		session = "default"
 	}
-	// Resolve $IDE_URL and $IDE_SESSION in the command now so cron doesn't
+	// Resolve $PRISM_URL and $PRISM_SESSION in the command now so cron doesn't
 	// expand them in an empty environment (shell expands $VAR before inline
 	// VAR=value assignments take effect).
-	command = strings.ReplaceAll(command, "$IDE_URL", "http://server:8080")
-	command = strings.ReplaceAll(command, "${IDE_URL}", "http://server:8080")
-	command = strings.ReplaceAll(command, "$IDE_SESSION", session)
-	command = strings.ReplaceAll(command, "${IDE_SESSION}", session)
+	command = strings.ReplaceAll(command, "$PRISM_URL", "http://prism-server:8080")
+	command = strings.ReplaceAll(command, "${PRISM_URL}", "http://prism-server:8080")
+	command = strings.ReplaceAll(command, "$PRISM_SESSION", session)
+	command = strings.ReplaceAll(command, "${PRISM_SESSION}", session)
 	entry := fmt.Sprintf("%s\n%s %s", marker, schedule, command)
 	var newCrontab string
 	if current == "" {
@@ -1303,8 +1308,8 @@ func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Too
 		session = "default"
 	}
 	env := map[string]string{
-		"IDE_SESSION": session,
-		"IDE_URL":     "http://server:8080",
+		"PRISM_SESSION": session,
+		"PRISM_URL":     "http://prism-server:8080",
 	}
 	if e.memStore != nil {
 		if secrets, err := e.memStore.GetAllSecrets(ctx); err == nil {

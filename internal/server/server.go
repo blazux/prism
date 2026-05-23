@@ -915,8 +915,8 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 		sessionID = "default"
 	}
 	env := map[string]string{
-		"IDE_SESSION": sessionID,
-		"IDE_URL":     "http://server:8080",
+		"PRISM_SESSION": sessionID,
+		"PRISM_URL":     "http://prism-server:8080",
 	}
 
 	// Pass the JSON payload via stdin to avoid shell argument-length limits (ARG_MAX).
@@ -1078,7 +1078,7 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleExternalNotify allows cron scripts (running in Docker) to push notifications
-// via: curl -s -X POST http://server:8080/api/notify -H "Content-Type: application/json" \
+// via: curl -s -X POST http://prism-server:8080/api/notify -H "Content-Type: application/json" \
 //      -d '{"session":"default","title":"Backup OK","level":"success"}'
 func (s *Server) handleExternalNotify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
