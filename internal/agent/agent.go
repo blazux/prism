@@ -536,6 +536,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		learningsCtx = a.learningsCtxFn(ctx, userMsg)
 	}
 
+	var emptyRetried bool
 	for iter := 0; iter < maxIterations; iter++ {
 		select {
 		case <-ctx.Done():
@@ -548,6 +549,20 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			events <- Event{Type: "error", Content: err.Error()}
 			return
 		}
+
+		// Empty response: don't save the ghost message; retry once with a nudge.
+		if strings.TrimSpace(fullContent) == "" && len(toolCalls) == 0 {
+			if !emptyRetried {
+				log.Printf("[agent] empty response from model — retrying with 'continue'")
+				emptyRetried = true
+				a.history = append(a.history, ollama.Message{Role: "user", Content: "continue"})
+				continue
+			}
+			log.Printf("[agent] empty response from model again after retry — stopping")
+			events <- Event{Type: "stream_end"}
+			return
+		}
+		emptyRetried = false
 
 		// Store assistant turn with its tool_calls (proper Ollama tool-use format)
 		assistantMsg := ollama.Message{
