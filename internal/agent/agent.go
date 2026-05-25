@@ -227,6 +227,12 @@ Cron jobs run in prism-workspace and cannot call notify directly. Use the HTTP A
 
 Levels: info, success, warning, error.
 
+### Secrets from cron scripts
+
+Cron jobs can retrieve stored secrets via the HTTP API:
+
+  SECRET=$(curl -s "$PRISM_URL/api/secrets/<name>" | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])")
+
 ### Web and browser tasks
 
 web_search → fetch_url (static pages) → browser_get (JS-heavy pages) → browser_act (interactive: clicks, forms, login flows).

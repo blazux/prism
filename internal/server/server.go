@@ -1364,16 +1364,24 @@ func (s *Server) handleSecretByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method != "DELETE" {
+	switch r.Method {
+	case "GET":
+		w.Header().Set("Content-Type", "application/json")
+		val, ok, err := ms.GetSecret(r.Context(), name)
+		if err != nil || !ok {
+			http.Error(w, "secret not found", 404)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"name": name, "value": val})
+	case "DELETE":
+		if err := ms.DeleteSecret(r.Context(), name); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.WriteHeader(204)
+	default:
 		http.Error(w, "method not allowed", 405)
-		return
 	}
-
-	if err := ms.DeleteSecret(r.Context(), name); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.WriteHeader(204)
 }
 
 // ─── MCP API ──────────────────────────────────────────────────────────────────
