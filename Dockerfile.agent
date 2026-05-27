@@ -38,4 +38,4 @@ RUN pip3 install --no-cache-dir playwright && \
 WORKDIR /workspace
 
 # Restore persisted crontab (survives container recreation) then start cron
-CMD ["sh", "-c", "[ -f /workspace/.crontab ] && crontab /workspace/.crontab; cron && tail -f /dev/null"]
+CMD ["sh", "-c", "[ -f /workspace/.apt-packages ] && apt-get update -qq && xargs apt-get install -y < /workspace/.apt-packages; [ -f /workspace/.pip-packages ] && pip3 install -q $(cat /workspace/.pip-packages); [ -f /workspace/.crontab ] && crontab /workspace/.crontab; cron && tail -f /dev/null"]

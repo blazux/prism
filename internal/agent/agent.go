@@ -28,6 +28,9 @@ Prism runs as two containers sharing the /workspace volume:
 - prism-server — Go backend; serves the browser, proxies workspace requests
 - prism-workspace — execution environment; where exec_command, cron, custom tools, and installed software run
 
+Package installs that survive container restarts:
+- Use apt_install and pip_install tools — they install the package AND record it in /workspace/.apt-packages or /workspace/.pip-packages so it is reinstalled automatically on container start.
+
 The browser only talks to prism-server. Access routes:
   /proxy/<port>/path          →  prism-server forwards to prism-workspace:<port>  (HTTP + WebSocket, no timeout)
   /api/tool/<name>            →  runs a Python script in prism-workspace  (2-min timeout, no streaming)

@@ -129,6 +129,14 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "list_widgets",
+			Description: "List all widgets currently on the dashboard for this session, with their ID, title, size and lock status.",
+			Parameters:  ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{}},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "remove_widget",
 			Description: "Remove a widget from the dashboard by its ID.",
 			Parameters: ollama.ToolParameters{
@@ -601,6 +609,8 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 			height = 280
 		}
 		return e.addUIPlugin(str("id"), str("title"), str("content"), cols, height)
+	case "list_widgets":
+		return e.listUIPlugins()
 	case "remove_widget":
 		return e.removeUIPlugin(str("id"))
 	case "show_in_editor":
@@ -784,6 +794,11 @@ func (e *ToolExecutor) aptInstall(ctx context.Context, packages string) (string,
 	if err != nil {
 		return fmt.Sprintf("Install failed: %v\n%s", err, out), nil
 	}
+	// Persist package names so they are reinstalled on container restart.
+	manifestPath := filepath.Join(e.workspaceDir, ".apt-packages")
+	for _, pkg := range strings.Fields(packages) {
+		appendToManifest(manifestPath, pkg)
+	}
 	return fmt.Sprintf("Installed: %s\n%s", packages, out), nil
 }
 
@@ -793,7 +808,28 @@ func (e *ToolExecutor) pipInstall(ctx context.Context, packages string) (string,
 	if err != nil {
 		return fmt.Sprintf("pip install failed: %v\n%s", err, out), nil
 	}
+	// Persist package names so they are reinstalled on container restart.
+	manifestPath := filepath.Join(e.workspaceDir, ".pip-packages")
+	for _, pkg := range strings.Fields(packages) {
+		appendToManifest(manifestPath, pkg)
+	}
 	return fmt.Sprintf("pip installed: %s\n%s", packages, out), nil
+}
+
+// appendToManifest adds an entry to a manifest file if not already present.
+func appendToManifest(path, entry string) {
+	existing, _ := os.ReadFile(path)
+	for _, line := range strings.Split(string(existing), "\n") {
+		if strings.TrimSpace(line) == entry {
+			return
+		}
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintln(f, entry)
 }
 
 type pluginMeta struct {
@@ -801,6 +837,45 @@ type pluginMeta struct {
 	Cols   int    `json:"cols"`
 	Height int    `json:"height"`
 	Locked bool   `json:"locked,omitempty"`
+}
+
+func (e *ToolExecutor) listUIPlugins() (string, error) {
+	entries, err := os.ReadDir(e.pluginDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "No widgets on the dashboard.", nil
+		}
+		return "", err
+	}
+	type row struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Cols   int    `json:"cols"`
+		Height int    `json:"height"`
+		Locked bool   `json:"locked,omitempty"`
+	}
+	var widgets []row
+	for _, entry := range entries {
+		fname := entry.Name()
+		if !strings.HasSuffix(fname, ".meta.json") {
+			continue
+		}
+		id := strings.TrimSuffix(fname, ".meta.json")
+		b, err := os.ReadFile(filepath.Join(e.pluginDir, fname))
+		if err != nil {
+			continue
+		}
+		var m pluginMeta
+		if err := json.Unmarshal(b, &m); err != nil {
+			continue
+		}
+		widgets = append(widgets, row{ID: id, Title: m.Title, Cols: m.Cols, Height: m.Height, Locked: m.Locked})
+	}
+	if len(widgets) == 0 {
+		return "No widgets on the dashboard.", nil
+	}
+	out, _ := json.MarshalIndent(widgets, "", "  ")
+	return string(out), nil
 }
 
 func (e *ToolExecutor) addUIPlugin(id, title, content string, cols, height int) (string, error) {

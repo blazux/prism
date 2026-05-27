@@ -39,6 +39,13 @@ services:
       - LC_ALL=C.UTF-8
       - PAGER=cat
       - COLORTERM=truecolor
+    command: >
+      sh -c "
+        [ -f /workspace/.apt-packages ] && apt-get update -qq && xargs apt-get install -y < /workspace/.apt-packages;
+        [ -f /workspace/.pip-packages ] && pip3 install -q $(cat /workspace/.pip-packages);
+        [ -f /workspace/.crontab ] && crontab /workspace/.crontab;
+        cron && tail -f /dev/null
+      "
     restart: unless-stopped
 
   postgres:
