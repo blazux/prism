@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -252,15 +254,16 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "rag_ingest",
-			Description: "Add a text document to a RAG collection so it can be retrieved later with rag_search. Use this for user-provided documents, reference material, or any content the user wants to query. For agent learnings use save_learning instead.",
+			Description: "Add a document to a RAG collection so it can be retrieved later with rag_search. Use this for user-provided documents, reference material, or any content the user wants to query. For agent learnings use save_learning instead. Prefer source_path for PDF files — images will be extracted automatically and returned alongside text chunks during search.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"collection": {Type: "string", Description: "Collection name (created automatically if it doesn't exist)"},
-					"source":     {Type: "string", Description: "A descriptive name for this document (e.g. 'api-docs', 'meeting-notes-2025')"},
-					"content":    {Type: "string", Description: "The full text content to index"},
+					"collection":  {Type: "string", Description: "Collection name (created automatically if it doesn't exist)"},
+					"source":      {Type: "string", Description: "A descriptive name for this document (e.g. 'api-docs', 'meeting-notes-2025'). Defaults to the filename when source_path is used."},
+					"content":     {Type: "string", Description: "The full text content to index (use for inline text). Omit when using source_path."},
+					"source_path": {Type: "string", Description: "Path to a file inside the workspace to ingest (relative to workspace root). For PDFs, page images are extracted automatically and returned with search results for vision models."},
 				},
-				Required: []string{"collection", "source", "content"},
+				Required: []string{"collection"},
 			},
 		},
 	},
@@ -569,34 +572,37 @@ func (e *ToolExecutor) SetCallbacks(
 	e.onFileChange = onChange
 }
 
-func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, error) {
+func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, []string, error) {
 	var args map[string]interface{}
 	if err := json.Unmarshal(rawArgs, &args); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+		return "", nil, fmt.Errorf("invalid args: %w", err)
 	}
 
 	str := func(key string) string {
 		v, _ := args[key].(string)
 		return v
 	}
+	wrap := func(s string, err error) (string, []string, error) {
+		return s, nil, err
+	}
 
 	switch name {
 	case "exec_command":
-		return e.execCommand(ctx, str("command"))
+		return wrap(e.execCommand(ctx, str("command")))
 	case "write_file":
-		return e.writeFile(str("path"), str("content"))
+		return wrap(e.writeFile(str("path"), str("content")))
 	case "read_file":
-		return e.readFile(str("path"))
+		return wrap(e.readFile(str("path")))
 	case "list_files":
 		path := str("path")
 		if path == "" {
 			path = "."
 		}
-		return e.listFiles(path)
+		return wrap(e.listFiles(path))
 	case "apt_install":
-		return e.aptInstall(ctx, str("packages"))
+		return wrap(e.aptInstall(ctx, str("packages")))
 	case "pip_install":
-		return e.pipInstall(ctx, str("packages"))
+		return wrap(e.pipInstall(ctx, str("packages")))
 	case "add_widget":
 		colsFloat, _ := args["cols"].(float64)
 		cols := int(colsFloat)
@@ -608,27 +614,27 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		if height <= 0 {
 			height = 280
 		}
-		return e.addUIPlugin(str("id"), str("title"), str("content"), cols, height)
+		return wrap(e.addUIPlugin(str("id"), str("title"), str("content"), cols, height))
 	case "list_widgets":
-		return e.listUIPlugins()
+		return wrap(e.listUIPlugins())
 	case "remove_widget":
-		return e.removeUIPlugin(str("id"))
+		return wrap(e.removeUIPlugin(str("id")))
 	case "show_in_editor":
-		return e.openFile(str("path"))
+		return wrap(e.openFile(str("path")))
 	case "cron_list":
-		return e.cronList(ctx)
+		return wrap(e.cronList(ctx))
 	case "cron_add":
-		return e.cronAdd(ctx, str("name"), str("schedule"), str("command"))
+		return wrap(e.cronAdd(ctx, str("name"), str("schedule"), str("command")))
 	case "cron_remove":
-		return e.cronRemove(ctx, str("name"))
+		return wrap(e.cronRemove(ctx, str("name")))
 	case "fetch_url":
-		return e.fetchURL(ctx, str("url"))
+		return wrap(e.fetchURL(ctx, str("url")))
 	case "web_search":
-		return e.webSearch(ctx, str("query"))
+		return wrap(e.webSearch(ctx, str("query")))
 	case "browser_get":
-		return e.browserExec(ctx, str("url"), str("script"))
+		return wrap(e.browserExec(ctx, str("url"), str("script")))
 	case "browser_act":
-		return e.browserAct(ctx, str("url"), args["actions"])
+		return wrap(e.browserAct(ctx, str("url"), args["actions"]))
 	case "rag_search":
 		limitFloat, _ := args["limit"].(float64)
 		limit := int(limitFloat)
@@ -637,50 +643,50 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		}
 		return e.ragSearch(ctx, str("query"), str("collection"), limit)
 	case "rag_ingest":
-		return e.ragIngest(ctx, str("collection"), str("source"), str("content"), "")
+		return wrap(e.ragIngest(ctx, str("collection"), str("source"), str("content"), str("source_path")))
 	case "rag_list":
 		if col := str("collection"); col != "" {
-			return e.ragListDocuments(ctx, col)
+			return wrap(e.ragListDocuments(ctx, col))
 		}
-		return e.ragListCollections(ctx)
+		return wrap(e.ragListCollections(ctx))
 	case "save_user_info":
-		return e.saveUserInfo(ctx, str("topic"), str("content"))
+		return wrap(e.saveUserInfo(ctx, str("topic"), str("content")))
 	case "save_learning":
-		return e.saveLearning(ctx, str("title"), str("content"))
+		return wrap(e.saveLearning(ctx, str("title"), str("content")))
 	case "notify":
 		delayFloat, _ := args["delay_seconds"].(float64)
 		delay := int(delayFloat)
 		if delay > 0 {
-			return e.scheduleNotification(str("title"), str("message"), str("level"), delay)
+			return wrap(e.scheduleNotification(str("title"), str("message"), str("level"), delay))
 		}
-		return e.sendNotification(str("title"), str("message"), str("level"))
+		return wrap(e.sendNotification(str("title"), str("message"), str("level")))
 	case "register_tool":
-		return e.registerTool(str("filename"), str("code"))
+		return wrap(e.registerTool(str("filename"), str("code")))
 	case "list_tools":
-		return e.listTools()
+		return wrap(e.listTools())
 	case "request_secret":
-		return e.requestSecret(ctx, str("name"), str("description"))
+		return wrap(e.requestSecret(ctx, str("name"), str("description")))
 	case "list_secrets":
-		return e.listSecrets(ctx)
+		return wrap(e.listSecrets(ctx))
 	case "delete_secret":
-		return e.deleteSecret(ctx, str("name"))
+		return wrap(e.deleteSecret(ctx, str("name")))
 	case "mcp_add_server":
-		return e.mcpAddServer(ctx, str("name"), str("url"), str("auth_secret"))
+		return wrap(e.mcpAddServer(ctx, str("name"), str("url"), str("auth_secret")))
 	case "mcp_remove_server":
-		return e.mcpRemoveServer(ctx, str("name"))
+		return wrap(e.mcpRemoveServer(ctx, str("name")))
 	case "mcp_list_servers":
-		return e.mcpListServers(ctx)
+		return wrap(e.mcpListServers(ctx))
 	default:
 		if e.customMgr != nil {
 			if ct := e.customMgr.Get(name); ct != nil {
-				return e.execCustomTool(ctx, ct, rawArgs)
+				return wrap(e.execCustomTool(ctx, ct, rawArgs))
 			}
 		}
 		// Route to MCP server if the tool is provided by one
 		if e.mcpMgr != nil && e.mcpMgr.HasTool(e.sessionID, name) {
-			return e.mcpMgr.CallTool(ctx, e.sessionID, name, rawArgs)
+			return wrap(e.mcpMgr.CallTool(ctx, e.sessionID, name, rawArgs))
 		}
-		return "", fmt.Errorf("unknown tool: %s", name)
+		return "", nil, fmt.Errorf("unknown tool: %s", name)
 	}
 }
 
@@ -1432,25 +1438,25 @@ func extractToolName(code string) string {
 
 // ─── RAG tool ─────────────────────────────────────────────────────────────────
 
-func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, limit int) (string, error) {
+func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, limit int) (string, []string, error) {
 	if e.ragStore == nil || e.ragEmbedder == nil {
-		return "RAG not available (Postgres not configured)", nil
+		return "RAG not available (Postgres not configured)", nil, nil
 	}
 	if query == "" || collection == "" {
-		return "", fmt.Errorf("query and collection are required")
+		return "", nil, fmt.Errorf("query and collection are required")
 	}
 
 	embedding, err := e.ragEmbedder.Embed(ctx, query)
 	if err != nil {
-		return fmt.Sprintf("ERROR embedding query: %v", err), nil
+		return fmt.Sprintf("ERROR embedding query: %v", err), nil, nil
 	}
 
 	results, err := e.ragStore.Search(ctx, collection, embedding, limit)
 	if err != nil {
-		return fmt.Sprintf("ERROR searching: %v", err), nil
+		return fmt.Sprintf("ERROR searching: %v", err), nil, nil
 	}
 	if len(results) == 0 {
-		return fmt.Sprintf("No results found in collection %q for query: %s", collection, query), nil
+		return fmt.Sprintf("No results found in collection %q for query: %s", collection, query), nil, nil
 	}
 
 	var sb strings.Builder
@@ -1458,31 +1464,105 @@ func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, 
 	for i, r := range results {
 		fmt.Fprintf(&sb, "--- [%d] %s (chunk %d, score %.3f) ---\n%s\n\n", i+1, r.Filename, r.ChunkIndex, r.Score, r.Content)
 	}
-	return sb.String(), nil
-}
 
-func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, content, description string) (string, error) {
-	if e.ragStore == nil || e.ragEmbedder == nil {
-		return "RAG not available (Postgres not configured)", nil
-	}
-	if collection == "" || source == "" || content == "" {
-		return "", fmt.Errorf("collection, source, and content are required")
-	}
-
-	// Ensure collection is registered for this session
-	if err := e.ragStore.EnsureCollection(ctx, collection, e.sessionID); err != nil {
-		return fmt.Sprintf("ERROR registering collection: %v", err), nil
-	}
-	// Create/update collection description if provided
-	if description != "" {
-		if err := e.ragStore.SetCollectionDescription(ctx, collection, e.sessionID, description); err != nil {
-			return fmt.Sprintf("ERROR setting collection description: %v", err), nil
+	// Load page images for chunks that have one, deduplicating by path.
+	var images []string
+	seen := map[string]bool{}
+	for _, r := range results {
+		if r.PageNumber == 0 || r.FileHash == "" {
+			continue
+		}
+		imgPath := filepath.Join(e.workspaceDir, "rag_images", collection, r.FileHash, fmt.Sprintf("page-%04d.jpg", r.PageNumber))
+		if seen[imgPath] {
+			continue
+		}
+		seen[imgPath] = true
+		data, err := os.ReadFile(imgPath)
+		if err == nil {
+			images = append(images, base64.StdEncoding.EncodeToString(data))
 		}
 	}
 
-	chunks := rag.SplitText(content)
+	return sb.String(), images, nil
+}
+
+func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, content, sourcePath string) (string, error) {
+	if e.ragStore == nil || e.ragEmbedder == nil {
+		return "RAG not available (Postgres not configured)", nil
+	}
+	if collection == "" {
+		return "", fmt.Errorf("collection is required")
+	}
+
+	var chunks []string
+	var pageNums []int
+	var fileHash string
+	var sizeBytes int64
+
+	if sourcePath != "" {
+		// File-based ingestion — resolve and safety-check the path.
+		fullPath := filepath.Join(e.workspaceDir, sourcePath)
+		rel, err := filepath.Rel(e.workspaceDir, fullPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return "", fmt.Errorf("source_path escapes workspace")
+		}
+
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			return fmt.Sprintf("ERROR reading file: %v", err), nil
+		}
+		sum := sha256.Sum256(data)
+		fileHash = fmt.Sprintf("%x", sum)
+		sizeBytes = int64(len(data))
+
+		if source == "" {
+			source = filepath.Base(fullPath)
+		}
+
+		if strings.ToLower(filepath.Ext(fullPath)) == ".pdf" {
+			pages, err := rag.ParsePDFPages(fullPath)
+			if err != nil {
+				return fmt.Sprintf("ERROR parsing PDF: %v", err), nil
+			}
+			for pageIdx, pageText := range pages {
+				for _, c := range rag.SplitText(pageText) {
+					chunks = append(chunks, c)
+					pageNums = append(pageNums, pageIdx+1)
+				}
+			}
+			// Extract page images, cleaning up stale images if the hash changed.
+			if prev, err := e.ragStore.FindDocument(ctx, collection, source); err == nil && prev != nil && prev.FileHash != fileHash {
+				os.RemoveAll(filepath.Join(e.workspaceDir, "rag_images", collection, prev.FileHash))
+			}
+			imgDir := filepath.Join(e.workspaceDir, "rag_images", collection, fileHash)
+			if err := rag.ExtractPageImages(fullPath, imgDir); err != nil {
+				// Non-fatal: text search still works without images.
+				fmt.Printf("WARN: could not extract page images from %s: %v\n", fullPath, err)
+			}
+		} else {
+			text, err := rag.ParseFile(fullPath)
+			if err != nil {
+				return fmt.Sprintf("ERROR parsing file: %v", err), nil
+			}
+			chunks = rag.SplitText(text)
+			pageNums = make([]int, len(chunks))
+		}
+	} else {
+		// Inline text ingestion.
+		if source == "" || content == "" {
+			return "", fmt.Errorf("source and content are required when source_path is not provided")
+		}
+		chunks = rag.SplitText(content)
+		pageNums = make([]int, len(chunks))
+		sizeBytes = int64(len(content))
+	}
+
 	if len(chunks) == 0 {
 		return "Content produced no chunks after splitting.", nil
+	}
+
+	if err := e.ragStore.EnsureCollection(ctx, collection, e.sessionID); err != nil {
+		return fmt.Sprintf("ERROR registering collection: %v", err), nil
 	}
 
 	embeddings, err := e.ragEmbedder.EmbedBatch(ctx, chunks)
@@ -1490,7 +1570,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 		return fmt.Sprintf("ERROR embedding content: %v", err), nil
 	}
 
-	if err := e.ragStore.UpsertDocument(ctx, collection, source, "", int64(len(content)), chunks, embeddings); err != nil {
+	if err := e.ragStore.UpsertDocument(ctx, collection, source, fileHash, sizeBytes, chunks, pageNums, embeddings); err != nil {
 		return fmt.Sprintf("ERROR storing document: %v", err), nil
 	}
 
@@ -1574,7 +1654,8 @@ func (e *ToolExecutor) saveLearning(ctx context.Context, title, content string) 
 		return fmt.Sprintf("ERROR embedding content: %v", err), nil
 	}
 
-	if err := e.ragStore.UpsertDocument(ctx, learningsCollection, title, "", int64(len(full)), chunks, embeddings); err != nil {
+	pageNums := make([]int, len(chunks))
+	if err := e.ragStore.UpsertDocument(ctx, learningsCollection, title, "", int64(len(full)), chunks, pageNums, embeddings); err != nil {
 		return fmt.Sprintf("ERROR storing learning: %v", err), nil
 	}
 
@@ -1635,7 +1716,8 @@ func (e *ToolExecutor) saveUserInfo(ctx context.Context, topic, content string) 
 		return fmt.Sprintf("ERROR embedding content: %v", err), nil
 	}
 
-	if err := e.ragStore.UpsertDocument(ctx, userProfileCollection, topic, "", int64(len(full)), chunks, embeddings); err != nil {
+	pageNums := make([]int, len(chunks))
+	if err := e.ragStore.UpsertDocument(ctx, userProfileCollection, topic, "", int64(len(full)), chunks, pageNums, embeddings); err != nil {
 		return fmt.Sprintf("ERROR storing user info: %v", err), nil
 	}
 

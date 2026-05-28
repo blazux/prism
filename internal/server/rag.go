@@ -301,7 +301,8 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Persist
-	if err := s.ragStore.UpsertDocument(r.Context(), collection, header.Filename, fileHash, size, chunks, embeddings); err != nil {
+	pageNums := make([]int, len(chunks))
+	if err := s.ragStore.UpsertDocument(r.Context(), collection, header.Filename, fileHash, size, chunks, pageNums, embeddings); err != nil {
 		jsonError(w, "store: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

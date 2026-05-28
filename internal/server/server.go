@@ -276,16 +276,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	model := s.cfg.Model
 
-	// Load personality from DB for this session (best-effort)
-	var personality string
-	if ms != nil {
-		if p, ok, err := ms.GetConfig(r.Context(), memory.KeyPersonality+"_"+sessionID); err == nil && ok {
-			personality = p
-		} else if p, ok, err := ms.GetConfig(r.Context(), memory.KeyPersonality); err == nil && ok {
-			// fallback to global personality key (legacy)
-			personality = p
-		}
-	}
+	// Load personality for this session (falls back to default session, then hardcoded).
+	personality := loadPersonality(r.Context(), ms, sessionID)
 
 	client.ag = agent.New(ollamaClient, executor, model, ms, personality)
 	client.ag.SetSession(sessionID, personality)
@@ -1207,14 +1199,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		return fmt.Errorf("request_secret non disponible en mode headless (cron)")
 	})
 
-	var personality string
-	if ms != nil {
-		if p, ok, err := ms.GetConfig(r.Context(), memory.KeyPersonality+"_"+sessionID); err == nil && ok {
-			personality = p
-		} else if p, ok, err := ms.GetConfig(r.Context(), memory.KeyPersonality); err == nil && ok {
-			personality = p
-		}
-	}
+	personality := loadPersonality(r.Context(), ms, sessionID)
 
 	ag := agent.New(ollamaClient, executor, model, ms, personality)
 	ag.SetSession(sessionID, personality)
@@ -1300,6 +1285,29 @@ func (s *Server) pushNotificationToSession(sessionID string, id int64, title, me
 			}
 		}
 	}
+}
+
+// loadPersonality returns the personality for a session:
+// 1. session-specific personality_<sessionID>
+// 2. default session's personality (personality_default) — acts as a global default
+// 3. empty string → agent.New falls back to the hardcoded default
+func loadPersonality(ctx context.Context, ms *memory.Store, sessionID string) string {
+	if ms == nil {
+		return ""
+	}
+	if p, ok, err := ms.GetConfig(ctx, memory.KeyPersonality+"_"+sessionID); err == nil && ok {
+		return p
+	}
+	if sessionID != "default" {
+		if p, ok, err := ms.GetConfig(ctx, memory.KeyPersonality+"_default"); err == nil && ok {
+			return p
+		}
+	}
+	// Legacy fallback: global key written by older versions.
+	if p, ok, err := ms.GetConfig(ctx, memory.KeyPersonality); err == nil && ok {
+		return p
+	}
+	return ""
 }
 
 // ─── Secrets API ──────────────────────────────────────────────────────────────

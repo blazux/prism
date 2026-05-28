@@ -2,6 +2,7 @@ package rag
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,8 +44,10 @@ type Collection struct {
 type SearchResult struct {
 	Content    string  `json:"content"`
 	Filename   string  `json:"filename"`
+	FileHash   string  `json:"file_hash"`
 	Collection string  `json:"collection"`
 	ChunkIndex int     `json:"chunk_index"`
+	PageNumber int     `json:"page_number"`
 	Score      float64 `json:"score"`
 }
 
@@ -121,9 +124,11 @@ func (s *Store) initSchema(ctx context.Context) error {
 			document_id BIGINT NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
 			collection  TEXT NOT NULL,
 			chunk_index INT NOT NULL,
+			page_number INT NOT NULL DEFAULT 0,
 			content     TEXT NOT NULL,
 			embedding   vector(%d)
 		)`, s.dim),
+		`ALTER TABLE rag_chunks ADD COLUMN IF NOT EXISTS page_number INT NOT NULL DEFAULT 0`,
 
 		// HNSW and IVFFlat are limited to 2000 dims in pgvector.
 		// For high-dim models (e.g. qwen3-embedding:8b = 4096 dims) we fall back
@@ -149,7 +154,8 @@ func (s *Store) initSchema(ctx context.Context) error {
 }
 
 // UpsertDocument inserts or replaces a document and all its chunks atomically.
-func (s *Store) UpsertDocument(ctx context.Context, collection, filename, fileHash string, sizeBytes int64, chunks []string, embeddings [][]float32) error {
+// pageNums[i] is the 1-based page number for chunks[i]; 0 means no associated page image.
+func (s *Store) UpsertDocument(ctx context.Context, collection, filename, fileHash string, sizeBytes int64, chunks []string, pageNums []int, embeddings [][]float32) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -180,9 +186,9 @@ func (s *Store) UpsertDocument(ctx context.Context, collection, filename, fileHa
 	for i, chunk := range chunks {
 		vec := pgvector.NewVector(embeddings[i])
 		if _, err = tx.Exec(ctx, `
-			INSERT INTO rag_chunks (document_id, collection, chunk_index, content, embedding)
-			VALUES ($1, $2, $3, $4, $5)
-		`, docID, collection, i, chunk, vec); err != nil {
+			INSERT INTO rag_chunks (document_id, collection, chunk_index, page_number, content, embedding)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, docID, collection, i, pageNums[i], chunk, vec); err != nil {
 			return fmt.Errorf("insert chunk %d: %w", i, err)
 		}
 	}
@@ -285,7 +291,7 @@ func (s *Store) DeleteDocument(ctx context.Context, id int64) error {
 func (s *Store) Search(ctx context.Context, collection string, embedding []float32, limit int) ([]SearchResult, error) {
 	vec := pgvector.NewVector(embedding)
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.content, d.filename, c.collection, c.chunk_index,
+		SELECT c.content, d.filename, d.file_hash, c.collection, c.chunk_index, c.page_number,
 		       1 - (c.embedding <=> $1) AS score
 		FROM rag_chunks c
 		JOIN rag_documents d ON d.id = c.document_id
@@ -301,12 +307,28 @@ func (s *Store) Search(ctx context.Context, collection string, embedding []float
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.Content, &r.Filename, &r.Collection, &r.ChunkIndex, &r.Score); err != nil {
+		if err := rows.Scan(&r.Content, &r.Filename, &r.FileHash, &r.Collection, &r.ChunkIndex, &r.PageNumber, &r.Score); err != nil {
 			return nil, err
 		}
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+// FindDocument returns the document row for (collection, filename), or nil if not found.
+func (s *Store) FindDocument(ctx context.Context, collection, filename string) (*Document, error) {
+	var d Document
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, collection, filename, file_hash, chunk_count, size_bytes, created_at, updated_at
+		FROM rag_documents WHERE collection = $1 AND filename = $2
+	`, collection, filename).Scan(&d.ID, &d.Collection, &d.Filename, &d.FileHash, &d.ChunkCount, &d.SizeBytes, &d.CreatedAt, &d.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
 }
 
 // AllContent returns all chunk content from a collection, ordered by document then chunk index.

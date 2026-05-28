@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -41,6 +42,44 @@ func parsePDF(path string) (string, error) {
 		return "", fmt.Errorf("pdftotext: %w (is poppler-utils installed?)", err)
 	}
 	return string(out), nil
+}
+
+// ParsePDFPages splits a PDF into per-page text (index 0 = page 1).
+// pdftotext separates pages with a form-feed character (\x0c).
+func ParsePDFPages(path string) ([]string, error) {
+	out, err := exec.Command("pdftotext", "-enc", "UTF-8", path, "-").Output()
+	if err != nil {
+		return nil, fmt.Errorf("pdftotext: %w (is poppler-utils installed?)", err)
+	}
+	pages := strings.Split(string(out), "\x0c")
+	for len(pages) > 0 && strings.TrimSpace(pages[len(pages)-1]) == "" {
+		pages = pages[:len(pages)-1]
+	}
+	return pages, nil
+}
+
+// ExtractPageImages renders each PDF page as a JPEG into outDir using pdftoppm.
+// Output files are named page-0001.jpg, page-0002.jpg, etc.
+func ExtractPageImages(pdfPath, outDir string) error {
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", outDir, err)
+	}
+	tmp := filepath.Join(outDir, "p")
+	if err := exec.Command("pdftoppm", "-jpeg", "-r", "120", pdfPath, tmp).Run(); err != nil {
+		return fmt.Errorf("pdftoppm: %w (is poppler-utils installed?)", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(outDir, "p-*.jpg"))
+	if err != nil {
+		return err
+	}
+	sort.Strings(matches)
+	for i, src := range matches {
+		dst := filepath.Join(outDir, fmt.Sprintf("page-%04d.jpg", i+1))
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("rename %s: %w", src, err)
+		}
+	}
+	return nil
 }
 
 // parseDOCX reads a .docx file (ZIP archive) and extracts text from

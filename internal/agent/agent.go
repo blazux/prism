@@ -607,11 +607,12 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			}
 
 			var result string
+			var toolImages []string
 			if tc.Function.Name == "update_system_prompt" {
 				result = a.handleUpdateSystemPrompt(ctx, tc.Function.Arguments)
 			} else {
 				var execErr error
-				result, execErr = a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
+				result, toolImages, execErr = a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
 				if execErr != nil {
 					result = fmt.Sprintf("Error: %v", execErr)
 				}
@@ -627,6 +628,8 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			toolMsg := ollama.Message{Role: "tool", Content: result}
 			if tc.Function.Name == "browser_act" {
 				toolMsg.Images = extractScreenshotImages(result, a.executor.WorkspaceDir())
+			} else if len(toolImages) > 0 {
+				toolMsg.Images = toolImages
 			}
 			a.history = append(a.history, toolMsg)
 			a.saveMessageToDB(ctx, toolMsg)
