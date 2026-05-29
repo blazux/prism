@@ -543,6 +543,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, msgBytes, err := conn.ReadMessage()
 		if err != nil {
+			// WebSocket closed (refresh, tab close, network drop) — cancel any in-flight agent turn.
+			if client.cancelFn != nil {
+				client.cancelFn()
+			}
 			break
 		}
 
@@ -1718,35 +1722,54 @@ func (c *Client) writePump() {
 
 // ─── Workspace proxy ──────────────────────────────────────────────────────────
 
-// handleWorkspaceProxy reverse-proxies /proxy/<port>/... to the workspace
-// container so widgets can reach services (e.g. ComfyUI on :8188) without
-// exposing extra ports to the host.
+// handleWorkspaceProxy reverse-proxies requests to services running in Docker.
+//
+// Routes:
+//   /proxy/<port>/...          → workspace container at <port>  (legacy)
+//   /proxy/<name>/<port>/...   → prism-svc-<name> container at <port>
 func (s *Server) handleWorkspaceProxy(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.TrimPrefix(r.URL.Path, "/proxy/")
-	idx := strings.Index(trimmed, "/")
-	var portStr, subPath string
-	if idx < 0 {
-		portStr = trimmed
-		subPath = "/"
+	firstSlash := strings.Index(trimmed, "/")
+	var firstSeg, rest string
+	if firstSlash < 0 {
+		firstSeg = trimmed
+		rest = "/"
 	} else {
-		portStr = trimmed[:idx]
-		subPath = trimmed[idx:]
+		firstSeg = trimmed[:firstSlash]
+		rest = trimmed[firstSlash:]
 	}
 
-	port, err := strconv.Atoi(portStr)
-	if err != nil || port < 1 || port > 65535 {
-		http.Error(w, "invalid port", http.StatusBadRequest)
+	port, err := strconv.Atoi(firstSeg)
+	if err == nil && port >= 1 && port <= 65535 {
+		// Legacy: route to workspace container.
+		s.reverseProxy(w, r, fmt.Sprintf("%s:%d", s.cfg.AgentContainer, port), rest)
 		return
 	}
 
-	targetHost := fmt.Sprintf("%s:%d", s.cfg.AgentContainer, port)
+	// Service container route: /proxy/<name>/<port>/...
+	restTrimmed := strings.TrimPrefix(rest, "/")
+	secondSlash := strings.Index(restTrimmed, "/")
+	var portStr, subPath string
+	if secondSlash < 0 {
+		portStr = restTrimmed
+		subPath = "/"
+	} else {
+		portStr = restTrimmed[:secondSlash]
+		subPath = restTrimmed[secondSlash:]
+	}
+	svcPort, err := strconv.Atoi(portStr)
+	if err != nil || svcPort < 1 || svcPort > 65535 {
+		http.Error(w, "invalid proxy route", http.StatusBadRequest)
+		return
+	}
+	s.reverseProxy(w, r, fmt.Sprintf("prism-svc-%s:%d", firstSeg, svcPort), subPath)
+}
 
-	// WebSocket: hijack + raw TCP tunnel so the upgrade handshake passes through.
+func (s *Server) reverseProxy(w http.ResponseWriter, r *http.Request, targetHost, subPath string) {
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		s.tunnelWebSocket(w, r, targetHost, subPath)
 		return
 	}
-
 	targetURL := &url.URL{Scheme: "http", Host: targetHost}
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.Director = func(req *http.Request) {
@@ -1755,7 +1778,7 @@ func (s *Server) handleWorkspaceProxy(w http.ResponseWriter, r *http.Request) {
 		req.URL.Path = subPath
 		req.Host = targetHost
 	}
-	proxy.FlushInterval = -1 // stream responses immediately (SSE / chunked)
+	proxy.FlushInterval = -1
 	proxy.ServeHTTP(w, r)
 }
 

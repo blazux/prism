@@ -28,8 +28,72 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "docker_run",
+			Description: "Start a Docker service container on the Prism network. The service is accessible at /proxy/<name>/<port>/. --restart=unless-stopped is set automatically — never add a @reboot cron for Docker services. Prefer this over apt/pip installs for self-contained services (ComfyUI, Draw.io, Jupyter, etc.).",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"image":   {Type: "string", Description: "Docker image to run (e.g. 'jgraph/drawio')"},
+					"name":    {Type: "string", Description: "Short service name, letters/digits/hyphens only (e.g. 'drawio'). Container will be named prism-svc-<name>."},
+					"port":    {Type: "integer", Description: "Port the service listens on inside the container"},
+					"env":     {Type: "object", Description: "Optional environment variables as key/value pairs"},
+					"volumes": {Type: "array", Description: "Ignored — the workspace (/workspace) is automatically available inside every service container via --volumes-from. Files you write to /workspace/drawio/ are accessible inside the container at /workspace/drawio/."},
+					"gpu":     {Type: "boolean", Description: "Set to true to give the container access to all GPUs (requires nvidia-container-toolkit on the host)"},
+				},
+				Required: []string{"image", "name", "port"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "docker_stop",
+			Description: "Stop and remove a service container started with docker_run.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"name": {Type: "string", Description: "Service name as given to docker_run"},
+				},
+				Required: []string{"name"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "docker_ps",
+			Description: "List all service containers managed by Prism (prism-svc-* containers).",
+			Parameters:  ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{}, Required: []string{}},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "docker_logs",
+			Description: "Get recent logs from a service container.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"name": {Type: "string", Description: "Service name"},
+					"tail": {Type: "integer", Description: "Number of log lines to return (default 50)"},
+				},
+				Required: []string{"name"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "docker_list",
+			Description: "List all Docker containers on the host (running and stopped), including Prism's own containers and any service containers.",
+			Parameters:  ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{}, Required: []string{}},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "exec_command",
-			Description: "Execute a shell command in the workspace container. Use this to run code, compile, test, etc.",
+			Description: "Execute a shell command in the workspace container. Use this to run code, compile, test, manage files, etc. Note: the Docker CLI is NOT available here — use docker_run/docker_stop/docker_ps/docker_logs/docker_list to manage containers.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -617,6 +681,36 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 	}
 
 	switch name {
+	case "docker_run":
+		portFloat, _ := args["port"].(float64)
+		gpu, _ := args["gpu"].(bool)
+		var envMap map[string]string
+		if raw, ok := args["env"].(map[string]interface{}); ok {
+			envMap = make(map[string]string, len(raw))
+			for k, v := range raw {
+				envMap[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		var volumes []string
+		if raw, ok := args["volumes"].([]interface{}); ok {
+			for _, v := range raw {
+				volumes = append(volumes, fmt.Sprintf("%v", v))
+			}
+		}
+		return wrap(e.dockerRun(ctx, str("image"), str("name"), int(portFloat), envMap, volumes, gpu))
+	case "docker_stop":
+		return wrap(e.dockerStop(ctx, str("name")))
+	case "docker_ps":
+		return wrap(e.dockerPS(ctx))
+	case "docker_logs":
+		tailFloat, _ := args["tail"].(float64)
+		tail := int(tailFloat)
+		if tail <= 0 {
+			tail = 50
+		}
+		return wrap(e.dockerLogs(ctx, str("name"), tail))
+	case "docker_list":
+		return wrap(e.dockerList(ctx))
 	case "exec_command":
 		return wrap(e.execCommand(ctx, str("command")))
 	case "write_file":
@@ -726,6 +820,84 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 }
 
 // ─── Existing tools ───────────────────────────────────────────────────────────
+
+// ─── Docker service tools ─────────────────────────────────────────────────────
+
+func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port int, env map[string]string, volumes []string, gpu bool) (string, error) {
+	if image == "" || name == "" || port == 0 {
+		return "", fmt.Errorf("image, name and port are required")
+	}
+	if err := e.docker.RunService(ctx, name, image, port, env, volumes, gpu); err != nil {
+		return fmt.Sprintf("ERROR: %v", err), nil
+	}
+	return fmt.Sprintf("Service %q started. Accessible at /proxy/%s/%d/\n\nUse this URL in widgets: window.location.origin + '/proxy/%s/%d/'", name, name, port, name, port), nil
+}
+
+func (e *ToolExecutor) dockerStop(ctx context.Context, name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	if err := e.docker.StopService(ctx, name); err != nil {
+		return fmt.Sprintf("ERROR: %v", err), nil
+	}
+	return fmt.Sprintf("Service %q stopped and removed.", name), nil
+}
+
+func (e *ToolExecutor) dockerPS(ctx context.Context) (string, error) {
+	services, err := e.docker.ListServices(ctx)
+	if err != nil {
+		return fmt.Sprintf("ERROR: %v", err), nil
+	}
+	if len(services) == 0 {
+		return "No service containers running. Use docker_run to start one.", nil
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Service containers (%d):\n\n", len(services))
+	for _, s := range services {
+		portInfo := ""
+		if s.Port > 0 {
+			portInfo = fmt.Sprintf(" — /proxy/%s/%d/", s.Name, s.Port)
+		}
+		fmt.Fprintf(&sb, "  • %s (%s) — %s%s\n", s.Name, s.Image, s.Status, portInfo)
+	}
+	return sb.String(), nil
+}
+
+func (e *ToolExecutor) dockerList(ctx context.Context) (string, error) {
+	containers, err := e.docker.ListAllContainers(ctx)
+	if err != nil {
+		return fmt.Sprintf("ERROR: %v", err), nil
+	}
+	if len(containers) == 0 {
+		return "No containers found.", nil
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "All Docker containers (%d):\n\n", len(containers))
+	for _, c := range containers {
+		portInfo := ""
+		if c.Port > 0 {
+			portInfo = fmt.Sprintf(" :%d", c.Port)
+		}
+		fmt.Fprintf(&sb, "  • %-30s  %-35s  %s%s\n", c.Name, c.Image, c.Status, portInfo)
+	}
+	return sb.String(), nil
+}
+
+func (e *ToolExecutor) dockerLogs(ctx context.Context, name string, tail int) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	out, err := e.docker.ServiceLogs(ctx, name, tail)
+	if err != nil {
+		return fmt.Sprintf("ERROR: %v", err), nil
+	}
+	if strings.TrimSpace(out) == "" {
+		return fmt.Sprintf("No logs for service %q.", name), nil
+	}
+	return out, nil
+}
+
+// ─── Workspace exec ───────────────────────────────────────────────────────────
 
 func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string, error) {
 	session := e.sessionID

@@ -5,9 +5,20 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
+
+const servicePrefix = "prism-svc-"
+
+// ServiceInfo describes a running or stopped service container.
+type ServiceInfo struct {
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	Status string `json:"status"`
+	Port   int    `json:"port"`
+}
 
 type Manager struct {
 	containerName string
@@ -152,6 +163,133 @@ func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string
 	}()
 
 	return outCh, errCh
+}
+
+// RunService starts a named service container on the same Docker network as the
+// workspace. The container is named prism-svc-<name> and restarts automatically.
+func (m *Manager) RunService(ctx context.Context, name, image string, port int, env map[string]string, volumes []string, gpu bool) error {
+	// Detect network from the workspace container so services land on the same network.
+	netOut, _ := m.run(ctx, "docker", "inspect",
+		"--format", "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}",
+		m.containerName)
+	network := strings.Fields(strings.TrimSpace(netOut))
+	net := "prism_default"
+	if len(network) > 0 {
+		net = network[0]
+	}
+
+	// Remove existing container with the same name (idempotent).
+	_, _ = m.run(ctx, "docker", "rm", "-f", servicePrefix+name)
+
+	args := []string{
+		"run", "-d",
+		"--name", servicePrefix + name,
+		"--network", net,
+		"--restart", "unless-stopped",
+		// Share the workspace volume so /workspace is available inside the service container.
+		"--volumes-from", m.containerName,
+	}
+	if gpu {
+		args = append(args, "--gpus", "all")
+	}
+	for k, v := range env {
+		args = append(args, "-e", k+"="+v)
+	}
+	// volumes are ignored: workspace is already mounted via --volumes-from.
+	_ = volumes
+	args = append(args, image)
+
+	if _, err := m.run(ctx, "docker", args...); err != nil {
+		return fmt.Errorf("docker run: %w", err)
+	}
+	return nil
+}
+
+// StopService stops and removes a service container.
+func (m *Manager) StopService(ctx context.Context, name string) error {
+	_, err := m.run(ctx, "docker", "rm", "-f", servicePrefix+name)
+	return err
+}
+
+// ListServices returns all prism-svc-* containers.
+func (m *Manager) ListServices(ctx context.Context) ([]ServiceInfo, error) {
+	out, err := m.run(ctx, "docker", "ps", "-a",
+		"--filter", "name="+servicePrefix,
+		"--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}")
+	if err != nil {
+		return nil, err
+	}
+	var services []ServiceInfo
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) < 3 {
+			continue
+		}
+		svc := ServiceInfo{
+			Name:   strings.TrimPrefix(parts[0], servicePrefix),
+			Image:  parts[1],
+			Status: parts[2],
+		}
+		if len(parts) == 4 {
+			svc.Port = parseFirstPort(parts[3])
+		}
+		services = append(services, svc)
+	}
+	return services, nil
+}
+
+// ListAllContainers returns all prism-* containers (docker ps -a filtered by name).
+func (m *Manager) ListAllContainers(ctx context.Context) ([]ServiceInfo, error) {
+	out, err := m.run(ctx, "docker", "ps", "-a",
+		"--filter", "name=prism",
+		"--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}")
+	if err != nil {
+		return nil, err
+	}
+	var containers []ServiceInfo
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) < 3 {
+			continue
+		}
+		c := ServiceInfo{
+			Name:   parts[0],
+			Image:  parts[1],
+			Status: parts[2],
+		}
+		if len(parts) == 4 {
+			c.Port = parseFirstPort(parts[3])
+		}
+		containers = append(containers, c)
+	}
+	return containers, nil
+}
+
+// ServiceLogs returns the last n log lines from a service container.
+func (m *Manager) ServiceLogs(ctx context.Context, name string, tail int) (string, error) {
+	return m.run(ctx, "docker", "logs", "--tail", strconv.Itoa(tail), servicePrefix+name)
+}
+
+// parseFirstPort extracts the first host port from a docker ps --format {{.Ports}} string.
+// e.g. "0.0.0.0:8188->8188/tcp" → 8188
+func parseFirstPort(ports string) int {
+	for _, mapping := range strings.Fields(ports) {
+		if idx := strings.Index(mapping, "->"); idx >= 0 {
+			hostPart := mapping[:idx]
+			if colon := strings.LastIndex(hostPart, ":"); colon >= 0 {
+				if p, err := strconv.Atoi(hostPart[colon+1:]); err == nil {
+					return p
+				}
+			}
+		}
+	}
+	return 0
 }
 
 func (m *Manager) IsDockerAvailable() bool {

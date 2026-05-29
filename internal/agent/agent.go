@@ -239,6 +239,17 @@ Cron jobs can retrieve stored secrets via the HTTP API:
 ### Web and browser tasks
 
 web_search → fetch_url (static pages) → browser_get (JS-heavy pages) → browser_act (interactive: clicks, forms, login flows).
+
+### Docker services
+
+For self-contained services (ComfyUI, Jupyter, Draw.io, databases, etc.), always use docker_run — never apt/pip installs for things that have a Docker image.
+
+Rules:
+- --restart=unless-stopped is already set by docker_run. NEVER add a @reboot cron for a Docker service.
+- The Docker CLI is not available in exec_command (workspace container). Only use docker_* tools to manage containers.
+- The workspace (/workspace) is automatically mounted in every service container. Files at /workspace/foo/ are accessible inside the container at /workspace/foo/ — no volume parameter needed.
+- After docker_run, use docker_logs to confirm the service is healthy before building a widget.
+- The service URL in widgets is: window.location.origin + '/proxy/<name>/<port>/'
 browser_act persists cookies per session — log in once and reuse across calls.
 Screenshots are saved to /workspace/.screenshots/ and served at /screenshots/<file> — display inline: ![desc](/screenshots/file.png)
 
