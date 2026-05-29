@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -576,7 +577,13 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 		fullContent, toolCalls, err := a.callOllama(ctx, learningsCtx, events)
 		if err != nil {
-			events <- Event{Type: "error", Content: err.Error()}
+			// Intentional cancel (user clicked stop, sent new message, or closed tab):
+			// close the bubble cleanly without showing an error message.
+			if errors.Is(err, context.Canceled) {
+				events <- Event{Type: "stream_end"}
+			} else {
+				events <- Event{Type: "error", Content: err.Error()}
+			}
 			return
 		}
 

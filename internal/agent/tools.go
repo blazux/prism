@@ -460,7 +460,7 @@ var ToolDefinitions = []ollama.Tool{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"url":     {Type: "string", Description: "Initial URL to navigate to before running actions. Omit to reuse the current session page."},
-					"actions": {Type: "array", Description: `List of action objects to execute in order. Each object must have a "type" field. Examples: {"type":"click","selector":"#submit"}, {"type":"type","selector":"input[name=q]","text":"hello"}, {"type":"screenshot"}, {"type":"evaluate","expression":"document.title"}, {"type":"get_text","selector":".result"}, {"type":"wait_for","selector":".loaded"}, {"type":"navigate","url":"https://..."}, {"type":"select","selector":"select#lang","value":"fr"}, {"type":"clear","selector":"#search"}. Console output is captured automatically — do not add a "console" action, it does not exist.`},
+					"actions": {Type: "array", Description: `List of action objects to execute in order. Each object must have a "type" field. Supported types: navigate (url), click (selector), type (selector,text), clear (selector), select (selector,value), wait_for (selector), wait_ms (ms), screenshot, evaluate (expression), get_text (selector). Console output is captured automatically. Do NOT use "wait", "timeMs" or "console" — they do not exist.`},
 				},
 				Required: []string{"actions"},
 			},
@@ -1371,6 +1371,10 @@ with sync_playwright() as p:
                 sel = action.get('selector','body')
                 text = page.inner_text(sel, timeout=10000)
                 results.append({'action':'get_text','selector':sel,'status':'ok','text':text[:4000]})
+            elif atype == 'wait_ms':
+                ms = int(action.get('ms', action.get('timeMs', 1000)))
+                page.wait_for_timeout(ms)
+                results.append({'action':'wait_ms','ms':ms,'status':'ok'})
             else:
                 results.append({'action':atype,'status':'error','error':'unknown action type'})
         except Exception as e:
