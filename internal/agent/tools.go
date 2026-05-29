@@ -284,6 +284,36 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "rag_show_page",
+			Description: "Display a specific PDF page to the user and to yourself. The image appears in the tool result so both you and the user can see it. Call this when a rag_search chunk references a diagram, figure, or visual content worth showing. If you also want the image in your response bubble, call add_attachment with the path it returns.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"collection": {Type: "string", Description: "The RAG collection name"},
+					"filename":   {Type: "string", Description: "The document filename as returned by rag_search"},
+					"page":       {Type: "integer", Description: "The 1-based page number to display"},
+				},
+				Required: []string{"collection", "filename", "page"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "add_attachment",
+			Description: "Attach a file from the workspace to your response. Images (jpg, png, webp) are displayed inline in your reply. Other file types will be made available for download. Only use paths returned by other tools or known workspace locations — never invent paths.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"path": {Type: "string", Description: "Workspace-relative path to the file to attach"},
+				},
+				Required: []string{"path"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "save_user_info",
 			Description: "Save a fact about the user to their permanent profile. Call this whenever the user explicitly states something about themselves. Same topic overwrites the previous value.",
 			Parameters: ollama.ToolParameters{
@@ -644,6 +674,11 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return e.ragSearch(ctx, str("query"), str("collection"), limit)
 	case "rag_ingest":
 		return wrap(e.ragIngest(ctx, str("collection"), str("source"), str("content"), str("source_path")))
+	case "rag_show_page":
+		pageFloat, _ := args["page"].(float64)
+		return e.ragShowPage(ctx, str("collection"), str("filename"), int(pageFloat))
+	case "add_attachment":
+		return e.addAttachment(str("path"))
 	case "rag_list":
 		if col := str("collection"); col != "" {
 			return wrap(e.ragListDocuments(ctx, col))
@@ -1462,28 +1497,14 @@ func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Found %d relevant chunks in collection %q:\n\n", len(results), collection)
 	for i, r := range results {
-		fmt.Fprintf(&sb, "--- [%d] %s (chunk %d, score %.3f) ---\n%s\n\n", i+1, r.Filename, r.ChunkIndex, r.Score, r.Content)
+		pageInfo := ""
+		if r.PageNumber > 0 {
+			pageInfo = fmt.Sprintf(", page %d", r.PageNumber)
+		}
+		fmt.Fprintf(&sb, "--- [%d] %s (chunk %d%s, score %.3f) ---\n%s\n\n", i+1, r.Filename, r.ChunkIndex, pageInfo, r.Score, r.Content)
 	}
 
-	// Load page images for chunks that have one, deduplicating by path.
-	var images []string
-	seen := map[string]bool{}
-	for _, r := range results {
-		if r.PageNumber == 0 || r.FileHash == "" {
-			continue
-		}
-		imgPath := filepath.Join(e.workspaceDir, "rag_images", collection, r.FileHash, fmt.Sprintf("page-%04d.jpg", r.PageNumber))
-		if seen[imgPath] {
-			continue
-		}
-		seen[imgPath] = true
-		data, err := os.ReadFile(imgPath)
-		if err == nil {
-			images = append(images, base64.StdEncoding.EncodeToString(data))
-		}
-	}
-
-	return sb.String(), images, nil
+	return sb.String(), nil, nil
 }
 
 func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, content, sourcePath string) (string, error) {
@@ -1519,8 +1540,29 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			source = filepath.Base(fullPath)
 		}
 
-		if strings.ToLower(filepath.Ext(fullPath)) == ".pdf" {
-			pages, err := rag.ParsePDFPages(fullPath)
+		imgDir := rag.ImageDir(e.workspaceDir, collection, source)
+		fileExt := strings.ToLower(filepath.Ext(fullPath))
+
+		parsePath := fullPath
+		var convertedDir string
+
+		if fileExt == ".pptx" {
+			var err error
+			convertedDir, err = os.MkdirTemp("", "pptx-convert-*")
+			if err != nil {
+				return fmt.Sprintf("ERROR creating temp dir: %v", err), nil
+			}
+			defer os.RemoveAll(convertedDir)
+			pdfPath, err := rag.ConvertToPDF(fullPath, convertedDir)
+			if err != nil {
+				return fmt.Sprintf("ERROR converting PPTX to PDF: %v", err), nil
+			}
+			parsePath = pdfPath
+			fileExt = ".pdf"
+		}
+
+		if fileExt == ".pdf" {
+			pages, err := rag.ParsePDFPages(parsePath)
 			if err != nil {
 				return fmt.Sprintf("ERROR parsing PDF: %v", err), nil
 			}
@@ -1530,14 +1572,18 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 					pageNums = append(pageNums, pageIdx+1)
 				}
 			}
-			// Extract page images, cleaning up stale images if the hash changed.
-			if prev, err := e.ragStore.FindDocument(ctx, collection, source); err == nil && prev != nil && prev.FileHash != fileHash {
-				os.RemoveAll(filepath.Join(e.workspaceDir, "rag_images", collection, prev.FileHash))
-			}
-			imgDir := filepath.Join(e.workspaceDir, "rag_images", collection, fileHash)
-			if err := rag.ExtractPageImages(fullPath, imgDir); err != nil {
-				// Non-fatal: text search still works without images.
+			if err := rag.ExtractPageImages(parsePath, imgDir); err != nil {
 				fmt.Printf("WARN: could not extract page images from %s: %v\n", fullPath, err)
+			}
+		} else if fileExt == ".docx" {
+			text, err := rag.ParseFile(fullPath)
+			if err != nil {
+				return fmt.Sprintf("ERROR parsing DOCX: %v", err), nil
+			}
+			chunks = rag.SplitText(text)
+			pageNums = make([]int, len(chunks))
+			if _, err := rag.ExtractDOCXImages(fullPath, imgDir); err != nil {
+				fmt.Printf("WARN: could not extract DOCX images from %s: %v\n", fullPath, err)
 			}
 		} else {
 			text, err := rag.ParseFile(fullPath)
@@ -1575,6 +1621,57 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 	}
 
 	return fmt.Sprintf("Ingested %q into collection %q: %d chunks indexed.", source, collection, len(chunks)), nil
+}
+
+var imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true}
+
+func (e *ToolExecutor) addAttachment(path string) (string, []string, error) {
+	fullPath := filepath.Join(e.workspaceDir, path)
+	rel, err := filepath.Rel(e.workspaceDir, fullPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", nil, fmt.Errorf("path escapes workspace")
+	}
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Sprintf("ERROR: could not read %q: %v", path, err), nil, nil
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	if !imageExts[ext] {
+		return fmt.Sprintf("Attached %q to your response (non-image file — download will be available).", filepath.Base(path)), nil, nil
+	}
+	return fmt.Sprintf("Attached %q to your response.", filepath.Base(path)), []string{base64.StdEncoding.EncodeToString(data)}, nil
+}
+
+func (e *ToolExecutor) ragShowPage(ctx context.Context, collection, filename string, page int) (string, []string, error) {
+	if e.ragStore == nil {
+		return "RAG not available (Postgres not configured)", nil, nil
+	}
+	if collection == "" || filename == "" || page < 1 {
+		return "", nil, fmt.Errorf("collection, filename and page are required")
+	}
+
+	doc, err := e.ragStore.FindDocument(ctx, collection, filename)
+	if err != nil {
+		return fmt.Sprintf("ERROR looking up document: %v", err), nil, nil
+	}
+	if doc == nil {
+		return fmt.Sprintf("Document %q not found in collection %q.", filename, collection), nil, nil
+	}
+
+	// Use glob to support both .jpg and .png (DOCX images may be PNG).
+	imgDir := rag.ImageDir(e.workspaceDir, collection, filename)
+	matches, _ := filepath.Glob(filepath.Join(imgDir, fmt.Sprintf("page-%04d.*", page)))
+	if len(matches) == 0 {
+		return fmt.Sprintf("No image available for page/image %d of %q (the document may not have been ingested with image extraction).", page, filename), nil, nil
+	}
+	imgPath := matches[0]
+	data, err := os.ReadFile(imgPath)
+	if err != nil {
+		return fmt.Sprintf("No image available for page/image %d of %q.", page, filename), nil, nil
+	}
+
+	attachPath := filepath.ToSlash(rag.PageImagePath("", collection, filename, page))
+	return fmt.Sprintf("Page %d of %q — call add_attachment(%q) to also include it in your response.", page, filename, attachPath), []string{base64.StdEncoding.EncodeToString(data)}, nil
 }
 
 func (e *ToolExecutor) ragListCollections(ctx context.Context) (string, error) {

@@ -152,6 +152,11 @@ func (s *Server) Start() error {
 	os.MkdirAll(screenshotsDir, 0755)
 	mux.Handle("/screenshots/", http.StripPrefix("/screenshots/", http.FileServer(http.Dir(screenshotsDir))))
 
+	// RAG page images — served at /rag_images/<collection>/<doc>/<page>.jpg
+	ragImagesDir := filepath.Join(s.cfg.WorkspaceDir, "rag_images")
+	os.MkdirAll(ragImagesDir, 0755)
+	mux.Handle("/rag_images/", http.StripPrefix("/rag_images/", http.FileServer(http.Dir(ragImagesDir))))
+
 	// WebSocket
 	mux.HandleFunc("/ws", s.handleWS)
 

@@ -275,19 +275,57 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	fileHash := fmt.Sprintf("%x", hasher.Sum(nil))
 
-	// Parse text from the document
-	text, err := rag.ParseFile(tmp.Name())
-	if err != nil {
-		jsonError(w, "parse: "+err.Error(), http.StatusUnprocessableEntity)
-		return
+	// Parse text and build chunk→page mapping.
+	// PPTX is converted to PDF first so we can reuse the page-aware pipeline.
+	var chunks []string
+	var pageNums []int
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+
+	parsePath := tmp.Name() // may be replaced by converted PDF for PPTX
+	var convertedDir string  // temp dir for LibreOffice output, cleaned up after
+
+	if ext == ".pptx" {
+		convertedDir, err = os.MkdirTemp("", "pptx-convert-*")
+		if err != nil {
+			jsonError(w, "temp dir: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer os.RemoveAll(convertedDir)
+		pdfPath, err := rag.ConvertToPDF(tmp.Name(), convertedDir)
+		if err != nil {
+			jsonError(w, "pptx→pdf: "+err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		parsePath = pdfPath
+		ext = ".pdf"
 	}
-	if strings.TrimSpace(text) == "" {
+
+	if ext == ".pdf" {
+		pages, err := rag.ParsePDFPages(parsePath)
+		if err != nil {
+			jsonError(w, "parse: "+err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		for pageIdx, pageText := range pages {
+			for _, c := range rag.SplitText(pageText) {
+				chunks = append(chunks, c)
+				pageNums = append(pageNums, pageIdx+1)
+			}
+		}
+	} else {
+		text, err := rag.ParseFile(tmp.Name())
+		if err != nil {
+			jsonError(w, "parse: "+err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		chunks = rag.SplitText(text)
+		pageNums = make([]int, len(chunks))
+	}
+
+	if strings.TrimSpace(strings.Join(chunks, "")) == "" {
 		jsonError(w, "no text extracted from file", http.StatusUnprocessableEntity)
 		return
 	}
-
-	// Split into chunks
-	chunks := rag.SplitText(text)
 	if len(chunks) == 0 {
 		jsonError(w, "no chunks produced", http.StatusUnprocessableEntity)
 		return
@@ -300,8 +338,23 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract page/slide images for PDF and PPTX (converted to PDF above).
+	// For DOCX: extract embedded images directly from the ZIP.
+	if s.cfg.WorkspaceDir != "" {
+		imgDir := rag.ImageDir(s.cfg.WorkspaceDir, collection, header.Filename)
+		origExt := strings.ToLower(filepath.Ext(header.Filename))
+		if origExt == ".pdf" || origExt == ".pptx" {
+			if err := rag.ExtractPageImages(parsePath, imgDir); err != nil {
+				log.Printf("[rag] warn: could not extract images from %s: %v", header.Filename, err)
+			}
+		} else if origExt == ".docx" {
+			if _, err := rag.ExtractDOCXImages(tmp.Name(), imgDir); err != nil {
+				log.Printf("[rag] warn: could not extract docx images from %s: %v", header.Filename, err)
+			}
+		}
+	}
+
 	// Persist
-	pageNums := make([]int, len(chunks))
 	if err := s.ragStore.UpsertDocument(r.Context(), collection, header.Filename, fileHash, size, chunks, pageNums, embeddings); err != nil {
 		jsonError(w, "store: "+err.Error(), http.StatusInternalServerError)
 		return

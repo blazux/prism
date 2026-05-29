@@ -1079,6 +1079,22 @@ body {
 .tool-block-output.running { color: var(--text3); font-style: italic; }
 .tool-block-output.error   { color: var(--red); }
 
+.tool-block-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 0 4px;
+}
+.tool-block-images img {
+  max-width: 320px;
+  max-height: 220px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+  background: var(--bg);
+  cursor: zoom-in;
+}
+
 /* ── Thinking blocks ─────────────────────────────────────────────────────── */
 
 .thinking-block {

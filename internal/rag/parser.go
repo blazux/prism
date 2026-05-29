@@ -10,13 +10,34 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/xuri/excelize/v2"
 )
 
+// ImageDir returns the directory where page images for a document are stored.
+// Uses the sanitized filename (without extension) — no hash — so the agent can
+// reference the path without risk of copy errors.
+func ImageDir(workspaceDir, collection, filename string) string {
+	base := strings.TrimSuffix(filename, filepath.Ext(filename))
+	safe := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, base)
+	return filepath.Join(workspaceDir, "rag_images", collection, safe)
+}
+
+// PageImagePath returns the path for a specific page image.
+func PageImagePath(workspaceDir, collection, filename string, page int) string {
+	return filepath.Join(ImageDir(workspaceDir, collection, filename), fmt.Sprintf("page-%04d.jpg", page))
+}
+
 // ParseFile extracts plain text from a file based on its extension.
-// Supported: .txt .md .csv .json (raw read), .pdf (pdftotext), .docx (zip+xml), .xlsx (excelize).
+// Supported: .txt .md .csv .json (raw read), .pdf (pdftotext), .docx (zip+xml), .xlsx (excelize), .pptx (zip+xml).
 func ParseFile(path string) (string, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
@@ -26,14 +47,161 @@ func ParseFile(path string) (string, error) {
 		return parseDOCX(path)
 	case ".xlsx":
 		return parseXLSX(path)
+	case ".pptx":
+		return parsePPTX(path)
 	default:
-		// txt, md, csv, json, etc. — read as-is
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 	}
+}
+
+// ConvertToPDF converts a file to PDF using LibreOffice headless mode.
+// The resulting PDF is written to outDir and its path is returned.
+func ConvertToPDF(path, outDir string) (string, error) {
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", err
+	}
+	if err := exec.Command("libreoffice", "--headless", "--convert-to", "pdf", "--outdir", outDir, path).Run(); err != nil {
+		return "", fmt.Errorf("libreoffice: %w (is libreoffice installed?)", err)
+	}
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	return filepath.Join(outDir, base+".pdf"), nil
+}
+
+// ExtractDOCXImages extracts JPEG and PNG images embedded in a DOCX file.
+// Images are saved to outDir as page-0001.jpg, page-0002.png, etc.
+// Returns the number of images extracted.
+func ExtractDOCXImages(path, outDir string) (int, error) {
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		return 0, fmt.Errorf("open docx: %w", err)
+	}
+	defer r.Close()
+
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return 0, err
+	}
+
+	var count int
+	for _, f := range r.File {
+		if !strings.HasPrefix(f.Name, "word/media/") {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(f.Name))
+		if ext == ".jpeg" {
+			ext = ".jpg"
+		}
+		if ext != ".jpg" && ext != ".png" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+		count++
+		dst := filepath.Join(outDir, fmt.Sprintf("page-%04d%s", count, ext))
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			return count, err
+		}
+	}
+	return count, nil
+}
+
+// parsePPTX extracts text from all slides in a PPTX file, one slide per paragraph block.
+func parsePPTX(path string) (string, error) {
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		return "", fmt.Errorf("open pptx: %w", err)
+	}
+	defer r.Close()
+
+	// Collect slide filenames and sort by slide number.
+	var slideNames []string
+	for _, f := range r.File {
+		name := f.Name
+		if strings.HasPrefix(name, "ppt/slides/slide") &&
+			strings.HasSuffix(name, ".xml") &&
+			!strings.Contains(name, "_rels") {
+			slideNames = append(slideNames, name)
+		}
+	}
+	sort.Slice(slideNames, func(i, j int) bool {
+		return pptxSlideNum(slideNames[i]) < pptxSlideNum(slideNames[j])
+	})
+
+	fileMap := make(map[string]*zip.File, len(r.File))
+	for _, f := range r.File {
+		fileMap[f.Name] = f
+	}
+
+	var sb strings.Builder
+	for _, name := range slideNames {
+		f := fileMap[name]
+		if f == nil {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+		text := extractPPTXText(data)
+		if strings.TrimSpace(text) != "" {
+			sb.WriteString(text)
+			sb.WriteString("\n\n")
+		}
+	}
+	return strings.TrimSpace(sb.String()), nil
+}
+
+func pptxSlideNum(name string) int {
+	base := strings.TrimSuffix(filepath.Base(name), ".xml")
+	base = strings.TrimPrefix(base, "slide")
+	n, _ := strconv.Atoi(base)
+	return n
+}
+
+// extractPPTXText pulls text runs (<a:t>) from a DrawingML slide XML.
+func extractPPTXText(data []byte) string {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	var sb strings.Builder
+	inT := false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Local == "t" {
+				inT = true
+			}
+		case xml.EndElement:
+			if t.Name.Local == "t" {
+				inT = false
+			}
+			if t.Name.Local == "p" {
+				sb.WriteByte('\n')
+			}
+		case xml.CharData:
+			if inT {
+				sb.Write(t)
+			}
+		}
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 func parsePDF(path string) (string, error) {

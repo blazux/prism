@@ -242,6 +242,15 @@ web_search → fetch_url (static pages) → browser_get (JS-heavy pages) → bro
 browser_act persists cookies per session — log in once and reuse across calls.
 Screenshots are saved to /workspace/.screenshots/ and served at /screenshots/<file> — display inline: ![desc](/screenshots/file.png)
 
+### RAG and page images
+
+rag_search results include a page number per chunk (e.g. "chunk 11, page 5"). When a chunk references a diagram, figure, or visual content:
+1. Call rag_show_page to load and display the image.
+2. Immediately call add_attachment with the path it returns — this puts the image in your response.
+3. Do NOT recreate the image as ASCII art or describe its layout. Just explain what's relevant.
+
+When the user asks to "see", "show", "display" or "afficher" something visual, steps 1+2 are mandatory.
+
 ### Reminders and custom tools
 
 One-shot reminders → notify(delay_seconds=N) — server-side, reliable. Never use nohup/sleep/curl.
@@ -268,6 +277,7 @@ type Event struct {
 	Path    string          `json:"path,omitempty"`
 	Cols    int             `json:"cols,omitempty"`
 	Height  int             `json:"height,omitempty"`
+	Images  []string        `json:"images,omitempty"`
 }
 
 const (
@@ -623,6 +633,10 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				Type:   "tool_result",
 				ID:     toolID,
 				Output: result,
+				Images: toolImages,
+			}
+			if tc.Function.Name == "add_attachment" && len(toolImages) > 0 {
+				events <- Event{Type: "attachment", Images: toolImages}
 			}
 
 			toolMsg := ollama.Message{Role: "tool", Content: result}

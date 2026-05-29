@@ -9,7 +9,8 @@ let currentAssistantEl = null
 let currentAssistantContent = ''
 const widgets = new Map()
 let grid = null
-let pendingImages = [] // base64 strings (without data-URL prefix) waiting to be sent
+let pendingImages = []      // base64 strings (without data-URL prefix) waiting to be sent
+let pendingAttachments = [] // images queued by add_attachment, injected into next assistant bubble
 let pendingFiles  = [] // {name, text} parsed file attachments waiting to be sent
 let currentSessionID = localStorage.getItem('active-session') || 'default'
 
@@ -85,6 +86,7 @@ function handleServerMsg(msg) {
   switch (msg.type) {
     case 'stream':          appendStream(msg.content); break
     case 'stream_end':      finalizeStream(); break
+    case 'attachment':      pendingAttachments.push(...(msg.images || [])); break
     case 'tool_use':        appendToolUse(msg); break
     case 'tool_result':     appendToolResult(msg); break
     case 'plugin_load':
@@ -272,7 +274,7 @@ window.handleChatKey = function(e) {
   setTimeout(() => autoResizeTextarea(e.target), 0)
 }
 
-window.resetChat  = function() { send({ type: 'reset_chat' }); pendingImages = []; pendingFiles = []; renderPreviews() }
+window.resetChat  = function() { send({ type: 'reset_chat' }); pendingImages = []; pendingFiles = []; pendingAttachments = []; renderPreviews() }
 
 window.cancelChat = function() {
   send({ type: 'cancel' })
@@ -346,6 +348,21 @@ function finalizeStream() {
   if (currentAssistantEl) {
     currentAssistantEl.classList.remove('cursor')
     currentAssistantEl.innerHTML = renderMarkdown(currentAssistantContent)
+    if (pendingAttachments.length > 0) {
+      const assistantDiv = currentAssistantEl.closest('.chat-msg.assistant')
+      if (assistantDiv) {
+        const imgContainer = document.createElement('div')
+        imgContainer.className = 'tool-block-images'
+        pendingAttachments.forEach(b64 => {
+          const img = document.createElement('img')
+          img.src = 'data:image/jpeg;base64,' + b64
+          img.alt = 'attachment'
+          imgContainer.appendChild(img)
+        })
+        assistantDiv.appendChild(imgContainer)
+      }
+      pendingAttachments = []
+    }
     currentAssistantEl = null
     currentAssistantContent = ''
   }
@@ -389,6 +406,20 @@ function appendToolResult(msg) {
     el.classList.remove('running')
     el.textContent = msg.output || '(no output)'
     if (msg.output?.startsWith('ERROR')) el.classList.add('error')
+    if (msg.images && msg.images.length > 0) {
+      const toolBlock = el.closest('.tool-block')
+      if (toolBlock) {
+        const imgContainer = document.createElement('div')
+        imgContainer.className = 'tool-block-images'
+        msg.images.forEach(b64 => {
+          const img = document.createElement('img')
+          img.src = 'data:image/jpeg;base64,' + b64
+          img.alt = 'page image'
+          imgContainer.appendChild(img)
+        })
+        toolBlock.appendChild(imgContainer)
+      }
+    }
   }
   scrollChat()
 }
