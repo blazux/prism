@@ -40,6 +40,7 @@ Is this a great idea? Probably. Does it make you slightly nervous? It should. Th
 | Embeddings | Ollama (any embedding model) |
 | Vector store | PostgreSQL + pgvector |
 | Web search | SearXNG |
+| Service routing | Traefik |
 | Runtime | Docker / Docker Compose |
 
 ---
@@ -64,6 +65,27 @@ Open [http://localhost:48080](http://localhost:48080).
 
 ---
 
+## Embedded services
+
+The agent can spin up full Docker containers on demand — Uptime Kuma, Jupyter, Grafana, ComfyUI, whatever has an image. Each service gets its own subdomain and is embedded directly in the dashboard as a widget iframe.
+
+When the agent calls `docker_run`, Prism:
+1. Auto-allocates a host port from the range `20000–20999`
+2. Adds Traefik labels so the container is routed via `http://<name>.localhost/`
+3. Strips `X-Frame-Options` so the service can be embedded as an iframe from the dashboard
+
+**Why `*.localhost`?** Chrome and Firefox resolve `anything.localhost` to `127.0.0.1` natively — no DNS server, no `/etc/hosts` entries, no configuration. The service runs at the root path `/`, so SPAs, Vue Router, socket.io and anything else work exactly as if you'd accessed it directly, with none of the subdirectory-proxy headaches.
+
+**Why Traefik?** It watches the Docker socket and configures routes automatically when containers appear or disappear. The agent doesn't need to know about it — `docker_run` handles everything.
+
+To embed a service the agent has started, a widget uses a plain iframe:
+
+```html
+<iframe src="http://uptime-kuma.localhost/" style="width:100%;height:100%;border:none"></iframe>
+```
+
+---
+
 ## Configuration
 
 All configuration is done via environment variables (set in `docker-compose.yml` or a `.env` file):
@@ -78,6 +100,8 @@ All configuration is done via environment variables (set in `docker-compose.yml`
 | `WORKSPACE_DIR` | Agent workspace directory | `/workspace` |
 | `PLUGIN_DIR` | Widget storage directory | `/workspace/.plugins` |
 | `TZ` | Timezone for the agent and cron jobs | `America/New_York`, `Europe/Paris` |
+| `SERVICE_PORT_START` | First host port in the auto-allocation range | `20000` |
+| `SERVICE_PORT_END` | Last host port in the auto-allocation range | `20999` |
 
 > **The only required changes are `OLLAMA_URL` and the model names** — everything else works out of the box with the default Docker Compose setup.
 

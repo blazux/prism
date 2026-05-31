@@ -29,16 +29,17 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "docker_run",
-			Description: "Start a Docker service container on the Prism network. The service is accessible at /proxy/<name>/<port>/. --restart=unless-stopped is set automatically — never add a @reboot cron for Docker services. Prefer this over apt/pip installs for self-contained services (ComfyUI, Draw.io, Jupyter, etc.).",
+			Description: "Start a Docker service container. A host port is auto-allocated (20000+) and a Traefik subdomain http://<name>.localhost/ is configured automatically — use this URL for iframes and API calls in widgets. The app runs at root /, so Vue Router, socket.io and all SPAs work without any base-path config. --restart=unless-stopped is set automatically. Prefer this over apt/pip installs for anything that has a Docker image.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"image":   {Type: "string", Description: "Docker image to run (e.g. 'jgraph/drawio')"},
 					"name":    {Type: "string", Description: "Short service name, letters/digits/hyphens only (e.g. 'drawio'). Container will be named prism-svc-<name>."},
-					"port":    {Type: "integer", Description: "Port the service listens on inside the container"},
-					"env":     {Type: "object", Description: "Optional environment variables as key/value pairs"},
-					"volumes": {Type: "array", Description: "Ignored — the workspace (/workspace) is automatically available inside every service container via --volumes-from. Files you write to /workspace/drawio/ are accessible inside the container at /workspace/drawio/."},
-					"gpu":     {Type: "boolean", Description: "Set to true to give the container access to all GPUs (requires nvidia-container-toolkit on the host)"},
+					"port":        {Type: "integer", Description: "Primary port the service listens on inside the container (e.g. 3000 for the UI)"},
+					"extra_ports": {Type: "array", Description: "Additional internal ports to expose (e.g. [9090, 8080] for metrics or API). Each gets its own auto-allocated host port."},
+					"env":         {Type: "object", Description: "Optional environment variables as key/value pairs"},
+					"volumes":     {Type: "array", Description: "Ignored — the workspace (/workspace) is automatically available inside every service container via --volumes-from."},
+					"gpu":         {Type: "boolean", Description: "Set to true to give the container access to all GPUs (requires nvidia-container-toolkit on the host)"},
 				},
 				Required: []string{"image", "name", "port"},
 			},
@@ -150,7 +151,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "apt_install",
-			Description: "Install packages in the workspace container using apt-get.",
+			Description: "Install packages in the workspace container using apt-get. Package names are saved to /workspace/.apt-packages and reinstalled automatically on container restart.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -164,7 +165,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "pip_install",
-			Description: "Install Python packages using pip.",
+			Description: "Install Python packages using pip. Package names are saved to /workspace/.pip-packages and reinstalled automatically on container restart.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -697,7 +698,15 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 				volumes = append(volumes, fmt.Sprintf("%v", v))
 			}
 		}
-		return wrap(e.dockerRun(ctx, str("image"), str("name"), int(portFloat), envMap, volumes, gpu))
+		var extraPorts []int
+		if raw, ok := args["extra_ports"].([]interface{}); ok {
+			for _, v := range raw {
+				if f, ok := v.(float64); ok {
+					extraPorts = append(extraPorts, int(f))
+				}
+			}
+		}
+		return wrap(e.dockerRun(ctx, str("image"), str("name"), int(portFloat), extraPorts, envMap, volumes, gpu))
 	case "docker_stop":
 		return wrap(e.dockerStop(ctx, str("name")))
 	case "docker_ps":
@@ -823,14 +832,24 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 
 // ─── Docker service tools ─────────────────────────────────────────────────────
 
-func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port int, env map[string]string, volumes []string, gpu bool) (string, error) {
+func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port int, extraPorts []int, env map[string]string, volumes []string, gpu bool) (string, error) {
 	if image == "" || name == "" || port == 0 {
 		return "", fmt.Errorf("image, name and port are required")
 	}
-	if err := e.docker.RunService(ctx, name, image, port, env, volumes, gpu); err != nil {
+	allPorts := append([]int{port}, extraPorts...)
+	hostPorts, err := e.docker.RunService(ctx, name, image, allPorts, env, volumes, gpu)
+	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
-	return fmt.Sprintf("Service %q started. Accessible at /proxy/%s/%d/\n\nUse this URL in widgets: window.location.origin + '/proxy/%s/%d/'", name, name, port, name, port), nil
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Service %q started.\n\nPort mappings:\n", name)
+	for i, hp := range hostPorts {
+		fmt.Fprintf(&sb, "  %d → host port %d\n", allPorts[i], hp)
+	}
+	fmt.Fprintf(&sb, "\nIframe URL (preferred):  http://%s.localhost/", name)
+	fmt.Fprintf(&sb, "\nDirect host URL:         http://<hostname>:%d/", hostPorts[0])
+	fmt.Fprintf(&sb, "\nInternal URL (scripts):  http://prism-svc-%s:%d/", name, port)
+	return sb.String(), nil
 }
 
 func (e *ToolExecutor) dockerStop(ctx context.Context, name string) (string, error) {

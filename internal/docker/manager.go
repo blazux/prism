@@ -21,15 +21,50 @@ type ServiceInfo struct {
 }
 
 type Manager struct {
-	containerName string
-	workspaceDir  string
+	containerName  string
+	workspaceDir   string
+	portRangeStart int
+	portRangeEnd   int
 }
 
-func NewManager(containerName, workspaceDir string) *Manager {
-	return &Manager{
-		containerName: containerName,
-		workspaceDir:  workspaceDir,
+func NewManager(containerName, workspaceDir string, portRangeStart, portRangeEnd int) *Manager {
+	if portRangeStart <= 0 {
+		portRangeStart = 20000
 	}
+	if portRangeEnd <= portRangeStart {
+		portRangeEnd = portRangeStart + 999
+	}
+	return &Manager{
+		containerName:  containerName,
+		workspaceDir:   workspaceDir,
+		portRangeStart: portRangeStart,
+		portRangeEnd:   portRangeEnd,
+	}
+}
+
+// allocateHostPorts returns n unused host ports from the configured range.
+func (m *Manager) allocateHostPorts(ctx context.Context, n int) ([]int, error) {
+	out, _ := m.run(ctx, "docker", "ps", "-a",
+		"--filter", "name="+servicePrefix,
+		"--format", "{{.Ports}}")
+	used := make(map[int]bool)
+	for _, line := range strings.Split(out, "\n") {
+		for _, word := range strings.Fields(line) {
+			if p := parseFirstPort(word); p > 0 {
+				used[p] = true
+			}
+		}
+	}
+	var result []int
+	for p := m.portRangeStart; p <= m.portRangeEnd && len(result) < n; p++ {
+		if !used[p] {
+			result = append(result, p)
+		}
+	}
+	if len(result) < n {
+		return nil, fmt.Errorf("not enough free ports in range %d-%d (need %d)", m.portRangeStart, m.portRangeEnd, n)
+	}
+	return result, nil
 }
 
 func (m *Manager) EnsureRunning(ctx context.Context) error {
@@ -166,8 +201,18 @@ func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string
 }
 
 // RunService starts a named service container on the same Docker network as the
-// workspace. The container is named prism-svc-<name> and restarts automatically.
-func (m *Manager) RunService(ctx context.Context, name, image string, port int, env map[string]string, volumes []string, gpu bool) error {
+// workspace. The container is named prism-svc-<name>, restarts automatically,
+// and is exposed on an auto-allocated host port from the configured range.
+// Returns the allocated host port.
+func (m *Manager) RunService(ctx context.Context, name, image string, ports []int, env map[string]string, volumes []string, gpu bool) ([]int, error) {
+	if len(ports) == 0 {
+		return nil, fmt.Errorf("at least one port is required")
+	}
+	hostPorts, err := m.allocateHostPorts(ctx, len(ports))
+	if err != nil {
+		return nil, err
+	}
+
 	// Detect network from the workspace container so services land on the same network.
 	netOut, _ := m.run(ctx, "docker", "inspect",
 		"--format", "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}",
@@ -186,8 +231,15 @@ func (m *Manager) RunService(ctx context.Context, name, image string, port int, 
 		"--name", servicePrefix + name,
 		"--network", net,
 		"--restart", "unless-stopped",
-		// Share the workspace volume so /workspace is available inside the service container.
 		"--volumes-from", m.containerName,
+		// Traefik labels: route <name>.localhost → container on its primary port.
+		"--label", "traefik.enable=true",
+		"--label", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.localhost`)", name, name),
+		"--label", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", name, ports[0]),
+		"--label", fmt.Sprintf("traefik.http.routers.%s.middlewares=strip-frames@docker", name),
+	}
+	for i, hp := range hostPorts {
+		args = append(args, "-p", fmt.Sprintf("%d:%d", hp, ports[i]))
 	}
 	if gpu {
 		args = append(args, "--gpus", "all")
@@ -195,14 +247,13 @@ func (m *Manager) RunService(ctx context.Context, name, image string, port int, 
 	for k, v := range env {
 		args = append(args, "-e", k+"="+v)
 	}
-	// volumes are ignored: workspace is already mounted via --volumes-from.
 	_ = volumes
 	args = append(args, image)
 
 	if _, err := m.run(ctx, "docker", args...); err != nil {
-		return fmt.Errorf("docker run: %w", err)
+		return nil, fmt.Errorf("docker run: %w", err)
 	}
-	return nil
+	return hostPorts, nil
 }
 
 // StopService stops and removes a service container.

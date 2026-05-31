@@ -4,6 +4,7 @@ import (
 	"embed"
 	"log"
 	"os"
+	"strconv"
 	_ "time/tzdata" // embed IANA timezone database so TZ env var works without tzdata installed
 
 	"prism/internal/server"
@@ -53,22 +54,27 @@ func main() {
 
 	postgresURL := os.Getenv("POSTGRES_URL")
 
+	servicePortStart, _ := strconv.Atoi(os.Getenv("SERVICE_PORT_START"))
+	servicePortEnd, _ := strconv.Atoi(os.Getenv("SERVICE_PORT_END"))
+
 	embedModel := os.Getenv("EMBED_MODEL")
 	if embedModel == "" {
 		embedModel = "qwen3-embedding:8b"
 	}
 
 	cfg := server.Config{
-		Port:           port,
-		WorkspaceDir:   workspaceDir,
-		PluginDir:      pluginDir,
-		OllamaURL:      ollamaURL,
-		Model:          model,
-		AgentContainer: agentContainer,
-		SearxngURL:     searxngURL,
-		PostgresURL:    postgresURL,
-		EmbedModel:     embedModel,
-		WebFS:          webFS,
+		Port:             port,
+		WorkspaceDir:     workspaceDir,
+		PluginDir:        pluginDir,
+		OllamaURL:        ollamaURL,
+		Model:            model,
+		AgentContainer:   agentContainer,
+		SearxngURL:       searxngURL,
+		PostgresURL:      postgresURL,
+		EmbedModel:       embedModel,
+		WebFS:            webFS,
+		ServicePortStart: servicePortStart,
+		ServicePortEnd:   servicePortEnd,
 	}
 
 	srv := server.New(cfg)

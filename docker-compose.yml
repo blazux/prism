@@ -21,9 +21,32 @@ services:
     extra_hosts:
       - "host-gateway:host-gateway"
     container_name: prism-server
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prism.rule=Host(`prism.localhost`)"
+      - "traefik.http.services.prism.loadbalancer.server.port=8080"
+      # Shared middleware: strip X-Frame-Options and CSP frame-ancestors so any
+      # service container can be embedded as an iframe from prism.localhost.
+      - "traefik.http.middlewares.strip-frames.headers.customResponseHeaders.X-Frame-Options="
+      - "traefik.http.middlewares.strip-frames.headers.customResponseHeaders.Content-Security-Policy="
     depends_on:
       - searxng
       - postgres
+    restart: unless-stopped
+
+  # Traefik reverse proxy — routes *.localhost subdomains to service containers
+  traefik:
+    image: traefik:v3.2
+    container_name: prism-traefik
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=prism_default"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
 
   # Agent workspace container — the AI executes code here
