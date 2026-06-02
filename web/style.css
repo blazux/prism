@@ -1776,3 +1776,67 @@ body {
 }
 .mcp-add-status.ok    { color: var(--green); }
 .mcp-add-status.error { color: var(--red); }
+
+/* ── Login overlay ────────────────────────────────────────────────────────── */
+#login-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+#login-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(90vw, 340px);
+  background: var(--bg1);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  padding: 32px 28px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.login-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+#login-input {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+  box-sizing: border-box;
+  width: 100%;
+  transition: border-color .15s;
+  font-family: monospace;
+  letter-spacing: .1em;
+}
+#login-input:focus { border-color: var(--accent); }
+#login-error {
+  display: none;
+  font-size: 12px;
+  color: var(--red);
+}
+#login-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 9px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+#login-btn:hover   { opacity: .85; }
+#login-btn:disabled { opacity: .5; cursor: default; }

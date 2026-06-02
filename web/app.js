@@ -1229,20 +1229,61 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
 }
 
 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+async function submitLogin() {
+  const input = document.getElementById('login-input')
+  const err   = document.getElementById('login-error')
+  const btn   = document.getElementById('login-btn')
+  err.style.display = 'none'
+  btn.disabled = true
+  btn.textContent = '…'
+  try {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: input.value })
+    })
+    if (res.ok) {
+      location.reload()
+    } else {
+      err.style.display = 'block'
+      input.value = ''
+      input.focus()
+    }
+  } finally {
+    btn.disabled = false
+    btn.textContent = 'Sign in'
+  }
+}
+
+window.submitLogin = submitLogin
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
-initGrid()
-// Force GridStack to recalculate column widths after first paint
-requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
-updateSettingsLink()
-connect()
-loadModels()
-setInterval(loadModels, 30000)
-
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    if (editorPath) closeEditor()
-    else if (notifPanelOpen) toggleNotifPanel()
-    else if (chatOpen) toggleChat()
+async function initApp() {
+  const res  = await fetch('/api/auth')
+  const data = await res.json()
+  if (!data.authenticated) {
+    document.getElementById('login-overlay').style.display = 'flex'
+    document.getElementById('login-input').focus()
+    return
   }
-})
+
+  initGrid()
+  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
+  updateSettingsLink()
+  connect()
+  loadModels()
+  setInterval(loadModels, 30000)
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (editorPath) closeEditor()
+      else if (notifPanelOpen) toggleNotifPanel()
+      else if (chatOpen) toggleChat()
+    }
+  })
+}
+
+initApp()

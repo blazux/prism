@@ -251,6 +251,9 @@ html, body { height: 100%; overflow: hidden; margin: 0; }
       <span class="logo" style="color:var(--text2);font-size:13px;font-weight:600">Settings</span>
       <span id="session-badge" style="font-size:10.5px;color:var(--text3);background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:2px 7px;margin-left:4px"></span>
     </div>
+    <div class="header-right">
+      <button id="logout-btn" onclick="logout()" style="display:none;background:transparent;border:1px solid var(--border2);color:var(--text3);font-size:11.5px;padding:4px 10px;border-radius:var(--radius);cursor:pointer;transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--text3)';this.style.borderColor='var(--border2)'">Sign out</button>
+    </div>
   </header>
 
   <div id="settings-main">
@@ -980,6 +983,16 @@ function showToast(msg, isError = false) {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.getElementById('modal-overlay').classList.remove('visible')
 })
+
+fetch('/api/auth').then(r => r.json()).then(d => {
+  if (!d.authenticated) { location.href = '/'; return }
+  if (d.auth_enabled) document.getElementById('logout-btn').style.display = 'block'
+})
+
+async function logout() {
+  await fetch('/api/auth', { method: 'DELETE' })
+  location.href = '/'
+}
 </script>
 </body>
 </html>

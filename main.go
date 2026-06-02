@@ -62,6 +62,8 @@ func main() {
 		embedModel = "qwen3-embedding:8b"
 	}
 
+	authToken := os.Getenv("PRISM_TOKEN")
+
 	cfg := server.Config{
 		Port:             port,
 		WorkspaceDir:     workspaceDir,
@@ -72,6 +74,7 @@ func main() {
 		SearxngURL:       searxngURL,
 		PostgresURL:      postgresURL,
 		EmbedModel:       embedModel,
+		AuthToken:        authToken,
 		WebFS:            webFS,
 		ServicePortStart: servicePortStart,
 		ServicePortEnd:   servicePortEnd,
