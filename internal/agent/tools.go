@@ -38,6 +38,7 @@ var ToolDefinitions = []ollama.Tool{
 					"port":        {Type: "integer", Description: "Primary port the service listens on inside the container (e.g. 3000 for the UI)"},
 					"extra_ports": {Type: "array", Description: "Additional internal ports to expose (e.g. [9090, 8080] for metrics or API). Each gets its own auto-allocated host port."},
 					"env":         {Type: "object", Description: "Optional environment variables as key/value pairs"},
+					"command":     {Type: "string", Description: "Optional command to override the image's default entrypoint (e.g. 'tail -f /dev/null' to keep a CLI image alive, or 'nginx -g daemon off;'). Leave empty to use the image default."},
 					"volumes":     {Type: "array", Description: "Ignored — the workspace (/workspace) is automatically available inside every service container via --volumes-from."},
 					"gpu":         {Type: "boolean", Description: "Set to true to give the container access to all GPUs (requires nvidia-container-toolkit on the host)"},
 				},
@@ -93,8 +94,23 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "docker_exec",
+			Description: "Execute a shell command inside a service container started with docker_run. Use this to inspect, configure, or debug a running service container.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"name":    {Type: "string", Description: "Service name as given to docker_run"},
+					"command": {Type: "string", Description: "The shell command to execute inside the container"},
+				},
+				Required: []string{"name", "command"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "exec_command",
-			Description: "Execute a shell command in the workspace container. Use this to run code, compile, test, manage files, etc. Note: the Docker CLI is NOT available here — use docker_run/docker_stop/docker_ps/docker_logs/docker_list to manage containers.",
+			Description: "Execute a shell command in the workspace container. Use this to run code, compile, test, manage files, etc. Note: the Docker CLI is NOT available here — use docker_run/docker_stop/docker_ps/docker_logs/docker_list/docker_exec to manage containers.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -706,7 +722,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 				}
 			}
 		}
-		return wrap(e.dockerRun(ctx, str("image"), str("name"), int(portFloat), extraPorts, envMap, volumes, gpu))
+		return wrap(e.dockerRun(ctx, str("image"), str("name"), int(portFloat), extraPorts, str("command"), envMap, volumes, gpu))
 	case "docker_stop":
 		return wrap(e.dockerStop(ctx, str("name")))
 	case "docker_ps":
@@ -720,6 +736,8 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.dockerLogs(ctx, str("name"), tail))
 	case "docker_list":
 		return wrap(e.dockerList(ctx))
+	case "docker_exec":
+		return wrap(e.dockerExecService(ctx, str("name"), str("command")))
 	case "exec_command":
 		return wrap(e.execCommand(ctx, str("command")))
 	case "write_file":
@@ -832,12 +850,12 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 
 // ─── Docker service tools ─────────────────────────────────────────────────────
 
-func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port int, extraPorts []int, env map[string]string, volumes []string, gpu bool) (string, error) {
+func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port int, extraPorts []int, command string, env map[string]string, volumes []string, gpu bool) (string, error) {
 	if image == "" || name == "" || port == 0 {
 		return "", fmt.Errorf("image, name and port are required")
 	}
 	allPorts := append([]int{port}, extraPorts...)
-	hostPorts, err := e.docker.RunService(ctx, name, image, allPorts, env, volumes, gpu)
+	hostPorts, err := e.docker.RunService(ctx, name, image, allPorts, command, env, volumes, gpu)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
@@ -875,7 +893,7 @@ func (e *ToolExecutor) dockerPS(ctx context.Context) (string, error) {
 	for _, s := range services {
 		portInfo := ""
 		if s.Port > 0 {
-			portInfo = fmt.Sprintf(" — /proxy/%s/%d/", s.Name, s.Port)
+			portInfo = fmt.Sprintf(" — http://%s.localhost/  (host port %d)", s.Name, s.Port)
 		}
 		fmt.Fprintf(&sb, "  • %s (%s) — %s%s\n", s.Name, s.Image, s.Status, portInfo)
 	}
@@ -912,6 +930,23 @@ func (e *ToolExecutor) dockerLogs(ctx context.Context, name string, tail int) (s
 	}
 	if strings.TrimSpace(out) == "" {
 		return fmt.Sprintf("No logs for service %q.", name), nil
+	}
+	return out, nil
+}
+
+func (e *ToolExecutor) dockerExecService(ctx context.Context, name, command string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	if command == "" {
+		return "", fmt.Errorf("command is required")
+	}
+	out, err := e.docker.ExecService(ctx, name, command, 2*time.Minute)
+	if err != nil {
+		return fmt.Sprintf("ERROR: %v", err), nil
+	}
+	if strings.TrimSpace(out) == "" {
+		return fmt.Sprintf("Command executed in container %q (no output).", name), nil
 	}
 	return out, nil
 }

@@ -204,7 +204,7 @@ func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string
 // workspace. The container is named prism-svc-<name>, restarts automatically,
 // and is exposed on an auto-allocated host port from the configured range.
 // Returns the allocated host port.
-func (m *Manager) RunService(ctx context.Context, name, image string, ports []int, env map[string]string, volumes []string, gpu bool) ([]int, error) {
+func (m *Manager) RunService(ctx context.Context, name, image string, ports []int, command string, env map[string]string, volumes []string, gpu bool) ([]int, error) {
 	if len(ports) == 0 {
 		return nil, fmt.Errorf("at least one port is required")
 	}
@@ -248,7 +248,16 @@ func (m *Manager) RunService(ctx context.Context, name, image string, ports []in
 		args = append(args, "-e", k+"="+v)
 	}
 	_ = volumes
+	if command != "" {
+		// Clear the image's default entrypoint so our command runs directly
+		// as sh -c "...". Without this, images with ENTRYPOINT ["/bin/bash"]
+		// would interpret our args as bash arguments instead of a new command.
+		args = append(args, "--entrypoint", "")
+	}
 	args = append(args, image)
+	if command != "" {
+		args = append(args, "sh", "-c", command)
+	}
 
 	if _, err := m.run(ctx, "docker", args...); err != nil {
 		return nil, fmt.Errorf("docker run: %w", err)
@@ -260,6 +269,16 @@ func (m *Manager) RunService(ctx context.Context, name, image string, ports []in
 func (m *Manager) StopService(ctx context.Context, name string) error {
 	_, err := m.run(ctx, "docker", "rm", "-f", servicePrefix+name)
 	return err
+}
+
+// ExecService runs a shell command inside a named service container.
+func (m *Manager) ExecService(ctx context.Context, name, command string, timeout time.Duration) (string, error) {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	return m.run(ctx, "docker", "exec", servicePrefix+name, "sh", "-c", command)
 }
 
 // ListServices returns all prism-svc-* containers.

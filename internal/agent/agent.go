@@ -263,6 +263,7 @@ Rules:
 - The Docker CLI is not available in exec_command (workspace container). Only use docker_* tools to manage containers.
 - The workspace (/workspace) is automatically mounted in every service container. Files at /workspace/foo/ are accessible inside the container at /workspace/foo/ — no volume parameter needed.
 - After docker_run, use docker_logs to confirm the service is healthy before building a widget.
+- To run a command inside a service container, use docker_exec(name, command). Use it to inspect state, run migrations, configure the service, install extra packages inside the container, etc.
 - Widget iframes and fetch/WS calls → http://<name>.localhost/ (Traefik, X-Frame-Options stripped, app at root /)
 - exec_command / tools / cron → http://prism-svc-<name>:<internal-port>/ (Docker internal network)
 

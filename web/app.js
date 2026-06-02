@@ -713,7 +713,7 @@ function renderSessionSwitcher(sessions) {
     rename.textContent = '✎'
     rename.onclick = async (e) => {
       e.stopPropagation()
-      const newName = prompt('Rename session:', sess.name)
+      const newName = prompt('Rename board:', sess.name)
       if (!newName || newName.trim() === sess.name) return
       await fetch(`/api/sessions/${sess.id}`, {
         method: 'PATCH',
@@ -731,7 +731,7 @@ function renderSessionSwitcher(sessions) {
       del.textContent = '×'
       del.onclick = async (e) => {
         e.stopPropagation()
-        if (!confirm(`Delete session "${sess.name}" and all its history?`)) return
+        if (!confirm(`Delete board "${sess.name}" and all its history?`)) return
         await fetch(`/api/sessions/${sess.id}`, { method: 'DELETE' })
         loadSessions()
       }
@@ -760,7 +760,7 @@ function switchToSession(id) {
 
 async function promptNewSession() {
   closeSessionMenu()
-  const name = prompt('New session name:')
+  const name = prompt('New board name:')
   if (!name || !name.trim()) return
   try {
     const res = await fetch('/api/sessions', {
