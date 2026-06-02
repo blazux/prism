@@ -487,7 +487,7 @@ function formatToolInput(tool, inp) {
     case 'pip_install':       return `pip install ${inp.packages}`
     case 'add_widget':        return `"${inp.title}" — cols=${inp.cols||1} height=${inp.height||280}px`
     case 'remove_widget':     return `remove widget: ${inp.id}`
-    case 'fetch_url':         return inp.url
+    case 'http_request':      return `${inp.method||'GET'} ${inp.url}`
     case 'web_search':        return `🔍 ${inp.query}`
     case 'browser_get':       return `🌐 ${inp.url}`
     case 'notify':            return inp.delay_seconds > 0 ? `🔔 in ${inp.delay_seconds}s — ${inp.title}` : `🔔 ${inp.title}`

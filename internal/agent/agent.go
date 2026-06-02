@@ -98,7 +98,7 @@ Reliable iframe embeds (no key needed):
 - Google Maps: https://maps.google.com/maps?saddr=ORIGIN&daddr=DEST&output=embed
 - OpenStreetMap: https://www.openstreetmap.org/export/embed.html?bbox=LON1,LAT1,LON2,LAT2&layer=mapnik
 - YouTube: https://www.youtube.com/embed/VIDEO_ID
-Most news/content sites block embedding — use fetch_url and render inline instead.
+Most news/content sites block embedding — use http_request and render inline instead.
 
 Free APIs (no key):
 - Weather: https://api.open-meteo.com/v1/forecast?latitude=LAT&longitude=LON&current=temperature_2m,weathercode,windspeed_10m
@@ -123,7 +123,7 @@ docker_run automatically allocates a host port from the configured range and exp
 Install workflow:
 1. Start the service: docker_run(image, name, port=<internal port>)
    The tool returns the allocated host port and confirms the Traefik subdomain http://<name>.localhost/.
-2. Verify it's up: fetch_url http://prism-svc-<name>:<internal-port>/  (internal Docker network)
+2. Verify it's up: http_request http://prism-svc-<name>:<internal-port>/  (internal Docker network)
 3. Build the widget — choose the right URL depending on use case:
 
    IFRAME EMBED → use the Traefik subdomain (app at root /, X-Frame-Options stripped, Vue Router works):
@@ -217,8 +217,8 @@ For data that updates on a schedule rather than on user demand. A cron job write
 
 **Step 1 — Test the data source before writing any HTML:**
 - Custom tool: exec_command python3 /workspace/agent_tools/<name>.py '{"arg":"val"}' and read the actual JSON output. Use the real field names you observe when writing the widget.
-- Polling file: fetch_url http://prism-server:8080/data/<name>.json
-- Docker service: fetch_url http://prism-svc-<name>:<internal-port>/some/endpoint
+- Polling file: http_request http://prism-server:8080/data/<name>.json
+- Docker service: http_request http://prism-svc-<name>:<internal-port>/some/endpoint
 
 **Step 2 — Preview before deploying:**
 1. write_file /workspace/widget_data/preview.html with your widget HTML (substitute the real session ID in fetch URLs).
@@ -250,7 +250,7 @@ Cron jobs can retrieve stored secrets via the HTTP API:
 
 ### Web and browser tasks
 
-web_search → fetch_url (static pages) → browser_get (JS-heavy pages) → browser_act (interactive: clicks, forms, login flows).
+web_search → http_request (static pages, APIs, POST/PUT) → browser_get (JS-heavy pages) → browser_act (interactive: clicks, forms, login flows).
 browser_act persists cookies per session — log in once and reuse across calls.
 Screenshots are saved to /workspace/.screenshots/ and served at /screenshots/<file> — display inline: ![desc](/screenshots/file.png)
 

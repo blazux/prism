@@ -34,7 +34,7 @@ PRISM is a self-hosted AI dashboard. The Go server (`main.go` → `internal/serv
 **Request flow:**
 1. Browser connects via WebSocket (`/ws?session=<id>`)
 2. `server.go` creates a per-connection `Client` with its own `Agent` instance
-3. Chat messages call `agent.Chat()` which loops: call Ollama → execute tool calls → feed results back → repeat (max 50 iterations)
+3. Chat messages call `agent.Chat()` which loops: call Ollama → execute tool calls → feed results back → repeat (max 75 iterations)
 4. Events stream back to the browser as JSON over WebSocket
 
 **Key packages:**

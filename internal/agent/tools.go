@@ -166,6 +166,20 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "delete_file",
+			Description: "Delete a file from the workspace.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"path": {Type: "string", Description: "File path relative to /workspace"},
+				},
+				Required: []string{"path"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "apt_install",
 			Description: "Install packages in the workspace container using apt-get. Package names are saved to /workspace/.apt-packages and reinstalled automatically on container restart.",
 			Parameters: ollama.ToolParameters{
@@ -234,6 +248,24 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "update_widget",
+			Description: "Update an existing widget's content, title, or size without removing and re-adding it. Only the fields you provide are changed.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"id":      {Type: "string", Description: "Widget ID to update"},
+					"title":   {Type: "string", Description: "New title (omit to keep current)"},
+					"content": {Type: "string", Description: "New HTML content (omit to keep current)"},
+					"cols":    {Type: "integer", Description: "New width: 1=small, 2=medium, 3=full-width (omit to keep current)"},
+					"height":  {Type: "integer", Description: "New height in pixels (omit to keep current)"},
+				},
+				Required: []string{"id"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "show_in_editor",
 			Description: "Open a file in the user's editor. Does not return the file content — use read_file for that.",
 			Parameters: ollama.ToolParameters{
@@ -290,12 +322,15 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "fetch_url",
-			Description: "Fetch a URL and return its readable text content. Good for static pages: docs, articles, GitHub, Wikipedia, APIs. For JS-heavy SPAs use browser_get instead.",
+			Name:        "http_request",
+			Description: "Make an HTTP request and return the response. For GET requests to HTML pages, returns readable text. For APIs and other content types, returns the raw response body. For JS-heavy SPAs use browser_get instead.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"url": {Type: "string", Description: "The URL to fetch (http or https)"},
+					"method":  {Type: "string", Description: "HTTP method: GET, POST, PUT, DELETE, PATCH (default: GET)"},
+					"url":     {Type: "string", Description: "The URL to request (http or https)"},
+					"headers": {Type: "object", Description: "Optional HTTP headers as key/value pairs (e.g. {\"Authorization\": \"Bearer token\", \"Content-Type\": \"application/json\"})"},
+					"body":    {Type: "string", Description: "Request body for POST/PUT/PATCH requests (e.g. JSON string)"},
 				},
 				Required: []string{"url"},
 			},
@@ -305,7 +340,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "web_search",
-			Description: "Search the web. Returns titles, URLs, and snippets for the top results. Use fetch_url or browser_get to read a full page afterwards.",
+			Description: "Search the web. Returns titles, URLs, and snippets for the top results. Use http_request or browser_get to read a full page afterwards.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -359,6 +394,21 @@ var ToolDefinitions = []ollama.Tool{
 					"collection": {Type: "string", Description: "Collection name — omit to list all collections, provide to list its documents"},
 				},
 				Required: []string{},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "rag_delete",
+			Description: "Delete a document from a RAG collection, or delete an entire collection. If document is omitted, the whole collection is deleted.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"collection": {Type: "string", Description: "Collection name"},
+					"document":   {Type: "string", Description: "Document filename to delete (as shown by rag_list). Omit to delete the entire collection."},
+				},
+				Required: []string{"collection"},
 			},
 		},
 	},
@@ -750,6 +800,8 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 			path = "."
 		}
 		return wrap(e.listFiles(path))
+	case "delete_file":
+		return wrap(e.deleteFile(str("path")))
 	case "apt_install":
 		return wrap(e.aptInstall(ctx, str("packages")))
 	case "pip_install":
@@ -770,6 +822,10 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.listUIPlugins())
 	case "remove_widget":
 		return wrap(e.removeUIPlugin(str("id")))
+	case "update_widget":
+		colsFloat, _ := args["cols"].(float64)
+		heightFloat, _ := args["height"].(float64)
+		return wrap(e.updateUIPlugin(str("id"), str("title"), str("content"), int(colsFloat), int(heightFloat)))
 	case "show_in_editor":
 		return wrap(e.openFile(str("path")))
 	case "cron_list":
@@ -778,8 +834,19 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.cronAdd(ctx, str("name"), str("schedule"), str("command")))
 	case "cron_remove":
 		return wrap(e.cronRemove(ctx, str("name")))
-	case "fetch_url":
-		return wrap(e.fetchURL(ctx, str("url")))
+	case "http_request":
+		headersRaw, _ := args["headers"].(map[string]interface{})
+		headers := make(map[string]string, len(headersRaw))
+		for k, v := range headersRaw {
+			if s, ok := v.(string); ok {
+				headers[k] = s
+			}
+		}
+		method := str("method")
+		if method == "" {
+			method = "GET"
+		}
+		return wrap(e.httpRequest(ctx, method, str("url"), headers, str("body")))
 	case "web_search":
 		return wrap(e.webSearch(ctx, str("query")))
 	case "browser_get":
@@ -805,6 +872,8 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 			return wrap(e.ragListDocuments(ctx, col))
 		}
 		return wrap(e.ragListCollections(ctx))
+	case "rag_delete":
+		return wrap(e.ragDelete(ctx, str("collection"), str("document")))
 	case "save_user_info":
 		return wrap(e.saveUserInfo(ctx, str("topic"), str("content")))
 	case "save_learning":
@@ -1028,6 +1097,21 @@ func (e *ToolExecutor) readFile(path string) (string, error) {
 	return content, nil
 }
 
+func (e *ToolExecutor) deleteFile(path string) (string, error) {
+	path = filepath.Clean(normalizeWorkspacePath(path))
+	if strings.HasPrefix(path, "..") {
+		return "", fmt.Errorf("invalid path")
+	}
+	fullPath := filepath.Join(e.workspaceDir, path)
+	if err := os.Remove(fullPath); err != nil {
+		return "", err
+	}
+	if e.onFileChange != nil {
+		e.onFileChange()
+	}
+	return fmt.Sprintf("Deleted %s", path), nil
+}
+
 func (e *ToolExecutor) listFiles(path string) (string, error) {
 	path = filepath.Clean(normalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
@@ -1171,6 +1255,55 @@ func (e *ToolExecutor) addUIPlugin(id, title, content string, cols, height int) 
 	return fmt.Sprintf("Widget '%s' added to dashboard (cols=%d, height=%dpx)", title, cols, height), nil
 }
 
+func (e *ToolExecutor) updateUIPlugin(id, title, content string, cols, height int) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("id is required")
+	}
+	metaPath := filepath.Join(e.pluginDir, id+".meta.json")
+	htmlPath := filepath.Join(e.pluginDir, id+".html")
+
+	b, err := os.ReadFile(metaPath)
+	if err != nil {
+		return "", fmt.Errorf("widget '%s' not found", id)
+	}
+	var m pluginMeta
+	if err := json.Unmarshal(b, &m); err != nil {
+		return "", fmt.Errorf("corrupt widget meta: %w", err)
+	}
+	if m.Locked {
+		return "", fmt.Errorf("widget '%s' is locked by the user and cannot be updated", id)
+	}
+
+	if title != "" {
+		m.Title = title
+	}
+	if cols >= 1 && cols <= 3 {
+		m.Cols = cols
+	}
+	if height > 0 {
+		m.Height = height
+	}
+
+	meta, _ := json.Marshal(m)
+	if err := os.WriteFile(metaPath, meta, 0644); err != nil {
+		return "", fmt.Errorf("write meta: %w", err)
+	}
+
+	if content != "" {
+		if err := os.WriteFile(htmlPath, []byte(content), 0644); err != nil {
+			return "", fmt.Errorf("write content: %w", err)
+		}
+	} else {
+		existing, _ := os.ReadFile(htmlPath)
+		content = string(existing)
+	}
+
+	if e.onPluginAdd != nil {
+		e.onPluginAdd(id, m.Title, content, m.Cols, m.Height)
+	}
+	return fmt.Sprintf("Widget '%s' updated", id), nil
+}
+
 func (e *ToolExecutor) removeUIPlugin(id string) (string, error) {
 	metaPath := filepath.Join(e.pluginDir, id+".meta.json")
 	htmlPath := filepath.Join(e.pluginDir, id+".html")
@@ -1205,52 +1338,64 @@ func (e *ToolExecutor) openFile(path string) (string, error) {
 
 // ─── Web tools ────────────────────────────────────────────────────────────────
 
-func (e *ToolExecutor) fetchURL(ctx context.Context, rawURL string) (string, error) {
+func (e *ToolExecutor) httpRequest(ctx context.Context, method, rawURL string, headers map[string]string, body string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return "", fmt.Errorf("invalid URL: must start with http:// or https://")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	var bodyReader io.Reader
+	if body != "" {
+		bodyReader = strings.NewReader(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(method), rawURL, bodyReader)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.9")
+
+	if method == "GET" || method == "" {
+		req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.9")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch failed: %w", err)
+		return "", fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		return fmt.Sprintf("HTTP %d %s", resp.StatusCode, resp.Status), nil
-	}
-
 	ct := resp.Header.Get("Content-Type")
-	if ct != "" && !strings.Contains(ct, "html") {
-		// Non-HTML: return raw truncated content
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8000))
-		return string(body), nil
+	isHTML := strings.Contains(ct, "html")
+
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4000))
+		return fmt.Sprintf("HTTP %d %s\n%s", resp.StatusCode, resp.Status, string(raw)), nil
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
-	if err != nil {
-		return "", fmt.Errorf("read body: %w", err)
+	if isHTML && (method == "GET" || method == "") {
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+		if err != nil {
+			return "", fmt.Errorf("read body: %w", err)
+		}
+		doc, err := html.Parse(strings.NewReader(string(raw)))
+		if err != nil {
+			return "", fmt.Errorf("parse HTML: %w", err)
+		}
+		text := extractText(doc)
+		if len(text) > 8000 {
+			text = text[:8000] + "\n...[truncated]"
+		}
+		return text, nil
 	}
 
-	doc, err := html.Parse(strings.NewReader(string(body)))
-	if err != nil {
-		return "", fmt.Errorf("parse HTML: %w", err)
-	}
-
-	text := extractText(doc)
-	if len(text) > 8000 {
-		text = text[:8000] + "\n...[truncated]"
-	}
-	return text, nil
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8000))
+	result := fmt.Sprintf("HTTP %d\n%s", resp.StatusCode, string(raw))
+	return result, nil
 }
 
 func (e *ToolExecutor) webSearch(ctx context.Context, query string) (string, error) {
@@ -1952,6 +2097,36 @@ func (e *ToolExecutor) ragListDocuments(ctx context.Context, collection string) 
 			d.Filename, d.ChunkCount, d.SizeBytes, d.UpdatedAt.Format("2006-01-02 15:04"))
 	}
 	return sb.String(), nil
+}
+
+func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document string) (string, error) {
+	if e.ragStore == nil {
+		return "RAG not available (Postgres not configured)", nil
+	}
+	if collection == "" {
+		return "", fmt.Errorf("collection is required")
+	}
+
+	if document == "" {
+		if err := e.ragStore.DeleteCollection(ctx, collection); err != nil {
+			return fmt.Sprintf("ERROR: %v", err), nil
+		}
+		return fmt.Sprintf("Collection %q deleted", collection), nil
+	}
+
+	docs, err := e.ragStore.ListDocuments(ctx, collection)
+	if err != nil {
+		return fmt.Sprintf("ERROR: %v", err), nil
+	}
+	for _, d := range docs {
+		if d.Filename == document {
+			if err := e.ragStore.DeleteDocument(ctx, d.ID); err != nil {
+				return fmt.Sprintf("ERROR: %v", err), nil
+			}
+			return fmt.Sprintf("Document %q deleted from collection %q", document, collection), nil
+		}
+	}
+	return fmt.Sprintf("Document %q not found in collection %q", document, collection), nil
 }
 
 // ─── Learnings tool ───────────────────────────────────────────────────────────
