@@ -444,7 +444,6 @@ function clearChat() {
 function restoreChatHistory(messages) {
   if (!messages || messages.length === 0) return
   const msgs = document.getElementById('chat-messages')
-  // Add a subtle separator so the user knows this is past history
   const sep = document.createElement('div')
   sep.className = 'chat-history-sep'
   sep.textContent = '— previous conversation —'
@@ -457,10 +456,28 @@ function restoreChatHistory(messages) {
       div.className = 'chat-msg user'
       div.innerHTML = `<div class="chat-msg-role">You${timeBadge}</div><div class="chat-msg-content">${escHtml(m.content)}</div>`
       msgs.appendChild(div)
-    } else if (m.role === 'assistant') {
+    } else if (m.role === 'assistant' && m.content) {
       const div = document.createElement('div')
       div.className = 'chat-msg assistant'
       div.innerHTML = `<div class="chat-msg-role">AI${timeBadge}</div><div class="chat-msg-content">${renderMarkdown(m.content)}</div>`
+      msgs.appendChild(div)
+    } else if (m.role === 'tool') {
+      let inputStr = ''
+      try {
+        const inp = typeof m.toolInput === 'string' ? JSON.parse(m.toolInput) : m.toolInput
+        inputStr = formatToolInput(m.toolName, inp)
+      } catch { inputStr = '' }
+      const isError = m.content && m.content.startsWith('ERROR')
+      const div = document.createElement('div')
+      div.className = 'chat-msg tool'
+      div.innerHTML = `
+        <div class="tool-block">
+          <div class="tool-block-header">
+            <span class="tool-block-name">${escHtml(m.toolName || 'tool')}</span>
+            <span class="tool-block-input-inline">${escHtml(inputStr)}</span>
+          </div>
+          <div class="tool-block-output${isError ? ' error' : ''}">${escHtml(m.content || '(no output)')}</div>
+        </div>`
       msgs.appendChild(div)
     }
   }

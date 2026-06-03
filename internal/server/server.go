@@ -456,31 +456,53 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Restore persisted conversation history for the UI
 	if ms != nil {
 		if entries, err := ms.LoadHistory(r.Context(), sessionID); err == nil && len(entries) > 0 {
+			type toolCallDef struct {
+				Function struct {
+					Name      string          `json:"name"`
+					Arguments json.RawMessage `json:"arguments"`
+				} `json:"function"`
+			}
 			type histMsg struct {
-				Role      string `json:"role"`
-				Content   string `json:"content"`
-				CreatedAt string `json:"createdAt"` // ISO 8601
+				Role      string          `json:"role"`
+				Content   string          `json:"content"`
+				CreatedAt string          `json:"createdAt,omitempty"`
+				ToolName  string          `json:"toolName,omitempty"`
+				ToolInput json.RawMessage `json:"toolInput,omitempty"`
 			}
 			var msgs []histMsg
-			for i, e := range entries {
-				if e.Role == "user" {
+			var pendingCalls []toolCallDef
+			var callIdx int
+			for _, e := range entries {
+				switch e.Role {
+				case "user":
 					msgs = append(msgs, histMsg{
-						Role:      e.Role,
+						Role:      "user",
 						Content:   e.Content,
 						CreatedAt: e.CreatedAt.Local().Format(time.RFC3339),
 					})
-				} else if e.Role == "assistant" {
-					// Skip intermediate assistant turns (those followed by a tool message).
-					// These are mid-loop iterations with tool calls; only the final
-					// assistant message (not followed by a tool) should appear in the UI.
-					if i+1 < len(entries) && entries[i+1].Role == "tool" {
-						continue
+					pendingCalls = nil
+					callIdx = 0
+				case "assistant":
+					if strings.TrimSpace(e.Content) != "" {
+						msgs = append(msgs, histMsg{
+							Role:      "assistant",
+							Content:   e.Content,
+							CreatedAt: e.CreatedAt.Local().Format(time.RFC3339),
+						})
 					}
-					msgs = append(msgs, histMsg{
-						Role:      e.Role,
-						Content:   e.Content,
-						CreatedAt: e.CreatedAt.Local().Format(time.RFC3339),
-					})
+					pendingCalls = nil
+					callIdx = 0
+					if len(e.ToolCalls) > 0 && string(e.ToolCalls) != "null" {
+						_ = json.Unmarshal(e.ToolCalls, &pendingCalls)
+					}
+				case "tool":
+					m := histMsg{Role: "tool", Content: e.Content}
+					if callIdx < len(pendingCalls) {
+						m.ToolName = pendingCalls[callIdx].Function.Name
+						m.ToolInput = pendingCalls[callIdx].Function.Arguments
+						callIdx++
+					}
+					msgs = append(msgs, m)
 				}
 			}
 			if len(msgs) > 0 {
