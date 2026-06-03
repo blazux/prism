@@ -1039,11 +1039,11 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 		}
 	}
 	out, err := e.docker.ExecWithEnv(ctx, "cd /workspace && "+command, 2*time.Minute, env)
-	if err != nil {
-		return fmt.Sprintf("ERROR: %v\nOutput: %s", err, out), nil
-	}
 	if len(out) > 8000 {
 		out = out[:4000] + "\n...[truncated]...\n" + out[len(out)-4000:]
+	}
+	if err != nil {
+		return fmt.Sprintf("ERROR: %v\nOutput: %s", err, out), nil
 	}
 	return out, nil
 }
@@ -1781,6 +1781,7 @@ func (e *ToolExecutor) listTools() (string, error) {
 	if e.customMgr == nil {
 		return "Custom tools not configured.", nil
 	}
+	e.customMgr.Reload()
 	tools := e.customMgr.All()
 	if len(tools) == 0 {
 		return "No custom tools registered yet. Use register_tool to create one.", nil

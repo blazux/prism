@@ -588,10 +588,15 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	a.saveMessageToDB(ctx, ollama.Message{Role: "user", Content: dbContent})
 
 	// Fetch relevant past learnings once per turn (before the tool loop).
+	// Use a short timeout so a slow embed model doesn't block the whole turn.
 	var learningsCtx string
 	if a.learningsCtxFn != nil {
-		learningsCtx = a.learningsCtxFn(ctx, userMsg)
+		lctx, lcancel := context.WithTimeout(ctx, 10*time.Second)
+		learningsCtx = a.learningsCtxFn(lctx, userMsg)
+		lcancel()
 	}
+
+	log.Printf("[agent] session=%s calling ollama with %d history messages", a.sessionID, len(a.history))
 
 	var emptyRetried bool
 	for iter := 0; iter < maxIterations; iter++ {
@@ -754,6 +759,8 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 		Messages: messages,
 		Tools:    tools,
 	}
+
+	log.Printf("[agent] → ollama: %d messages, %d tools, prompt_len=%d", len(messages), len(tools), len(prompt))
 
 	ch := make(chan ollama.StreamEvent, 100)
 	go func() {

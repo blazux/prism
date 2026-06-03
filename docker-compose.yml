@@ -26,10 +26,6 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.prism.rule=Host(`prism.localhost`)"
       - "traefik.http.services.prism.loadbalancer.server.port=8080"
-      # Shared middleware: strip X-Frame-Options and CSP frame-ancestors so any
-      # service container can be embedded as an iframe from prism.localhost.
-      - "traefik.http.middlewares.strip-frames.headers.customResponseHeaders.X-Frame-Options="
-      - "traefik.http.middlewares.strip-frames.headers.customResponseHeaders.Content-Security-Policy="
     depends_on:
       - searxng
       - postgres
@@ -48,6 +44,12 @@ services:
       - "80:80"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - "traefik.enable=true"
+      # Shared middleware: strip X-Frame-Options and CSP frame-ancestors so any
+      # service container can be embedded as an iframe from prism.localhost.
+      - "traefik.http.middlewares.strip-frames.headers.customResponseHeaders.X-Frame-Options="
+      - "traefik.http.middlewares.strip-frames.headers.customResponseHeaders.Content-Security-Policy="
     restart: unless-stopped
 
   # Agent workspace container — the AI executes code here
