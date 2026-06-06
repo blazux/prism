@@ -173,6 +173,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/tools", s.handleTools)
 	mux.HandleFunc("/api/tool/", s.handleToolCall)
+	mux.HandleFunc("/api/builtin/", s.handleBuiltinTool)
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/sessions/", s.handleSessionByID)
 	mux.HandleFunc("/api/chat/upload", s.handleChatFileUpload)
@@ -248,7 +249,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	ollamaClient := ollama.NewClient(s.cfg.OllamaURL)
 
-	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL)
+	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
 	if s.ragStore != nil {
 		executor.SetRAG(s.ragStore, s.ragEmbedder)
 	}
@@ -1205,7 +1206,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 	os.MkdirAll(sessionPluginDir, 0755)
 
 	ollamaClient := ollama.NewClient(s.cfg.OllamaURL)
-	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL)
+	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
 
 	if s.ragStore != nil {
 		executor.SetRAG(s.ragStore, s.ragEmbedder)
@@ -1305,6 +1306,114 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		"response": strings.TrimSpace(response.String()),
 		"session":  sessionID,
 	})
+}
+
+// pushJSONToSession sends an arbitrary JSON payload to all live WS clients for a session.
+func (s *Server) pushJSONToSession(sessionID string, payload map[string]interface{}) {
+	data, _ := json.Marshal(payload)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for c := range s.clients {
+		if c.sessionID == sessionID {
+			select {
+			case c.send <- data:
+			default:
+			}
+		}
+	}
+}
+
+// handleBuiltinTool exposes built-in agent tools as an HTTP endpoint so custom
+// Python tools and cron scripts can call them.
+// POST /api/builtin/<tool_name>?session=<id>  body: JSON args
+func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if r.Method != "POST" {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := strings.TrimPrefix(r.URL.Path, "/api/builtin/")
+	if name == "" {
+		http.Error(w, "tool name required", http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) == 0 {
+		body = []byte("{}")
+	}
+	if !json.Valid(body) {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
+	if sessionID == "" {
+		sessionID = "default"
+	}
+
+	s.mu.RLock()
+	ms := s.memStore
+	s.mu.RUnlock()
+
+	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
+	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
+	if s.ragStore != nil {
+		executor.SetRAG(s.ragStore, s.ragEmbedder)
+	}
+	executor.SetSessionID(sessionID)
+	if ms != nil {
+		executor.SetMemoryStore(ms)
+	}
+	executor.SetCustomTools(s.customMgr, func() {
+		s.customMgr.Reload()
+		s.broadcastTools()
+	})
+	executor.SetMCPManager(s.mcpMgr, func() { s.broadcastMCP(sessionID) })
+
+	if ms != nil {
+		executor.SetNotificationCallback(func(title, msg, level string) {
+			id, err := ms.AddNotification(context.Background(), sessionID, title, msg, level)
+			if err != nil {
+				return
+			}
+			s.pushNotificationToSession(sessionID, id, title, msg, level)
+		})
+	}
+
+	executor.SetCallbacks(
+		func(id, title, content string, cols, height int) {
+			s.pushJSONToSession(sessionID, map[string]interface{}{
+				"type": "plugin_load", "id": id, "title": title,
+				"content": content, "cols": cols, "height": height,
+			})
+		},
+		func(id string) {
+			s.pushJSONToSession(sessionID, map[string]interface{}{"type": "plugin_unload", "id": id})
+		},
+		func(path string) {}, // open_file: UI-only, no-op
+		func() {},            // file_changed: UI-only, no-op
+	)
+	executor.SetSecretRequestCallback(func(ctx context.Context, name, description string) error {
+		return fmt.Errorf("request_secret unavailable from builtin HTTP endpoint")
+	})
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	result, images, execErr := executor.Execute(ctx, name, json.RawMessage(body))
+
+	resp := map[string]interface{}{"result": result}
+	if len(images) > 0 {
+		resp["images"] = images
+	}
+	if execErr != nil {
+		resp["error"] = execErr.Error()
+	}
+	json.NewEncoder(w).Encode(resp)
 }
 
 // pushNotificationToSession delivers a notification to all live WS clients for a session.

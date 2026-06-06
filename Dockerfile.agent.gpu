@@ -1,0 +1,37 @@
+FROM nvcr.io/nvidia/pytorch:26.03-py3
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Tools not included in the NVIDIA base
+RUN apt-get update && apt-get install -y \
+    nodejs npm \
+    golang-go \
+    rustc cargo \
+    vim nano \
+    jq \
+    sqlite3 \
+    ffmpeg \
+    imagemagick \
+    cron \
+    && rm -rf /var/lib/apt/lists/*
+
+# Extra Python packages (PyTorch, numpy, CUDA already in base)
+RUN pip install --no-cache-dir \
+    httpx \
+    pandas \
+    matplotlib seaborn plotly \
+    flask fastapi uvicorn \
+    jupyter nbformat \
+    pytest black ruff
+
+# Playwright for browser automation
+RUN pip install --no-cache-dir playwright && \
+    python -m playwright install chromium && \
+    python -m playwright install-deps chromium && \
+    mkdir -p /workspace/.screenshots
+
+WORKDIR /workspace
+
+CMD ["sh", "-c", "[ -f /workspace/.apt-packages ] && apt-get update -qq && xargs apt-get install -y < /workspace/.apt-packages; [ -f /workspace/.pip-packages ] && pip install -q $(cat /workspace/.pip-packages); [ -f /workspace/.crontab ] && crontab /workspace/.crontab; cron && tail -f /dev/null"]

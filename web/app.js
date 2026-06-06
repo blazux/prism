@@ -996,7 +996,29 @@ function renderMarkdown(text) {
 
   if (!text) return result
 
-  result += marked.parse(text, { breaks: true, gfm: true })
+  // Extract math blocks before marked so it doesn't mangle underscores/stars in LaTeX
+  const mathBlocks = []
+  const placeholder = (i) => `\x00MATH${i}\x00`
+  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => {
+    mathBlocks.push({ inner, display: true })
+    return placeholder(mathBlocks.length - 1)
+  })
+  text = text.replace(/\$([^\$\n]+?)\$/g, (_, inner) => {
+    mathBlocks.push({ inner, display: false })
+    return placeholder(mathBlocks.length - 1)
+  })
+
+  let html = marked.parse(text, { breaks: true, gfm: true })
+
+  // Restore math blocks as KaTeX-rendered HTML
+  html = html.replace(/\x00MATH(\d+)\x00/g, (_, i) => {
+    const { inner, display } = mathBlocks[parseInt(i)]
+    try {
+      return katex.renderToString(inner, { displayMode: display, throwOnError: false, output: 'html' })
+    } catch { return display ? `$$${inner}$$` : `$${inner}$` }
+  })
+
+  result += html
   return result
 }
 

@@ -654,6 +654,7 @@ type ToolExecutor struct {
 	workspaceDir     string
 	pluginDir        string
 	searxngURL       string
+	prismToken       string
 	sessionID        string
 	ragStore         *rag.Store
 	ragEmbedder      *rag.Embedder
@@ -670,12 +671,13 @@ type ToolExecutor struct {
 	onSecretRequest  func(ctx context.Context, name, description string) error
 }
 
-func NewToolExecutor(dm *docker.Manager, workspaceDir, pluginDir, searxngURL string) *ToolExecutor {
+func NewToolExecutor(dm *docker.Manager, workspaceDir, pluginDir, searxngURL, prismToken string) *ToolExecutor {
 	return &ToolExecutor{
 		docker:       dm,
 		workspaceDir: workspaceDir,
 		pluginDir:    pluginDir,
 		searxngURL:   searxngURL,
+		prismToken:   prismToken,
 	}
 }
 
@@ -1030,6 +1032,7 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 	env := map[string]string{
 		"PRISM_SESSION": session,
 		"PRISM_URL":     "http://prism-server:8080",
+		"PRISM_TOKEN":   e.prismToken,
 	}
 	if e.memStore != nil {
 		if secrets, err := e.memStore.GetAllSecrets(ctx); err == nil {
@@ -1682,6 +1685,8 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command stri
 	command = strings.ReplaceAll(command, "${PRISM_URL}", "http://prism-server:8080")
 	command = strings.ReplaceAll(command, "$PRISM_SESSION", session)
 	command = strings.ReplaceAll(command, "${PRISM_SESSION}", session)
+	command = strings.ReplaceAll(command, "$PRISM_TOKEN", e.prismToken)
+	command = strings.ReplaceAll(command, "${PRISM_TOKEN}", e.prismToken)
 	entry := fmt.Sprintf("%s\n%s %s", marker, schedule, command)
 	var newCrontab string
 	if current == "" {
@@ -1802,6 +1807,7 @@ func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Too
 	env := map[string]string{
 		"PRISM_SESSION": session,
 		"PRISM_URL":     "http://prism-server:8080",
+		"PRISM_TOKEN":   e.prismToken,
 	}
 	if e.memStore != nil {
 		if secrets, err := e.memStore.GetAllSecrets(ctx); err == nil {
