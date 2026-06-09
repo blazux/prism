@@ -389,6 +389,16 @@ func (m *Manager) ComposeLogs(ctx context.Context, file, project, service string
 	return m.run(ctx, "docker", args...)
 }
 
+// ComposeExec runs a shell command inside a compose service container (non-interactive).
+func (m *Manager) ComposeExec(ctx context.Context, file, project, service, command string) (string, error) {
+	args := []string{"compose", "-f", file}
+	if project != "" {
+		args = append(args, "--project-name", project)
+	}
+	args = append(args, "exec", "-T", service, "sh", "-c", command)
+	return m.run(ctx, "docker", args...)
+}
+
 // ComposeRestart restarts services in the given compose project.
 func (m *Manager) ComposeRestart(ctx context.Context, file, project, service string) (string, error) {
 	args := []string{"compose", "-f", file}

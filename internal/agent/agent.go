@@ -127,6 +127,10 @@ rag_search includes page numbers per chunk. rag_show_page returns an image path;
 
 If a task requires specific information (addresses, credentials, preferences…) that is absent from the user profile and cannot be reasonably inferred, ask before proceeding.
 
+## Saving remote files
+
+When you need to save a file fetched from the web (docker-compose.yml, shell scripts, configs, binaries…), always use wget — never http_request + write_file. The model cannot reliably transcribe long files verbatim: names get corrupted, indentation shifts, sections get dropped. wget streams directly from the URL to disk with zero model involvement.
+
 ## Context tools
 
 request_secret — retrieve a secret by name without exposing it in chat.

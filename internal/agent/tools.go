@@ -110,14 +110,15 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "docker_compose",
-			Description: "Manage multi-container applications with Docker Compose. Write the docker-compose.yml to workspace first with write_file, then call this tool. Supports up, down, ps, logs, and restart actions.",
+			Description: "Manage multi-container applications with Docker Compose. Write the docker-compose.yml to workspace first with write_file or wget, then call this tool. Container names are automatically prefixed prism-svc-<dir>-<service>-1.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":  {Type: "string", Description: "Action: up (start all services), down (stop and remove), ps (list services), logs (get logs), restart"},
-					"file":    {Type: "string", Description: "Path to docker-compose.yml relative to /workspace (e.g. 'myapp/docker-compose.yml')"},
-					"project": {Type: "string", Description: "Optional project name. If omitted, derived from the file's directory name."},
-					"service": {Type: "string", Description: "Optional service name to target for logs or restart (default: all services)"},
+					"action":  {Type: "string", Description: "Action: up (start all services), down (stop and remove), ps (list services), logs (get logs), restart, exec (run a command inside a service container)"},
+					"file":    {Type: "string", Description: "Path to docker-compose.yml relative to /workspace (e.g. 'greenbone/docker-compose.yml')"},
+					"project": {Type: "string", Description: "Optional project name override. If omitted, auto-set to prism-svc-<directory> (e.g. 'prism-svc-greenbone')."},
+					"service": {Type: "string", Description: "Service name to target for logs, restart, or exec"},
+					"command": {Type: "string", Description: "Shell command to run inside the service container (exec action only)"},
 					"tail":    {Type: "integer", Description: "Number of log lines per service (default: 50, for logs action)"},
 				},
 				Required: []string{"action", "file"},
@@ -135,6 +136,21 @@ var ToolDefinitions = []ollama.Tool{
 					"command": {Type: "string", Description: "The bash command to execute"},
 				},
 				Required: []string{"command"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "wget",
+			Description: "Download a file from a URL directly to the workspace without passing its content through the model. Use this instead of http_request + write_file whenever you want to save a remote file as-is (docker-compose.yml, scripts, configs, binaries, etc.). Content is streamed directly from the URL to disk — no transcription, no truncation.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"url":  {Type: "string", Description: "HTTP or HTTPS URL to download from"},
+					"path": {Type: "string", Description: "Destination path relative to /workspace (e.g. 'greenbone/docker-compose.yml')"},
+				},
+				Required: []string{"url", "path"},
 			},
 		},
 	},
@@ -814,7 +830,9 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		if tail <= 0 {
 			tail = 50
 		}
-		return wrap(e.dockerCompose(ctx, str("action"), str("file"), str("project"), str("service"), tail))
+		return wrap(e.dockerCompose(ctx, str("action"), str("file"), str("project"), str("service"), str("command"), tail))
+	case "wget":
+		return wrap(e.downloadFile(ctx, str("url"), str("path")))
 	case "exec_command":
 		return wrap(e.execCommand(ctx, str("command")))
 	case "write_file":
@@ -1047,7 +1065,48 @@ func (e *ToolExecutor) dockerExecService(ctx context.Context, name, command stri
 	return out, nil
 }
 
-func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project, service string, tail int) (string, error) {
+func (e *ToolExecutor) downloadFile(ctx context.Context, rawURL, path string) (string, error) {
+	if rawURL == "" {
+		return "", fmt.Errorf("url is required")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", fmt.Errorf("invalid URL: must be http or https")
+	}
+	fullPath := filepath.Join(e.workspaceDir, filepath.Clean("/"+path))
+	rel, err := filepath.Rel(e.workspaceDir, fullPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("path escapes workspace")
+	}
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{Timeout: 2 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d from %s", resp.StatusCode, rawURL)
+	}
+	f, err := os.Create(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("create file: %w", err)
+	}
+	defer f.Close()
+	written, err := io.Copy(f, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("write failed: %w", err)
+	}
+	return fmt.Sprintf("Downloaded %d bytes → %s", written, path), nil
+}
+
+func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project, service, command string, tail int) (string, error) {
 	if file == "" {
 		return "", fmt.Errorf("file is required")
 	}
@@ -1057,6 +1116,15 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 		return "", fmt.Errorf("file path escapes workspace")
 	}
 
+	// Auto-derive project name from the compose file's directory, prefixed with prism-svc-.
+	if project == "" {
+		dir := filepath.Base(filepath.Dir(rel))
+		if dir == "." || dir == "" {
+			dir = "app"
+		}
+		project = "prism-svc-" + dir
+	}
+
 	switch action {
 	case "up":
 		out, err := e.docker.ComposeUp(ctx, hostPath, project)
@@ -1064,7 +1132,7 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 			return fmt.Sprintf("ERROR: %v\n%s", err, out), nil
 		}
 		if strings.TrimSpace(out) == "" {
-			return "All services started.", nil
+			return fmt.Sprintf("All services started (project: %s).", project), nil
 		}
 		return out, nil
 	case "down":
@@ -1103,8 +1171,23 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 			return "Services restarted.", nil
 		}
 		return out, nil
+	case "exec":
+		if service == "" {
+			return "", fmt.Errorf("service is required for exec action")
+		}
+		if command == "" {
+			return "", fmt.Errorf("command is required for exec action")
+		}
+		out, err := e.docker.ComposeExec(ctx, hostPath, project, service, command)
+		if err != nil {
+			return fmt.Sprintf("ERROR: %v", err), nil
+		}
+		if strings.TrimSpace(out) == "" {
+			return fmt.Sprintf("Command executed in %s/%s (no output).", project, service), nil
+		}
+		return out, nil
 	default:
-		return "", fmt.Errorf("unknown action %q — valid: up, down, ps, logs, restart", action)
+		return "", fmt.Errorf("unknown action %q — valid: up, down, ps, logs, restart, exec", action)
 	}
 }
 
