@@ -109,8 +109,26 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "docker_compose",
+			Description: "Manage multi-container applications with Docker Compose. Write the docker-compose.yml to workspace first with write_file, then call this tool. Supports up, down, ps, logs, and restart actions.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action":  {Type: "string", Description: "Action: up (start all services), down (stop and remove), ps (list services), logs (get logs), restart"},
+					"file":    {Type: "string", Description: "Path to docker-compose.yml relative to /workspace (e.g. 'myapp/docker-compose.yml')"},
+					"project": {Type: "string", Description: "Optional project name. If omitted, derived from the file's directory name."},
+					"service": {Type: "string", Description: "Optional service name to target for logs or restart (default: all services)"},
+					"tail":    {Type: "integer", Description: "Number of log lines per service (default: 50, for logs action)"},
+				},
+				Required: []string{"action", "file"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "exec_command",
-			Description: "Execute a shell command in the workspace container. Use this to run code, compile, test, manage files, etc. Note: the Docker CLI is NOT available here — use docker_run/docker_stop/docker_ps/docker_logs/docker_list/docker_exec to manage containers.",
+			Description: "Execute a shell command in the workspace container. Use this to run code, compile, test, manage files, etc. Note: the Docker CLI is NOT available here — use docker_run/docker_stop/docker_ps/docker_logs/docker_list/docker_exec/docker_compose to manage containers.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -790,6 +808,13 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.dockerList(ctx))
 	case "docker_exec":
 		return wrap(e.dockerExecService(ctx, str("name"), str("command")))
+	case "docker_compose":
+		tailFloat, _ := args["tail"].(float64)
+		tail := int(tailFloat)
+		if tail <= 0 {
+			tail = 50
+		}
+		return wrap(e.dockerCompose(ctx, str("action"), str("file"), str("project"), str("service"), tail))
 	case "exec_command":
 		return wrap(e.execCommand(ctx, str("command")))
 	case "write_file":
@@ -1020,6 +1045,67 @@ func (e *ToolExecutor) dockerExecService(ctx context.Context, name, command stri
 		return fmt.Sprintf("Command executed in container %q (no output).", name), nil
 	}
 	return out, nil
+}
+
+func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project, service string, tail int) (string, error) {
+	if file == "" {
+		return "", fmt.Errorf("file is required")
+	}
+	hostPath := filepath.Join(e.workspaceDir, filepath.Clean("/"+file))
+	rel, err := filepath.Rel(e.workspaceDir, hostPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("file path escapes workspace")
+	}
+
+	switch action {
+	case "up":
+		out, err := e.docker.ComposeUp(ctx, hostPath, project)
+		if err != nil {
+			return fmt.Sprintf("ERROR: %v\n%s", err, out), nil
+		}
+		if strings.TrimSpace(out) == "" {
+			return "All services started.", nil
+		}
+		return out, nil
+	case "down":
+		out, err := e.docker.ComposeDown(ctx, hostPath, project)
+		if err != nil {
+			return fmt.Sprintf("ERROR: %v\n%s", err, out), nil
+		}
+		if strings.TrimSpace(out) == "" {
+			return "All services stopped and removed.", nil
+		}
+		return out, nil
+	case "ps":
+		out, err := e.docker.ComposePS(ctx, hostPath, project)
+		if err != nil {
+			return fmt.Sprintf("ERROR: %v", err), nil
+		}
+		if strings.TrimSpace(out) == "" {
+			return "No services running.", nil
+		}
+		return out, nil
+	case "logs":
+		out, err := e.docker.ComposeLogs(ctx, hostPath, project, service, tail)
+		if err != nil {
+			return fmt.Sprintf("ERROR: %v", err), nil
+		}
+		if strings.TrimSpace(out) == "" {
+			return "No logs.", nil
+		}
+		return out, nil
+	case "restart":
+		out, err := e.docker.ComposeRestart(ctx, hostPath, project, service)
+		if err != nil {
+			return fmt.Sprintf("ERROR: %v\n%s", err, out), nil
+		}
+		if strings.TrimSpace(out) == "" {
+			return "Services restarted.", nil
+		}
+		return out, nil
+	default:
+		return "", fmt.Errorf("unknown action %q — valid: up, down, ps, logs, restart", action)
+	}
 }
 
 // ─── Workspace exec ───────────────────────────────────────────────────────────

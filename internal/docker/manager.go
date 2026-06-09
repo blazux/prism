@@ -346,6 +346,62 @@ func (m *Manager) ServiceLogs(ctx context.Context, name string, tail int) (strin
 	return m.run(ctx, "docker", "logs", "--tail", strconv.Itoa(tail), servicePrefix+name)
 }
 
+// ComposeUp runs `docker compose up -d` for the given compose file (absolute host path).
+func (m *Manager) ComposeUp(ctx context.Context, file, project string) (string, error) {
+	args := []string{"compose", "-f", file}
+	if project != "" {
+		args = append(args, "--project-name", project)
+	}
+	args = append(args, "up", "-d", "--remove-orphans")
+	return m.run(ctx, "docker", args...)
+}
+
+// ComposeDown runs `docker compose down` for the given compose file.
+func (m *Manager) ComposeDown(ctx context.Context, file, project string) (string, error) {
+	args := []string{"compose", "-f", file}
+	if project != "" {
+		args = append(args, "--project-name", project)
+	}
+	args = append(args, "down")
+	return m.run(ctx, "docker", args...)
+}
+
+// ComposePS lists services for the given compose file.
+func (m *Manager) ComposePS(ctx context.Context, file, project string) (string, error) {
+	args := []string{"compose", "-f", file}
+	if project != "" {
+		args = append(args, "--project-name", project)
+	}
+	args = append(args, "ps")
+	return m.run(ctx, "docker", args...)
+}
+
+// ComposeLogs returns logs from the given compose project (optionally filtered to one service).
+func (m *Manager) ComposeLogs(ctx context.Context, file, project, service string, tail int) (string, error) {
+	args := []string{"compose", "-f", file}
+	if project != "" {
+		args = append(args, "--project-name", project)
+	}
+	args = append(args, "logs", "--no-color", "--tail", strconv.Itoa(tail))
+	if service != "" {
+		args = append(args, service)
+	}
+	return m.run(ctx, "docker", args...)
+}
+
+// ComposeRestart restarts services in the given compose project.
+func (m *Manager) ComposeRestart(ctx context.Context, file, project, service string) (string, error) {
+	args := []string{"compose", "-f", file}
+	if project != "" {
+		args = append(args, "--project-name", project)
+	}
+	args = append(args, "restart")
+	if service != "" {
+		args = append(args, service)
+	}
+	return m.run(ctx, "docker", args...)
+}
+
 // parseFirstPort extracts the first host port from a docker ps --format {{.Ports}} string.
 // e.g. "0.0.0.0:8188->8188/tcp" → 8188
 func parseFirstPort(ports string) int {

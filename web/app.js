@@ -402,6 +402,10 @@ function appendToolUse(msg) {
 
 function appendToolResult(msg) {
   const el = document.getElementById('tool-out-' + msg.id)
+  if (!el) {
+    console.error('[prism] tool_result orphan — no element for id:', msg.id, msg)
+    return
+  }
   if (el) {
     el.classList.remove('running')
     el.textContent = msg.output || '(no output)'
