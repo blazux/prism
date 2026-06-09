@@ -8,7 +8,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o prism .
 
 FROM alpine:3.19
-RUN apk add --no-cache docker-cli ca-certificates poppler-utils
+RUN apk add --no-cache docker-cli docker-cli-compose ca-certificates poppler-utils
 
 WORKDIR /app
 COPY --from=builder /build/prism .
