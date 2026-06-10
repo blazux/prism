@@ -60,6 +60,22 @@ For applications that require multiple services (e.g. Greenbone/OpenVAS, Nextclo
 
 docker_compose uses the same Docker socket as docker_run — services land on the same network and /workspace is available via --volumes-from if needed. For simple single-image services, prefer docker_run (auto port allocation, Traefik labels). Use docker_compose when the stack has service dependencies, shared volumes, or requires docker-compose.yml for correct startup order.
 
+To expose a docker_compose service via Traefik (http://<name>.localhost/), add labels and the prism-net network to the target service. The Host() rule uses backtick-quoted hostnames. Example for a service named "myapp" on container port 8080:
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.myapp.rule=Host('myapp.localhost')"   # use backtick-quotes, not single quotes
+      - "traefik.http.services.myapp.loadbalancer.server.port=8080"
+    networks:
+      - prism-net
+      - default
+
+  networks:
+    prism-net:
+      external: true
+
+Always add Traefik labels when writing a docker-compose.yml — do not wait to be asked.
+
 ## Widgets
 
 Self-contained HTML files rendered as iframes.
@@ -127,6 +143,13 @@ rag_search includes page numbers per chunk. rag_show_page returns an image path;
 
 If a task requires specific information (addresses, credentials, preferences…) that is absent from the user profile and cannot be reasonably inferred, ask before proceeding.
 
+## Retry discipline
+
+If a tool call fails, diagnose the error before retrying. Never call the exact same tool with the exact same arguments more than twice in a row. After 2 failed attempts with the same error:
+- Stop immediately and explain what you tried and what failed
+- Do not spin in a loop hoping the result will change
+- Ask the user for guidance or wait for the underlying condition to resolve
+
 ## Saving remote files
 
 When you need to save a file fetched from the web (docker-compose.yml, shell scripts, configs, binaries…), always use wget — never http_request + write_file. The model cannot reliably transcribe long files verbatim: names get corrupted, indentation shifts, sections get dropped. wget streams directly from the URL to disk with zero model involvement.
@@ -136,7 +159,9 @@ When you need to save a file fetched from the web (docker-compose.yml, shell scr
 request_secret — retrieve a secret by name without exposing it in chat.
 save_user_info — store a personal fact under a stable key (e.g. "job", "location"); same key overwrites.
 save_learning — store a lesson from a difficult problem; retrieved automatically at conversation start when relevant.
-notify(delay_seconds=N) — server-side scheduled reminder.`
+notify(delay_seconds=N) — server-side scheduled reminder.
+
+After any successful service deployment (docker_run, docker_compose up, or custom install), always call save_learning to record: the service name, access URL, default credentials if any, and any non-obvious setup steps. This survives conversation summarization and lets you answer future questions about the deployment.`
 
 type Event struct {
 	Type    string          `json:"type"`
@@ -156,7 +181,7 @@ const (
 	// maxHistoryMessages triggers summarization when user+assistant count exceeds this.
 	maxHistoryMessages = 40
 	// keepRecentMessages is how many recent messages to keep after summarization.
-	keepRecentMessages = 10
+	keepRecentMessages = 20
 	// defaultSessionID is used for single-user deployments.
 	defaultSessionID = "default"
 )
@@ -432,6 +457,14 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 	log.Printf("[agent] session=%s calling ollama with %d history messages", a.sessionID, len(a.history))
 
+	// Loop detection: track consecutive identical (tool, args, result) triples.
+	// If the same call produces the same result 3 times in a row, the agent is stuck.
+	var (
+		lastLoopKey    string
+		lastLoopResult string
+		loopCount      int
+	)
+
 	var emptyRetried bool
 	for iter := 0; iter < maxIterations; iter++ {
 		select {
@@ -520,6 +553,23 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			}
 			if tc.Function.Name == "add_attachment" && len(toolImages) > 0 {
 				events <- Event{Type: "attachment", Images: toolImages}
+			}
+
+			// Detect retry loops: same tool + same args + same result 3 times in a row.
+			loopKey := tc.Function.Name + "\x00" + string(tc.Function.Arguments)
+			if loopKey == lastLoopKey && result == lastLoopResult {
+				loopCount++
+			} else {
+				loopCount = 0
+				lastLoopKey = loopKey
+				lastLoopResult = result
+			}
+			if loopCount >= 2 {
+				events <- Event{Type: "error", Content: fmt.Sprintf(
+					"Loop detected: tool %q was called with identical arguments and returned the same result %d times in a row. Stopping to avoid an infinite loop.",
+					tc.Function.Name, loopCount+1,
+				)}
+				return
 			}
 
 			toolMsg := ollama.Message{Role: "tool", Content: result}
