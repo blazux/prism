@@ -250,6 +250,12 @@ func ExtractPageImages(pdfPath, outDir string) error {
 	return nil
 }
 
+// execCommandOutput runs a command and returns its stdout as a string.
+func execCommandOutput(name string, args ...string) (string, error) {
+	out, err := exec.Command(name, args...).Output()
+	return string(out), err
+}
+
 // parseDOCX reads a .docx file (ZIP archive) and extracts text from
 // word/document.xml without any external dependency.
 func parseDOCX(path string) (string, error) {

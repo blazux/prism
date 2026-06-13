@@ -196,6 +196,48 @@ func (s *Store) UpsertDocument(ctx context.Context, collection, filename, fileHa
 	return tx.Commit(ctx)
 }
 
+// AppendChunks adds extra chunks (e.g. figure captions) to an existing document,
+// continuing the chunk index sequence and updating the document's chunk count.
+func (s *Store) AppendChunks(ctx context.Context, collection, filename string, chunks []string, pageNums []int, embeddings [][]float32) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var docID int64
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM rag_documents WHERE collection = $1 AND filename = $2
+	`, collection, filename).Scan(&docID); err != nil {
+		return fmt.Errorf("find document: %w", err)
+	}
+
+	var nextIdx int
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(MAX(chunk_index), -1) + 1 FROM rag_chunks WHERE document_id = $1
+	`, docID).Scan(&nextIdx); err != nil {
+		return fmt.Errorf("max chunk index: %w", err)
+	}
+
+	for i, chunk := range chunks {
+		vec := pgvector.NewVector(embeddings[i])
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO rag_chunks (document_id, collection, chunk_index, page_number, content, embedding)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, docID, collection, nextIdx+i, pageNums[i], chunk, vec); err != nil {
+			return fmt.Errorf("insert caption chunk %d: %w", i, err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE rag_documents SET chunk_count = chunk_count + $1, updated_at = NOW() WHERE id = $2
+	`, len(chunks), docID); err != nil {
+		return fmt.Errorf("update chunk count: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
 // ListCollections returns all collections for the given session with aggregate stats.
 func (s *Store) ListCollections(ctx context.Context, sessionID string) ([]Collection, error) {
 	rows, err := s.pool.Query(ctx, `

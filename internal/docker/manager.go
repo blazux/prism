@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,6 +26,10 @@ type Manager struct {
 	workspaceDir   string
 	portRangeStart int
 	portRangeEnd   int
+	// portMu serializes port allocation + container start: allocateHostPorts
+	// scans `docker ps` for used ports, so two concurrent RunService calls
+	// could otherwise pick the same port before either container exists.
+	portMu sync.Mutex
 }
 
 func NewManager(containerName, workspaceDir string, portRangeStart, portRangeEnd int) *Manager {
@@ -208,6 +213,10 @@ func (m *Manager) RunService(ctx context.Context, name, image string, ports []in
 	if len(ports) == 0 {
 		return nil, fmt.Errorf("at least one port is required")
 	}
+	// Hold the lock until `docker run` completes so the allocated ports are
+	// visible to the next allocation scan.
+	m.portMu.Lock()
+	defer m.portMu.Unlock()
 	hostPorts, err := m.allocateHostPorts(ctx, len(ports))
 	if err != nil {
 		return nil, err

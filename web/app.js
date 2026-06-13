@@ -506,6 +506,13 @@ function formatToolInput(tool, inp) {
     case 'list_files':        return `ls ${inp.path || '.'}`
     case 'apt_install':       return `apt install ${inp.packages}`
     case 'pip_install':       return `pip install ${inp.packages}`
+    case 'install_packages':  return `${inp.manager} install ${inp.packages}`
+    case 'docker_manage':     return `docker ${inp.action}${inp.name ? ' ' + inp.name : ''}`
+    case 'widget':            return inp.action === 'add' || inp.action === 'update' ? `${inp.action} "${inp.title || inp.id}"` : `${inp.action} widget${inp.id ? ': ' + inp.id : 's'}`
+    case 'cron':              return inp.action === 'add' ? `${inp.schedule} → ${inp.name}` : `${inp.action}${inp.name ? ': ' + inp.name : ' jobs'}`
+    case 'rag_manage':        return `rag ${inp.action}${inp.collection ? ': ' + inp.collection : ' collections'}`
+    case 'secrets':           return `secrets ${inp.action}${inp.name ? ': ' + inp.name : ''}`
+    case 'mcp':               return `⬡ ${inp.action}${inp.name ? ': ' + inp.name : ''}`
     case 'add_widget':        return `"${inp.title}" — cols=${inp.cols||1} height=${inp.height||280}px`
     case 'remove_widget':     return `remove widget: ${inp.id}`
     case 'http_request':      return `${inp.method||'GET'} ${inp.url}`

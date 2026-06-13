@@ -87,6 +87,7 @@ func (s *Server) initRAG(ctx context.Context) {
 
 	s.ragEmbedder = embedder
 	s.ragStore = store
+	s.ragCaptioner = rag.NewCaptioner(s.cfg.OllamaURL, s.cfg.Model)
 	ragInitStatus.Store("ready")
 	log.Println("[rag] ready")
 }
@@ -282,7 +283,7 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 
 	parsePath := tmp.Name() // may be replaced by converted PDF for PPTX
-	var convertedDir string  // temp dir for LibreOffice output, cleaned up after
+	var convertedDir string // temp dir for LibreOffice output, cleaned up after
 
 	if ext == ".pptx" {
 		convertedDir, err = os.MkdirTemp("", "pptx-convert-*")
@@ -300,12 +301,14 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 		ext = ".pdf"
 	}
 
+	var pdfPages []string // per-page text, used for visual page detection
 	if ext == ".pdf" {
 		pages, err := rag.ParsePDFPages(parsePath)
 		if err != nil {
 			jsonError(w, "parse: "+err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
+		pdfPages = pages
 		for pageIdx, pageText := range pages {
 			for _, c := range rag.SplitText(pageText) {
 				chunks = append(chunks, c)
@@ -340,12 +343,18 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Extract page/slide images for PDF and PPTX (converted to PDF above).
 	// For DOCX: extract embedded images directly from the ZIP.
+	var visualPages []int // pages selected for background figure captioning
+	var imgDir string
 	if s.cfg.WorkspaceDir != "" {
-		imgDir := rag.ImageDir(s.cfg.WorkspaceDir, collection, header.Filename)
+		imgDir = rag.ImageDir(s.cfg.WorkspaceDir, collection, header.Filename)
 		origExt := strings.ToLower(filepath.Ext(header.Filename))
 		if origExt == ".pdf" || origExt == ".pptx" {
 			if err := rag.ExtractPageImages(parsePath, imgDir); err != nil {
 				log.Printf("[rag] warn: could not extract images from %s: %v", header.Filename, err)
+			} else {
+				// Keep only pages likely to contain figures; must run while
+				// parsePath (a temp file) still exists.
+				visualPages = rag.PlanVisualPages(parsePath, imgDir, pdfPages)
 			}
 		} else if origExt == ".docx" {
 			if _, err := rag.ExtractDOCXImages(tmp.Name(), imgDir); err != nil {
@@ -362,13 +371,49 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 	// Register collection ownership for this session (no-op if already exists)
 	_ = s.ragStore.EnsureCollection(r.Context(), collection, uploadSession)
 
+	// Caption visual pages in the background so figures become searchable.
+	if s.ragCaptioner != nil && len(visualPages) > 0 {
+		go s.captionFiguresBackground(uploadSession, collection, header.Filename, imgDir, visualPages)
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"ok":         true,
-		"collection": collection,
-		"filename":   header.Filename,
-		"chunks":     len(chunks),
-		"size":       size,
+		"ok":          true,
+		"collection":  collection,
+		"filename":    header.Filename,
+		"chunks":      len(chunks),
+		"size":        size,
+		"visualPages": len(visualPages),
 	})
+}
+
+// captionFiguresBackground runs vision captioning for the selected pages and
+// notifies the session when figures become searchable.
+func (s *Server) captionFiguresBackground(sessionID, collection, filename, imgDir string, pages []int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	notify := func(title, msg, level string) {
+		s.mu.RLock()
+		ms := s.memStore
+		s.mu.RUnlock()
+		if ms == nil {
+			return
+		}
+		id, err := ms.AddNotification(context.Background(), sessionID, title, msg, level)
+		if err != nil {
+			return
+		}
+		s.pushNotificationToSession(sessionID, id, title, msg, level)
+	}
+
+	n, err := rag.CaptionPages(ctx, s.ragStore, s.ragEmbedder, s.ragCaptioner, imgDir, collection, filename, pages)
+	if err != nil {
+		log.Printf("[rag] figure captioning for %s/%s: %v", collection, filename, err)
+		notify("RAG", fmt.Sprintf("Figure captioning failed for %q: %v", filename, err), "warning")
+		return
+	}
+	log.Printf("[rag] %d figure caption(s) added for %s/%s", n, collection, filename)
+	notify("RAG", fmt.Sprintf("%d figure(s) from %q are now searchable in collection %q.", n, filename, collection), "success")
 }
 
 func sanitizeName(s string) string {
