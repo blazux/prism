@@ -333,7 +333,7 @@ func (s *Store) GetSummary(ctx context.Context, sessionID string) string {
 // MaybeSummarize summarizes old history if user+assistant message count exceeds maxMessages.
 // It keeps the keepRecent most recent messages and summarizes the rest.
 // Runs the LLM call with the provided client and model.
-func (s *Store) MaybeSummarize(ctx context.Context, sessionID string, ollamaClient *ollama.Client, model string, maxMessages, keepRecent int) {
+func (s *Store) MaybeSummarize(ctx context.Context, sessionID string, ollamaClient ollama.Backend, model string, maxMessages, keepRecent int) {
 	var count int
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM conversation_history

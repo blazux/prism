@@ -20,18 +20,35 @@ import (
 const captionPrompt = `Describe the figures, diagrams, charts, schematics and tables on this document page, densely and factually, so the description can be found by semantic search. Include labels, axis names, component names and relationships shown. Ignore plain paragraphs of text. If the page contains no figure, diagram, chart, schematic or table, reply with exactly: NONE`
 
 // Captioner generates text descriptions of document page images using the
-// vision capabilities of the main Ollama chat model.
+// vision capabilities of the main chat model. With the default Ollama backend
+// it hits /api/chat; with the "openai" backend (SGLang/vLLM/…) it hits
+// /v1/chat/completions with the image inlined as a data: URL.
 type Captioner struct {
-	ollamaURL string
-	model     string
-	client    *http.Client
+	backend string // "ollama" (default) or "openai"
+	baseURL string // for openai: includes the /v1 suffix
+	apiKey  string // optional, openai backend only
+	model   string
+	client  *http.Client
 }
 
 func NewCaptioner(ollamaURL, model string) *Captioner {
 	return &Captioner{
-		ollamaURL: ollamaURL,
-		model:     model,
-		client:    &http.Client{Timeout: 5 * time.Minute},
+		backend: "ollama",
+		baseURL: ollamaURL,
+		model:   model,
+		client:  &http.Client{Timeout: 5 * time.Minute},
+	}
+}
+
+// NewOpenAICaptioner builds a captioner against an OpenAI-compatible endpoint.
+// baseURL must point at the /v1 root.
+func NewOpenAICaptioner(baseURL, apiKey, model string) *Captioner {
+	return &Captioner{
+		backend: "openai",
+		baseURL: strings.TrimRight(baseURL, "/"),
+		apiKey:  apiKey,
+		model:   model,
+		client:  &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
@@ -42,47 +59,87 @@ func (c *Captioner) CaptionPage(ctx context.Context, imagePath string) (string, 
 	if err != nil {
 		return "", err
 	}
+	b64 := base64.StdEncoding.EncodeToString(data)
 
-	body, err := json.Marshal(map[string]interface{}{
-		"model":  c.model,
-		"stream": false,
-		"messages": []map[string]interface{}{{
-			"role":    "user",
-			"content": captionPrompt,
-			"images":  []string{base64.StdEncoding.EncodeToString(data)},
-		}},
-	})
+	var url string
+	var body []byte
+	if c.backend == "openai" {
+		url = c.baseURL + "/chat/completions"
+		body, err = json.Marshal(map[string]interface{}{
+			"model":  c.model,
+			"stream": false,
+			"messages": []map[string]interface{}{{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": captionPrompt},
+					{"type": "image_url", "image_url": map[string]string{"url": "data:image/jpeg;base64," + b64}},
+				},
+			}},
+		})
+	} else {
+		url = c.baseURL + "/api/chat"
+		body, err = json.Marshal(map[string]interface{}{
+			"model":  c.model,
+			"stream": false,
+			"messages": []map[string]interface{}{{
+				"role":    "user",
+				"content": captionPrompt,
+				"images":  []string{b64},
+			}},
+		})
+	}
 	if err != nil {
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.ollamaURL+"/api/chat", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.backend == "openai" && c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ollama chat: %w", err)
+		return "", fmt.Errorf("caption chat: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("ollama chat returned %d: %s", resp.StatusCode, bytes.TrimSpace(b))
+		return "", fmt.Errorf("caption chat returned %d: %s", resp.StatusCode, bytes.TrimSpace(b))
 	}
 
-	var result struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode chat response: %w", err)
+	var content string
+	if c.backend == "openai" {
+		var result struct {
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return "", fmt.Errorf("decode chat response: %w", err)
+		}
+		if len(result.Choices) > 0 {
+			content = result.Choices[0].Message.Content
+		}
+	} else {
+		var result struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return "", fmt.Errorf("decode chat response: %w", err)
+		}
+		content = result.Message.Content
 	}
 
-	caption := strings.TrimSpace(result.Message.Content)
+	caption := strings.TrimSpace(content)
 	if caption == "" || strings.EqualFold(caption, "NONE") || strings.EqualFold(caption, "NONE.") {
 		return "", nil
 	}

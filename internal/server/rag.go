@@ -38,7 +38,7 @@ func (s *Server) initRAG(ctx context.Context) {
 		return
 	}
 
-	embedder := rag.NewEmbedder(s.cfg.OllamaURL, s.cfg.EmbedModel)
+	embedder := s.newEmbedder()
 
 	// Probe embedding dimension (retry — model may need to load)
 	var dim int
@@ -87,7 +87,7 @@ func (s *Server) initRAG(ctx context.Context) {
 
 	s.ragEmbedder = embedder
 	s.ragStore = store
-	s.ragCaptioner = rag.NewCaptioner(s.cfg.OllamaURL, s.cfg.Model)
+	s.ragCaptioner = s.newCaptioner()
 	ragInitStatus.Store("ready")
 	log.Println("[rag] ready")
 }

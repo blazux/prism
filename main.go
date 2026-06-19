@@ -37,6 +37,22 @@ func main() {
 		model = "qwen2.5-coder:7b"
 	}
 
+	// LLM backend: "ollama" (default) or "openai" for any OpenAI-compatible
+	// server (SGLang, vLLM, TGI, LM Studio, OpenRouter, …).
+	llmBackend := os.Getenv("LLM_BACKEND")
+	if llmBackend == "" {
+		llmBackend = "ollama"
+	}
+	openAIBaseURL := os.Getenv("OPENAI_BASE_URL")
+	openAIAPIKey := os.Getenv("OPENAI_API_KEY")
+	// When targeting the openai backend, OPENAI_MODEL overrides OLLAMA_MODEL so
+	// the served-model-name can differ from the Ollama tag.
+	if llmBackend == "openai" {
+		if m := os.Getenv("OPENAI_MODEL"); m != "" {
+			model = m
+		}
+	}
+
 	agentContainer := os.Getenv("AGENT_CONTAINER")
 	if agentContainer == "" {
 		agentContainer = "prism-workspace"
@@ -70,6 +86,9 @@ func main() {
 		PluginDir:        pluginDir,
 		OllamaURL:        ollamaURL,
 		Model:            model,
+		LLMBackend:       llmBackend,
+		OpenAIBaseURL:    openAIBaseURL,
+		OpenAIAPIKey:     openAIAPIKey,
 		AgentContainer:   agentContainer,
 		SearxngURL:       searxngURL,
 		PostgresURL:      postgresURL,

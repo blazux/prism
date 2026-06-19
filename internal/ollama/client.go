@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// Backend is the wire-neutral contract every LLM provider must satisfy. The
+// Ollama and OpenAI-compatible (SGLang/vLLM/…) clients both implement it, so
+// callers depend on this interface rather than a concrete client.
+type Backend interface {
+	Chat(ctx context.Context, req ChatRequest, out chan<- StreamEvent)
+	Ping(ctx context.Context) error
+	ListModels(ctx context.Context) ([]string, error)
+}
+
 type Client struct {
 	baseURL    string
 	httpClient *http.Client

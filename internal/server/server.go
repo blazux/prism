@@ -27,6 +27,9 @@ type Config struct {
 	PluginDir        string
 	OllamaURL        string
 	Model            string
+	LLMBackend       string // "ollama" (default) or "openai" (SGLang/vLLM/…)
+	OpenAIBaseURL    string // /v1 root, used when LLMBackend == "openai"
+	OpenAIAPIKey     string // optional bearer token for the openai backend
 	AgentContainer   string
 	SearxngURL       string
 	ServicePortStart int

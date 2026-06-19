@@ -41,7 +41,7 @@ const (
 )
 
 type Agent struct {
-	ollama         *ollama.Client
+	ollama         ollama.Backend
 	executor       *ToolExecutor
 	model          string
 	histMu         sync.Mutex // guards history, toolSeq and historyLoaded (Chat goroutine vs WS read pump: InjectNote, ResetHistory, SetSession)
@@ -116,7 +116,7 @@ func (a *Agent) buildToolList() []ollama.Tool {
 
 // New creates a new Agent. personality is the editable system prompt section loaded
 // from DB by the caller; pass "" to use the default.
-func New(ollamaClient *ollama.Client, executor *ToolExecutor, model string, memStore *memory.Store, personality string) *Agent {
+func New(ollamaClient ollama.Backend, executor *ToolExecutor, model string, memStore *memory.Store, personality string) *Agent {
 	if personality == "" {
 		personality = systemPromptPersonalityDefault
 	}

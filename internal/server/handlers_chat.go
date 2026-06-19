@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"prism/internal/agent"
-	"prism/internal/ollama"
 	"prism/internal/rag"
 )
 
@@ -115,7 +114,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	os.MkdirAll(sessionPluginDir, 0755)
 
-	ollamaClient := ollama.NewClient(s.cfg.OllamaURL)
+	ollamaClient := s.newChatBackend()
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
 
 	if s.ragStore != nil {

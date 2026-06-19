@@ -34,13 +34,14 @@ PRISM is a self-hosted AI dashboard. The Go server (`main.go` → `internal/serv
 **Request flow:**
 1. Browser connects via WebSocket (`/ws?session=<id>`)
 2. `server.go` creates a per-connection `Client` with its own `Agent` instance
-3. Chat messages call `agent.Chat()` which loops: call Ollama → execute tool calls → feed results back → repeat (max 75 iterations)
+3. Chat messages call `agent.Chat()` which loops: call the LLM backend → execute tool calls → feed results back → repeat (max 75 iterations)
 4. Events stream back to the browser as JSON over WebSocket
 
 **Key packages:**
 
 - `internal/agent` — `Agent` (conversation loop, system prompt assembly, history management) + `ToolExecutor` (all tool implementations). `ToolDefinitions` in `tools.go` is the authoritative list of built-in tools.
-- `internal/ollama` — HTTP client for the Ollama API (streaming chat, model listing, embeddings)
+- `internal/ollama` — HTTP client for the Ollama API (streaming chat, model listing, embeddings). Also defines `ollama.Backend`, the wire-neutral chat interface (`Chat`/`Ping`/`ListModels`) that callers depend on. The `ollama.*` types (`Message`, `Tool`, `StreamEvent`, …) are the canonical pivot types used everywhere.
+- `internal/openai` — OpenAI-compatible chat backend (SGLang/vLLM/TGI/LM Studio/OpenRouter). Implements `ollama.Backend` by translating the pivot types to/from the `/v1/chat/completions` wire format: SSE streaming, fragmented `tool_calls` deltas reassembled by index, `reasoning_content` → `Thinking`. Selected via `LLM_BACKEND=openai`; backend factory lives in `internal/server/backend.go`.
 - `internal/docker` — executes shell commands inside the `prism-workspace` container via the Docker socket
 - `internal/rag` — pgvector store (collections, documents, chunks) + embedder (calls Ollama) + chunker/parser
 - `internal/memory` — PostgreSQL-backed conversation history, session management, notifications, and LLM-based summarization (triggered automatically when history exceeds 40 messages)
@@ -67,6 +68,8 @@ Two-part: editable `personality` (stored in DB per session, modifiable via `upda
 ## Environment variables
 
 See `.env.example`. Key ones: `OLLAMA_URL`, `OLLAMA_MODEL`, `EMBED_MODEL`, `POSTGRES_URL`, `SEARXNG_URL`, `AGENT_CONTAINER` (default: `prism-workspace`), `WORKSPACE_DIR`, `PLUGIN_DIR`.
+
+`LLM_BACKEND` selects the provider: `ollama` (default) or `openai` for any OpenAI-compatible server (SGLang, vLLM, …). When `openai`, set `OPENAI_BASE_URL` (the `/v1` root), optionally `OPENAI_API_KEY`, and `OPENAI_MODEL` (overrides `OLLAMA_MODEL`; must match the server's `--served-model-name`). The same base URL serves chat, embeddings (`/v1/embeddings`) and RAG vision captioning.
 
 Changing `EMBED_MODEL` requires resetting the RAG database (vector dimension is fixed per table).
 

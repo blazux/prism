@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"prism/internal/agent"
-	"prism/internal/ollama"
 )
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -21,7 +20,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	client := ollama.NewClient(s.cfg.OllamaURL)
+	client := s.newChatBackend()
 	models, err := client.ListModels(ctx)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{"models": []string{}, "error": err.Error()})

@@ -15,7 +15,6 @@ import (
 
 	"prism/internal/agent"
 	"prism/internal/memory"
-	"prism/internal/ollama"
 
 	"github.com/gorilla/websocket"
 )
@@ -88,7 +87,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	os.MkdirAll(sessionPluginDir, 0755)
 
-	ollamaClient := ollama.NewClient(s.cfg.OllamaURL)
+	ollamaClient := s.newChatBackend()
 
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
 	if s.ragStore != nil {
@@ -566,7 +565,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					curPersonality = p
 				}
 			}
-			client.ag = agent.New(ollama.NewClient(s.cfg.OllamaURL), executor, model, curMS, curPersonality)
+			client.ag = agent.New(s.newChatBackend(), executor, model, curMS, curPersonality)
 			client.ag.SetSession(client.sessionID, curPersonality)
 			if ragContextFn != nil {
 				client.ag.SetRAGContextFn(ragContextFn)
