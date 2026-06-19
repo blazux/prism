@@ -376,9 +376,27 @@ func (s *Store) MaybeSummarize(ctx context.Context, sessionID string, ollamaClie
 
 	toSummarize := msgs[:len(msgs)-keepRecent]
 
-	// Build summary prompt
+	// Consolidation prompt: instead of appending a fresh summary to the old one
+	// (which lets obsolete facts pile up forever), we feed the existing running
+	// summary back in and ask the model to rewrite a single, up-to-date summary
+	// that reflects the CURRENT state — dropping anything later messages have
+	// undone. This keeps the summary bounded and reconciled with reality.
+	existing := s.GetSummary(ctx, sessionID)
+
 	var sb strings.Builder
-	sb.WriteString("Summarize the following conversation concisely, preserving key information, decisions, and context:\n\n")
+	sb.WriteString("You maintain a running summary of an ongoing conversation between a user and an AI assistant. ")
+	sb.WriteString("Produce an updated, self-contained summary that reflects the CURRENT state of things.\n\n")
+	sb.WriteString("Rules:\n")
+	sb.WriteString("- Integrate the new messages into the existing summary. Do NOT simply append them.\n")
+	sb.WriteString("- If newer messages show something was undone, deleted, renamed, completed or changed, UPDATE or REMOVE the now-obsolete fact. The summary must describe what is true now, not the full history.\n")
+	sb.WriteString("- Preserve durable facts, decisions, user preferences and still-pending tasks.\n")
+	sb.WriteString("- Stay concise and factual. Output ONLY the summary text, with no preamble or commentary.\n\n")
+	if existing != "" {
+		sb.WriteString("=== Current running summary ===\n")
+		sb.WriteString(existing)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("=== New messages to integrate ===\n")
 	for _, m := range toSummarize {
 		if m.role == "tool" {
 			continue
@@ -413,7 +431,7 @@ func (s *Store) MaybeSummarize(ctx context.Context, sessionID string, ollamaClie
 		}
 		summary.WriteString(ev.Content)
 	}
-	summaryText := strings.TrimSpace(summary.String())
+	summaryText := stripThinking(strings.TrimSpace(summary.String()))
 	if summaryText == "" {
 		return
 	}
@@ -436,18 +454,13 @@ func (s *Store) MaybeSummarize(ctx context.Context, sessionID string, ollamaClie
 		return
 	}
 
-	// Accumulate with existing summary
-	existing := s.GetSummary(ctx, sessionID)
-	newSummary := summaryText
-	if existing != "" {
-		newSummary = existing + "\n\n" + summaryText
-	}
-
+	// Replace (not append): the consolidation prompt already folded the previous
+	// summary into summaryText, so the stored summary stays bounded and current.
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO agent_config (key, value, updated_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-	`, summaryKey(sessionID), newSummary); err != nil {
+	`, summaryKey(sessionID), summaryText); err != nil {
 		log.Printf("[memory] summarize upsert summary: %v", err)
 		return
 	}
@@ -458,6 +471,29 @@ func (s *Store) MaybeSummarize(ctx context.Context, sessionID string, ollamaClie
 	}
 
 	log.Printf("[memory] summarized %d messages for session %q", len(toSummarize), sessionID)
+}
+
+// stripThinking removes <think>…</think> (and <thinking>/<thought>) blocks from
+// a model's output, so reasoning a model inlines into content never leaks into a
+// stored summary. Mirrors the agent's stripThinkingBlocks. Unclosed tags drop
+// everything from the opening tag onward.
+func stripThinking(s string) string {
+	for _, tag := range []string{"think", "thinking", "thought"} {
+		open, close := "<"+tag+">", "</"+tag+">"
+		for {
+			start := strings.Index(s, open)
+			if start < 0 {
+				break
+			}
+			end := strings.Index(s[start:], close)
+			if end < 0 {
+				s = s[:start] // unclosed: drop the trailing reasoning
+				break
+			}
+			s = s[:start] + s[start+end+len(close):]
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 func summaryKey(sessionID string) string {
