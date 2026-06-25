@@ -126,13 +126,37 @@
   // broadcasts from the dashboard and updates :root in place (no reload).
   const WIDGET_BOOTSTRAP = `(function(){function a(v){var r=document.documentElement.style;for(var k in v)r.setProperty(k,v[k]);}window.addEventListener('message',function(e){var d=e.data;if(d&&d.type==='prism-theme'&&d.vars)a(d.vars);});})();`;
 
+  // ─── Custom themes (localStorage) ─────────────────────────────────────────
+  const CUSTOM_KEY = 'prism-custom-themes';
+  function readCustomArr() {
+    try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); } catch (_) { return []; }
+  }
+  function loadCustomThemes() {
+    const out = {};
+    for (const t of readCustomArr()) if (t && t.id && t.vars) out[t.id] = { label: t.label || t.id, vars: t.vars, custom: true };
+    return out;
+  }
+  function getAllThemes() { return Object.assign({}, THEMES, loadCustomThemes()); }
+  function saveCustomTheme(id, label, vars) {
+    const arr = readCustomArr();
+    const i = arr.findIndex((t) => t.id === id);
+    const entry = { id, label, vars };
+    if (i >= 0) arr[i] = entry; else arr.push(entry);
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify(arr));
+  }
+  function deleteCustomTheme(id) {
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify(readCustomArr().filter((t) => t.id !== id)));
+    if (localStorage.getItem(STORAGE_KEY) === id) applyTheme(DEFAULT_THEME);
+  }
+
   function getThemeId() {
     const id = localStorage.getItem(STORAGE_KEY);
-    return THEMES[id] ? id : DEFAULT_THEME;
+    return getAllThemes()[id] ? id : DEFAULT_THEME;
   }
 
   function activeVars() {
-    return THEMES[getThemeId()].vars;
+    const t = getAllThemes()[getThemeId()];
+    return (t || THEMES[DEFAULT_THEME]).vars;
   }
 
   function varsToCSS(vars) {
@@ -143,8 +167,9 @@
 
   // Apply to the dashboard itself + broadcast to every widget iframe.
   function applyTheme(id, broadcast = true) {
-    if (!THEMES[id]) id = DEFAULT_THEME;
-    const vars = THEMES[id].vars;
+    const all = getAllThemes();
+    if (!all[id]) id = DEFAULT_THEME;
+    const vars = all[id].vars;
     const root = document.documentElement.style;
     for (const k in vars) root.setProperty(k, vars[k]);
     // data-theme drives the per-theme animated background (see style.css #bg-fx).
@@ -163,6 +188,90 @@
     window.dispatchEvent(new CustomEvent('prism-theme-change', { detail: { id, vars } }));
   }
 
+  // Live preview a token map without persisting it (used by the theme studio).
+  function previewVars(vars) {
+    const root = document.documentElement.style;
+    for (const k in vars) root.setProperty(k, vars[k]);
+    const frames = [...document.querySelectorAll('.widget-body iframe')];
+    const appFrame = document.getElementById('app-frame');
+    if (appFrame) frames.push(appFrame);
+    frames.forEach((f) => { try { f.contentWindow.postMessage({ type: 'prism-theme', vars }, '*'); } catch (_) {} });
+  }
+
+  // ─── Palette generation: one accent → a coherent token set ────────────────
+  function hexToHSL(hex) {
+    hex = (hex || '').replace('#', '');
+    if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+    const r = parseInt(hex.slice(0, 2), 16) / 255, g = parseInt(hex.slice(2, 4), 16) / 255, b = parseInt(hex.slice(4, 6), 16) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0; const l = (max + min) / 2;
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+    }
+    return [h, s * 100, l * 100];
+  }
+  function hsl(h, s, l) {
+    h = ((h % 360) + 360) % 360; s = Math.max(0, Math.min(100, s)) / 100; l = Math.max(0, Math.min(100, l)) / 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+    const hx = (n) => Math.round((n + m) * 255).toString(16).padStart(2, '0');
+    return '#' + hx(r) + hx(g) + hx(b);
+  }
+
+  // generatePalette derives the full Prism token set from a single accent color.
+  function generatePalette(accent, mode, harmony) {
+    const [h, s] = hexToHSL(accent);
+    const dark = mode !== 'light';
+    let bgH = h, brH = h;
+    if (harmony === 'complementary') { brH = (h + 180) % 360; }
+    else if (harmony === 'analogous') { bgH = (h - 25 + 360) % 360; brH = (h + 25) % 360; }
+    else if (harmony === 'triadic') { bgH = (h + 120) % 360; brH = (h + 240) % 360; }
+    const t = Math.min(s, 26);                 // subtle surface tint
+    const v = { '--accent': accent };
+    if (dark) {
+      v['--bg'] = hsl(bgH, t * 0.6, 6); v['--bg1'] = hsl(bgH, t * 0.6, 8);
+      v['--bg2'] = hsl(bgH, t * 0.6, 11); v['--bg3'] = hsl(bgH, t * 0.6, 15); v['--bg4'] = hsl(bgH, t * 0.6, 20);
+      v['--border'] = hsl(brH, t * 0.7, 18); v['--border2'] = hsl(brH, t * 0.7, 27);
+      v['--text'] = hsl(h, Math.min(s, 14), 93); v['--text2'] = hsl(h, Math.min(s, 12), 62); v['--text3'] = hsl(h, Math.min(s, 10), 42);
+      v['--accent-dim'] = hsl(h, Math.max(s, 40), 22);
+    } else {
+      v['--bg'] = hsl(bgH, t * 0.5, 96); v['--bg1'] = hsl(bgH, t * 0.4, 100);
+      v['--bg2'] = hsl(bgH, t * 0.5, 93); v['--bg3'] = hsl(bgH, t * 0.5, 88); v['--bg4'] = hsl(bgH, t * 0.5, 82);
+      v['--border'] = hsl(brH, t * 0.6, 86); v['--border2'] = hsl(brH, t * 0.6, 77);
+      v['--text'] = hsl(h, Math.min(s, 25), 14); v['--text2'] = hsl(h, Math.min(s, 16), 38); v['--text3'] = hsl(h, Math.min(s, 12), 60);
+      v['--accent-dim'] = hsl(h, Math.max(s, 35), 87);
+    }
+    v['--green'] = '#4dba87'; v['--red'] = '#e06c75'; v['--yellow'] = '#e5c07b'; v['--orange'] = '#d19a66';
+    return v;
+  }
+
+  // ─── UI preferences (scale / density / animated-bg intensity) ─────────────
+  const SCALE_KEY = 'prism-ui-scale', DENSITY_KEY = 'prism-density', BGFX_KEY = 'prism-bgfx';
+  function getPref(k, d) { return localStorage.getItem(k) || d; }
+  function applyUIScale(v) {
+    v = v || getPref(SCALE_KEY, '100'); localStorage.setItem(SCALE_KEY, v);
+    document.documentElement.style.setProperty('--ui-scale', String(Number(v) / 100));
+  }
+  function applyDensity(v) {
+    v = v || getPref(DENSITY_KEY, 'comfortable'); localStorage.setItem(DENSITY_KEY, v);
+    const c = document.documentElement.classList;
+    c.remove('density-compact', 'density-spacious');
+    if (v !== 'comfortable') c.add('density-' + v);
+  }
+  function applyBgfx(v) {
+    v = (v == null ? getPref(BGFX_KEY, '100') : String(v)); localStorage.setItem(BGFX_KEY, v);
+    document.documentElement.style.setProperty('--bgfx-opacity', String(Number(v) / 100));
+  }
+  function applyPrefs() { applyTheme(getThemeId(), false); applyUIScale(); applyDensity(); applyBgfx(); }
+
   // Wrap an agent-authored widget document with the active theme tokens, the
   // shared widget stylesheet and the live-update bootstrap.
   function composeWidgetDoc(content) {
@@ -177,30 +286,39 @@
     return head + content;
   }
 
-  // Fill a <select> with the available themes and wire live switching.
+  // Fill a <select> with the available themes (presets + custom) and wire live
+  // switching. Idempotent (uses onchange) so it can be re-called on updates.
   function populateSelect(sel) {
     if (!sel) return;
+    const all = getAllThemes();
     sel.innerHTML = '';
-    for (const id in THEMES) {
+    for (const id in all) {
       const o = document.createElement('option');
       o.value = id;
-      o.textContent = THEMES[id].label;
+      o.textContent = all[id].label + (all[id].custom ? ' ✦' : '');
       sel.appendChild(o);
     }
     sel.value = getThemeId();
-    sel.addEventListener('change', () => applyTheme(sel.value));
+    sel.onchange = () => applyTheme(sel.value);
   }
 
   window.PrismTheme = {
-    THEMES,
-    getThemeId,
-    activeVars,
-    applyTheme,
-    composeWidgetDoc,
-    populateSelect,
+    THEMES, getAllThemes, getThemeId, activeVars,
+    applyTheme, previewVars, composeWidgetDoc, populateSelect,
+    saveCustomTheme, deleteCustomTheme, generatePalette,
+    applyUIScale, applyDensity, applyBgfx, getPref,
+    KEYS: { THEME: STORAGE_KEY, SCALE: SCALE_KEY, DENSITY: DENSITY_KEY, BGFX: BGFX_KEY },
   };
 
-  // Apply the saved theme to the dashboard immediately (before app.js runs) so
-  // there is no flash of the default palette.
-  applyTheme(getThemeId(), false);
+  // Cross-tab: when settings change prefs/themes, re-apply + refresh the picker.
+  window.addEventListener('storage', (e) => {
+    if ([STORAGE_KEY, CUSTOM_KEY, SCALE_KEY, DENSITY_KEY, BGFX_KEY].includes(e.key)) {
+      applyPrefs();
+      const sel = document.getElementById('theme-select');
+      if (sel) populateSelect(sel);
+    }
+  });
+
+  // Apply everything immediately (before app.js runs) so there is no flash.
+  applyPrefs();
 })();

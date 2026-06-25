@@ -80,8 +80,8 @@
           <div class="rail-sep"></div>
           <div class="rail-section rail-boards" id="rail-boards"></div>
           <div class="rail-spacer"></div>
-          <button class="rail-item rail-new" onclick="promptNewSession()" title="New board">
-            <span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span><span class="rail-label">New board</span></button>
+          <button class="rail-item rail-new" onclick="promptNewSession()" title="New workspace">
+            <span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span><span class="rail-label">New workspace</span></button>
         </div>
       </nav>
 
@@ -106,6 +106,44 @@
         <!-- Widget dock (taskbar): minimize/restore/delete every widget -->
         <div id="widget-dock" style="display:none"></div>
       </main>
+
+      <!-- Chat: docked side panel (sibling of #main inside #body) -->
+      <div id="chat-drawer">
+        <div id="chat-resize-handle"></div>
+        <div id="chat-header">
+          <span class="chat-title" id="chat-agent">Assistant</span>
+          <div class="chat-header-actions">
+            <button onclick="resetChat()" title="New conversation">New chat</button>
+            <button class="drawer-close" onclick="toggleChat()" title="Close">✕</button>
+          </div>
+        </div>
+        <div id="chat-context-bar" style="display:none"></div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-area">
+          <div id="image-previews" style="display:none"></div>
+          <div class="chat-input-row">
+            <label id="attach-btn" title="Attach a file — images, PDF, DOCX, TXT, CSV… (or paste image with Ctrl+V)">
+              <input type="file" accept="image/*,.pdf,.docx,.txt,.csv,.md,.json,.tsv" multiple style="display:none"
+                onchange="Array.from(this.files).forEach(addAttachment); this.value=''">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+              </svg>
+            </label>
+            <button id="emoji-btn" title="Insert emoji" onclick="toggleEmojiPicker()">😊</button>
+            <textarea
+              id="chat-input"
+              placeholder="Ask anything… Ctrl+V to paste an image"
+              onkeydown="handleChatKey(event)"
+              rows="1"
+            ></textarea>
+            <button id="send-btn" onclick="sendChat()">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                <path d="M1 8L15 1L8 15L7 9L1 8Z" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- File editor panel -->
@@ -120,46 +158,6 @@
         </div>
       </div>
       <div id="editor-codemirror"></div>
-    </div>
-
-    <!-- Chat backdrop -->
-    <div id="chat-overlay"></div>
-
-    <!-- Chat drawer -->
-    <div id="chat-drawer">
-      <div id="chat-resize-handle"></div>
-      <div id="chat-header">
-        <span class="chat-title">Chat</span>
-        <div class="chat-header-actions">
-          <button onclick="resetChat()" title="New conversation">New chat</button>
-          <button class="drawer-close" onclick="toggleChat()" title="Close">✕</button>
-        </div>
-      </div>
-      <div id="chat-messages"></div>
-      <div id="chat-input-area">
-        <div id="image-previews" style="display:none"></div>
-        <div class="chat-input-row">
-          <label id="attach-btn" title="Attach a file — images, PDF, DOCX, TXT, CSV… (or paste image with Ctrl+V)">
-            <input type="file" accept="image/*,.pdf,.docx,.txt,.csv,.md,.json,.tsv" multiple style="display:none"
-              onchange="Array.from(this.files).forEach(addAttachment); this.value=''">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
-            </svg>
-          </label>
-          <button id="emoji-btn" title="Insert emoji" onclick="toggleEmojiPicker()">😊</button>
-          <textarea
-            id="chat-input"
-            placeholder="Ask anything… Ctrl+V to paste an image"
-            onkeydown="handleChatKey(event)"
-            rows="1"
-          ></textarea>
-          <button id="send-btn" onclick="sendChat()">
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-              <path d="M1 8L15 1L8 15L7 9L1 8Z" fill="currentColor"/>
-            </svg>
-          </button>
-        </div>
-      </div>
     </div>
 
     <!-- Secret input dialog -->

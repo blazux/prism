@@ -11,7 +11,11 @@ const widgets = new Map()
 let pendingImages = []      // base64 strings (without data-URL prefix) waiting to be sent
 let pendingAttachments = [] // images queued by add_attachment, injected into next assistant bubble
 let pendingFiles  = [] // {name, text} parsed file attachments waiting to be sent
-let currentSessionID = localStorage.getItem('active-session') || 'default'
+// The workspace whose dashboard we return to. The live chat session
+// (currentSessionID) follows the view: a workspace id on a dashboard, or the
+// global ASSISTANT session while viewing a global app.
+let lastWorkspace = localStorage.getItem('active-workspace') || localStorage.getItem('active-session') || 'default'
+let currentSessionID = lastWorkspace
 
 function updateSettingsLink() {
   const link = document.getElementById('settings-link')
@@ -54,7 +58,7 @@ function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(currentSessionID)}`)
 
-  ws.onopen  = () => { clearChat(); batchLoading = true }
+  ws.onopen  = () => { clearChat(); batchLoading = true; if (currentContext) send({ type: 'set_context', content: currentContext }) }
   ws.onclose = () => { setContainerBadge('unknown'); setTimeout(connect, 2000) }
   ws.onerror = () => {}
   ws.onmessage = (e) => {
@@ -173,27 +177,13 @@ function mountWindow(rec) {
   titleEl.className = 'widget-title'
   titleEl.textContent = rec.title
 
-  const lockBtn = document.createElement('button')
-  lockBtn.className = 'widget-lock'
-  const applyLockIcon = () => {
-    lockBtn.title = rec.locked ? 'Unlock' : 'Lock'
-    lockBtn.textContent = rec.locked ? '🔒' : '🔓'
-  }
-  applyLockIcon()
-  lockBtn.addEventListener('click', () => {
-    rec.locked = !rec.locked
-    applyLockIcon()
-    send({ type: 'lock_plugin', id: rec.id, locked: rec.locked })
-    renderDock()
-  })
-
   const minBtn = document.createElement('button')
   minBtn.className = 'widget-min'
   minBtn.textContent = '–'
   minBtn.title = 'Minimize (keep in dock)'
   minBtn.addEventListener('click', () => minimizeWidget(rec.id))
 
-  hdr.append(titleEl, lockBtn, minBtn)
+  hdr.append(titleEl, minBtn)
 
   const body = document.createElement('div')
   body.className = 'widget-body'
@@ -278,7 +268,7 @@ function renderDock() {
     const btn = document.createElement('button')
     btn.className = 'dock-chip-label'
     btn.title = rec.open ? 'Minimize' : 'Reopen'
-    btn.textContent = (rec.locked ? '🔒 ' : '') + rec.title
+    btn.textContent = rec.title
     btn.addEventListener('click', () => rec.open ? minimizeWidget(rec.id) : restoreWidget(rec.id))
 
     const del = document.createElement('button')
@@ -302,14 +292,23 @@ function updateEmptyState() {
 window.toggleChat = function() {
   chatOpen = !chatOpen
   document.getElementById('chat-drawer').classList.toggle('open', chatOpen)
-  document.getElementById('chat-overlay').classList.toggle('visible', chatOpen)
   document.getElementById('chat-fab').classList.toggle('active', chatOpen)
   if (chatOpen) setTimeout(() => document.getElementById('chat-input').focus(), 50)
 }
 
-document.getElementById('chat-overlay').addEventListener('click', () => {
-  if (chatOpen) toggleChat()
-})
+// ─── Context-aware chat ─────────────────────────────────────────────────────────
+// Tells the agent what the user is currently looking at (workspace, app, the
+// open email/note…) so "summarize this" / "reply to it" resolve on their own.
+let currentContext = ''
+function setContext(text) {
+  currentContext = text || ''
+  const bar = document.getElementById('chat-context-bar')
+  if (bar) {
+    bar.textContent = currentContext
+    bar.style.display = currentContext ? '' : 'none'
+  }
+  send({ type: 'set_context', content: currentContext })
+}
 
 document.querySelectorAll('.empty-examples span').forEach(el => {
   el.addEventListener('click', () => {
@@ -787,8 +786,35 @@ window.handleSecretKey = function(e) {
 // ─── View router (rail: apps + boards) ─────────────────────────────────────────
 
 const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar' }
-let currentView = { type: 'board' }      // { type:'board' } | { type:'app', name }
+const ASSISTANT = 'assistant'            // reserved session: the global super-agent
+let currentView = { type: 'board' }      // { type:'board', workspace } | { type:'app', name }
 let allSessions = []
+
+// gotoSession reconnects the chat/WS to a different session (workspace or the
+// global assistant). It does NOT change the view — setView decides the session.
+function gotoSession(id) {
+  if (id === currentSessionID) return
+  batchLoading = true
+  clearChat()
+  cascadeN = 0
+  for (const wid of [...widgets.keys()]) removeWidget(wid)
+  currentSessionID = id
+  updateSettingsLink()
+  pendingImages = []
+  pendingFiles  = []
+  renderPreviews()
+  notifications = []
+  renderNotifPanel()
+  renderNotifBadge()
+  if (ws) { ws.onclose = null; ws.close() }
+  connect()
+}
+
+// setChatAgentLabel shows who you're talking to in the chat header.
+function setChatAgentLabel(text) {
+  const el = document.getElementById('chat-agent')
+  if (el) el.textContent = text
+}
 
 function boardName(id) {
   const s = allSessions.find(x => x.id === id)
@@ -808,19 +834,30 @@ function setView(view) {
   document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'))
 
   if (view.type === 'app') {
-    frame.src = `/apps/${view.name}.html?session=${encodeURIComponent(currentSessionID)}`
+    // Global apps → chat is the global assistant.
+    gotoSession(ASSISTANT)
+    frame.src = `/apps/${view.name}.html?session=${encodeURIComponent(ASSISTANT)}`
     frame.style.display = ''
     dash.style.display = 'none'
     dock.style.display = 'none'
     if (title) title.textContent = APP_TITLES[view.name] || view.name
     document.querySelector(`.rail-item[data-app="${view.name}"]`)?.classList.add('active')
+    setChatAgentLabel('🌐 Global assistant')
+    setContext(`Viewing the ${APP_TITLES[view.name] || view.name} app`)
   } else {
+    // Workspace dashboard → chat is that workspace's agent.
+    const ws_id = view.workspace || lastWorkspace
+    lastWorkspace = ws_id
+    localStorage.setItem('active-workspace', ws_id)
+    gotoSession(ws_id)
     frame.style.display = 'none'
     frame.src = 'about:blank'
     dash.style.display = ''
     renderDock()
-    if (title) title.textContent = boardName(currentSessionID)
-    document.querySelector(`.rail-item[data-board-id="${CSS.escape(currentSessionID)}"]`)?.classList.add('active')
+    if (title) title.textContent = boardName(ws_id)
+    document.querySelector(`.rail-item[data-board-id="${CSS.escape(ws_id)}"]`)?.classList.add('active')
+    setChatAgentLabel(boardName(ws_id))
+    setContext(`Workspace "${boardName(ws_id)}" — its dashboard (${widgets.size} widget(s))`)
   }
 }
 
@@ -830,6 +867,124 @@ async function loadSessions() {
     const data = await res.json()
     allSessions = data.sessions || []
     renderBoardList(allSessions)
+    // Names arrive async — refresh the title/agent label if on a workspace.
+    if (currentView.type === 'board') {
+      const t = document.getElementById('view-title')
+      if (t) t.textContent = boardName(lastWorkspace)
+      setChatAgentLabel(boardName(lastWorkspace))
+    }
+  } catch {}
+}
+
+// ─── Workspace icons (client-side) ──────────────────────────────────────────────
+const WS_ICON_KEY = 'prism-workspace-icons'
+function wsIcons() { try { return JSON.parse(localStorage.getItem(WS_ICON_KEY) || '{}') } catch { return {} } }
+function getWorkspaceIcon(id) { return wsIcons()[id] || '' }
+function setWorkspaceIcon(id, emoji) {
+  const m = wsIcons()
+  if (emoji) m[id] = emoji; else delete m[id]
+  localStorage.setItem(WS_ICON_KEY, JSON.stringify(m))
+}
+const escAttr = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+const WS_EMOJI_SUGGEST = ['🗂','💼','🏠','🎮','🚀','📊','🧪','🎨','🛠','📅','💡','🌐','📁','🔬','📈','🎵']
+
+// editWorkspace opens a small dialog to rename a workspace AND pick its icon.
+function editWorkspace(sess) {
+  const ov = document.createElement('div')
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:700;display:flex;align-items:center;justify-content:center'
+  const dlg = document.createElement('div')
+  dlg.style.cssText = 'width:min(360px,92vw);background:var(--bg1);border:1px solid var(--border2);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px'
+  dlg.innerHTML = `
+    <div style="font-weight:600;color:var(--text)">Edit workspace</div>
+    <label style="font-size:11px;color:var(--text2)">Name<input id="ws-name" type="text" value="${escAttr(sess.name)}" style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px"></label>
+    <label style="font-size:11px;color:var(--text2)">Icon (emoji — blank = default)<input id="ws-icon" type="text" value="${escAttr(getWorkspaceIcon(sess.id))}" maxlength="4" style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px"></label>
+    <div id="ws-suggest" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+      <button class="dock-chip-label" id="ws-cancel" style="border:1px solid var(--border2);border-radius:6px;padding:5px 12px">Cancel</button>
+      <button id="ws-save" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 14px;cursor:pointer">Save</button>
+    </div>`
+  ov.appendChild(dlg); document.body.appendChild(ov)
+  const iconInput = dlg.querySelector('#ws-icon'), sug = dlg.querySelector('#ws-suggest')
+  for (const e of WS_EMOJI_SUGGEST) {
+    const b = document.createElement('button')
+    b.type = 'button'; b.textContent = e
+    b.style.cssText = 'font-size:16px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;width:30px;height:30px;cursor:pointer'
+    b.onclick = () => { iconInput.value = e }
+    sug.appendChild(b)
+  }
+  const close = () => ov.remove()
+  ov.addEventListener('click', e => { if (e.target === ov) close() })
+  dlg.querySelector('#ws-cancel').onclick = close
+  dlg.querySelector('#ws-save').onclick = async () => {
+    const name = dlg.querySelector('#ws-name').value.trim()
+    setWorkspaceIcon(sess.id, iconInput.value.trim())
+    if (name && name !== sess.name) {
+      await fetch(`/api/sessions/${sess.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+    }
+    close()
+    loadSessions()
+    if (currentView.type === 'board' && currentSessionID === sess.id) {
+      const t = document.getElementById('view-title'); if (t && name) t.textContent = name
+      setChatAgentLabel(name || sess.name)
+    }
+  }
+  setTimeout(() => dlg.querySelector('#ws-name').focus(), 50)
+}
+
+// ─── Command palette (Ctrl/⌘-K) ─────────────────────────────────────────────────
+function openCmdK() {
+  if (document.getElementById('cmdk')) return
+  const ov = document.createElement('div'); ov.id = 'cmdk'
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:800;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh'
+  const box = document.createElement('div')
+  box.style.cssText = 'width:min(520px,92vw);background:var(--bg1);border:1px solid var(--border2);border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5)'
+  box.innerHTML = `<input id="cmdk-input" placeholder="Jump to an app or workspace…" autocomplete="off" style="width:100%;box-sizing:border-box;background:var(--bg2);color:var(--text);border:none;border-bottom:1px solid var(--border);padding:12px 14px;font-size:14px;outline:none"><div id="cmdk-list" style="max-height:52vh;overflow-y:auto"></div>`
+  ov.appendChild(box); document.body.appendChild(ov)
+  const input = box.querySelector('#cmdk-input'), list = box.querySelector('#cmdk-list')
+  const all = [
+    ...Object.keys(APP_TITLES).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
+    ...allSessions.filter(s => s.id !== ASSISTANT).map(s => ({ kind: 'board', id: s.id, label: s.name, icon: getWorkspaceIcon(s.id) || '▣' })),
+  ]
+  let filtered = all, sel = 0
+  function render() {
+    list.innerHTML = ''
+    filtered.forEach((it, i) => {
+      const row = document.createElement('div')
+      row.style.cssText = `display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;${i === sel ? 'background:var(--bg3)' : ''}`
+      row.innerHTML = `<span style="width:20px;text-align:center">${it.icon}</span><span style="flex:1;color:var(--text);font-size:13px">${escAttr(it.label)}</span><span style="font-size:11px;color:var(--text3)">${it.kind === 'app' ? 'App' : 'Workspace'}</span>`
+      row.onmouseenter = () => { sel = i; render() }
+      row.onclick = () => choose(i)
+      list.appendChild(row)
+    })
+  }
+  function choose(i) { const it = filtered[i]; if (!it) return; close(); if (it.kind === 'app') setView({ type: 'app', name: it.name }); else selectBoard(it.id) }
+  function close() { ov.remove(); document.removeEventListener('keydown', onKey, true) }
+  function onKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); close() }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(sel + 1, filtered.length - 1); render() }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(sel - 1, 0); render() }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(sel) }
+  }
+  input.addEventListener('input', () => { const q = input.value.toLowerCase(); filtered = all.filter(it => it.label.toLowerCase().includes(q)); sel = 0; render() })
+  document.addEventListener('keydown', onKey, true)
+  ov.addEventListener('click', e => { if (e.target === ov) close() })
+  render(); input.focus()
+}
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openCmdK() }
+})
+
+// ─── Unread mail badge on the rail Email icon ────────────────────────────────────
+async function refreshMailBadge() {
+  try {
+    const { count } = await (await fetch('/api/email/unread')).json()
+    const iconEl = document.querySelector('.rail-item[data-app="email"] .rail-icon')
+    if (!iconEl) return
+    let b = iconEl.querySelector('.rail-badge')
+    if (count > 0) {
+      if (!b) { b = document.createElement('span'); b.className = 'rail-badge'; iconEl.appendChild(b) }
+      b.textContent = count > 99 ? '99+' : String(count)
+    } else if (b) { b.remove() }
   } catch {}
 }
 
@@ -838,6 +993,7 @@ function renderBoardList(sessions) {
   if (!host) return
   host.innerHTML = ''
   for (const sess of sessions) {
+    if (sess.id === ASSISTANT) continue   // shown as the dedicated top item
     const item = document.createElement('button')
     item.className = 'rail-item'
     item.dataset.boardId = sess.id
@@ -847,7 +1003,9 @@ function renderBoardList(sessions) {
 
     const icon = document.createElement('span')
     icon.className = 'rail-icon'
-    icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
+    const emoji = getWorkspaceIcon(sess.id)
+    if (emoji) icon.textContent = emoji
+    else icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
     const label = document.createElement('span')
     label.className = 'rail-label'
     label.textContent = sess.name
@@ -855,15 +1013,9 @@ function renderBoardList(sessions) {
 
     const rename = document.createElement('span')
     rename.className = 'rail-board-act'
-    rename.title = 'Rename'
+    rename.title = 'Edit'
     rename.textContent = '✎'
-    rename.onclick = async (e) => {
-      e.stopPropagation()
-      const n = prompt('Rename board:', sess.name)
-      if (!n || n.trim() === sess.name) return
-      await fetch(`/api/sessions/${sess.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n.trim() }) })
-      loadSessions()
-    }
+    rename.onclick = (e) => { e.stopPropagation(); editWorkspace(sess) }
     item.appendChild(rename)
 
     if (sess.id !== currentSessionID) {
@@ -873,7 +1025,7 @@ function renderBoardList(sessions) {
       del.textContent = '×'
       del.onclick = async (e) => {
         e.stopPropagation()
-        if (!confirm(`Delete board "${sess.name}" and all its history?`)) return
+        if (!confirm(`Delete workspace "${sess.name}" and all its history?`)) return
         await fetch(`/api/sessions/${sess.id}`, { method: 'DELETE' })
         loadSessions()
       }
@@ -884,32 +1036,12 @@ function renderBoardList(sessions) {
 }
 
 function selectBoard(id) {
-  if (id !== currentSessionID) switchToSession(id)
-  else setView({ type: 'board' })
-}
-
-function switchToSession(id) {
-  batchLoading = true
-  clearChat()
-  cascadeN = 0
-  for (const wid of [...widgets.keys()]) removeWidget(wid)
-  currentSessionID = id
-  localStorage.setItem('active-session', id)
-  updateSettingsLink()
-  pendingImages = []
-  pendingFiles  = []
-  renderPreviews()
-  notifications = []
-  renderNotifPanel()
-  renderNotifBadge()
-  setView({ type: 'board' })
+  setView({ type: 'board', workspace: id })
   loadSessions()
-  if (ws) { ws.onclose = null; ws.close() }
-  connect()
 }
 
 async function promptNewSession() {
-  const name = prompt('New board name:')
+  const name = prompt('New workspace name:')
   if (!name || !name.trim()) return
   try {
     const res = await fetch('/api/sessions', {
@@ -918,7 +1050,8 @@ async function promptNewSession() {
       body: JSON.stringify({ name: name.trim() })
     })
     const data = await res.json()
-    switchToSession(data.id)
+    setView({ type: 'board', workspace: data.id })
+    loadSessions()
   } catch (e) {
     alert('Failed to create: ' + e.message)
   }
@@ -1316,6 +1449,10 @@ window.addEventListener('message', e => {
   if (!d || !d.type) return
   if (d.type === 'openFile' && d.path) {
     send({ type: 'file_open', path: d.path.replace(/^\/workspace\//, '') })
+  } else if (d.type === 'context' && typeof d.text === 'string') {
+    setContext(d.text)
+  } else if (d.type === 'mail-unread-changed') {
+    refreshMailBadge()
   } else if (d.type === 'sendChat' && d.text) {
     document.getElementById('chat-input').value = d.text
     if (!chatOpen) toggleChat()
@@ -1358,6 +1495,10 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
   const handle = document.getElementById('chat-resize-handle')
   let resizing = false, startX = 0, startWidth = 0
 
+  // While dragging, the cursor moves over the app/widget iframes which would
+  // otherwise swallow mousemove events and make the drag stutter.
+  const setIframePE = on => document.querySelectorAll('iframe').forEach(f => { f.style.pointerEvents = on ? '' : 'none' })
+
   handle.addEventListener('mousedown', e => {
     resizing = true
     startX = e.clientX
@@ -1365,12 +1506,13 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
     handle.classList.add('dragging')
     document.body.style.cursor = 'ew-resize'
     document.body.style.userSelect = 'none'
+    setIframePE(false)
     e.preventDefault()
   })
 
   document.addEventListener('mousemove', e => {
     if (!resizing) return
-    const newWidth = Math.min(Math.max(startWidth + (startX - e.clientX), 280), window.innerWidth * 0.9)
+    const newWidth = Math.min(Math.max(startWidth + (startX - e.clientX), 300), 720)
     chatDrawer.style.width = newWidth + 'px'
   })
 
@@ -1380,6 +1522,7 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
     handle.classList.remove('dragging')
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
+    setIframePE(true)
     localStorage.setItem(DRAWER_WIDTH_KEY, chatDrawer.style.width)
   })
 }
@@ -1430,10 +1573,12 @@ async function initApp() {
   renderDock()
   updateSettingsLink()
   loadSessions()
-  setView({ type: 'board' })
+  setView({ type: 'board', workspace: lastWorkspace })
   connect()
   loadModels()
   setInterval(loadModels, 30000)
+  refreshMailBadge()
+  setInterval(refreshMailBadge, 60000)
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {

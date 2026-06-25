@@ -43,14 +43,21 @@
   .toolbar .search { flex: 1; }
   .mail { flex: 1; display: flex; min-height: 0; }
   .mlist { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border); overflow-y: auto; }
-  .mrow { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .12s; }
+  .mrow { display: flex; gap: 11px; align-items: flex-start; padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .12s; }
   .mrow:hover { background: var(--bg2); }
-  .mrow.active { background: var(--bg3); border-left: 2px solid var(--accent); padding-left: 12px; }
-  .mrow .mfrom { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
-  .mrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
-  .mrow.seen .dot { background: transparent; }
-  .mrow .msub { color: var(--text); font-weight: 600; font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mrow .mdate { font-size: 11px; color: var(--text3); margin-left: auto; }
+  .mrow.active { background: var(--bg3); box-shadow: inset 2px 0 0 var(--accent); }
+  .mavatar { width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; color: #fff; font-weight: 600; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+  .mbody { flex: 1; min-width: 0; }
+  .mtop { display: flex; align-items: baseline; gap: 8px; }
+  /* Read (default): normal weight, muted. */
+  .mname { flex: 1; min-width: 0; font-size: 13px; color: var(--text2); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mdate { font-size: 11px; color: var(--text3); flex-shrink: 0; font-weight: 400; }
+  .msub { color: var(--text2); font-weight: 400; font-size: 12.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Unread: bold + bright + an accent ring on the avatar. */
+  .mrow.unread .mname { color: var(--text); font-weight: 600; }
+  .mrow.unread .msub { color: var(--text); font-weight: 600; }
+  .mrow.unread .mdate { color: var(--text2); }
+  .mrow.unread .mavatar { box-shadow: 0 0 0 2px var(--bg1), 0 0 0 4px var(--accent); }
   .reading { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .rhead { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
   .rhead .rsub { font-size: 17px; color: var(--text); font-weight: 600; }
@@ -285,10 +292,15 @@ function renderList() {
   const sorted = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   for (const m of sorted) {
     const row = document.createElement('div');
-    row.className = 'mrow' + (m.seen ? ' seen' : '') + (current && current.uid === m.uid ? ' active' : '');
+    row.className = 'mrow' + (m.seen ? '' : ' unread') + (current && current.uid === m.uid ? ' active' : '');
+    const nm = senderName(m.from);
+    row.title = m.from || '';
     row.innerHTML = `
-      <div class="mfrom"><span class="dot"></span>${esc(m.from)}<span class="mdate">${fmtDate(m.date)}</span></div>
-      <div class="msub">${esc(m.subject) || '(no subject)'}</div>`;
+      <div class="mavatar" style="background:${avatarColor(m.from || '')}">${esc(initial(nm))}</div>
+      <div class="mbody">
+        <div class="mtop"><span class="mname">${esc(nm)}</span><span class="mdate">${fmtDate(m.date)}</span></div>
+        <div class="msub">${esc(m.subject) || '(no subject)'}</div>
+      </div>`;
     row.onclick = () => openMessage(m.uid);
     l.appendChild(row);
   }
@@ -300,13 +312,18 @@ async function openMessage(uid) {
   reading.innerHTML = '<div class="placeholder">Loading…</div>';
   try {
     current = (await fetch('/api/email/read?uid=' + uid).then(J)).message;
+    try { parent.postMessage({ type: 'context', text: `Reading an email — from ${current.from}, subject "${current.subject}", UID ${current.uid}` }, '*'); } catch (_) {}
+    if (!current.seen) markSeen(current.uid, true);   // opening = mark read
     renderList();
     reading.innerHTML = `
       <div class="rhead">
         <div class="rsub">${esc(current.subject) || '(no subject)'}</div>
-        <div class="rmeta">${esc(current.from)} · ${fmtDate(current.date)}</div>
+        <div class="rmeta" title="${esc(current.from)}">${esc(senderName(current.from))} · ${fmtDate(current.date)}</div>
         <div class="ractions">
           <button class="btn" onclick="reply()">↩ Reply</button>
+          <button class="btn" onclick="replyAll()">↩↩ Reply all</button>
+          <button class="btn" onclick="forward()">➡ Forward</button>
+          <button class="btn" onclick="markUnread()">● Mark unread</button>
           <button class="btn" onclick="aiSummarize()">✨ Summarize</button>
           <button class="btn" onclick="aiReply()">✨ AI reply</button>
         </div>
@@ -342,20 +359,58 @@ function aiReply() {
   aiAsk(`Read the email with UID ${current.uid} in my inbox (from ${current.from}, subject "${current.subject}") using the email tool (action=read), then draft a suitable reply. Show me the draft and ask for confirmation before sending it.`);
 }
 
-function compose() { replyUid = 0; openCompose('New message', '', ''); }
+function compose() { replyUid = 0; openCompose('New message', '', '', ''); }
+function reSubject(s) { return /^re:/i.test(s || '') ? s : 'Re: ' + (s || ''); }
 function reply() {
   if (!current) return;
   replyUid = current.uid;
-  const sub = /^re:/i.test(current.subject || '') ? current.subject : 'Re: ' + (current.subject || '');
-  openCompose('Reply', current.from, sub);
+  openCompose('Reply', current.from, reSubject(current.subject), '');
 }
-function openCompose(title, to, subject) {
+function replyAll() {
+  if (!current) return;
+  replyUid = current.uid;
+  // sender + original To + Cc, deduped, minus our own address
+  const mine = new Set([cfg && cfg.user, cfg && cfg.from].filter(Boolean).map(x => x.toLowerCase()));
+  const emails = (`${current.from}, ${current.to || ''}, ${current.cc || ''}`.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || []);
+  const seen = new Set(), list = [];
+  for (const e of emails) { const le = e.toLowerCase(); if (!mine.has(le) && !seen.has(le)) { seen.add(le); list.push(e); } }
+  openCompose('Reply all', list.join(', '), reSubject(current.subject), '');
+}
+function forward() {
+  if (!current) return;
+  replyUid = 0;  // a forward is a new message, not threaded
+  const sub = /^fwd?:/i.test(current.subject || '') ? current.subject : 'Fwd: ' + (current.subject || '');
+  const body = looksHTML(current.body) ? stripHtml(current.body) : (current.body || '');
+  const quoted = `\n\n---------- Forwarded message ----------\nFrom: ${current.from}\nDate: ${new Date(current.date).toLocaleString()}\nSubject: ${current.subject}\nTo: ${current.to || ''}\n\n${body}`;
+  openCompose('Forward', '', sub, quoted);
+}
+function openCompose(title, to, subject, body) {
   document.getElementById('compose-title').textContent = title;
   document.getElementById('c-to').value = to || '';
   document.getElementById('c-subject').value = subject || '';
-  document.getElementById('c-body').value = '';
+  document.getElementById('c-body').value = body || '';
   document.getElementById('c-err').textContent = '';
   document.getElementById('overlay').classList.add('open');
+}
+
+// ── Read state ──────────────────────────────────────────────────────────────
+function notifyBadge() { try { parent.postMessage({ type: 'mail-unread-changed' }, '*'); } catch (_) {} }
+function setLocalSeen(uid, seen) {
+  const m = messages.find(x => x.uid === uid); if (m) m.seen = seen;
+  if (current && current.uid === uid) current.seen = seen;
+  renderList(); notifyBadge();
+}
+async function markSeen(uid, seen) {
+  setLocalSeen(uid, seen);   // optimistic
+  try { await fetch('/api/email/markseen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uid, seen }) }); } catch (_) {}
+}
+function markUnread() { if (current) markSeen(current.uid, false); }
+function stripHtml(s) {
+  try {
+    // DOMParser is inert — it does not run scripts or load resources.
+    const doc = new DOMParser().parseFromString(s || '', 'text/html');
+    return (doc.body.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+  } catch { return (s || '').replace(/<[^>]+>/g, ' ').trim(); }
 }
 function closeCompose() { document.getElementById('overlay').classList.remove('open'); }
 
@@ -376,8 +431,23 @@ function fmtDate(s) {
   if (!s) return '';
   const d = new Date(s); const now = new Date();
   if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
+// Show the sender's display name; fall back to the address only when there is no name.
+function senderName(from) {
+  from = (from || '').trim();
+  if (!from) return '(unknown)';
+  const lt = from.indexOf('<');
+  if (lt > 0) {
+    const name = from.slice(0, lt).trim().replace(/^"|"$/g, '').trim();
+    if (name) return name;
+  }
+  return ((from.match(/<([^>]+)>/) || [, from])[1] || from).trim();
+}
+function initial(name) { return ((name || '').trim()[0] || '?').toUpperCase(); }
+function avatarColor(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return `hsl(${h},42%,46%)`; }
+
 function looksHTML(s) {
   return /<(!doctype|html|head|body|table|tr|td|div|p|a|img|br|hr|span|b|strong|i|em|u|ul|ol|li|h[1-6]|font|center|blockquote|style)\b[^>]*>/i.test(s)
       || /&(nbsp|amp|lt|gt|quot|#\d+|#x[0-9a-fA-F]+);/.test(s);

@@ -15,9 +15,22 @@
 
   const MIN_W = 200;
   const MIN_H = 120;
+  // Widgets live in the band 20..Z_CAP. The left rail sits just above this band
+  // (see #rail z-index in style.css) so its hover flyout is never hidden behind
+  // a window. When the counter reaches the cap we compact every window's z-index
+  // back down so the band can't creep into the rail/modal layers.
   let zTop = 20;
+  const Z_CAP = 200;
+
+  function renormalizeZ() {
+    const wins = [...document.querySelectorAll('.widget-window')]
+      .sort((a, b) => (parseInt(a.style.zIndex) || 0) - (parseInt(b.style.zIndex) || 0));
+    zTop = 20;
+    for (const el of wins) el.style.zIndex = String(++zTop);
+  }
 
   function bringToFront(el) {
+    if (zTop >= Z_CAP) renormalizeZ();
     el.style.zIndex = String(++zTop);
   }
 

@@ -69,6 +69,7 @@ async function load() {
   const y = view.getFullYear(), m = view.getMonth();
   const from = new Date(y, m, 1), to = new Date(y, m + 1, 0, 23, 59);
   document.getElementById('title').textContent = `${MONTHS[m]} ${y}`;
+  try { parent.postMessage({ type: 'context', text: `Viewing the calendar — ${MONTHS[m]} ${y}` }, '*'); } catch (_) {}
   try {
     const data = await fetch(`/api/events?session=${encodeURIComponent(session)}&from=${ymd(from)}&to=${ymd(to)} 23:59`).then(r => r.json());
     events = data.events || [];

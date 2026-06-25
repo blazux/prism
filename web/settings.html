@@ -10,7 +10,17 @@
 <script src="/theme.js"></script>
 <style>
 html, body { height: 100%; overflow: hidden; margin: 0; }
-#settings-app { display: flex; flex-direction: column; height: 100vh; }
+#settings-app { display: flex; flex-direction: column; zoom: var(--ui-scale, 1); height: calc(100vh / var(--ui-scale, 1)); }
+.brain-sub { background: var(--bg2); border: 1px solid var(--border2); color: var(--text2); font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 8px; cursor: pointer; }
+.brain-sub:hover { color: var(--text); }
+.brain-sub.active { background: var(--bg3); color: var(--accent); border-color: var(--accent); }
+.appe-card { background: var(--bg1); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.appe-row { display: flex; align-items: center; gap: 12px; }
+.appe-row > label { width: 140px; flex-shrink: 0; font-size: 12.5px; color: var(--text2); }
+.appe-row select, .appe-row input[type=text] { background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; }
+.appe-swatches { display: flex; gap: 6px; margin-top: 2px; }
+.appe-sw { height: 26px; border-radius: 6px; border: 1px solid var(--border); flex: 1; }
+input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var(--border2); border-radius: 6px; background: none; cursor: pointer; }
 
 /* ── Main layout ──────────────────────────────────────────────────────────── */
 #settings-main {
@@ -270,8 +280,11 @@ html, body { height: 100%; overflow: hidden; margin: 0; }
       <div class="nav-item" data-tab="secrets">
         <span class="nav-icon">🔑</span> Secrets
       </div>
-      <div class="nav-item" data-tab="rag">
-        <span class="nav-icon">📚</span> RAG
+      <div class="nav-item" data-tab="knowledge">
+        <span class="nav-icon">📚</span> Knowledge
+      </div>
+      <div class="nav-item" data-tab="appearance">
+        <span class="nav-icon">🎨</span> Appearance
       </div>
     </nav>
 
@@ -334,7 +347,217 @@ function renderTab(tab) {
   if (tab === 'tools')   renderToolsTab(content)
   else if (tab === 'mcp')     renderMCPTab(content)
   else if (tab === 'secrets') renderSecretsTab(content)
-  else if (tab === 'rag')     renderRAGTab(content)
+  else if (tab === 'knowledge') renderBrainTab(content)
+  else if (tab === 'appearance') renderAppearanceTab(content)
+}
+
+// ── Appearance: theme studio (accent → palette), UI scale, density, bg ──────────
+function renderAppearanceTab(container) {
+  const T = window.PrismTheme
+  const pane = document.createElement('div')
+  pane.style.cssText = 'padding:18px;overflow-y:auto;max-width:560px'
+  pane.innerHTML = `
+    <p class="settings-page-title">Theme</p>
+    <div class="appe-card">
+      <div class="appe-row"><label>Active theme</label><select id="appe-theme"></select></div>
+    </div>
+
+    <p class="settings-page-title" style="margin-top:20px">Create a custom theme</p>
+    <div class="appe-card">
+      <div class="appe-row"><label>Accent color</label>
+        <span style="display:flex;gap:8px;align-items:center"><input type="color" id="appe-accent" value="#6b8afd"><input type="text" id="appe-accent-hex" value="#6b8afd" style="width:90px"></span></div>
+      <div class="appe-row"><label>Mode</label>
+        <select id="appe-mode"><option value="dark">Dark</option><option value="light">Light</option></select></div>
+      <div class="appe-row"><label>Harmony</label>
+        <select id="appe-harmony"><option value="monochromatic">Monochromatic</option><option value="analogous">Analogous</option><option value="complementary">Complementary</option><option value="triadic">Triadic</option></select></div>
+      <div class="appe-swatches" id="appe-swatches"></div>
+      <details style="margin-top:2px"><summary style="cursor:pointer;font-size:12px;color:var(--text2);user-select:none">Edit every color</summary>
+        <div id="appe-colors" style="display:grid;grid-template-columns:1fr 1fr;gap:5px 14px;margin-top:8px"></div></details>
+      <div class="appe-row" style="margin-top:6px"><label>Name</label><input type="text" id="appe-name" placeholder="My theme" style="flex:1"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
+        <button class="btn" id="appe-preview">Preview</button>
+        <button class="btn btn-primary" id="appe-save">Save & apply</button>
+      </div>
+    </div>
+    <div id="appe-custom-list" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div>
+
+    <p class="settings-page-title" style="margin-top:20px">Interface</p>
+    <div class="appe-card">
+      <div class="appe-row"><label>UI scale</label>
+        <select id="appe-scale"><option value="90">90%</option><option value="100">100%</option><option value="110">110%</option><option value="125">125%</option><option value="140">140%</option></select></div>
+      <div class="appe-row"><label>Density</label>
+        <select id="appe-density"><option value="compact">Compact</option><option value="comfortable">Comfortable</option><option value="spacious">Spacious</option></select></div>
+      <div class="appe-row"><label>Animated background</label>
+        <span style="display:flex;gap:10px;align-items:center;flex:1;max-width:240px"><input type="range" id="appe-bgfx" min="0" max="100" step="5" style="flex:1"><span id="appe-bgfx-val" style="font-size:12px;color:var(--text2);width:34px;text-align:right"></span></span></div>
+    </div>`
+  container.appendChild(pane)
+
+  // Active theme picker
+  const themeSel = pane.querySelector('#appe-theme')
+  T.populateSelect(themeSel)
+
+  // Custom theme builder — `pal` is the working palette (source of truth).
+  const accent = pane.querySelector('#appe-accent'), accentHex = pane.querySelector('#appe-accent-hex')
+  const modeSel = pane.querySelector('#appe-mode'), harmSel = pane.querySelector('#appe-harmony')
+  const swatches = pane.querySelector('#appe-swatches'), colorsEl = pane.querySelector('#appe-colors')
+  const TOKENS = [
+    ['--bg', 'Background'], ['--bg1', 'Surface 1'], ['--bg2', 'Surface 2'], ['--bg3', 'Surface 3'], ['--bg4', 'Surface 4'],
+    ['--border', 'Border'], ['--border2', 'Border 2'],
+    ['--text', 'Text'], ['--text2', 'Text muted'], ['--text3', 'Text faint'],
+    ['--accent', 'Accent'], ['--accent-dim', 'Accent dim'],
+    ['--green', 'Success'], ['--red', 'Error'], ['--yellow', 'Warning'], ['--orange', 'Orange'],
+  ]
+  let pal = T.generatePalette(accent.value, modeSel.value, harmSel.value)
+
+  function renderSwatches() {
+    const keys = ['--bg', '--bg2', '--bg4', '--border2', '--text', '--text2', '--accent']
+    swatches.innerHTML = keys.map(k => `<span class="appe-sw" title="${k}" style="background:${pal[k]}"></span>`).join('')
+  }
+  function buildColorEditor() {
+    colorsEl.innerHTML = ''
+    for (const [tok, label] of TOKENS) {
+      const row = document.createElement('label')
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text2);cursor:pointer'
+      row.innerHTML = `<input type="color" value="${pal[tok] || '#000000'}" data-tok="${tok}" style="width:32px;height:22px"><span>${label}</span>`
+      const inp = row.querySelector('input')
+      inp.addEventListener('input', () => { pal[tok] = inp.value; renderSwatches(); T.previewVars(pal) })
+      colorsEl.appendChild(row)
+    }
+  }
+  function syncColorInputs() { colorsEl.querySelectorAll('input[data-tok]').forEach(i => { i.value = pal[i.dataset.tok] || '#000000' }) }
+  function regen() { pal = T.generatePalette(accent.value, modeSel.value, harmSel.value); renderSwatches(); syncColorInputs(); T.previewVars(pal) }
+
+  accent.addEventListener('input', () => { accentHex.value = accent.value; regen() })
+  accentHex.addEventListener('change', () => { if (/^#[0-9a-fA-F]{6}$/.test(accentHex.value)) { accent.value = accentHex.value; regen() } })
+  modeSel.addEventListener('change', regen)
+  harmSel.addEventListener('change', regen)
+  renderSwatches(); buildColorEditor()
+  pane.querySelector('#appe-preview').addEventListener('click', () => T.previewVars(pal))
+  pane.querySelector('#appe-save').addEventListener('click', () => {
+    const name = (pane.querySelector('#appe-name').value || '').trim() || 'Custom'
+    const id = 'custom-' + Date.now()
+    T.saveCustomTheme(id, name, Object.assign({}, pal))
+    T.applyTheme(id)
+    T.populateSelect(themeSel)
+    renderCustomList()
+    showToast('Theme saved')
+  })
+
+  // Custom theme list (delete)
+  const customList = pane.querySelector('#appe-custom-list')
+  function renderCustomList() {
+    const all = T.getAllThemes()
+    const customs = Object.entries(all).filter(([, t]) => t.custom)
+    customList.innerHTML = customs.length ? '' : '<div style="font-size:12px;color:var(--text3)">No custom themes yet.</div>'
+    for (const [id, t] of customs) {
+      const row = document.createElement('div')
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:7px 10px'
+      row.innerHTML = `<span style="flex:1;color:var(--text);font-size:13px">${escHtml(t.label)} <span style="color:var(--accent)">✦</span></span>
+        <button class="btn appe-apply">Apply</button><button class="btn appe-del" style="color:var(--red)">Delete</button>`
+      row.querySelector('.appe-apply').addEventListener('click', () => { T.applyTheme(id); T.populateSelect(themeSel) })
+      row.querySelector('.appe-del').addEventListener('click', () => { if (confirm(`Delete theme "${t.label}"?`)) { T.deleteCustomTheme(id); T.populateSelect(themeSel); renderCustomList() } })
+      customList.appendChild(row)
+    }
+  }
+  renderCustomList()
+
+  // Import / export custom themes (JSON)
+  const ioBar = document.createElement('div')
+  ioBar.style.cssText = 'display:flex;gap:8px;margin-top:8px'
+  ioBar.innerHTML = `<button class="btn" id="appe-export">⬇ Export</button><button class="btn" id="appe-import">⬆ Import</button><input type="file" id="appe-import-file" accept="application/json" style="display:none">`
+  pane.querySelector('#appe-custom-list').after(ioBar)
+  ioBar.querySelector('#appe-export').onclick = () => {
+    const customs = Object.entries(T.getAllThemes()).filter(([, t]) => t.custom).map(([id, t]) => ({ id, label: t.label, vars: t.vars }))
+    if (!customs.length) { showToast('No custom themes to export'); return }
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(customs, null, 2)], { type: 'application/json' }))
+    a.download = 'prism-themes.json'; a.click()
+  }
+  const fileInp = ioBar.querySelector('#appe-import-file')
+  ioBar.querySelector('#appe-import').onclick = () => fileInp.click()
+  fileInp.onchange = async () => {
+    const f = fileInp.files[0]; if (!f) return
+    try {
+      const arr = JSON.parse(await f.text()); let n = 0
+      for (const t of (Array.isArray(arr) ? arr : [])) {
+        if (t && t.vars) T.saveCustomTheme('custom-' + Date.now() + '-' + (n++), t.label || 'Imported', t.vars)
+      }
+      T.populateSelect(themeSel); renderCustomList(); showToast(`Imported ${n} theme(s)`)
+    } catch { showToast('Invalid theme file') }
+    fileInp.value = ''
+  }
+
+  // Interface prefs
+  const scaleSel = pane.querySelector('#appe-scale'), densSel = pane.querySelector('#appe-density')
+  const bgfx = pane.querySelector('#appe-bgfx'), bgfxVal = pane.querySelector('#appe-bgfx-val')
+  scaleSel.value = T.getPref(T.KEYS.SCALE, '100'); scaleSel.addEventListener('change', () => T.applyUIScale(scaleSel.value))
+  densSel.value = T.getPref(T.KEYS.DENSITY, 'comfortable'); densSel.addEventListener('change', () => T.applyDensity(densSel.value))
+  bgfx.value = T.getPref(T.KEYS.BGFX, '100'); bgfxVal.textContent = bgfx.value + '%'
+  bgfx.addEventListener('input', () => { bgfxVal.textContent = bgfx.value + '%'; T.applyBgfx(bgfx.value) })
+}
+
+// ── Brain tab: the agent's mind — Knowledge (RAG: documents, memories,
+// learnings) + Skills, in one place. ───────────────────────────────────────────
+let brainSubTab = 'knowledge'
+function renderBrainTab(container) {
+  const wrap = document.createElement('div')
+  wrap.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0'
+  wrap.innerHTML = `
+    <div class="brain-subnav" style="display:flex;gap:6px;padding:12px 16px 0">
+      <button class="brain-sub ${brainSubTab==='knowledge'?'active':''}" data-sub="knowledge">📚 Documents</button>
+      <button class="brain-sub ${brainSubTab==='skills'?'active':''}" data-sub="skills">⚡ Skills</button>
+    </div>
+    <div id="brain-sub-content" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>`
+  container.appendChild(wrap)
+  wrap.querySelectorAll('.brain-sub').forEach(b => b.addEventListener('click', () => {
+    brainSubTab = b.dataset.sub
+    renderTab('knowledge')
+  }))
+  const sub = wrap.querySelector('#brain-sub-content')
+  if (brainSubTab === 'skills') renderSkillsPanel(sub)
+  else renderRAGTab(sub)
+}
+
+async function renderSkillsPanel(container) {
+  const pane = document.createElement('div')
+  pane.style.cssText = 'padding:16px;overflow-y:auto'
+  pane.innerHTML = '<p class="settings-page-title">Saved skills</p><div id="skills-list" style="display:flex;flex-direction:column;gap:8px"></div>'
+  container.appendChild(pane)
+  const list = pane.querySelector('#skills-list')
+  let skills = []
+  try { skills = (await (await fetch('/api/skills')).json()).skills || [] } catch {}
+  if (!skills.length) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px 0">No skills yet. The agent saves procedures here as it learns them.</div>'
+    return
+  }
+  for (const sk of skills) {
+    const card = document.createElement('div')
+    card.style.cssText = 'background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px'
+    const when = sk.when_to_use || sk.description || ''
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px">
+        <strong style="flex:1;color:var(--text)">${escHtml(sk.name)}</strong>
+        <button class="btn sk-view">View</button>
+        <button class="btn sk-del" style="color:var(--red)">Delete</button>
+      </div>
+      ${when ? `<div style="font-size:12px;color:var(--text2);margin-top:4px">${escHtml(when)}</div>` : ''}
+      <pre class="sk-body" style="display:none;white-space:pre-wrap;font-size:12px;color:var(--text2);margin-top:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px"></pre>`
+    card.querySelector('.sk-view').addEventListener('click', async () => {
+      const body = card.querySelector('.sk-body')
+      if (body.style.display === 'none') {
+        if (!body.textContent) {
+          try { const d = await (await fetch('/api/skills?name=' + encodeURIComponent(sk.name))).json(); body.textContent = d.skill?.body || '(empty)' } catch { body.textContent = '(error)' }
+        }
+        body.style.display = ''
+      } else body.style.display = 'none'
+    })
+    card.querySelector('.sk-del').addEventListener('click', async () => {
+      if (!confirm(`Delete skill "${sk.name}"?`)) return
+      await fetch('/api/skills?name=' + encodeURIComponent(sk.name), { method: 'DELETE' })
+      renderTab('knowledge')
+    })
+    list.appendChild(card)
+  }
 }
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -762,7 +985,7 @@ async function renderRAGTab(container) {
       msg.style.cssText = 'padding:40px 24px;color:var(--text3);font-size:13px'
       msg.textContent = 'RAG not ready: ' + (data.status || 'initializing…')
       container.appendChild(msg)
-      setTimeout(() => renderTab('rag'), 2000)
+      setTimeout(() => { if (currentTab === 'knowledge') renderTab('knowledge') }, 2000)
       return
     }
   } catch { /* ignore, render anyway */ }

@@ -40,7 +40,10 @@ body {
 #app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* UI scale: zoom the whole app; #bg-fx (a sibling) stays unscaled. The height
+     is divided back out so the zoomed result still fills exactly one viewport. */
+  zoom: var(--ui-scale, 1);
+  height: calc(100vh / var(--ui-scale, 1));
   overflow: hidden;
   position: relative;   /* sits above the animated #bg-fx layer */
   z-index: 1;
@@ -65,7 +68,9 @@ body {
   width: 54px;
   flex-shrink: 0;
   position: relative;
-  z-index: 6;
+  /* Above the widget-window band (20..200, see windows.js) so the hover flyout
+     covers windows, but below the modal/panel layer (250+). */
+  z-index: 220;
 }
 #rail-inner {
   position: absolute;
@@ -109,7 +114,8 @@ body {
   background: var(--bg2);
   box-shadow: inset 3px 0 0 var(--accent);   /* indicator that doesn't shift content */
 }
-.rail-icon { width: 22px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.rail-icon { width: 22px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; position: relative; }
+.rail-badge { position: absolute; top: -5px; right: -7px; min-width: 14px; height: 14px; padding: 0 3px; background: var(--accent); color: #fff; font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; border-radius: 999px; box-shadow: 0 0 0 2px var(--bg1); }
 .rail-icon svg { width: 18px; height: 18px; }
 .rail-label {
   flex: 1;
@@ -1009,40 +1015,23 @@ body {
 
 /* ── Chat overlay ────────────────────────────────────────────────────────── */
 
-#chat-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.25s;
-  z-index: 190;
-}
-#chat-overlay.visible {
-  opacity: 1;
-  pointer-events: auto;
-}
+/* ── Chat: docked side panel ─────────────────────────────────────────────── */
 
-/* ── Chat drawer ─────────────────────────────────────────────────────────── */
-
+/* Docked side panel: a flex sibling of #main inside #body (no overlay) so you
+   can read a mail / work a dashboard AND chat side by side. */
 #chat-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
+  position: relative;
+  flex-shrink: 0;
   width: var(--drawer-w);
-  min-width: 280px;
-  max-width: 90vw;
-  height: 100vh;
+  min-width: 300px;
+  max-width: 720px;
   background: var(--bg1);
   border-left: 1px solid var(--border);
-  display: flex;
   flex-direction: column;
-  transform: translateX(100%);
-  transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 200;
   overflow: hidden;
+  display: none;
 }
+#chat-drawer.open { display: flex; }
 #chat-resize-handle {
   position: absolute;
   left: 0;
@@ -1055,8 +1044,34 @@ body {
 }
 #chat-resize-handle:hover,
 #chat-resize-handle.dragging { background: var(--accent-dim); }
-#chat-drawer.open {
-  transform: translateX(0);
+
+#chat-agent {
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-size: 12.5px;
+  color: var(--text2);
+}
+
+/* Context bar — shows what the agent currently "sees" */
+#chat-context-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#chat-context-bar::before {
+  content: '👁';
+  font-size: 11px;
+  flex-shrink: 0;
+  opacity: .7;
 }
 
 #chat-header {
@@ -2020,6 +2035,7 @@ body {
   pointer-events: none;
   overflow: hidden;
   background: var(--bg);
+  opacity: var(--bgfx-opacity, 1);   /* animated-background intensity (0 = off) */
 }
 
 /* Tron canvas (bgfx.js) — drawn transparently over the #bg-fx base gradient */
@@ -2235,3 +2251,12 @@ body {
 @media (prefers-reduced-motion: reduce) {
   #bg-fx, #bg-fx::before, #bg-fx::after { animation: none !important; }
 }
+
+/* ── Density (compact / comfortable / spacious) ───────────────────────────── */
+html.density-compact  #chat-messages { padding: 10px 12px; gap: 10px; }
+html.density-compact  .chat-msg-content { font-size: 12.5px; line-height: 1.45; }
+html.density-compact  .rail-item { height: 34px; }
+html.density-compact  .widget-header { height: 18px; }
+html.density-spacious #chat-messages { padding: 22px 20px; gap: 24px; }
+html.density-spacious .chat-msg-content { font-size: 14.5px; line-height: 1.7; }
+html.density-spacious .rail-item { height: 46px; }

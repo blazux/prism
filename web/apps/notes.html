@@ -118,6 +118,7 @@ function select(id) {
   selectedId = id;
   const n = notes.find(x => x.id === id);
   if (!n) return;
+  try { parent.postMessage({ type: 'context', text: `Editing a note titled "${n.title || 'untitled'}"` }, '*'); } catch (_) {}
   document.getElementById('empty').style.display = 'none';
   const ed = document.getElementById('editor');
   ed.style.display = 'flex';
