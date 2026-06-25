@@ -5,13 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PRISM</title>
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@10/dist/gridstack.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
 </head>
 <body>
+  <!-- Per-theme animated background (see #bg-fx rules in style.css) -->
+  <div id="bg-fx"></div>
   <div id="app">
 
     <!-- Top bar -->
@@ -34,18 +35,7 @@
           PRISM
         </span>
         <div id="container-badge" class="badge badge-unknown" title="Container status"></div>
-        <div id="session-switcher">
-          <button id="session-btn" onclick="toggleSessionMenu()">
-            <span id="session-label">…</span>
-            <svg width="10" height="10" viewBox="0 0 10 6" fill="currentColor"><path d="M0 0l5 6 5-6z"/></svg>
-          </button>
-          <div id="session-menu" class="session-menu" style="display:none">
-            <div id="session-list"></div>
-            <div class="session-menu-footer">
-              <button onclick="promptNewSession()">+ New board</button>
-            </div>
-          </div>
-        </div>
+        <span id="view-title"></span>
       </div>
       <div class="header-right">
         <a id="settings-link" href="/settings.html" title="Settings" style="display:flex;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--border2);color:var(--text3);font-size:11.5px;padding:4px 10px;border-radius:var(--radius);text-decoration:none;transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--text)';this.style.borderColor='var(--accent)'" onmouseout="this.style.color='var(--text3)';this.style.borderColor='var(--border2)'">
@@ -53,6 +43,7 @@
           Settings
         </a>
 
+        <select id="theme-select" title="Theme"></select>
         <select id="model-select" onchange="setModel(this.value)" title="AI Model"></select>
         <button id="notif-btn" onclick="toggleNotifPanel()" title="Notifications">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -70,20 +61,51 @@
       </div>
     </header>
 
-    <!-- Widget grid -->
-    <div id="dashboard">
-      <div id="empty-state">
-        <div class="empty-icon">⊞</div>
-        <div class="empty-title">No widgets yet</div>
-        <div class="empty-hint">Open the chat and ask the AI to build one</div>
-        <div class="empty-examples">
-          <span data-prompt="Add a weather widget for Paris">🌤 Weather</span>
-          <span data-prompt="Show live stock prices for AAPL, MSFT and NVDA">📈 Stocks</span>
-          <span data-prompt="Create a traffic widget to know if I'll be late to work">🚗 Traffic</span>
-          <span data-prompt="Add a world clock widget showing Paris, New York and Tokyo">🕐 Clock</span>
+    <!-- Body: left rail + main pane -->
+    <div id="body">
+
+      <!-- Left rail: apps (top) + boards (bottom). Expands on hover. -->
+      <nav id="rail">
+        <div id="rail-inner">
+          <div class="rail-section rail-apps">
+            <button class="rail-item" data-app="email" title="Email">
+              <span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg></span><span class="rail-label">Email</span></button>
+            <button class="rail-item" data-app="notes" title="Notes">
+              <span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h6"/></svg></span><span class="rail-label">Notes</span></button>
+            <button class="rail-item" data-app="tasks" title="Tasks">
+              <span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span><span class="rail-label">Tasks</span></button>
+            <button class="rail-item" data-app="calendar" title="Calendar">
+              <span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span><span class="rail-label">Calendar</span></button>
+          </div>
+          <div class="rail-sep"></div>
+          <div class="rail-section rail-boards" id="rail-boards"></div>
+          <div class="rail-spacer"></div>
+          <button class="rail-item rail-new" onclick="promptNewSession()" title="New board">
+            <span class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span><span class="rail-label">New board</span></button>
         </div>
-      </div>
-      <div class="grid-stack" id="widget-grid"></div>
+      </nav>
+
+      <!-- Main pane: board canvas (widgets) or a full-pane app iframe -->
+      <main id="main">
+        <!-- Widget windows mount directly into #dashboard (free-floating) -->
+        <div id="dashboard">
+          <div id="empty-state">
+            <div class="empty-icon">⊞</div>
+            <div class="empty-title">No widgets yet</div>
+            <div class="empty-hint">Open the chat and ask the AI to build one</div>
+            <div class="empty-examples">
+              <span data-prompt="Add a weather widget for Paris">🌤 Weather</span>
+              <span data-prompt="Show live stock prices for AAPL, MSFT and NVDA">📈 Stocks</span>
+              <span data-prompt="Create a traffic widget to know if I'll be late to work">🚗 Traffic</span>
+              <span data-prompt="Add a world clock widget showing Paris, New York and Tokyo">🕐 Clock</span>
+            </div>
+          </div>
+        </div>
+        <!-- Full-pane app view (Email/Notes/Tasks/Calendar) -->
+        <iframe id="app-frame" style="display:none"></iframe>
+        <!-- Widget dock (taskbar): minimize/restore/delete every widget -->
+        <div id="widget-dock" style="display:none"></div>
+      </main>
     </div>
 
     <!-- File editor panel -->
@@ -190,10 +212,12 @@
 
   </div>
 
-  <!-- Gridstack must load before the module -->
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/gridstack@10/dist/gridstack-all.js"></script>
+  <!-- Theme + window manager must load (classic scripts) before the app module -->
+  <script src="/theme.js"></script>
+  <script src="/windows.js"></script>
+  <script src="/bgfx.js"></script>
   <!-- CodeMirror -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>

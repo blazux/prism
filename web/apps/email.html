@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Email</title>
+<link rel="stylesheet" href="/widget-base.css">
+<script src="/theme.js"></script>
+<script>
+  addEventListener('message', e => {
+    if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
+      const r = document.documentElement.style;
+      for (const k in e.data.vars) r.setProperty(k, e.data.vars[k]);
+    }
+  });
+</script>
+<style>
+  html, body { height: 100%; }
+  body { padding: 0; overflow: hidden; }
+  .app { height: 100%; display: flex; flex-direction: column; }
+
+  /* config */
+  .config { max-width: 460px; margin: 0 auto; padding: 28px 20px; overflow-y: auto; width: 100%; }
+  .config h1 { color: var(--text); font-size: 18px; margin-bottom: 4px; }
+  .config .hint { font-size: 12px; color: var(--text2); margin-bottom: 18px; line-height: 1.5; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); margin-bottom: 4px; }
+  .field input, .field select { width: 100%; }
+  .row2 { display: grid; grid-template-columns: 1fr 90px; gap: 10px; }
+  .prov-hint { font-size: 12px; color: var(--text2); background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; margin-bottom: 12px; line-height: 1.45; }
+  .prov-hint b { color: var(--text); }
+  details#adv { margin-bottom: 12px; }
+  details#adv > summary { cursor: pointer; font-size: 12px; color: var(--text2); padding: 4px 0; user-select: none; }
+  details#adv[open] > summary { margin-bottom: 8px; }
+  .provider-logos { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .plogo { flex: 1; min-width: 72px; padding: 12px 8px; border: 1px solid var(--border2); border-radius: 10px; background: var(--bg2); cursor: pointer; text-align: center; font-size: 12px; color: var(--text2); transition: border-color .12s, color .12s; }
+  .plogo .pi { font-size: 22px; display: block; margin-bottom: 4px; }
+  .plogo:hover { color: var(--text); }
+  .plogo.sel { border-color: var(--accent); color: var(--text); background: var(--bg3); }
+
+  /* mail layout */
+  .toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .toolbar .search { flex: 1; }
+  .mail { flex: 1; display: flex; min-height: 0; }
+  .mlist { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border); overflow-y: auto; }
+  .mrow { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .12s; }
+  .mrow:hover { background: var(--bg2); }
+  .mrow.active { background: var(--bg3); border-left: 2px solid var(--accent); padding-left: 12px; }
+  .mrow .mfrom { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
+  .mrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+  .mrow.seen .dot { background: transparent; }
+  .mrow .msub { color: var(--text); font-weight: 600; font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mrow .mdate { font-size: 11px; color: var(--text3); margin-left: auto; }
+  .reading { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .rhead { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
+  .rhead .rsub { font-size: 17px; color: var(--text); font-weight: 600; }
+  .rhead .rmeta { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  .ractions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .rbody { flex: 1; overflow-y: auto; padding: 16px 18px; white-space: pre-wrap; line-height: 1.5; font-family: var(--sans, sans-serif); }
+  .rhtml { flex: 1; width: 100%; border: none; background: #fff; }
+  .placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text3); }
+  .mail-err { padding: 28px 20px; text-align: center; color: var(--text2); }
+  .mail-err .ic { font-size: 30px; color: var(--yellow); margin-bottom: 8px; }
+  .mail-err .t { color: var(--text); font-weight: 600; margin-bottom: 8px; }
+  .mail-err .m { font-family: var(--mono); font-size: 11px; color: var(--red); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; word-break: break-word; white-space: pre-wrap; text-align: left; margin-bottom: 14px; }
+
+  /* compose overlay */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .overlay.open { display: flex; }
+  .compose { width: min(560px, 92vw); max-height: 90vh; background: var(--bg1); border: 1px solid var(--border2); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+  .compose-head { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; color: var(--text); }
+  .compose-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .compose-body textarea { min-height: 200px; resize: vertical; }
+  .compose-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--border); }
+  .err { color: var(--red); font-size: 12px; }
+
+  @media (max-width: 620px) { .mlist { width: 100%; } .mail.reading-open .mlist { display: none; } }
+</style>
+</head>
+<body>
+  <div class="app" id="app"></div>
+
+  <div class="overlay" id="overlay">
+    <div class="compose">
+      <div class="compose-head" id="compose-title">New message</div>
+      <div class="compose-body">
+        <input id="c-to" placeholder="To">
+        <input id="c-subject" placeholder="Subject">
+        <textarea id="c-body" placeholder="Write your message…"></textarea>
+        <div class="err" id="c-err"></div>
+      </div>
+      <div class="compose-foot">
+        <button class="btn" onclick="closeCompose()">Cancel</button>
+        <button class="btn btn-accent" onclick="doSend()">Send</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const J = (r) => r.json();
+let cfg = null, messages = [], current = null, replyUid = 0;
+
+// One-click presets. Users only type email + password; servers are filled in.
+const PROVIDERS = {
+  gmail: {
+    label: 'Gmail', icon: '✉', imap: 'imap.gmail.com', imapPort: 993, smtp: 'smtp.gmail.com', smtpPort: 587,
+    hint: 'Gmail needs an <b>App Password</b>, not your normal password. Enable 2-Step Verification, then create one at <b>Google Account → Security → App passwords</b>.'
+  },
+  outlook: {
+    label: 'Outlook', icon: '📧', imap: 'outlook.office365.com', imapPort: 993, smtp: 'smtp-mail.outlook.com', smtpPort: 587,
+    hint: 'Outlook / Hotmail. If you use 2FA, create an <b>App Password</b> at <b>account.microsoft.com → Security</b>.'
+  },
+  protonmail: {
+    label: 'ProtonMail', icon: '🛡', imap: 'protonmail-bridge', imapPort: 143, smtp: 'protonmail-bridge', smtpPort: 25,
+    security: 'starttls', insecure: true,
+    hint: 'ProtonMail needs <b>Proton Mail Bridge</b> (paid Proton plan), run as the bundled <b>protonmail-bridge</b> Docker service. After <code>docker compose run --rm protonmail-bridge init</code> (login → info → exit), use the <b>username</b> and <b>Bridge password</b> it shows here. Host stays <b>protonmail-bridge</b>, IMAP 143 / SMTP 25.'
+  },
+  icloud: {
+    label: 'iCloud', icon: '☁', imap: 'imap.mail.me.com', imapPort: 993, smtp: 'smtp.mail.me.com', smtpPort: 587,
+    hint: 'iCloud Mail needs an <b>app-specific password</b> from <b>appleid.apple.com → Sign-In and Security</b>.'
+  },
+  yahoo: {
+    label: 'Yahoo', icon: '💜', imap: 'imap.mail.yahoo.com', imapPort: 993, smtp: 'smtp.mail.yahoo.com', smtpPort: 587,
+    hint: 'Yahoo Mail needs an <b>App Password</b> from <b>Account Security</b>.'
+  },
+  other: {
+    label: 'Other', icon: '⚙', imap: '', imapPort: 993, smtp: '', smtpPort: 587,
+    hint: 'Enter your provider\'s IMAP and SMTP servers below.'
+  },
+};
+
+async function init() {
+  cfg = await fetch('/api/email/config').then(J).catch(() => null);
+  if (!cfg || !cfg.configured || !cfg.has_password) renderConfig();
+  else renderInbox();
+}
+
+// ── Config ──────────────────────────────────────────────────────────────────
+function matchProvider() {
+  for (const k in PROVIDERS) {
+    if (k !== 'other' && PROVIDERS[k].imap === cfg.imap_host) return k;
+  }
+  return cfg.imap_host ? 'other' : 'gmail';
+}
+
+function renderConfig() {
+  cfg = cfg || {};
+  const sel = matchProvider();
+  const logos = Object.entries(PROVIDERS).map(([k, p]) =>
+    `<div class="plogo${k === sel ? ' sel' : ''}" data-prov="${k}" onclick="pickProvider('${k}')"><span class="pi">${p.icon}</span>${p.label}</div>`).join('');
+  document.getElementById('app').innerHTML = `
+    <div class="config">
+      <h1>Connect your mailbox</h1>
+      <div class="hint">Pick your provider, then just enter your email and password. Credentials are stored <b>encrypted</b> on your server.</div>
+      <div class="provider-logos">${logos}</div>
+      <div class="field"><label>Email</label><input id="f-user" value="${esc(cfg.user)}" placeholder="you@example.com"></div>
+      <div class="field"><label>Password</label><input id="f-pass" type="password" placeholder="${cfg.has_password ? '•••••• (unchanged)' : ''}"></div>
+      <div class="prov-hint" id="prov-hint"></div>
+      <details id="adv">
+        <summary>Advanced — server settings</summary>
+        <div class="row2">
+          <div class="field"><label>IMAP host</label><input id="f-ih" value="${esc(cfg.imap_host)}"></div>
+          <div class="field"><label>Port</label><input id="f-ip" value="${cfg.imap_port || ''}"></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>SMTP host</label><input id="f-sh" value="${esc(cfg.smtp_host)}"></div>
+          <div class="field"><label>Port</label><input id="f-sp" value="${cfg.smtp_port || ''}"></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>Security</label>
+            <select id="f-sec">
+              <option value="ssl">SSL/TLS</option>
+              <option value="starttls">STARTTLS</option>
+            </select></div>
+          <div class="field" style="display:flex;align-items:flex-end;padding-bottom:7px">
+            <label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-size:12px;color:var(--text2);cursor:pointer">
+              <input type="checkbox" id="f-insec" style="width:auto"> self-signed</label></div>
+        </div>
+        <div class="field"><label>From (optional)</label><input id="f-from" value="${esc(cfg.from)}" placeholder="defaults to email"></div>
+      </details>
+      <div class="err" id="cfg-err"></div>
+      <button class="btn btn-accent" style="width:100%;margin-top:6px" onclick="saveConfig()">Save & connect</button>
+    </div>`;
+  // Apply preset only when no servers are set yet (don't clobber a saved custom config).
+  if (!cfg.imap_host) {
+    applyProvider(sel);
+  } else {
+    document.getElementById('f-sec').value = cfg.security || 'ssl';
+    document.getElementById('f-insec').checked = !!cfg.insecure;
+    updateHint(sel);
+  }
+}
+
+function pickProvider(name) {
+  document.querySelectorAll('.plogo').forEach(el => el.classList.toggle('sel', el.dataset.prov === name));
+  applyProvider(name);
+}
+
+function applyProvider(name) {
+  const p = PROVIDERS[name]; if (!p) return;
+  document.getElementById('f-ih').value = p.imap;
+  document.getElementById('f-ip').value = p.imapPort || '';
+  document.getElementById('f-sh').value = p.smtp;
+  document.getElementById('f-sp').value = p.smtpPort || '';
+  document.getElementById('f-sec').value = p.security || 'ssl';
+  document.getElementById('f-insec').checked = !!p.insecure;
+  if (name === 'other' || p.insecure) document.getElementById('adv').open = true;
+  updateHint(name);
+}
+
+function updateHint(name) {
+  const el = document.getElementById('prov-hint');
+  if (el && PROVIDERS[name]) el.innerHTML = PROVIDERS[name].hint;
+}
+
+async function saveConfig() {
+  const v = id => document.getElementById(id).value.trim();
+  const body = {
+    user: v('f-user'), imap_host: v('f-ih'), smtp_host: v('f-sh'), from: v('f-from'),
+    imap_port: parseInt(v('f-ip')) || 0, smtp_port: parseInt(v('f-sp')) || 0,
+    security: document.getElementById('f-sec').value,
+    insecure: document.getElementById('f-insec').checked,
+  };
+  const pass = document.getElementById('f-pass').value;
+  if (pass) body.password = pass;
+  const res = await fetch('/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) { document.getElementById('cfg-err').textContent = 'Could not save.'; return; }
+  cfg = await fetch('/api/email/config').then(J);
+  renderInbox();
+}
+
+// ── Inbox ───────────────────────────────────────────────────────────────────
+function renderInbox() {
+  document.getElementById('app').innerHTML = `
+    <div class="toolbar">
+      <button class="btn btn-accent" onclick="compose()">＋ Compose</button>
+      <button class="btn" onclick="loadInbox()" title="Refresh">⟳</button>
+      <input class="search" id="search" placeholder="Search mail… (Enter)">
+      <button class="btn" onclick="renderConfig()" title="Settings">⚙</button>
+    </div>
+    <div class="mail" id="mail">
+      <div class="mlist" id="mlist"></div>
+      <div class="reading" id="reading"><div class="placeholder">Select a message</div></div>
+    </div>`;
+  document.getElementById('search').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { const q = e.target.value.trim(); q ? search(q) : loadInbox(); }
+  });
+  loadInbox();
+}
+
+function errBox(msg) {
+  return `<div class="mail-err">
+    <div class="ic">⚠</div>
+    <div class="t">Couldn't reach your mailbox</div>
+    <div class="m">${esc(msg)}</div>
+    <button class="btn" onclick="renderConfig()">Edit connection</button>
+  </div>`;
+}
+
+async function loadInbox() {
+  setList('<div class="placeholder" style="padding:30px">Loading…</div>');
+  try {
+    const res = await fetch('/api/email/list?limit=60');
+    if (!res.ok) { setList(errBox(await res.text())); return; }
+    messages = (await res.json()).messages || [];
+    renderList();
+  } catch (e) { setList(errBox(e.message)); }
+}
+async function search(q) {
+  setList('<div class="placeholder" style="padding:30px">Searching…</div>');
+  try {
+    const res = await fetch('/api/email/search?q=' + encodeURIComponent(q) + '&limit=40');
+    if (!res.ok) { setList(errBox(await res.text())); return; }
+    messages = (await res.json()).messages || [];
+    renderList();
+  } catch (e) { setList(errBox(e.message)); }
+}
+
+function setList(html) { const l = document.getElementById('mlist'); if (l) l.innerHTML = html; }
+
+function renderList() {
+  if (!messages.length) { setList('<div class="placeholder" style="padding:30px">No messages</div>'); return; }
+  const l = document.getElementById('mlist'); l.innerHTML = '';
+  // Newest first, by actual message date.
+  const sorted = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  for (const m of sorted) {
+    const row = document.createElement('div');
+    row.className = 'mrow' + (m.seen ? ' seen' : '') + (current && current.uid === m.uid ? ' active' : '');
+    row.innerHTML = `
+      <div class="mfrom"><span class="dot"></span>${esc(m.from)}<span class="mdate">${fmtDate(m.date)}</span></div>
+      <div class="msub">${esc(m.subject) || '(no subject)'}</div>`;
+    row.onclick = () => openMessage(m.uid);
+    l.appendChild(row);
+  }
+}
+
+async function openMessage(uid) {
+  document.getElementById('mail').classList.add('reading-open');
+  const reading = document.getElementById('reading');
+  reading.innerHTML = '<div class="placeholder">Loading…</div>';
+  try {
+    current = (await fetch('/api/email/read?uid=' + uid).then(J)).message;
+    renderList();
+    reading.innerHTML = `
+      <div class="rhead">
+        <div class="rsub">${esc(current.subject) || '(no subject)'}</div>
+        <div class="rmeta">${esc(current.from)} · ${fmtDate(current.date)}</div>
+        <div class="ractions">
+          <button class="btn" onclick="reply()">↩ Reply</button>
+          <button class="btn" onclick="aiSummarize()">✨ Summarize</button>
+          <button class="btn" onclick="aiReply()">✨ AI reply</button>
+        </div>
+      </div>`;
+    const raw = current.body || '';
+    if (looksHTML(raw)) {
+      // Render untrusted HTML in a locked-down sandbox: no scripts, no same-origin.
+      const frame = document.createElement('iframe');
+      frame.className = 'rhtml';
+      frame.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
+      frame.srcdoc = raw;
+      reading.appendChild(frame);
+    } else {
+      const div = document.createElement('div');
+      div.className = 'rbody';
+      div.textContent = raw || '(empty)';
+      reading.appendChild(div);
+    }
+  } catch { reading.innerHTML = '<div class="placeholder">Could not load message</div>'; }
+}
+
+// ── Compose / reply ─────────────────────────────────────────────────────────
+// Delegate to the agent via the dashboard chat (postMessage to parent).
+function aiAsk(text) {
+  try { parent.postMessage({ type: 'sendChat', text }, '*'); } catch (_) {}
+}
+function aiSummarize() {
+  if (!current) return;
+  aiAsk(`Summarize the email with UID ${current.uid} in my inbox (from ${current.from}, subject "${current.subject}"). Use the email tool with action=read to fetch it, then give me a short, clear summary.`);
+}
+function aiReply() {
+  if (!current) return;
+  aiAsk(`Read the email with UID ${current.uid} in my inbox (from ${current.from}, subject "${current.subject}") using the email tool (action=read), then draft a suitable reply. Show me the draft and ask for confirmation before sending it.`);
+}
+
+function compose() { replyUid = 0; openCompose('New message', '', ''); }
+function reply() {
+  if (!current) return;
+  replyUid = current.uid;
+  const sub = /^re:/i.test(current.subject || '') ? current.subject : 'Re: ' + (current.subject || '');
+  openCompose('Reply', current.from, sub);
+}
+function openCompose(title, to, subject) {
+  document.getElementById('compose-title').textContent = title;
+  document.getElementById('c-to').value = to || '';
+  document.getElementById('c-subject').value = subject || '';
+  document.getElementById('c-body').value = '';
+  document.getElementById('c-err').textContent = '';
+  document.getElementById('overlay').classList.add('open');
+}
+function closeCompose() { document.getElementById('overlay').classList.remove('open'); }
+
+async function doSend() {
+  const body = {
+    to: document.getElementById('c-to').value.trim(),
+    subject: document.getElementById('c-subject').value,
+    body: document.getElementById('c-body').value,
+  };
+  if (replyUid) body.uid = replyUid;
+  if (!body.body.trim()) { document.getElementById('c-err').textContent = 'Message is empty.'; return; }
+  const res = await fetch('/api/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) { document.getElementById('c-err').textContent = 'Send failed: ' + (await res.text()); return; }
+  closeCompose();
+}
+
+function fmtDate(s) {
+  if (!s) return '';
+  const d = new Date(s); const now = new Date();
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+function looksHTML(s) {
+  return /<(!doctype|html|head|body|table|tr|td|div|p|a|img|br|hr|span|b|strong|i|em|u|ul|ol|li|h[1-6]|font|center|blockquote|style)\b[^>]*>/i.test(s)
+      || /&(nbsp|amp|lt|gt|quot|#\d+|#x[0-9a-fA-F]+);/.test(s);
+}
+function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+init();
+</script>
+</body>
+</html>

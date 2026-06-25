@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notes</title>
+<link rel="stylesheet" href="/widget-base.css">
+<script src="/theme.js"></script>
+<script>
+  // Live theme updates pushed from the dashboard.
+  addEventListener('message', e => {
+    if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
+      const r = document.documentElement.style;
+      for (const k in e.data.vars) r.setProperty(k, e.data.vars[k]);
+    }
+  });
+</script>
+<style>
+  html, body { height: 100%; }
+  body { padding: 0; overflow: hidden; }
+  .app { display: flex; height: 100%; }
+
+  /* List pane */
+  .list-pane { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .list-head { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }
+  .list-head input { flex: 1; }
+  .btn-new { white-space: nowrap; }
+  .notes { flex: 1; overflow-y: auto; }
+  .note-row { padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .12s; }
+  .note-row:hover { background: var(--bg2); }
+  .note-row.active { background: var(--bg3); border-left: 2px solid var(--accent); padding-left: 10px; }
+  .note-row .nt { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note-row .ns { font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .note-row .ntags { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--bg3); color: var(--text2); }
+
+  /* Editor pane */
+  .editor { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .editor-head { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .editor-head .title-in { flex: 1; font-size: 16px; font-weight: 600; background: none; border: none; padding: 4px 0; }
+  .editor-head .title-in:focus { outline: none; border-bottom: 1px solid var(--accent); }
+  .editor-body { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px 14px; gap: 10px; }
+  .editor-body textarea { flex: 1; resize: none; line-height: 1.5; }
+  .tags-in { font-size: 12px; }
+  .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text3); flex-direction: column; gap: 8px; }
+  .empty .big { font-size: 36px; opacity: .3; }
+  .back-btn { display: none; }
+
+  @media (max-width: 560px) {
+    .list-pane { width: 100%; }
+    .app.editing .list-pane { display: none; }
+    .app:not(.editing) .editor { display: none; }
+    .back-btn { display: inline-flex; }
+  }
+</style>
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="list-pane">
+      <div class="list-head">
+        <input id="search" placeholder="Search notes…">
+        <button class="btn btn-accent btn-new" onclick="newNote()">＋ New</button>
+      </div>
+      <div class="notes" id="notes"></div>
+    </div>
+
+    <div class="editor">
+      <div class="empty" id="empty">
+        <div class="big">📝</div>
+        <div>Select a note, or create one</div>
+      </div>
+      <div id="editor" style="display:none; height:100%; flex-direction:column; min-height:0;">
+        <div class="editor-head">
+          <button class="btn back-btn" onclick="closeEditor()">←</button>
+          <input class="title-in" id="e-title" placeholder="Title">
+          <button class="btn" onclick="saveNote()">Save</button>
+          <button class="btn" onclick="deleteNote()" title="Delete" style="color:var(--red)">🗑</button>
+        </div>
+        <div class="editor-body">
+          <input class="tags-in" id="e-tags" placeholder="tags, comma, separated">
+          <textarea id="e-body" placeholder="Write your note…"></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const session = new URLSearchParams(location.search).get('session') || 'default';
+const api = (path, opts) => fetch(`/api/notes${path}`, opts).then(r => r.json());
+let notes = [], selectedId = null, filter = '';
+
+async function load() {
+  const data = await api(`?session=${encodeURIComponent(session)}`);
+  notes = data.notes || [];
+  render();
+}
+
+function render() {
+  const host = document.getElementById('notes');
+  host.innerHTML = '';
+  const f = filter.toLowerCase();
+  const shown = notes.filter(n => !f || (n.title + ' ' + n.body + ' ' + n.tags).toLowerCase().includes(f));
+  for (const n of shown) {
+    const row = document.createElement('div');
+    row.className = 'note-row' + (n.id === selectedId ? ' active' : '');
+    row.onclick = () => select(n.id);
+    const tags = (n.tags || '').split(',').map(t => t.trim()).filter(Boolean)
+      .map(t => `<span class="tag">${esc(t)}</span>`).join('');
+    row.innerHTML = `<div class="nt">${esc(n.title) || '(untitled)'}</div>
+      <div class="ns">${esc((n.body || '').replace(/\n/g, ' ')) || '—'}</div>
+      ${tags ? `<div class="ntags">${tags}</div>` : ''}`;
+    host.appendChild(row);
+  }
+  if (!shown.length) host.innerHTML = '<div class="empty" style="padding:30px"><div>No notes</div></div>';
+}
+
+function select(id) {
+  selectedId = id;
+  const n = notes.find(x => x.id === id);
+  if (!n) return;
+  document.getElementById('empty').style.display = 'none';
+  const ed = document.getElementById('editor');
+  ed.style.display = 'flex';
+  document.getElementById('e-title').value = n.title || '';
+  document.getElementById('e-tags').value = n.tags || '';
+  document.getElementById('e-body').value = n.body || '';
+  document.getElementById('app').classList.add('editing');
+  render();
+}
+
+async function newNote() {
+  const { id } = await api(`?session=${encodeURIComponent(session)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'Untitled', body: '', tags: '' })
+  });
+  await load();
+  select(id);
+  document.getElementById('e-title').focus();
+  document.getElementById('e-title').select();
+}
+
+async function saveNote() {
+  if (!selectedId) return;
+  await api(`?session=${encodeURIComponent(session)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: selectedId,
+      title: document.getElementById('e-title').value,
+      body: document.getElementById('e-body').value,
+      tags: document.getElementById('e-tags').value,
+    })
+  });
+  await load();
+}
+
+async function deleteNote() {
+  if (!selectedId || !confirm('Delete this note?')) return;
+  await fetch(`/api/notes?session=${encodeURIComponent(session)}&id=${selectedId}`, { method: 'DELETE' });
+  selectedId = null;
+  closeEditor();
+  await load();
+}
+
+function closeEditor() {
+  document.getElementById('editor').style.display = 'none';
+  document.getElementById('empty').style.display = 'flex';
+  document.getElementById('app').classList.remove('editing');
+}
+
+function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+document.getElementById('search').addEventListener('input', e => { filter = e.target.value; render(); });
+// Save when leaving a field.
+['e-title', 'e-tags', 'e-body'].forEach(id =>
+  document.getElementById(id).addEventListener('blur', () => { if (selectedId) saveNote(); }));
+
+load();
+</script>
+</body>
+</html>

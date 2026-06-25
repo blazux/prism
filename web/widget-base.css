@@ -1,0 +1,47 @@
+/* Shared widget stylesheet — the vocabulary the agent composes from. Injected
+ * into every widget (dashboard srcdoc + /plugins/*.html preview) alongside the
+ * active theme's token block, so widgets never need to declare colors/fonts. */
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  font-family:var(--mono,'Fira Code',ui-monospace,monospace);
+  font-size:13px;line-height:1.45;color:var(--text);
+  background:var(--bg1);padding:10px;overflow:hidden;
+}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+h1,h2,h3,h4{margin:0 0 .4em;font-weight:600;line-height:1.2}
+h1{font-size:18px}h2{font-size:15px}h3{font-size:13px}h4{font-size:12px;color:var(--text2)}
+p{margin:0 0 .5em}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+small,.muted{color:var(--text2)}.dim{color:var(--text3)}
+hr{border:none;border-top:1px solid var(--border);margin:.6em 0}
+code,kbd{font-family:var(--mono,monospace);background:var(--bg3);padding:1px 5px;border-radius:4px;font-size:.92em}
+.row{display:flex;align-items:center;gap:8px}
+.col{display:flex;flex-direction:column;gap:8px}
+.wrap{flex-wrap:wrap}.grow{flex:1}.between{justify-content:space-between}.center{justify-content:center;align-items:center}
+.scroll{overflow:auto;min-height:0}
+.fill{width:100%;height:100%}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius,8px);padding:12px}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat-value{font-size:24px;font-weight:700;color:var(--text);line-height:1.1}
+.stat-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.04em}
+.btn{
+  font:inherit;cursor:pointer;border:1px solid var(--border2);border-radius:var(--radius,8px);
+  background:var(--bg3);color:var(--text);padding:5px 12px;transition:border-color .15s,background .15s;
+}
+.btn:hover{border-color:var(--accent);background:var(--bg4)}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-accent:hover{filter:brightness(1.08)}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:999px;background:var(--bg3);color:var(--text2)}
+.ok,.success{color:var(--green)}.warn,.warning{color:var(--yellow)}.err,.error{color:var(--red)}.info{color:var(--accent)}
+.bg-ok{background:var(--green)}.bg-warn{background:var(--yellow)}.bg-err{background:var(--red)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--border)}
+th{color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+tr:last-child td{border-bottom:none}
+ul,ol{margin:0;padding-left:1.2em}li{margin:.15em 0}
+input,select,textarea{font:inherit;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:5px 8px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}

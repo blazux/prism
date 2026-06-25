@@ -8,7 +8,6 @@ let chatOpen = false
 let currentAssistantEl = null
 let currentAssistantContent = ''
 const widgets = new Map()
-let grid = null
 let pendingImages = []      // base64 strings (without data-URL prefix) waiting to be sent
 let pendingAttachments = [] // images queued by add_attachment, injected into next assistant bubble
 let pendingFiles  = [] // {name, text} parsed file attachments waiting to be sent
@@ -18,47 +17,35 @@ function updateSettingsLink() {
   const link = document.getElementById('settings-link')
   if (link) link.href = `/settings.html?session=${encodeURIComponent(currentSessionID)}#tools`
 }
-let sessionMenuOpen = false
 let batchLoading = false
 let batchLoadingTimer = null
+// Window geometry/open state is persisted server-side (set_plugin_state); the
+// frontend keeps no localStorage layout. Kept here only as a no-op anchor.
 let notifications = []   // [{id, title, message, level, read, createdAt}]
 let notifPanelOpen = false
 
-const layoutKey = () => `dashboard-layout:${currentSessionID}`
+// ─── Dashboard windows ──────────────────────────────────────────────────────
+// Widgets are free-floating windows (see windows.js). Their geometry and
+// open/closed state live server-side in each widget's meta.json — persisted via
+// set_plugin_state — so a board looks the same across reloads and devices.
 
-// ─── GridStack ────────────────────────────────────────────────────────────────
+const dashboard = () => document.getElementById('dashboard')
+let cascadeN = 0
 
-function initGrid() {
-  grid = GridStack.init({
-    column: 12,
-    cellHeight: 25,
-    handle: '.widget-header',
-    margin: 6,
-    float: false,
-    disableOneColumnMode: true,
-  }, '#widget-grid')
-  grid.on('change', saveLayout)
-
-  // Prevent iframes from swallowing mouse events during drag/resize
-  grid.on('dragstart resizestart', () => {
-    document.querySelectorAll('.widget-body iframe').forEach(f => { f.style.pointerEvents = 'none' })
-  })
-  grid.on('dragstop resizestop', () => {
-    document.querySelectorAll('.widget-body iframe').forEach(f => { f.style.pointerEvents = '' })
-  })
+// Stagger new windows so they never stack exactly on top of each other.
+function nextCascade(w, h) {
+  const step = 28, base = 24
+  const c = dashboard()
+  const maxX = Math.max(base, c.clientWidth - w - base)
+  const maxY = Math.max(base, c.clientHeight - h - base)
+  const x = Math.min(base + cascadeN * step, maxX)
+  const y = Math.min(base + cascadeN * step, maxY)
+  cascadeN = (cascadeN + 1) % 12
+  return { x, y }
 }
 
-function saveLayout() {
-  if (!grid || batchLoading) return
-  const nodes = grid.save(false)
-  const layout = {}
-  nodes.forEach(n => { if (n.id) layout[n.id] = { x: n.x, y: n.y, w: n.w, h: n.h } })
-  localStorage.setItem(layoutKey(), JSON.stringify(layout))
-}
-
-function loadWidgetPos(elemId) {
-  try { return JSON.parse(localStorage.getItem(layoutKey()) || '{}')[elemId] ?? null }
-  catch { return null }
+function persistState(id, patch) {
+  send({ type: 'set_plugin_state', id, ...patch })
 }
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -90,7 +77,7 @@ function handleServerMsg(msg) {
     case 'tool_use':        appendToolUse(msg); break
     case 'tool_result':     appendToolResult(msg); break
     case 'plugin_load':
-      addWidget(msg.id, msg.title, msg.content, msg.cols, msg.height, msg.locked)
+      addWidget(msg)
       clearTimeout(batchLoadingTimer)
       batchLoadingTimer = setTimeout(() => { batchLoading = false }, 0)
       break
@@ -122,26 +109,59 @@ function handleServerMsg(msg) {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
-function addWidget(id, title, content, cols, height, locked) {
-  cols   = Math.max(1, Math.min(3, cols   || 1))
-  height = height > 0 ? height : 280
+const WIDGET_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox'
 
-  // Map agent cols (1-3) → GridStack width (out of 12 columns)
-  const gsW    = cols * 4
-  const gsH    = Math.max(4, Math.round(height / 25))
-  const elemId = 'widget-' + id
+// addWidget handles a plugin_load: create (or update) the widget record from
+// its persisted meta, then mount it as a window if it is open. `meta` carries
+// id, title, content, cols, height, locked, open and the saved x/y/w/h.
+function addWidget(meta) {
+  const id = meta.id
+  const prev = widgets.get(id)
 
-  // Remove existing widget with same id (update flow)
-  const existing = document.getElementById(elemId)
-  if (existing) grid.removeWidget(existing, true)
+  // Tear down any existing instance (update flow).
+  if (prev?.win) prev.win.destroy()
+  if (prev?.el) prev.el.remove()
 
-  // Build widget DOM
+  const cols = Math.max(1, Math.min(3, meta.cols || 1))
+  const defW = cols === 1 ? 340 : cols === 2 ? 500 : 700
+  const defH = (meta.height > 0 ? meta.height : 260) + 26  // + header/border
+
+  // Open/closed and geometry: explicit meta wins, else keep the previous
+  // instance's, else fall back to defaults / cascade. Treat 0 as "unset".
+  const open = (meta.open === undefined) ? (prev ? prev.open : true) : (meta.open !== false)
+  let w = +meta.w || prev?.w || defW
+  let h = +meta.h || prev?.h || defH
+  let x = +meta.x || prev?.x || 0
+  let y = +meta.y || prev?.y || 0
+  if (!x && !y) { const c = nextCascade(w, h); x = c.x; y = c.y }
+
+  const rec = {
+    id, title: meta.title || id, content: meta.content || '',
+    cols, height: meta.height || 280, locked: !!meta.locked,
+    open, x, y, w, h, el: null, win: null,
+  }
+  widgets.set(id, rec)
+  if (open) mountWindow(rec)
+  renderDock()
+  updateEmptyState()
+
+  // A plugin_load with no open/geometry comes from a fresh agent add/update
+  // (the server callback). Persist the chosen window placement so it survives a
+  // reload. Server-driven restores always carry `open`, so they never re-save.
+  if (meta.open === undefined && open) {
+    persistState(id, { open: true, x: rec.x, y: rec.y, w: rec.w, h: rec.h })
+  }
+}
+
+// mountWindow builds the window DOM and wires drag/resize for an open widget.
+function mountWindow(rec) {
   const el = document.createElement('div')
-  el.className = 'grid-stack-item'
-  el.id = elemId
-
-  const inner = document.createElement('div')
-  inner.className = 'grid-stack-item-content'
+  el.className = 'widget-window'
+  el.id = 'widget-' + rec.id
+  el.style.left = rec.x + 'px'
+  el.style.top = rec.y + 'px'
+  el.style.width = rec.w + 'px'
+  el.style.height = rec.h + 'px'
 
   const card = document.createElement('div')
   card.className = 'widget-card'
@@ -151,74 +171,130 @@ function addWidget(id, title, content, cols, height, locked) {
 
   const titleEl = document.createElement('span')
   titleEl.className = 'widget-title'
-  titleEl.textContent = title
+  titleEl.textContent = rec.title
 
   const lockBtn = document.createElement('button')
   lockBtn.className = 'widget-lock'
-  lockBtn.title = locked ? 'Unlock' : 'Lock'
-  lockBtn.textContent = locked ? '🔒' : '🔓'
+  const applyLockIcon = () => {
+    lockBtn.title = rec.locked ? 'Unlock' : 'Lock'
+    lockBtn.textContent = rec.locked ? '🔒' : '🔓'
+  }
+  applyLockIcon()
   lockBtn.addEventListener('click', () => {
-    const isLocked = lockBtn.textContent === '🔒'
-    const nowLocked = !isLocked
-    lockBtn.textContent = nowLocked ? '🔒' : '🔓'
-    lockBtn.title = nowLocked ? 'Unlock' : 'Lock'
-    closeBtn.style.display = nowLocked ? 'none' : ''
-    widgets.set(id, { ...widgets.get(id), locked: nowLocked })
-    send({ type: 'lock_plugin', id, locked: nowLocked })
+    rec.locked = !rec.locked
+    applyLockIcon()
+    send({ type: 'lock_plugin', id: rec.id, locked: rec.locked })
+    renderDock()
   })
 
-  const closeBtn = document.createElement('button')
-  closeBtn.className = 'widget-close'
-  closeBtn.textContent = '×'
-  closeBtn.title = 'Remove'
-  closeBtn.style.display = locked ? 'none' : ''
-  closeBtn.addEventListener('click', () => send({ type: 'remove_plugin', id }))
+  const minBtn = document.createElement('button')
+  minBtn.className = 'widget-min'
+  minBtn.textContent = '–'
+  minBtn.title = 'Minimize (keep in dock)'
+  minBtn.addEventListener('click', () => minimizeWidget(rec.id))
 
-  hdr.appendChild(titleEl)
-  hdr.appendChild(lockBtn)
-  hdr.appendChild(closeBtn)
+  hdr.append(titleEl, lockBtn, minBtn)
 
   const body = document.createElement('div')
   body.className = 'widget-body'
 
   const iframe = document.createElement('iframe')
-  iframe.srcdoc = content
-  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox')
-
+  iframe.srcdoc = window.PrismTheme.composeWidgetDoc(rec.content)
+  iframe.setAttribute('sandbox', WIDGET_SANDBOX)
   body.appendChild(iframe)
-  card.appendChild(hdr)
-  card.appendChild(body)
-  inner.appendChild(card)
-  el.appendChild(inner)
 
-  // Restore saved position or auto-place via gs-* attributes
-  const saved = loadWidgetPos(elemId)
-  el.setAttribute('gs-w',  String(saved?.w ?? gsW))
-  el.setAttribute('gs-h',  String(saved?.h ?? gsH))
-  el.setAttribute('gs-id', elemId)
-  if (saved?.x !== undefined) el.setAttribute('gs-x', String(saved.x))
-  if (saved?.y !== undefined) el.setAttribute('gs-y', String(saved.y))
+  card.append(hdr, body)
+  el.appendChild(card)
+  dashboard().appendChild(el)
 
-  try {
-    grid.addWidget(el)
-  } catch(err) {
-    console.error('[addWidget] GridStack error:', err)
-  }
-  widgets.set(id, { cols, height, locked: !!locked })
+  rec.el = el
+  rec.win = window.PrismWindows.makeWindow(el, {
+    handle: hdr,
+    container: dashboard(),
+    onChange: (g) => {
+      rec.x = g.x; rec.y = g.y; rec.w = g.w; rec.h = g.h
+      persistState(rec.id, g)
+    },
+  })
+}
+
+// Minimize: hide the window but keep the widget (file stays on disk).
+function minimizeWidget(id) {
+  const rec = widgets.get(id)
+  if (!rec) return
+  if (rec.win) { rec.win.destroy(); rec.win = null }
+  if (rec.el) { rec.el.remove(); rec.el = null }
+  rec.open = false
+  persistState(id, { open: false })
+  renderDock()
   updateEmptyState()
 }
 
+// Restore a minimized widget back into an open window.
+function restoreWidget(id) {
+  const rec = widgets.get(id)
+  if (!rec || rec.open) return
+  rec.open = true
+  if (!rec.x && !rec.y) { const c = nextCascade(rec.w, rec.h); rec.x = c.x; rec.y = c.y }
+  mountWindow(rec)
+  persistState(id, { open: true, x: rec.x, y: rec.y, w: rec.w, h: rec.h })
+  renderDock()
+  updateEmptyState()
+}
+
+// Permanently delete a widget (removes the files server-side, after confirm).
+function deleteWidget(id) {
+  const rec = widgets.get(id)
+  if (rec?.locked) { showToast({ title: 'Widget locked', message: 'Unlock it before deleting.', level: 'warning' }); return }
+  const title = rec?.title || id
+  if (!confirm(`Delete widget “${title}” permanently? This cannot be undone.`)) return
+  send({ type: 'remove_plugin', id })
+}
+
+// removeWidget handles a plugin_unload (server confirmed the widget is gone).
 function removeWidget(id) {
-  const el = document.getElementById('widget-' + id)
-  if (el) {
-    grid.removeWidget(el, true)
-    updateEmptyState()
-  }
+  const rec = widgets.get(id)
+  if (rec?.win) rec.win.destroy()
+  if (rec?.el) rec.el.remove()
   widgets.delete(id)
+  renderDock()
+  updateEmptyState()
+}
+
+// ─── Widget dock ────────────────────────────────────────────────────────────
+// A taskbar of every widget on the board: open ones are highlighted, minimized
+// ones dimmed. Click toggles minimize/restore; the trash button deletes for good.
+function renderDock() {
+  const dock = document.getElementById('widget-dock')
+  if (!dock) return
+  dock.innerHTML = ''
+  if (widgets.size === 0) { dock.style.display = 'none'; return }
+  dock.style.display = 'flex'
+
+  for (const rec of widgets.values()) {
+    const chip = document.createElement('div')
+    chip.className = 'dock-chip' + (rec.open ? ' open' : '')
+
+    const btn = document.createElement('button')
+    btn.className = 'dock-chip-label'
+    btn.title = rec.open ? 'Minimize' : 'Reopen'
+    btn.textContent = (rec.locked ? '🔒 ' : '') + rec.title
+    btn.addEventListener('click', () => rec.open ? minimizeWidget(rec.id) : restoreWidget(rec.id))
+
+    const del = document.createElement('button')
+    del.className = 'dock-chip-del'
+    del.textContent = '🗑'
+    del.title = 'Delete permanently'
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteWidget(rec.id) })
+
+    chip.append(btn, del)
+    dock.appendChild(chip)
+  }
 }
 
 function updateEmptyState() {
-  document.getElementById('empty-state').style.display = widgets.size > 0 ? 'none' : 'flex'
+  const anyOpen = [...widgets.values()].some(w => w.open)
+  document.getElementById('empty-state').style.display = anyOpen ? 'none' : 'flex'
 }
 
 // ─── Chat drawer ──────────────────────────────────────────────────────────────
@@ -708,53 +784,91 @@ window.handleSecretKey = function(e) {
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
+// ─── View router (rail: apps + boards) ─────────────────────────────────────────
+
+const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar' }
+let currentView = { type: 'board' }      // { type:'board' } | { type:'app', name }
+let allSessions = []
+
+function boardName(id) {
+  const s = allSessions.find(x => x.id === id)
+  return s ? s.name : id
+}
+
+// setView switches the main pane between the board canvas (widgets) and a
+// full-pane app iframe. Apps are the same HTML used by board widgets, just
+// maximized — same REST data underneath.
+function setView(view) {
+  currentView = view
+  const dash  = document.getElementById('dashboard')
+  const dock  = document.getElementById('widget-dock')
+  const frame = document.getElementById('app-frame')
+  const title = document.getElementById('view-title')
+
+  document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'))
+
+  if (view.type === 'app') {
+    frame.src = `/apps/${view.name}.html?session=${encodeURIComponent(currentSessionID)}`
+    frame.style.display = ''
+    dash.style.display = 'none'
+    dock.style.display = 'none'
+    if (title) title.textContent = APP_TITLES[view.name] || view.name
+    document.querySelector(`.rail-item[data-app="${view.name}"]`)?.classList.add('active')
+  } else {
+    frame.style.display = 'none'
+    frame.src = 'about:blank'
+    dash.style.display = ''
+    renderDock()
+    if (title) title.textContent = boardName(currentSessionID)
+    document.querySelector(`.rail-item[data-board-id="${CSS.escape(currentSessionID)}"]`)?.classList.add('active')
+  }
+}
+
 async function loadSessions() {
   try {
     const res = await fetch('/api/sessions')
     const data = await res.json()
-    renderSessionSwitcher(data.sessions || [])
+    allSessions = data.sessions || []
+    renderBoardList(allSessions)
   } catch {}
 }
 
-function renderSessionSwitcher(sessions) {
-  const label = document.getElementById('session-label')
-  const list  = document.getElementById('session-list')
-  if (!label || !list) return
-
-  const current = sessions.find(s => s.id === currentSessionID)
-  label.textContent = current ? current.name : currentSessionID
-
-  list.innerHTML = ''
+function renderBoardList(sessions) {
+  const host = document.getElementById('rail-boards')
+  if (!host) return
+  host.innerHTML = ''
   for (const sess of sessions) {
-    const row = document.createElement('div')
-    row.className = 'session-row' + (sess.id === currentSessionID ? ' active' : '')
+    const item = document.createElement('button')
+    item.className = 'rail-item'
+    item.dataset.boardId = sess.id
+    if (currentView.type === 'board' && sess.id === currentSessionID) item.classList.add('active')
+    item.title = sess.name
+    item.onclick = () => selectBoard(sess.id)
 
-    const nameBtn = document.createElement('button')
-    nameBtn.className = 'session-name-btn'
-    nameBtn.textContent = sess.name
-    nameBtn.onclick = () => { closeSessionMenu(); if (sess.id !== currentSessionID) switchToSession(sess.id) }
-    row.appendChild(nameBtn)
+    const icon = document.createElement('span')
+    icon.className = 'rail-icon'
+    icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
+    const label = document.createElement('span')
+    label.className = 'rail-label'
+    label.textContent = sess.name
+    item.append(icon, label)
 
-    const rename = document.createElement('button')
-    rename.className = 'session-del-btn'
+    const rename = document.createElement('span')
+    rename.className = 'rail-board-act'
     rename.title = 'Rename'
     rename.textContent = '✎'
     rename.onclick = async (e) => {
       e.stopPropagation()
-      const newName = prompt('Rename board:', sess.name)
-      if (!newName || newName.trim() === sess.name) return
-      await fetch(`/api/sessions/${sess.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim() })
-      })
+      const n = prompt('Rename board:', sess.name)
+      if (!n || n.trim() === sess.name) return
+      await fetch(`/api/sessions/${sess.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n.trim() }) })
       loadSessions()
     }
-    row.appendChild(rename)
+    item.appendChild(rename)
 
     if (sess.id !== currentSessionID) {
-      const del = document.createElement('button')
-      del.className = 'session-del-btn'
+      const del = document.createElement('span')
+      del.className = 'rail-board-act'
       del.title = 'Delete'
       del.textContent = '×'
       del.onclick = async (e) => {
@@ -763,15 +877,21 @@ function renderSessionSwitcher(sessions) {
         await fetch(`/api/sessions/${sess.id}`, { method: 'DELETE' })
         loadSessions()
       }
-      row.appendChild(del)
+      item.appendChild(del)
     }
-    list.appendChild(row)
+    host.appendChild(item)
   }
+}
+
+function selectBoard(id) {
+  if (id !== currentSessionID) switchToSession(id)
+  else setView({ type: 'board' })
 }
 
 function switchToSession(id) {
   batchLoading = true
   clearChat()
+  cascadeN = 0
   for (const wid of [...widgets.keys()]) removeWidget(wid)
   currentSessionID = id
   localStorage.setItem('active-session', id)
@@ -782,12 +902,13 @@ function switchToSession(id) {
   notifications = []
   renderNotifPanel()
   renderNotifBadge()
+  setView({ type: 'board' })
+  loadSessions()
   if (ws) { ws.onclose = null; ws.close() }
   connect()
 }
 
 async function promptNewSession() {
-  closeSessionMenu()
   const name = prompt('New board name:')
   if (!name || !name.trim()) return
   try {
@@ -803,27 +924,12 @@ async function promptNewSession() {
   }
 }
 
-window.toggleSessionMenu = function() {
-  sessionMenuOpen = !sessionMenuOpen
-  const menu = document.getElementById('session-menu')
-  if (menu) menu.style.display = sessionMenuOpen ? 'block' : 'none'
-  if (sessionMenuOpen) loadSessions()
-}
-
-function closeSessionMenu() {
-  sessionMenuOpen = false
-  const menu = document.getElementById('session-menu')
-  if (menu) menu.style.display = 'none'
-}
+// Wire the rail app buttons.
+document.querySelectorAll('.rail-item[data-app]').forEach(btn => {
+  btn.addEventListener('click', () => setView({ type: 'app', name: btn.dataset.app }))
+})
 
 window.promptNewSession = promptNewSession
-
-// Close session menu when clicking outside
-document.addEventListener('click', e => {
-  if (sessionMenuOpen && !document.getElementById('session-switcher')?.contains(e.target)) {
-    closeSessionMenu()
-  }
-})
 
 // ─── File / Image upload ──────────────────────────────────────────────────────
 
@@ -1320,9 +1426,11 @@ async function initApp() {
     return
   }
 
-  initGrid()
-  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
+  window.PrismTheme.populateSelect(document.getElementById('theme-select'))
+  renderDock()
   updateSettingsLink()
+  loadSessions()
+  setView({ type: 'board' })
   connect()
   loadModels()
   setInterval(loadModels, 30000)

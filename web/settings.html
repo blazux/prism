@@ -6,6 +6,8 @@
 <title>Settings — PRISM</title>
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link rel="stylesheet" href="/style.css">
+<!-- Applies the saved theme (sets CSS vars on :root) before the page renders -->
+<script src="/theme.js"></script>
 <style>
 html, body { height: 100%; overflow: hidden; margin: 0; }
 #settings-app { display: flex; flex-direction: column; height: 100vh; }
@@ -414,9 +416,19 @@ const TOOL_CATEGORIES = [
     name: 'Web', icon: '🌐', color: 'var(--green)',
     tools: [
       { id: 'web_search',  name: 'Web search',      desc: 'Search the web via SearXNG' },
+      { id: 'deep_research', name: 'Deep research',  desc: 'Multi-round web research: plans, searches, reads and synthesizes a sourced report' },
       { id: 'http_request', name: 'HTTP request',     desc: 'Make GET/POST/PUT/DELETE requests to URLs or APIs' },
       { id: 'browser_get', name: 'Headless browser', desc: 'Open a URL in Chromium for JS-heavy sites' },
       { id: 'browser_act', name: 'Browser actions',  desc: 'Click, type, screenshot — full browser interaction' },
+    ]
+  },
+  {
+    name: 'Personal', icon: '🗓', color: 'var(--accent)',
+    tools: [
+      { id: 'note',     name: 'Notes',    desc: 'Create, list and edit personal notes' },
+      { id: 'task',     name: 'Tasks',    desc: 'Manage a to-do list with priorities and due dates' },
+      { id: 'calendar', name: 'Calendar', desc: 'Add and list calendar events' },
+      { id: 'email',    name: 'Email',    desc: 'IMAP/SMTP inbox: list, read, search, send and reply' },
     ]
   },
   {
@@ -434,6 +446,7 @@ const TOOL_CATEGORIES = [
       { id: 'rag_ingest', name: 'Add document', desc: 'Index a document for semantic search' },
       { id: 'rag_search', name: 'Search',       desc: 'Search a RAG collection by meaning' },
       { id: 'rag_list',   name: 'List',         desc: 'List collections or documents inside one' },
+      { id: 'skill',      name: 'Skills',       desc: 'Save and recall reusable procedures the agent learns' },
     ]
   },
 ]

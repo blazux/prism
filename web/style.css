@@ -42,6 +42,110 @@ body {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  position: relative;   /* sits above the animated #bg-fx layer */
+  z-index: 1;
+  background: transparent;
+}
+
+/* ── Shell: left rail + main pane ─────────────────────────────────────────── */
+#body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+#view-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  letter-spacing: 0.02em;
+}
+
+#rail {
+  width: 54px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 6;
+}
+#rail-inner {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 54px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+  background: var(--bg1);
+  border-right: 1px solid var(--border);
+  transition: width 0.16s ease, box-shadow 0.16s ease;
+}
+#rail:hover #rail-inner {
+  width: 184px;
+  box-shadow: 6px 0 28px rgba(0,0,0,0.45);
+}
+.rail-section { display: flex; flex-direction: column; gap: 2px; }
+.rail-spacer { flex: 1; }
+.rail-sep { height: 1px; background: var(--border); margin: 8px 12px; }
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding-left: 16px;
+  background: none;
+  border: none;
+  color: var(--text2);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;            /* buttons center by default — keep labels left */
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.rail-item:hover { background: var(--bg2); color: var(--text); }
+.rail-item.active {
+  color: var(--accent);
+  background: var(--bg2);
+  box-shadow: inset 3px 0 0 var(--accent);   /* indicator that doesn't shift content */
+}
+.rail-icon { width: 22px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.rail-icon svg { width: 18px; height: 18px; }
+.rail-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+#rail:hover .rail-label { opacity: 1; }
+.rail-new { color: var(--text3); }
+
+/* board rename/delete, only visible when the rail is expanded + row hovered */
+.rail-board-act {
+  background: none; border: none; color: var(--text3);
+  cursor: pointer; font-size: 12px; padding: 2px 6px; opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+}
+#rail:hover .rail-item:hover .rail-board-act { opacity: 0.7; }
+.rail-board-act:hover { opacity: 1 !important; color: var(--text); }
+
+#main {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+#app-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--bg);
+  z-index: 3;
 }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
@@ -357,9 +461,8 @@ body {
 
 #dashboard {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 10px;
+  position: relative;       /* positioning context for free-floating windows */
+  overflow: auto;
 }
 
 /* ── Empty state ─────────────────────────────────────────────────────────── */
@@ -419,11 +522,15 @@ body {
   border-color: var(--accent);
 }
 
-/* ── Widget grid ─────────────────────────────────────────────────────────── */
+/* ── Widget window (free-floating) ───────────────────────────────────────── */
 
-#widget-grid {
-  align-content: start;
-  width: 100%;
+.widget-window {
+  position: absolute;
+  min-width: 200px;
+  min-height: 120px;
+  display: flex;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px var(--border);
 }
 
 /* ── Widget card ─────────────────────────────────────────────────────────── */
@@ -435,6 +542,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
   transition: border-color 0.15s;
 }
@@ -466,25 +574,24 @@ body {
   flex: 1;
 }
 
-.widget-close, .widget-lock {
+.widget-min, .widget-lock {
   background: none;
   border: none;
   color: var(--text3);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
-  padding: 1px 3px;
+  padding: 1px 5px;
   border-radius: 4px;
   flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.1s, color 0.1s, background 0.1s;
 }
-.widget-card:hover .widget-close,
+.widget-card:hover .widget-min,
 .widget-card:hover .widget-lock { opacity: 1; }
-.widget-close:hover, .widget-lock:hover { color: var(--text); background: var(--bg3); }
+.widget-min:hover, .widget-lock:hover { color: var(--text); background: var(--bg3); }
 .widget-lock { font-size: 13px; }
-/* lock icon always visible when locked */
-.widget-lock[title="Déverrouiller"] { opacity: 0.6; }
+.widget-min { font-size: 16px; font-weight: 600; }
 
 .widget-body {
   flex: 1;
@@ -502,39 +609,98 @@ body {
   display: block;
 }
 
-/* ── GridStack resize handles ─────────────────────────────────────────────── */
+/* ── Window resize handle ─────────────────────────────────────────────────── */
 
-.grid-stack-item > .ui-resizable-se {
-  width: 16px;
-  height: 16px;
+.window-resize {
+  position: absolute;
   right: 0;
   bottom: 0;
-  background: none;
-  border-radius: 0 0 10px 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
   opacity: 0;
   transition: opacity 0.15s;
+  z-index: 2;
 }
-.grid-stack-item > .ui-resizable-se::after {
+.widget-window:hover .window-resize { opacity: 1; }
+.window-resize::after {
   content: '';
   position: absolute;
-  bottom: 3px;
-  right: 3px;
-  width: 10px;
-  height: 10px;
+  bottom: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
   border-bottom: 2.5px solid var(--border2);
   border-right: 2.5px solid var(--border2);
-  border-radius: 0 0 100% 0;
-  transform: rotate(45deg);
   transition: border-color 0.15s;
 }
-.grid-stack-item:hover > .ui-resizable-se { opacity: 1; }
-.grid-stack-item > .ui-resizable-se:hover::after {
-  border-color: var(--accent);
+.window-resize:hover::after { border-color: var(--accent); }
+
+/* ── Widget dock (taskbar) ────────────────────────────────────────────────── */
+
+#widget-dock {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 88px 6px 10px;   /* right space kept clear for the chat FAB */
+  background: var(--bg1);
+  border-top: 1px solid var(--border);
+  max-height: 96px;
+  overflow-y: auto;
 }
-.grid-stack-item > .ui-resizable-s,
-.grid-stack-item > .ui-resizable-e {
-  background: transparent;
+.dock-chip {
+  display: flex;
+  align-items: center;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  overflow: hidden;
+  opacity: 0.6;
+  transition: opacity 0.15s, border-color 0.15s;
 }
+.dock-chip.open { opacity: 1; border-color: var(--accent-dim); }
+.dock-chip:hover { opacity: 1; }
+.dock-chip-label {
+  background: none;
+  border: none;
+  color: var(--text2);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 4px 4px 4px 12px;
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dock-chip.open .dock-chip-label { color: var(--text); }
+.dock-chip-del {
+  background: none;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 9px 4px 5px;
+  opacity: 0.5;
+  transition: color 0.1s, opacity 0.1s;
+}
+.dock-chip-del:hover { color: var(--red); opacity: 1; }
+
+/* ── Theme picker ─────────────────────────────────────────────────────────── */
+
+#theme-select {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  color: var(--text3);
+  font-size: 11.5px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+#theme-select:hover { color: var(--text); border-color: var(--accent); }
 
 /* ── Zoom control ────────────────────────────────────────────────────────── */
 
@@ -1840,3 +2006,232 @@ body {
 }
 #login-btn:hover   { opacity: .85; }
 #login-btn:disabled { opacity: .5; cursor: default; }
+
+/* ══ Animated background (per theme) ════════════════════════════════════════
+ * #bg-fx is a fixed, non-interactive layer behind #app. The empty dashboard
+ * area is transparent, so the animation shows through behind the windows. All
+ * effects are tinted with the active theme's tokens, so they re-colour for free
+ * on theme switch; tech themes override the default "aurora" with their own. */
+
+#bg-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* Tron canvas (bgfx.js) — drawn transparently over the #bg-fx base gradient */
+#bgfx-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: none;
+}
+
+/* Default — slow drifting accent glows (used by all non-tech themes) */
+#bg-fx::before {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background:
+    radial-gradient(38% 38% at 20% 28%, var(--accent), transparent 70%),
+    radial-gradient(34% 34% at 82% 72%, var(--accent), transparent 70%),
+    radial-gradient(30% 30% at 62% 18%, var(--green), transparent 70%);
+  opacity: .14;
+  filter: blur(60px);
+  will-change: transform;
+  animation: bgAurora 26s ease-in-out infinite alternate;
+}
+@keyframes bgAurora {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(3%, -2%) scale(1.12); }
+  100% { transform: translate(-3%, 2%) scale(1.05); }
+}
+
+/* ── Tech — faint drifting grid + accent scan ─────────────────────────────── */
+[data-theme="tech"] #bg-fx::before {
+  inset: 0;
+  background:
+    linear-gradient(var(--border2) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(90deg, var(--border2) 1px, transparent 1px) 0 0 / 48px 48px;
+  opacity: .35;
+  filter: none;
+  animation: bgDrift 34s linear infinite;
+}
+[data-theme="tech"] #bg-fx::after {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background: radial-gradient(45% 45% at 30% 25%, var(--accent), transparent 70%);
+  opacity: .12;
+  filter: blur(70px);
+  animation: bgAurora 22s ease-in-out infinite alternate;
+}
+@keyframes bgDrift {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 48px 48px, 48px 48px; }
+}
+
+/* ── Cyberpunk — Tron grid with travelling glow points (canvas: bgfx.js) ───── */
+[data-theme="cyberpunk"] #bg-fx {
+  background: radial-gradient(circle at 50% 40%, var(--accent-dim), var(--bg) 70%);
+}
+/* The CSS aurora layer is replaced by the canvas for this theme. */
+[data-theme="cyberpunk"] #bg-fx::before { display: none; }
+@keyframes bgGrid {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 0 50px, 50px 0; }
+}
+
+/* ── Synthwave — retro sun + horizon grid ─────────────────────────────────── */
+[data-theme="synthwave"] #bg-fx {
+  background: linear-gradient(180deg, var(--bg) 0%, var(--accent-dim) 72%, var(--bg2) 100%);
+}
+[data-theme="synthwave"] #bg-fx::before {
+  content: '';
+  position: absolute;
+  left: -50%; right: -50%; bottom: -8%;
+  height: 120%;
+  background:
+    linear-gradient(var(--accent) 2px, transparent 2px) 0 0 / 50px 50px,
+    linear-gradient(90deg, var(--green) 2px, transparent 2px) 0 0 / 50px 50px;
+  opacity: .18;
+  transform: perspective(440px) rotateX(64deg);
+  transform-origin: bottom center;
+  animation: bgGrid 6s linear infinite;
+}
+[data-theme="synthwave"] #bg-fx::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 14%;
+  width: 280px; height: 280px;
+  margin-left: -140px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--yellow), var(--accent));
+  -webkit-mask: repeating-linear-gradient(180deg, #000 0 9px, transparent 9px 14px);
+          mask: repeating-linear-gradient(180deg, #000 0 9px, transparent 9px 14px);
+  filter: blur(1px);
+  opacity: .55;
+  animation: bgSun 7s ease-in-out infinite alternate;
+}
+@keyframes bgSun {
+  from { opacity: .4; filter: blur(1px); }
+  to   { opacity: .65; filter: blur(3px); }
+}
+
+/* ── Matrix — falling code rain (canvas: bgfx.js) + CRT scanlines on top ───── */
+[data-theme="matrix"] #bg-fx {
+  background: radial-gradient(ellipse at center, var(--bg1), #000 82%);
+}
+[data-theme="matrix"] #bg-fx::before { display: none; }  /* rain drawn on canvas */
+[data-theme="matrix"] #bg-fx::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(57,255,20,.07) 0 1px, transparent 1px 3px);
+  box-shadow: inset 0 0 220px 50px rgba(0,0,0,.85);
+  animation: bgScan 7s linear infinite, bgFlicker 4s ease-in-out infinite;
+}
+@keyframes bgScan {
+  from { background-position: 0 0; }
+  to   { background-position: 0 120px; }
+}
+/* Gentle CRT brightness drift — subtle, not a strobe */
+@keyframes bgFlicker {
+  0%, 100% { opacity: .85; }
+  47%      { opacity: .7; }
+  50%      { opacity: 1; }
+  53%      { opacity: .72; }
+}
+
+/* ── Midnight — drifting, twinkling starfield + faint nebula ───────────────── */
+[data-theme="midnight"] #bg-fx::before {
+  inset: 0;
+  background:
+    radial-gradient(1.4px 1.4px at 12% 22%, var(--text), transparent 60%),
+    radial-gradient(1px 1px at 28% 68%, var(--text2), transparent 60%),
+    radial-gradient(1.6px 1.6px at 45% 38%, var(--accent), transparent 60%),
+    radial-gradient(1px 1px at 62% 80%, var(--text2), transparent 60%),
+    radial-gradient(1.3px 1.3px at 73% 28%, var(--text), transparent 60%),
+    radial-gradient(1px 1px at 84% 60%, var(--text2), transparent 60%),
+    radial-gradient(1.5px 1.5px at 92% 14%, var(--accent), transparent 60%),
+    radial-gradient(1px 1px at 18% 90%, var(--text2), transparent 60%),
+    radial-gradient(1.2px 1.2px at 53% 12%, var(--text), transparent 60%),
+    radial-gradient(1px 1px at 38% 52%, var(--text2), transparent 60%);
+  background-repeat: no-repeat;
+  opacity: .55;
+  filter: none;
+  animation: bgTwinkle 5s ease-in-out infinite alternate, bgFloat 50s ease-in-out infinite alternate;
+}
+[data-theme="midnight"] #bg-fx::after {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background: radial-gradient(40% 40% at 70% 30%, var(--accent), transparent 70%);
+  opacity: .10;
+  filter: blur(70px);
+  animation: bgAurora 28s ease-in-out infinite alternate;
+}
+
+/* ── Nord — slow aurora borealis bands ────────────────────────────────────── */
+[data-theme="nord"] #bg-fx::before {
+  inset: -30%;
+  background: linear-gradient(115deg, transparent 18%, var(--accent) 38%, var(--green) 52%, var(--accent) 66%, transparent 84%);
+  opacity: .12;
+  filter: blur(55px);
+  animation: bgBands 16s ease-in-out infinite alternate;
+}
+
+/* ── Solarized — slowly rotating warm sun rays + glow ──────────────────────── */
+[data-theme="solarized-dark"] #bg-fx::before {
+  inset: -60%;
+  background: conic-gradient(from 0deg at 50% 50%,
+    transparent 0 6deg, var(--yellow) 6deg 7deg, transparent 7deg 18deg,
+    var(--orange) 18deg 19deg, transparent 19deg 36deg);
+  opacity: .05;
+  filter: blur(1px);
+  animation: bgRays 90s linear infinite;
+}
+[data-theme="solarized-dark"] #bg-fx::after {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background: radial-gradient(38% 38% at 50% 45%, var(--yellow), transparent 70%);
+  opacity: .07;
+  filter: blur(70px);
+  animation: bgAurora 24s ease-in-out infinite alternate;
+}
+
+/* ── Rosé Pine — floating soft bokeh ──────────────────────────────────────── */
+[data-theme="rose-pine"] #bg-fx::before {
+  inset: -15%;
+  background:
+    radial-gradient(60px 60px at 20% 80%, var(--accent), transparent 70%),
+    radial-gradient(45px 45px at 65% 90%, var(--orange), transparent 70%),
+    radial-gradient(80px 80px at 80% 72%, var(--green), transparent 70%),
+    radial-gradient(50px 50px at 40% 95%, var(--yellow), transparent 70%);
+  background-repeat: no-repeat;
+  opacity: .13;
+  filter: blur(22px);
+  animation: bgRise 26s ease-in-out infinite alternate;
+}
+
+/* ── Prism Light — kept sober (a whisper of the default aurora) ────────────── */
+[data-theme="prism-light"] #bg-fx::before { opacity: .05; }
+
+@keyframes bgTwinkle { from { opacity: .35; } to { opacity: .6; } }
+@keyframes bgFloat   { from { transform: translateY(2%); } to { transform: translateY(-6%); } }
+@keyframes bgBands {
+  0%   { transform: translate(-12%, -6%) rotate(-5deg) scaleY(1); }
+  100% { transform: translate(12%, 6%) rotate(5deg) scaleY(1.2); }
+}
+@keyframes bgRays { to { transform: rotate(360deg); } }
+@keyframes bgRise { from { transform: translateY(8%); } to { transform: translateY(-12%); } }
+
+/* Respect users who ask for less motion — keep the colour, drop the animation */
+@media (prefers-reduced-motion: reduce) {
+  #bg-fx, #bg-fx::before, #bg-fx::after { animation: none !important; }
+}

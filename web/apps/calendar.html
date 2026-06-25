@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calendar</title>
+<link rel="stylesheet" href="/widget-base.css">
+<script src="/theme.js"></script>
+<script>
+  addEventListener('message', e => {
+    if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
+      const r = document.documentElement.style;
+      for (const k in e.data.vars) r.setProperty(k, e.data.vars[k]);
+    }
+  });
+</script>
+<style>
+  html, body { height: 100%; }
+  body { padding: 0; overflow: hidden; }
+  .app { display: flex; flex-direction: column; height: 100%; }
+  .head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .head h1 { font-size: 16px; color: var(--text); min-width: 170px; }
+  .head .spacer { flex: 1; }
+  .nav-btn { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+
+  .grid { flex: 1; display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+  .weekdays { display: grid; grid-template-columns: repeat(7, 1fr); }
+  .weekdays div { padding: 6px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); text-align: right; }
+  .weeks { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; min-height: 0; }
+  .cell { border-top: 1px solid var(--border); border-left: 1px solid var(--border); padding: 4px 6px; overflow: hidden; display: flex; flex-direction: column; gap: 3px; cursor: pointer; transition: background .12s; min-height: 0; }
+  .cell:nth-child(7n) { border-right: 1px solid var(--border); }
+  .cell:hover { background: var(--bg2); }
+  .cell.dim { opacity: .4; }
+  .cell .dnum { font-size: 12px; color: var(--text2); text-align: right; flex-shrink: 0; }
+  .cell.today .dnum { color: #fff; background: var(--accent); border-radius: 50%; width: 22px; height: 22px; line-height: 22px; text-align: center; margin-left: auto; font-weight: 600; }
+  .ev { font-size: 11px; padding: 2px 6px; border-radius: 5px; background: var(--accent-dim); color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .ev .t { color: var(--text2); }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="head">
+      <h1 id="title"></h1>
+      <button class="btn nav-btn" onclick="move(-1)" title="Previous">‹</button>
+      <button class="btn" onclick="today()">Today</button>
+      <button class="btn nav-btn" onclick="move(1)" title="Next">›</button>
+      <span class="spacer"></span>
+      <button class="btn btn-accent" onclick="addToday()">＋ Event</button>
+    </div>
+    <div class="grid">
+      <div class="weekdays" id="weekdays"></div>
+      <div class="weeks" id="weeks"></div>
+    </div>
+  </div>
+
+<script>
+const session = new URLSearchParams(location.search).get('session') || 'default';
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const WD = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+let view = new Date(); view.setDate(1);
+let events = [];
+
+document.getElementById('weekdays').innerHTML = WD.map(d => `<div>${d}</div>`).join('');
+
+function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+function pad(x) { return String(x).padStart(2, '0'); }
+
+async function load() {
+  const y = view.getFullYear(), m = view.getMonth();
+  const from = new Date(y, m, 1), to = new Date(y, m + 1, 0, 23, 59);
+  document.getElementById('title').textContent = `${MONTHS[m]} ${y}`;
+  try {
+    const data = await fetch(`/api/events?session=${encodeURIComponent(session)}&from=${ymd(from)}&to=${ymd(to)} 23:59`).then(r => r.json());
+    events = data.events || [];
+  } catch { events = []; }
+  render();
+}
+
+function render() {
+  const weeks = document.getElementById('weeks');
+  weeks.innerHTML = '';
+  const y = view.getFullYear(), m = view.getMonth();
+  const first = new Date(y, m, 1);
+  let start = (first.getDay() + 6) % 7;             // Monday-based offset
+  const gridStart = new Date(y, m, 1 - start);
+  const todayStr = ymd(new Date());
+
+  // bucket events by day
+  const byDay = {};
+  for (const ev of events) {
+    const key = ymd(new Date(ev.startAt));
+    (byDay[key] = byDay[key] || []).push(ev);
+  }
+
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(gridStart); d.setDate(gridStart.getDate() + i);
+    const key = ymd(d);
+    const cell = document.createElement('div');
+    cell.className = 'cell' + (d.getMonth() !== m ? ' dim' : '') + (key === todayStr ? ' today' : '');
+    cell.onclick = () => addOn(key);
+    const num = document.createElement('div'); num.className = 'dnum'; num.textContent = d.getDate();
+    cell.appendChild(num);
+    for (const ev of (byDay[key] || []).sort((a,b)=>a.startAt.localeCompare(b.startAt))) {
+      const chip = document.createElement('div');
+      chip.className = 'ev';
+      const t = new Date(ev.startAt);
+      const time = (t.getHours() || t.getMinutes()) ? `<span class="t">${pad(t.getHours())}:${pad(t.getMinutes())}</span> ` : '';
+      chip.innerHTML = time + esc(ev.title);
+      chip.title = ev.title + (ev.location ? ' @ ' + ev.location : '');
+      chip.onclick = (e) => { e.stopPropagation(); openEvent(ev); };
+      cell.appendChild(chip);
+    }
+    weeks.appendChild(cell);
+  }
+}
+
+function move(n) { view.setMonth(view.getMonth() + n); load(); }
+function today() { view = new Date(); view.setDate(1); load(); }
+
+async function addOn(dateKey) {
+  const title = prompt(`New event on ${dateKey}\nTitle:`);
+  if (!title || !title.trim()) return;
+  const time = prompt('Time (HH:MM, blank = all-day):', '09:00') || '';
+  const start = time.trim() ? `${dateKey}T${time.trim()}` : `${dateKey}T00:00`;
+  await fetch(`/api/events?session=${encodeURIComponent(session)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: title.trim(), start })
+  });
+  load();
+}
+function addToday() { addOn(ymd(new Date())); }
+
+async function openEvent(ev) {
+  const when = new Date(ev.startAt).toLocaleString();
+  if (confirm(`${ev.title}\n${when}${ev.location ? '\n@ ' + ev.location : ''}${ev.description ? '\n\n' + ev.description : ''}\n\nDelete this event?`)) {
+    await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${ev.id}`, { method: 'DELETE' });
+    load();
+  }
+}
+
+function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+load();
+</script>
+</body>
+</html>
