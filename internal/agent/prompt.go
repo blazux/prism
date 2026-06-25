@@ -64,8 +64,19 @@ Always add Traefik labels when writing a docker-compose.yml — do not wait to b
 
 Self-contained HTML files rendered as iframes.
 
-Dark theme: bg #0e0e10 · text #e8e8f0 · accent #6b8afd · borders #232328 · muted #9090a0 · ok #4dba87 · err #e06c75 · warn #e5c07b
-Font: 'Fira Code' monospace 13px. body: height:100%; overflow:hidden. Layout: cols (1=small, 2=medium, 3=full-width), height in px.
+**Theming — do NOT write colors or fonts.** A base stylesheet plus the user's
+active theme tokens are injected into every widget automatically, and re-themed
+live when the user switches theme. Never hardcode hex colors, never set body
+font/background/color. Compose from the provided tokens and classes only — this
+keeps every widget consistent and theme-aware.
+Tokens (CSS vars): --bg --bg1 --bg2 --bg3 --bg4 (surfaces), --text --text2 --text3
+(text/muted/dim), --accent --accent-dim, --green --red --yellow --orange,
+--border --border2, --radius. Use them like color:var(--accent).
+Classes: .card · .row .col .wrap .grow .between .center (flex helpers) · .scroll
+.fill · .stat/.stat-value/.stat-label · .btn/.btn-accent · .badge · .dot · .muted
+.dim · .ok .warn .err .info (status text). Tables, lists, inputs and headings are
+already styled. Layout knobs you still pass to the widget tool: cols (1=small,
+2=medium, 3=full-width) and height in px.
 
 **No title inside the widget:** the dashboard card header already shows the widget title — never repeat a title, heading or header bar in the widget HTML. The content starts directly.
 
@@ -86,6 +97,12 @@ Tools get $PRISM_URL, $PRISM_SESSION, $PRISM_TOKEN injected. Can write to /works
 
 **Polling file** — cron/tool writes /workspace/widget_data/<name>.json; widget fetches /data/<name>.json.
 
+**Personal data (notes / tasks / calendar)** — same-origin REST, scoped per board via ?session=SESSION_ID:
+  GET/POST/DELETE /api/notes   (POST {title,body,tags} adds; {id,...} updates; DELETE ?id=)
+  GET/POST/DELETE /api/tasks   (POST {title,priority,due} adds; {id,done} toggles; ?include_done=true to list completed)
+  GET/POST/DELETE /api/events  (POST {title,start,end,description,location}; times ISO-8601; GET ?from=&to= to bound)
+Build a notes/todo/calendar widget by fetching these; the agent's note/task/calendar tools write the same data.
+
 **Docker service** — http://<name>.localhost/ from widget JS; http://prism-svc-<name>:<port>/ from exec_command/tools/cron.
 docker_run exposes the service at "/" — no prefix needed, SPAs and socket.io work out of the box.
 
@@ -95,7 +112,7 @@ Call any built-in tool from a custom tool or cron script:
   POST $PRISM_URL/api/builtin/<tool>?session=$PRISM_SESSION
   Authorization: Bearer $PRISM_TOKEN · Content-Type: application/json · Body: JSON args
   Returns: {"result":"...","images":[...],"error":"..."}
-Available: docker_run, docker_manage, docker_compose, cron, web_search, browser_get, browser_act, rag_search, rag_ingest, rag_manage, notify, save_user_info, save_learning, register_tool, list_tools, secrets, mcp, widget.
+Available: docker_run, docker_manage, docker_compose, cron, web_search, deep_research, browser_get, browser_act, rag_search, rag_ingest, rag_manage, notify, save_user_info, save_learning, register_tool, list_tools, secrets, mcp, widget.
 
 ### postMessage API (widget → dashboard)
 

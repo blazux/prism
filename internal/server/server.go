@@ -127,7 +127,7 @@ func (s *Server) Start() error {
 
 	// Dynamic plugin files
 	os.MkdirAll(s.cfg.PluginDir, 0755)
-	mux.Handle("/plugins/", http.StripPrefix("/plugins/", http.FileServer(http.Dir(s.cfg.PluginDir))))
+	mux.Handle("/plugins/", http.StripPrefix("/plugins/", s.servePluginHTML(http.FileServer(http.Dir(s.cfg.PluginDir)))))
 
 	// Widget data directory — writable by cron/tools, readable by widgets via /data/<file>
 	widgetDataDir := filepath.Join(s.cfg.WorkspaceDir, "widget_data")
@@ -160,6 +160,15 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/sessions/", s.handleSessionByID)
 	mux.HandleFunc("/api/chat/upload", s.handleChatFileUpload)
 	mux.HandleFunc("/api/notify", s.handleExternalNotify)
+	mux.HandleFunc("/api/notes", s.handleNotes)
+	mux.HandleFunc("/api/tasks", s.handleTasks)
+	mux.HandleFunc("/api/events", s.handleEvents)
+	mux.HandleFunc("/api/cron", s.handleCron)
+	mux.HandleFunc("/api/email/config", s.handleEmailConfig)
+	mux.HandleFunc("/api/email/list", s.handleEmailList)
+	mux.HandleFunc("/api/email/read", s.handleEmailRead)
+	mux.HandleFunc("/api/email/search", s.handleEmailSearch)
+	mux.HandleFunc("/api/email/send", s.handleEmailSend)
 	mux.HandleFunc("/api/chat", s.handleChatHTTP)
 	mux.HandleFunc("/api/secrets", s.handleSecrets)
 	mux.HandleFunc("/api/secrets/", s.handleSecretByName)

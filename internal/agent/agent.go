@@ -51,6 +51,7 @@ type Agent struct {
 	ragCtxFn       func() string                                  // returns live RAG context block for system prompt
 	mcpCtxFn       func() string                                  // returns MCP servers context block for system prompt
 	userProfileFn  func() string                                  // returns full user profile for system prompt injection
+	skillsCtxFn    func() string                                  // returns saved-skills index for system prompt
 	learningsCtxFn func(ctx context.Context, query string) string // searches agent-learnings RAG for relevant past lessons
 	memStore       *memory.Store
 	sessionID      string
@@ -69,6 +70,10 @@ func (a *Agent) SetMCPContextFn(fn func() string) { a.mcpCtxFn = fn }
 // SetUserProfileFn registers a callback that returns the full user profile to
 // inject into the system prompt on every chat turn.
 func (a *Agent) SetUserProfileFn(fn func() string) { a.userProfileFn = fn }
+
+// SetSkillsContextFn registers a callback that returns the saved-skills index
+// to inject into the system prompt on every chat turn.
+func (a *Agent) SetSkillsContextFn(fn func() string) { a.skillsCtxFn = fn }
 
 // SetLearningsCtxFn registers a callback that searches the agent-learnings RAG
 // collection and returns relevant past lessons for the current query.
@@ -275,6 +280,14 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	// Inject MCP server context
 	if a.mcpCtxFn != nil {
 		if extra := a.mcpCtxFn(); extra != "" {
+			sb.WriteString("\n\n")
+			sb.WriteString(extra)
+		}
+	}
+
+	// Inject saved-skills index
+	if a.skillsCtxFn != nil {
+		if extra := a.skillsCtxFn(); extra != "" {
 			sb.WriteString("\n\n")
 			sb.WriteString(extra)
 		}

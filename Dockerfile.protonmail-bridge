@@ -1,0 +1,9 @@
+# Proton Mail Bridge in a container. The upstream image auto-updates the bridge
+# to a version that is dynamically linked against libfido2, which the base image
+# does not ship — causing "libfido2.so.1: cannot open shared object file" and a
+# crash loop. We just add the missing library.
+FROM shenxn/protonmail-bridge:latest
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libfido2-1 \
+    && rm -rf /var/lib/apt/lists/*

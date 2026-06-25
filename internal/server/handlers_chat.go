@@ -116,6 +116,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ollamaClient := s.newChatBackend()
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
+	executor.SetLLM(ollamaClient, model)
 
 	if s.ragStore != nil {
 		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
@@ -176,6 +177,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 			return sb.String()
 		})
 	}
+	ag.SetSkillsContextFn(executor.SkillsIndex)
 	ag.SetUserProfileFn(func() string {
 		return executor.GetUserProfile(context.Background())
 	})

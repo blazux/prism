@@ -26,6 +26,8 @@ type ToolExecutor struct {
 	customMgr       *customtools.Manager
 	mcpMgr          *mcp.Manager
 	memStore        *memory.Store
+	backend         ollama.Backend // LLM backend, used by deep_research sub-calls
+	model           string
 	onPluginAdd     func(id, title, content string, cols, height int)
 	onPluginRem     func(id string)
 	onOpenFile      func(path string)
@@ -44,6 +46,13 @@ func NewToolExecutor(dm *docker.Manager, workspaceDir, pluginDir, searxngURL, pr
 		searxngURL:   searxngURL,
 		prismToken:   prismToken,
 	}
+}
+
+// SetLLM gives the executor access to the chat backend + model so tools that
+// drive their own LLM sub-calls (deep_research) can reuse the same provider.
+func (e *ToolExecutor) SetLLM(backend ollama.Backend, model string) {
+	e.backend = backend
+	e.model = model
 }
 
 func (e *ToolExecutor) SetRAG(store *rag.Store, embedder *rag.Embedder, captioner *rag.Captioner) {
@@ -298,6 +307,20 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.httpRequest(ctx, method, str("url"), headers, str("body")))
 	case "web_search":
 		return wrap(e.webSearch(ctx, str("query")))
+	case "deep_research":
+		rounds, _ := args["max_rounds"].(float64)
+		return wrap(e.deepResearch(ctx, str("question"), int(rounds)))
+	case "skill":
+		return wrap(e.skillTool(str("action"), str("name"), str("description"), str("when_to_use"), str("body")))
+	case "note":
+		return wrap(e.noteTool(ctx, str("action"), idArg(args), str("title"), str("body"), str("tags")))
+	case "task":
+		includeDone, _ := args["include_done"].(bool)
+		return wrap(e.taskTool(ctx, str("action"), idArg(args), str("title"), str("priority"), str("due"), includeDone))
+	case "calendar":
+		return wrap(e.calendarTool(ctx, str("action"), idArg(args), str("title"), str("description"), str("location"), str("start"), str("end"), str("from"), str("to")))
+	case "email":
+		return wrap(e.emailTool(ctx, args))
 	case "browser_get":
 		return wrap(e.browserExec(ctx, str("url"), str("script")))
 	case "browser_act":

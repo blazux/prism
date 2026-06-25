@@ -247,6 +247,125 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name: "deep_research",
+			Description: "Run multi-round, in-depth web research on a question. Iteratively plans, searches the web, reads pages, and synthesizes an evolving report until comprehensive, then returns a long Markdown report with sources. Use for open-ended questions needing many sources (comparisons, surveys, 'everything about X'); not for a single quick lookup (use web_search for that). Slow — runs several search+read+LLM rounds.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"question":   {Type: "string", Description: "The research question to investigate in depth"},
+					"max_rounds": {Type: "integer", Description: "Max research rounds (default 4, max 10). More rounds = deeper but slower."},
+				},
+				Required: []string{"question"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name: "skill",
+			Description: "Reusable skills library. Save a procedure you worked out (action=add) so you can recall it later; an index of saved skills (name + when-to-use) is always in your system prompt. action=get loads a skill's full steps; action=list / delete also available. Save a skill after solving something non-trivial you may need again.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action":      {Type: "string", Description: "add, get, list, or delete"},
+					"name":        {Type: "string", Description: "Skill name (required for add/get/delete)"},
+					"description": {Type: "string", Description: "One-line summary (for add)"},
+					"when_to_use": {Type: "string", Description: "When this skill applies, shown in the index (for add)"},
+					"body":        {Type: "string", Description: "The full procedure / steps, Markdown (for add)"},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name: "note",
+			Description: "Personal notes (per board). action=add|list|update|delete. Notes have a title, body and comma-separated tags. Use to remember free-form information the user wants kept.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action": {Type: "string", Description: "add, list, update, or delete"},
+					"id":     {Type: "integer", Description: "Note id (for update/delete)"},
+					"title":  {Type: "string", Description: "Note title"},
+					"body":   {Type: "string", Description: "Note body (Markdown)"},
+					"tags":   {Type: "string", Description: "Comma-separated tags"},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name: "task",
+			Description: "To-do tasks (per board). action=add|list|done|reopen|delete. Tasks have a title, priority (low|normal|high) and optional due date. list hides completed tasks unless include_done=true.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action":       {Type: "string", Description: "add, list, done, reopen, or delete"},
+					"id":           {Type: "integer", Description: "Task id (for done/reopen/delete)"},
+					"title":        {Type: "string", Description: "Task title (for add)"},
+					"priority":     {Type: "string", Description: "low, normal, or high"},
+					"due":          {Type: "string", Description: "Due date, e.g. '2026-07-01 09:00' or '2026-07-01'"},
+					"include_done": {Type: "boolean", Description: "Include completed tasks when listing"},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name: "email",
+			Description: "Email over IMAP/SMTP. action=config sets up the account (imap_host, smtp_host, user, password, optional ports/from — password is stored encrypted). Then: list (recent inbox), read (uid → full body), search (query), send (to, subject, body), reply (uid, body — threads to the original). Summarize/triage/draft using the LLM yourself from list/read output.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action":    {Type: "string", Description: "config, list, read, search, send, or reply"},
+					"to":        {Type: "string", Description: "Recipient (send); defaults to original sender for reply"},
+					"subject":   {Type: "string", Description: "Subject (send)"},
+					"body":      {Type: "string", Description: "Message body (send/reply)"},
+					"uid":       {Type: "integer", Description: "Message UID from list/search (read/reply)"},
+					"query":     {Type: "string", Description: "Search query (search)"},
+					"limit":     {Type: "integer", Description: "Max messages to return (list/search, default 20)"},
+					"imap_host": {Type: "string", Description: "IMAP server host (config)"},
+					"imap_port": {Type: "integer", Description: "IMAP port (config, default 993)"},
+					"smtp_host": {Type: "string", Description: "SMTP server host (config)"},
+					"smtp_port": {Type: "integer", Description: "SMTP port (config, default 587; 465 = implicit TLS)"},
+					"user":      {Type: "string", Description: "Account username/email (config)"},
+					"password":  {Type: "string", Description: "Account password — stored encrypted (config)"},
+					"from":      {Type: "string", Description: "From address if different from user (config)"},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name: "calendar",
+			Description: "Calendar events (per board). action=add|list|delete. Events have a title, start (required), optional end, description and location. For list, optionally pass from/to to bound the range.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action":      {Type: "string", Description: "add, list, or delete"},
+					"id":          {Type: "integer", Description: "Event id (for delete)"},
+					"title":       {Type: "string", Description: "Event title (for add)"},
+					"description": {Type: "string", Description: "Event description"},
+					"location":    {Type: "string", Description: "Event location"},
+					"start":       {Type: "string", Description: "Start time, e.g. '2026-07-01 09:00' (required for add)"},
+					"end":         {Type: "string", Description: "End time (optional)"},
+					"from":        {Type: "string", Description: "List filter: range start"},
+					"to":          {Type: "string", Description: "List filter: range end"},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "rag_search",
 			Description: "Search the RAG knowledge base for relevant information from uploaded documents. Use this to answer questions based on the documentation available in a collection.",
 			Parameters: ollama.ToolParameters{

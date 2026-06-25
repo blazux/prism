@@ -101,6 +101,37 @@ func (s *Store) initSchema(ctx context.Context) error {
 			PRIMARY KEY (session_id, id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS mcp_servers_session_idx ON mcp_servers(session_id)`,
+		`CREATE TABLE IF NOT EXISTS notes (
+			id         BIGSERIAL PRIMARY KEY,
+			session_id TEXT NOT NULL DEFAULT 'default',
+			title      TEXT NOT NULL DEFAULT '',
+			body       TEXT NOT NULL DEFAULT '',
+			tags       TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS notes_session_idx ON notes(session_id, updated_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS tasks (
+			id         BIGSERIAL PRIMARY KEY,
+			session_id TEXT NOT NULL DEFAULT 'default',
+			title      TEXT NOT NULL,
+			done       BOOLEAN NOT NULL DEFAULT FALSE,
+			priority   TEXT NOT NULL DEFAULT 'normal',
+			due_at     TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS tasks_session_idx ON tasks(session_id, done, due_at)`,
+		`CREATE TABLE IF NOT EXISTS calendar_events (
+			id          BIGSERIAL PRIMARY KEY,
+			session_id  TEXT NOT NULL DEFAULT 'default',
+			title       TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			start_at    TIMESTAMPTZ NOT NULL,
+			end_at      TIMESTAMPTZ,
+			location    TEXT NOT NULL DEFAULT '',
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS calendar_session_idx ON calendar_events(session_id, start_at)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.pool.Exec(ctx, stmt); err != nil {

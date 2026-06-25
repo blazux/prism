@@ -59,6 +59,13 @@ type WSMessage struct {
 	DisabledTools []string        `json:"disabledTools,omitempty"`
 	Images        []string        `json:"images,omitempty"` // base64 image strings for multimodal
 	Files         []ChatFile      `json:"files,omitempty"`  // parsed text file attachments
+	// Widget window state (set_plugin_state). Pointers so callers can send a
+	// partial update — only the provided fields are written to meta.json.
+	Open *bool    `json:"open,omitempty"`
+	X    *float64 `json:"x,omitempty"`
+	Y    *float64 `json:"y,omitempty"`
+	W    *float64 `json:"w,omitempty"`
+	H    *float64 `json:"h,omitempty"`
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +97,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	ollamaClient := s.newChatBackend()
 
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
+	executor.SetLLM(ollamaClient, s.cfg.Model)
 	if s.ragStore != nil {
 		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
 	}
@@ -146,6 +154,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	client.ag.SetUserProfileFn(func() string {
 		return executor.GetUserProfile(context.Background())
 	})
+	client.ag.SetSkillsContextFn(executor.SkillsIndex)
 	client.ag.SetLearningsCtxFn(func(ctx context.Context, query string) string {
 		return executor.SearchLearnings(ctx, query)
 	})
@@ -358,6 +367,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		client.sendJSON(map[string]interface{}{
 			"type": "plugin_load", "id": p.id, "title": p.title, "content": p.content,
 			"cols": p.cols, "height": p.height, "locked": p.locked,
+			"open": p.open, "x": p.x, "y": p.y, "w": p.w, "h": p.h,
 		})
 	}
 
@@ -509,18 +519,35 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "lock_plugin":
 			if msg.ID != "" {
 				metaPath := filepath.Join(sessionPluginDir, msg.ID+".meta.json")
-				var m struct {
-					Title  string `json:"title"`
-					Cols   int    `json:"cols"`
-					Height int    `json:"height"`
-					Locked bool   `json:"locked,omitempty"`
-				}
-				if b, err := os.ReadFile(metaPath); err == nil {
-					json.Unmarshal(b, &m)
-				}
-				m.Locked = msg.Locked
-				if b, err := json.Marshal(m); err == nil {
-					os.WriteFile(metaPath, b, 0644)
+				updatePluginMeta(metaPath, func(m map[string]any) {
+					m["locked"] = msg.Locked
+				})
+			}
+
+		// set_plugin_state persists window lifecycle without touching the
+		// widget content: minimize/restore (open) and the free-window geometry
+		// (x/y/w/h). Only the fields the client sent are written.
+		case "set_plugin_state":
+			if msg.ID != "" {
+				metaPath := filepath.Join(sessionPluginDir, msg.ID+".meta.json")
+				if _, err := os.Stat(metaPath); err == nil {
+					updatePluginMeta(metaPath, func(m map[string]any) {
+						if msg.Open != nil {
+							m["open"] = *msg.Open
+						}
+						if msg.X != nil {
+							m["x"] = *msg.X
+						}
+						if msg.Y != nil {
+							m["y"] = *msg.Y
+						}
+						if msg.W != nil {
+							m["w"] = *msg.W
+						}
+						if msg.H != nil {
+							m["h"] = *msg.H
+						}
+					})
 				}
 			}
 
@@ -570,6 +597,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if ragContextFn != nil {
 				client.ag.SetRAGContextFn(ragContextFn)
 			}
+			client.ag.SetSkillsContextFn(executor.SkillsIndex)
 			curSessionID := client.sessionID
 			client.ag.SetMCPContextFn(func() string {
 				servers, err := mcpMgr.List(context.Background(), curSessionID)

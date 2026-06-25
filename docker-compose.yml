@@ -95,6 +95,24 @@ services:
       - SEARXNG_BASE_URL=http://searxng:8080
     restart: unless-stopped
 
+  # ProtonMail Bridge — speaks IMAP/SMTP for Proton accounts. The image re-exposes
+  # the bridge on standard ports inside the Docker network: IMAP 143, SMTP 25.
+  # Built from a small Dockerfile that adds libfido2 (upstream auto-update needs it).
+  # One-time login:  docker compose run --rm protonmail-bridge init
+  #   in the bridge shell:  login  → Proton email + password + 2FA,
+  #                         info   → copy the username + bridge password,  exit.
+  # In Prism Email → ProtonMail → Advanced: host (IMAP & SMTP) = "protonmail-bridge",
+  # IMAP port 143, SMTP port 25, STARTTLS + self-signed.
+  protonmail-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.protonmail-bridge
+    container_name: prism-protonmail-bridge
+    volumes:
+      - protonmail:/root
+    restart: unless-stopped
+
 volumes:
   workspace:
   pgdata:
+  protonmail:

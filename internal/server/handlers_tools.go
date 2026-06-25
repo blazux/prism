@@ -156,6 +156,7 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
+	executor.SetLLM(s.newChatBackend(), s.cfg.Model)
 	if s.ragStore != nil {
 		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
 	}

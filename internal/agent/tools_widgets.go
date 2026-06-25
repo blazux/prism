@@ -10,10 +10,19 @@ import (
 )
 
 type pluginMeta struct {
-	Title  string `json:"title"`
-	Cols   int    `json:"cols"`
-	Height int    `json:"height"`
-	Locked bool   `json:"locked,omitempty"`
+	Title  string  `json:"title"`
+	Cols   int     `json:"cols"`
+	Height int     `json:"height"`
+	Locked bool    `json:"locked,omitempty"`
+	// Open is the window lifecycle flag. nil/absent means "open" (the default
+	// for freshly created widgets). false means the user minimized the window
+	// but kept the widget — it lives in the dock and can be reopened.
+	Open *bool `json:"open,omitempty"`
+	// Free-window geometry (pixels) persisted across reloads/devices.
+	X float64 `json:"x,omitempty"`
+	Y float64 `json:"y,omitempty"`
+	W float64 `json:"w,omitempty"`
+	H float64 `json:"h,omitempty"`
 }
 
 func (e *ToolExecutor) listUIPlugins() (string, error) {
@@ -30,6 +39,7 @@ func (e *ToolExecutor) listUIPlugins() (string, error) {
 		Cols   int    `json:"cols"`
 		Height int    `json:"height"`
 		Locked bool   `json:"locked,omitempty"`
+		Open   bool   `json:"open"`
 	}
 	var widgets []row
 	for _, entry := range entries {
@@ -46,7 +56,8 @@ func (e *ToolExecutor) listUIPlugins() (string, error) {
 		if err := json.Unmarshal(b, &m); err != nil {
 			continue
 		}
-		widgets = append(widgets, row{ID: id, Title: m.Title, Cols: m.Cols, Height: m.Height, Locked: m.Locked})
+		open := m.Open == nil || *m.Open
+		widgets = append(widgets, row{ID: id, Title: m.Title, Cols: m.Cols, Height: m.Height, Locked: m.Locked, Open: open})
 	}
 	if len(widgets) == 0 {
 		return "No widgets on the dashboard.", nil
