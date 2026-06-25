@@ -28,6 +28,7 @@ type Client struct {
 	sessionID       string
 	lastNotifID     int64       // last notification ID pushed to this client
 	pendingSecretCh chan string // non-nil while agent is waiting for secret input
+	viewContext     string      // what the user is currently looking at (UI -> agent)
 }
 
 // cancelActive cancels the in-flight agent turn (if any) under the client mutex.
@@ -155,6 +156,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return executor.GetUserProfile(context.Background())
 	})
 	client.ag.SetSkillsContextFn(executor.SkillsIndex)
+	client.ag.SetViewContextFn(func() string {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return client.viewContext
+	})
+	if sessionID == assistantSession {
+		client.ag.SetGlobalContextFn(s.workspacesOverview)
+	}
 	client.ag.SetLearningsCtxFn(func(ctx context.Context, query string) string {
 		return executor.SearchLearnings(ctx, query)
 	})
@@ -524,6 +533,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 
+		// set_context records what the user is currently viewing so the agent
+		// can resolve "this email/note/event" on the next turn.
+		case "set_context":
+			client.mu.Lock()
+			client.viewContext = msg.Content
+			client.mu.Unlock()
+
 		// set_plugin_state persists window lifecycle without touching the
 		// widget content: minimize/restore (open) and the free-window geometry
 		// (x/y/w/h). Only the fields the client sent are written.
@@ -598,6 +614,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				client.ag.SetRAGContextFn(ragContextFn)
 			}
 			client.ag.SetSkillsContextFn(executor.SkillsIndex)
+			client.ag.SetViewContextFn(func() string {
+				client.mu.Lock()
+				defer client.mu.Unlock()
+				return client.viewContext
+			})
+			if client.sessionID == assistantSession {
+				client.ag.SetGlobalContextFn(s.workspacesOverview)
+			}
 			curSessionID := client.sessionID
 			client.ag.SetMCPContextFn(func() string {
 				servers, err := mcpMgr.List(context.Background(), curSessionID)

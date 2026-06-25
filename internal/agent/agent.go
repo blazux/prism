@@ -52,6 +52,8 @@ type Agent struct {
 	mcpCtxFn       func() string                                  // returns MCP servers context block for system prompt
 	userProfileFn  func() string                                  // returns full user profile for system prompt injection
 	skillsCtxFn    func() string                                  // returns saved-skills index for system prompt
+	viewCtxFn      func() string                                  // returns what the user is currently looking at
+	globalCtxFn    func() string                                  // global assistant: overview of all workspaces
 	learningsCtxFn func(ctx context.Context, query string) string // searches agent-learnings RAG for relevant past lessons
 	memStore       *memory.Store
 	sessionID      string
@@ -74,6 +76,16 @@ func (a *Agent) SetUserProfileFn(fn func() string) { a.userProfileFn = fn }
 // SetSkillsContextFn registers a callback that returns the saved-skills index
 // to inject into the system prompt on every chat turn.
 func (a *Agent) SetSkillsContextFn(fn func() string) { a.skillsCtxFn = fn }
+
+// SetViewContextFn registers a callback that returns a description of what the
+// user is currently looking at (which app/workspace, the open email/note…), so
+// "summarize this" / "reply to it" resolve without the user spelling it out.
+func (a *Agent) SetViewContextFn(fn func() string) { a.viewCtxFn = fn }
+
+// SetGlobalContextFn registers a callback that returns an overview of every
+// workspace. It is only wired for the global "Assistant" session — the soft
+// partition: per-workspace agents don't get cross-workspace visibility.
+func (a *Agent) SetGlobalContextFn(fn func() string) { a.globalCtxFn = fn }
 
 // SetLearningsCtxFn registers a callback that searches the agent-learnings RAG
 // collection and returns relevant past lessons for the current query.
@@ -290,6 +302,24 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		if extra := a.skillsCtxFn(); extra != "" {
 			sb.WriteString("\n\n")
 			sb.WriteString(extra)
+		}
+	}
+
+	// Inject what the user is currently looking at (context-aware chat).
+	if a.viewCtxFn != nil {
+		if v := a.viewCtxFn(); v != "" {
+			sb.WriteString("\n\n## What the user is looking at right now\n")
+			sb.WriteString(v)
+			sb.WriteString("\nWhen the user says \"this\", \"it\", \"this email/note/event\", assume they mean what they are looking at above.")
+		}
+	}
+
+	// Global assistant: overview of every workspace (super-agent tier).
+	if a.globalCtxFn != nil {
+		if v := a.globalCtxFn(); v != "" {
+			sb.WriteString("\n\n## You are the global assistant\n")
+			sb.WriteString("You see and act across the user's entire space — all workspaces, plus mail, calendar, notes and tasks. The user's workspaces:\n")
+			sb.WriteString(v)
 		}
 	}
 

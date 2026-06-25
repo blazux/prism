@@ -1,12 +1,47 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// assistantSession is the reserved session for the global "Assistant" — the
+// super-agent that sees across all workspaces.
+const assistantSession = "assistant"
+
+// workspacesOverview builds a markdown list of every (non-assistant) workspace
+// and the widgets on its dashboard, injected into the global assistant's prompt.
+func (s *Server) workspacesOverview() string {
+	if s.memStore == nil {
+		return ""
+	}
+	sessions, err := s.memStore.ListSessions(context.Background())
+	if err != nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, sess := range sessions {
+		if sess.ID == assistantSession {
+			continue
+		}
+		fmt.Fprintf(&sb, "- **%s**", sess.Name)
+		plugins := s.loadPlugins(filepath.Join(s.cfg.PluginDir, sess.ID))
+		if len(plugins) > 0 {
+			titles := make([]string, 0, len(plugins))
+			for _, p := range plugins {
+				titles = append(titles, p.title)
+			}
+			fmt.Fprintf(&sb, " — widgets: %s", strings.Join(titles, ", "))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
 
 type pluginEntry struct {
 	id, title, content string

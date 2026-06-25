@@ -8,13 +8,10 @@ import (
 	"time"
 )
 
-// session returns the executor's session, defaulting to "default".
-func (e *ToolExecutor) session() string {
-	if e.sessionID == "" {
-		return "default"
-	}
-	return e.sessionID
-}
+// pimScope is the shared scope for personal data (notes, tasks, calendar). These
+// apps are global ("soft partition"): every workspace's agent sees the same set,
+// while dashboard widgets stay per-workspace.
+const pimScope = "global"
 
 // parseTime accepts a few human-friendly layouts (local time) and RFC3339.
 func parseTime(s string) (time.Time, error) {
@@ -46,7 +43,7 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body,
 	if e.memStore == nil {
 		return "", fmt.Errorf("notes unavailable: no database")
 	}
-	sess := e.session()
+	sess := pimScope
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
 		id, err := e.memStore.AddNote(ctx, sess, title, body, tags)
@@ -92,7 +89,7 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 	if e.memStore == nil {
 		return "", fmt.Errorf("tasks unavailable: no database")
 	}
-	sess := e.session()
+	sess := pimScope
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
 		id, err := e.memStore.AddTask(ctx, sess, title, priority, parseTimePtr(due))
@@ -147,7 +144,7 @@ func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, d
 	if e.memStore == nil {
 		return "", fmt.Errorf("calendar unavailable: no database")
 	}
-	sess := e.session()
+	sess := pimScope
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
 		st, err := parseTime(start)

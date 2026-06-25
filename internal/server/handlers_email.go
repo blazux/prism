@@ -104,6 +104,44 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GET /api/email/unread -> { count }. Soft-fails to 0 so the badge poll never
+// errors (e.g. email not configured or briefly unreachable).
+func (s *Server) handleEmailUnread(w http.ResponseWriter, r *http.Request) {
+	cfg, ok := s.loadEmailCfg(r)
+	if !ok {
+		writeJSON(w, map[string]interface{}{"count": 0})
+		return
+	}
+	n, err := cfg.UnreadCount()
+	if err != nil {
+		writeJSON(w, map[string]interface{}{"count": 0})
+		return
+	}
+	writeJSON(w, map[string]interface{}{"count": n})
+}
+
+// POST /api/email/markseen  {uid, seen}  — marks a message read/unread.
+func (s *Server) handleEmailMarkSeen(w http.ResponseWriter, r *http.Request) {
+	cfg, ok := s.loadEmailCfg(r)
+	if !ok {
+		http.Error(w, "email not configured", 400)
+		return
+	}
+	var b struct {
+		UID  uint32 `json:"uid"`
+		Seen bool   `json:"seen"`
+	}
+	if json.NewDecoder(r.Body).Decode(&b) != nil || b.UID == 0 {
+		http.Error(w, "uid required", 400)
+		return
+	}
+	if err := cfg.SetSeen(b.UID, b.Seen); err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
 func (s *Server) handleEmailList(w http.ResponseWriter, r *http.Request) {
 	cfg, ok := s.loadEmailCfg(r)
 	if !ok {

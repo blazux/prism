@@ -1,8 +1,8 @@
 package server
 
-// REST endpoints for the PIM features (notes / tasks / calendar) so widgets can
-// read and write them directly. All are scoped per board via ?session=. Auth is
-// handled by the global middleware.
+// REST endpoints for the PIM features (notes / tasks / calendar) so widgets and
+// apps can read and write them directly. This data is global (shared across all
+// workspaces) — see pimScope. Auth is handled by the global middleware.
 
 import (
 	"encoding/json"
@@ -11,13 +11,10 @@ import (
 	"time"
 )
 
-func pimSession(r *http.Request) string {
-	s := sanitizeSessionID(r.URL.Query().Get("session"))
-	if s == "" {
-		s = "default"
-	}
-	return s
-}
+// pimScope is the shared scope for personal data — notes, tasks and calendar are
+// global ("soft partition"), shared across all workspaces. Keep in sync with the
+// agent's pimScope constant.
+const pimScope = "global"
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -58,7 +55,7 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
-	sess := pimSession(r)
+	sess := pimScope
 	switch r.Method {
 	case "GET":
 		notes, err := s.memStore.ListNotes(r.Context(), sess)
@@ -109,7 +106,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
-	sess := pimSession(r)
+	sess := pimScope
 	switch r.Method {
 	case "GET":
 		tasks, err := s.memStore.ListTasks(r.Context(), sess, r.URL.Query().Get("include_done") == "true")
@@ -161,7 +158,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
-	sess := pimSession(r)
+	sess := pimScope
 	switch r.Method {
 	case "GET":
 		events, err := s.memStore.ListEvents(r.Context(), sess,
