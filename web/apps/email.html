@@ -63,6 +63,15 @@
   .rhead .rsub { font-size: 17px; color: var(--text); font-weight: 600; }
   .rhead .rmeta { font-size: 12px; color: var(--text2); margin-top: 4px; }
   .ractions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .ai-box { margin: 12px 18px 0; padding: 11px 13px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 9px; font-size: 12.5px; color: var(--text); line-height: 1.5; white-space: pre-wrap; }
+  .ai-box .ai-h { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); margin-bottom: 5px; font-weight: 600; }
+  .mfilter { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--border); align-items: center; }
+  .fchip { font-size: 11px; padding: 3px 10px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--border2); color: var(--text2); cursor: pointer; white-space: nowrap; }
+  .fchip:hover { color: var(--text); }
+  .fchip.on { background: var(--bg3); color: var(--text); border-color: var(--accent); }
+  .mtags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+  .mtag { font-size: 9.5px; padding: 1px 7px; border-radius: 999px; background: var(--bg4); color: var(--text2); }
+  .mcat { font-size: 9.5px; padding: 1px 7px; border-radius: 999px; font-weight: 600; color: #fff; }
   .rbody { flex: 1; overflow-y: auto; padding: 16px 18px; white-space: pre-wrap; line-height: 1.5; font-family: var(--sans, sans-serif); }
   .rhtml { flex: 1; width: 100%; border: none; background: #fff; }
   .placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text3); }
@@ -105,135 +114,29 @@
 
 <script>
 const J = (r) => r.json();
-let cfg = null, messages = [], current = null, replyUid = 0;
+let cfg = null, messages = [], current = null, replyUid = 0, mailTags = {}, activeFilter = '';
 
-// One-click presets. Users only type email + password; servers are filled in.
-const PROVIDERS = {
-  gmail: {
-    label: 'Gmail', icon: '✉', imap: 'imap.gmail.com', imapPort: 993, smtp: 'smtp.gmail.com', smtpPort: 587,
-    hint: 'Gmail needs an <b>App Password</b>, not your normal password. Enable 2-Step Verification, then create one at <b>Google Account → Security → App passwords</b>.'
-  },
-  outlook: {
-    label: 'Outlook', icon: '📧', imap: 'outlook.office365.com', imapPort: 993, smtp: 'smtp-mail.outlook.com', smtpPort: 587,
-    hint: 'Outlook / Hotmail. If you use 2FA, create an <b>App Password</b> at <b>account.microsoft.com → Security</b>.'
-  },
-  protonmail: {
-    label: 'ProtonMail', icon: '🛡', imap: 'protonmail-bridge', imapPort: 143, smtp: 'protonmail-bridge', smtpPort: 25,
-    security: 'starttls', insecure: true,
-    hint: 'ProtonMail needs <b>Proton Mail Bridge</b> (paid Proton plan), run as the bundled <b>protonmail-bridge</b> Docker service. After <code>docker compose run --rm protonmail-bridge init</code> (login → info → exit), use the <b>username</b> and <b>Bridge password</b> it shows here. Host stays <b>protonmail-bridge</b>, IMAP 143 / SMTP 25.'
-  },
-  icloud: {
-    label: 'iCloud', icon: '☁', imap: 'imap.mail.me.com', imapPort: 993, smtp: 'smtp.mail.me.com', smtpPort: 587,
-    hint: 'iCloud Mail needs an <b>app-specific password</b> from <b>appleid.apple.com → Sign-In and Security</b>.'
-  },
-  yahoo: {
-    label: 'Yahoo', icon: '💜', imap: 'imap.mail.yahoo.com', imapPort: 993, smtp: 'smtp.mail.yahoo.com', smtpPort: 587,
-    hint: 'Yahoo Mail needs an <b>App Password</b> from <b>Account Security</b>.'
-  },
-  other: {
-    label: 'Other', icon: '⚙', imap: '', imapPort: 993, smtp: '', smtpPort: 587,
-    hint: 'Enter your provider\'s IMAP and SMTP servers below.'
-  },
-};
+// Category → colour for triage chips.
+const CAT_COLORS = { Action: 'var(--red)', FYI: 'var(--accent)', Newsletter: 'var(--text3)', Personal: 'var(--green)', Promo: 'var(--yellow)', Spam: 'var(--red)' };
+
+const SESSION = new URLSearchParams(location.search).get('session') || 'default';
+function openSettings() { window.top.location.href = `/settings.html?session=${encodeURIComponent(SESSION)}#email`; }
 
 async function init() {
   cfg = await fetch('/api/email/config').then(J).catch(() => null);
-  if (!cfg || !cfg.configured || !cfg.has_password) renderConfig();
+  if (!cfg || !cfg.configured || !cfg.has_password) renderNotConfigured();
   else renderInbox();
 }
 
-// ── Config ──────────────────────────────────────────────────────────────────
-function matchProvider() {
-  for (const k in PROVIDERS) {
-    if (k !== 'other' && PROVIDERS[k].imap === cfg.imap_host) return k;
-  }
-  return cfg.imap_host ? 'other' : 'gmail';
-}
-
-function renderConfig() {
-  cfg = cfg || {};
-  const sel = matchProvider();
-  const logos = Object.entries(PROVIDERS).map(([k, p]) =>
-    `<div class="plogo${k === sel ? ' sel' : ''}" data-prov="${k}" onclick="pickProvider('${k}')"><span class="pi">${p.icon}</span>${p.label}</div>`).join('');
+// Mailbox config now lives in Settings → Email. Point the user there.
+function renderNotConfigured() {
   document.getElementById('app').innerHTML = `
-    <div class="config">
-      <h1>Connect your mailbox</h1>
-      <div class="hint">Pick your provider, then just enter your email and password. Credentials are stored <b>encrypted</b> on your server.</div>
-      <div class="provider-logos">${logos}</div>
-      <div class="field"><label>Email</label><input id="f-user" value="${esc(cfg.user)}" placeholder="you@example.com"></div>
-      <div class="field"><label>Password</label><input id="f-pass" type="password" placeholder="${cfg.has_password ? '•••••• (unchanged)' : ''}"></div>
-      <div class="prov-hint" id="prov-hint"></div>
-      <details id="adv">
-        <summary>Advanced — server settings</summary>
-        <div class="row2">
-          <div class="field"><label>IMAP host</label><input id="f-ih" value="${esc(cfg.imap_host)}"></div>
-          <div class="field"><label>Port</label><input id="f-ip" value="${cfg.imap_port || ''}"></div>
-        </div>
-        <div class="row2">
-          <div class="field"><label>SMTP host</label><input id="f-sh" value="${esc(cfg.smtp_host)}"></div>
-          <div class="field"><label>Port</label><input id="f-sp" value="${cfg.smtp_port || ''}"></div>
-        </div>
-        <div class="row2">
-          <div class="field"><label>Security</label>
-            <select id="f-sec">
-              <option value="ssl">SSL/TLS</option>
-              <option value="starttls">STARTTLS</option>
-            </select></div>
-          <div class="field" style="display:flex;align-items:flex-end;padding-bottom:7px">
-            <label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-size:12px;color:var(--text2);cursor:pointer">
-              <input type="checkbox" id="f-insec" style="width:auto"> self-signed</label></div>
-        </div>
-        <div class="field"><label>From (optional)</label><input id="f-from" value="${esc(cfg.from)}" placeholder="defaults to email"></div>
-      </details>
-      <div class="err" id="cfg-err"></div>
-      <button class="btn btn-accent" style="width:100%;margin-top:6px" onclick="saveConfig()">Save & connect</button>
+    <div class="config" style="text-align:center">
+      <div style="font-size:34px;margin-bottom:10px">✉</div>
+      <h1>No mailbox connected</h1>
+      <div class="hint">Connect your email account in <b>Settings → Email</b> — pick your provider and enter your credentials there.</div>
+      <button class="btn btn-accent" style="margin-top:6px" onclick="openSettings()">Open Settings → Email</button>
     </div>`;
-  // Apply preset only when no servers are set yet (don't clobber a saved custom config).
-  if (!cfg.imap_host) {
-    applyProvider(sel);
-  } else {
-    document.getElementById('f-sec').value = cfg.security || 'ssl';
-    document.getElementById('f-insec').checked = !!cfg.insecure;
-    updateHint(sel);
-  }
-}
-
-function pickProvider(name) {
-  document.querySelectorAll('.plogo').forEach(el => el.classList.toggle('sel', el.dataset.prov === name));
-  applyProvider(name);
-}
-
-function applyProvider(name) {
-  const p = PROVIDERS[name]; if (!p) return;
-  document.getElementById('f-ih').value = p.imap;
-  document.getElementById('f-ip').value = p.imapPort || '';
-  document.getElementById('f-sh').value = p.smtp;
-  document.getElementById('f-sp').value = p.smtpPort || '';
-  document.getElementById('f-sec').value = p.security || 'ssl';
-  document.getElementById('f-insec').checked = !!p.insecure;
-  if (name === 'other' || p.insecure) document.getElementById('adv').open = true;
-  updateHint(name);
-}
-
-function updateHint(name) {
-  const el = document.getElementById('prov-hint');
-  if (el && PROVIDERS[name]) el.innerHTML = PROVIDERS[name].hint;
-}
-
-async function saveConfig() {
-  const v = id => document.getElementById(id).value.trim();
-  const body = {
-    user: v('f-user'), imap_host: v('f-ih'), smtp_host: v('f-sh'), from: v('f-from'),
-    imap_port: parseInt(v('f-ip')) || 0, smtp_port: parseInt(v('f-sp')) || 0,
-    security: document.getElementById('f-sec').value,
-    insecure: document.getElementById('f-insec').checked,
-  };
-  const pass = document.getElementById('f-pass').value;
-  if (pass) body.password = pass;
-  const res = await fetch('/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!res.ok) { document.getElementById('cfg-err').textContent = 'Could not save.'; return; }
-  cfg = await fetch('/api/email/config').then(J);
-  renderInbox();
 }
 
 // ── Inbox ───────────────────────────────────────────────────────────────────
@@ -242,9 +145,11 @@ function renderInbox() {
     <div class="toolbar">
       <button class="btn btn-accent" onclick="compose()">＋ Compose</button>
       <button class="btn" onclick="loadInbox()" title="Refresh">⟳</button>
+      <button class="btn" id="triage-btn" onclick="triage()" title="Classify inbox with AI">✨ Triage</button>
       <input class="search" id="search" placeholder="Search mail… (Enter)">
-      <button class="btn" onclick="renderConfig()" title="Settings">⚙</button>
+      <button class="btn" onclick="openSettings()" title="Mailbox settings">⚙</button>
     </div>
+    <div class="mfilter" id="mfilter" style="display:none"></div>
     <div class="mail" id="mail">
       <div class="mlist" id="mlist"></div>
       <div class="reading" id="reading"><div class="placeholder">Select a message</div></div>
@@ -255,19 +160,23 @@ function renderInbox() {
   loadInbox();
 }
 
+// Inbox size is configured in Settings → Email (cfg.list_limit).
+function inboxLimit() { return Math.max(1, Math.min(500, (cfg && cfg.list_limit) || 60)); }
+
 function errBox(msg) {
   return `<div class="mail-err">
     <div class="ic">⚠</div>
     <div class="t">Couldn't reach your mailbox</div>
     <div class="m">${esc(msg)}</div>
-    <button class="btn" onclick="renderConfig()">Edit connection</button>
+    <button class="btn" onclick="openSettings()">Edit connection</button>
   </div>`;
 }
 
 async function loadInbox() {
   setList('<div class="placeholder" style="padding:30px">Loading…</div>');
   try {
-    const res = await fetch('/api/email/list?limit=60');
+    mailTags = await fetch('/api/email/tags').then(J).catch(() => ({}));
+    const res = await fetch('/api/email/list?limit=' + inboxLimit());
     if (!res.ok) { setList(errBox(await res.text())); return; }
     messages = (await res.json()).messages || [];
     renderList();
@@ -276,7 +185,7 @@ async function loadInbox() {
 async function search(q) {
   setList('<div class="placeholder" style="padding:30px">Searching…</div>');
   try {
-    const res = await fetch('/api/email/search?q=' + encodeURIComponent(q) + '&limit=40');
+    const res = await fetch('/api/email/search?q=' + encodeURIComponent(q) + '&limit=' + inboxLimit());
     if (!res.ok) { setList(errBox(await res.text())); return; }
     messages = (await res.json()).messages || [];
     renderList();
@@ -285,21 +194,65 @@ async function search(q) {
 
 function setList(html) { const l = document.getElementById('mlist'); if (l) l.innerHTML = html; }
 
+// Category/tag filter chips (only shown once messages have been triaged).
+function renderFilters() {
+  const host = document.getElementById('mfilter');
+  if (!host) return;
+  const catCount = {}, tagCount = {};
+  for (const m of messages) {
+    const t = mailTags[m.uid]; if (!t) continue;
+    if (t.category) catCount[t.category] = (catCount[t.category] || 0) + 1;
+    for (const tg of (t.tags || [])) tagCount[tg] = (tagCount[tg] || 0) + 1;
+  }
+  const cats = Object.keys(catCount), tags = Object.keys(tagCount);
+  host.innerHTML = '';
+  if (!cats.length && !tags.length) { host.style.display = 'none'; return; }
+  host.style.display = 'flex';
+  const chip = (label, val, color) => {
+    const b = document.createElement('button');
+    b.className = 'fchip' + (activeFilter === val ? ' on' : '');
+    const dot = color ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle"></span>` : '';
+    b.innerHTML = dot + esc(label);
+    b.onclick = () => setFilter(val);
+    host.appendChild(b);
+  };
+  chip(`All (${messages.length})`, '');
+  for (const c of cats) chip(`${c} (${catCount[c]})`, c, CAT_COLORS[c] || 'var(--text3)');
+  for (const tg of tags) chip(`#${tg} (${tagCount[tg]})`, 'tag:' + tg);
+}
+function setFilter(f) { activeFilter = f; renderFilters(); renderList(); }
+function passesFilter(m) {
+  if (!activeFilter) return true;
+  const t = mailTags[m.uid]; if (!t) return false;
+  if (activeFilter.slice(0, 4) === 'tag:') return (t.tags || []).includes(activeFilter.slice(4));
+  return t.category === activeFilter;
+}
+
 function renderList() {
+  renderFilters();
   if (!messages.length) { setList('<div class="placeholder" style="padding:30px">No messages</div>'); return; }
   const l = document.getElementById('mlist'); l.innerHTML = '';
   // Newest first, by actual message date.
-  const sorted = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const sorted = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).filter(passesFilter);
+  if (!sorted.length) { setList('<div class="placeholder" style="padding:30px">No messages in this filter</div>'); return; }
   for (const m of sorted) {
     const row = document.createElement('div');
     row.className = 'mrow' + (m.seen ? '' : ' unread') + (current && current.uid === m.uid ? ' active' : '');
     const nm = senderName(m.from);
     row.title = m.from || '';
+    const t = mailTags[m.uid];
+    let tagsHTML = '';
+    if (t) {
+      const cat = t.category ? `<span class="mcat" style="background:${CAT_COLORS[t.category] || 'var(--text3)'}">${esc(t.category)}</span>` : '';
+      const tags = (t.tags || []).map(x => `<span class="mtag">${esc(x)}</span>`).join('');
+      if (cat || tags) tagsHTML = `<div class="mtags">${cat}${tags}</div>`;
+    }
     row.innerHTML = `
       <div class="mavatar" style="background:${avatarColor(m.from || '')}">${esc(initial(nm))}</div>
       <div class="mbody">
         <div class="mtop"><span class="mname">${esc(nm)}</span><span class="mdate">${fmtDate(m.date)}</span></div>
         <div class="msub">${esc(m.subject) || '(no subject)'}</div>
+        ${tagsHTML}
       </div>`;
     row.onclick = () => openMessage(m.uid);
     l.appendChild(row);
@@ -345,18 +298,69 @@ async function openMessage(uid) {
   } catch { reading.innerHTML = '<div class="placeholder">Could not load message</div>'; }
 }
 
-// ── Compose / reply ─────────────────────────────────────────────────────────
-// Delegate to the agent via the dashboard chat (postMessage to parent).
-function aiAsk(text) {
-  try { parent.postMessage({ type: 'sendChat', text }, '*'); } catch (_) {}
+// ── AI features (in-app, one-shot via /api/ai/assist) ────────────────────────
+function emailPlain() {
+  const raw = current.body || '';
+  const text = looksHTML(raw) ? stripHtml(raw) : raw;
+  return `From: ${current.from}\nSubject: ${current.subject}\n\n${text}`.slice(0, 6000);
 }
-function aiSummarize() {
-  if (!current) return;
-  aiAsk(`Summarize the email with UID ${current.uid} in my inbox (from ${current.from}, subject "${current.subject}"). Use the email tool with action=read to fetch it, then give me a short, clear summary.`);
+async function assist(task, text, instruction) {
+  const r = await fetch('/api/ai/assist', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task, text, instruction: instruction || '' })
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return (await r.json()).result || '';
 }
-function aiReply() {
+
+async function aiSummarize() {
   if (!current) return;
-  aiAsk(`Read the email with UID ${current.uid} in my inbox (from ${current.from}, subject "${current.subject}") using the email tool (action=read), then draft a suitable reply. Show me the draft and ask for confirmation before sending it.`);
+  const reading = document.getElementById('reading');
+  let box = reading.querySelector('.ai-box');
+  if (!box) {
+    box = document.createElement('div'); box.className = 'ai-box';
+    reading.querySelector('.rhead').after(box);
+  }
+  box.innerHTML = '<div class="ai-h">✨ Summary</div>Summarizing…';
+  try { box.innerHTML = '<div class="ai-h">✨ Summary</div>' + esc(await assist('email_summary', emailPlain())); }
+  catch (e) { box.innerHTML = '<div class="ai-h">✨ Summary</div>Failed: ' + esc(e.message); }
+}
+
+async function aiReply() {
+  if (!current) return;
+  replyUid = current.uid;
+  openCompose('AI reply draft', current.from, reSubject(current.subject), 'Drafting…');
+  const ta = document.getElementById('c-body');
+  try { ta.value = await assist('email_reply', emailPlain()); }
+  catch (e) { ta.value = ''; document.getElementById('c-err').textContent = 'Draft failed: ' + e.message; }
+}
+
+// AI triage: classify the visible inbox into categories + tags, persist them.
+async function triage() {
+  if (!messages.length) return;
+  const btn = document.getElementById('triage-btn');
+  const label = btn.textContent; btn.textContent = '✨ Triaging…'; btn.disabled = true;
+  try {
+    const sorted = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const payload = sorted.map((m, i) => ({ i, from: senderName(m.from), subject: (m.subject || '').slice(0, 140) }));
+    const out = await assist('email_triage', JSON.stringify(payload));
+    let arr;
+    try { arr = JSON.parse(out.replace(/```json|```/g, '').trim()); } catch { throw new Error('AI returned an unexpected format.'); }
+    const updates = {};
+    for (const it of (arr || [])) {
+      const m = sorted[it.i]; if (!m) continue;
+      const rec = { category: it.category || '', tags: Array.isArray(it.tags) ? it.tags.slice(0, 2) : [] };
+      mailTags[m.uid] = rec; updates[m.uid] = rec;
+    }
+    if (Object.keys(updates).length) {
+      await fetch('/api/email/tags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+    }
+    renderList();
+    btn.textContent = label;
+  } catch (e) {
+    btn.textContent = '✨ Triage failed';
+    setTimeout(() => { btn.textContent = label; }, 2500);
+  } finally { btn.disabled = false; }
 }
 
 function compose() { replyUid = 0; openCompose('New message', '', '', ''); }

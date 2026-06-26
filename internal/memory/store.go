@@ -132,6 +132,15 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS calendar_session_idx ON calendar_events(session_id, start_at)`,
+		`CREATE TABLE IF NOT EXISTS documents (
+			id         BIGSERIAL PRIMARY KEY,
+			session_id TEXT NOT NULL DEFAULT 'default',
+			title      TEXT NOT NULL DEFAULT '',
+			body       TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS documents_session_idx ON documents(session_id, updated_at DESC)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.pool.Exec(ctx, stmt); err != nil {

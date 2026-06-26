@@ -238,6 +238,22 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-primary:hover { background: #7c9bff; }
 
+/* ── Email tab ─────────────────────────────────────────────────────────────── */
+.eplogos { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.eplogo { flex: 1; min-width: 72px; padding: 12px 8px; border: 1px solid var(--border2); border-radius: 10px; background: var(--bg2); cursor: pointer; text-align: center; font-size: 12px; color: var(--text2); transition: border-color .12s, color .12s; }
+.eplogo .epi { font-size: 22px; display: block; margin-bottom: 4px; }
+.eplogo:hover { color: var(--text); }
+.eplogo.sel { border-color: var(--accent); color: var(--text); background: var(--bg3); }
+.efield { margin-bottom: 12px; }
+.efield label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); margin-bottom: 4px; }
+.efield input, .efield select { width: 100%; background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 6px; padding: 7px 9px; font: inherit; }
+.erow2 { display: grid; grid-template-columns: 1fr 90px; gap: 10px; }
+.eprov-hint { font-size: 12px; color: var(--text2); background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; margin-bottom: 12px; line-height: 1.45; }
+.eprov-hint b { color: var(--text); }
+#e-adv { margin-bottom: 12px; }
+#e-adv > summary { cursor: pointer; font-size: 12px; color: var(--text2); padding: 4px 0; user-select: none; }
+#e-adv[open] > summary { margin-bottom: 8px; }
+
 /* ── Toast ────────────────────────────────────────────────────────────────── */
 #toast {
   position: fixed; bottom: 24px; right: 24px; background: var(--bg3);
@@ -279,6 +295,9 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
       </div>
       <div class="nav-item" data-tab="secrets">
         <span class="nav-icon">🔑</span> Secrets
+      </div>
+      <div class="nav-item" data-tab="email">
+        <span class="nav-icon">✉</span> Email
       </div>
       <div class="nav-item" data-tab="knowledge">
         <span class="nav-icon">📚</span> Knowledge
@@ -347,6 +366,7 @@ function renderTab(tab) {
   if (tab === 'tools')   renderToolsTab(content)
   else if (tab === 'mcp')     renderMCPTab(content)
   else if (tab === 'secrets') renderSecretsTab(content)
+  else if (tab === 'email') renderEmailTab(content)
   else if (tab === 'knowledge') renderBrainTab(content)
   else if (tab === 'appearance') renderAppearanceTab(content)
 }
@@ -968,6 +988,97 @@ async function renderSecretsTab(container) {
     const list = document.getElementById('secrets-list')
     if (list) list.innerHTML = '<span style="color:var(--text3);font-size:12px">Indisponible (Postgres requis).</span>'
   }
+}
+
+// ── Email tab — mailbox configuration ──────────────────────────────────────────
+const EMAIL_PROVIDERS = {
+  gmail:      { label: 'Gmail',      icon: '✉', imap: 'imap.gmail.com',        imapPort: 993, smtp: 'smtp.gmail.com',          smtpPort: 587, hint: 'Gmail needs an <b>App Password</b>, not your normal password. Enable 2-Step Verification, then create one at <b>Google Account → Security → App passwords</b>.' },
+  outlook:    { label: 'Outlook',    icon: '📧', imap: 'outlook.office365.com', imapPort: 993, smtp: 'smtp-mail.outlook.com',    smtpPort: 587, hint: 'Outlook / Hotmail. If you use 2FA, create an <b>App Password</b> at <b>account.microsoft.com → Security</b>.' },
+  protonmail: { label: 'ProtonMail', icon: '🛡', imap: 'protonmail-bridge',     imapPort: 143, smtp: 'protonmail-bridge',       smtpPort: 25, security: 'starttls', insecure: true, hint: 'ProtonMail needs <b>Proton Mail Bridge</b> (paid plan), run as the bundled <b>protonmail-bridge</b> Docker service. Use the <b>username</b> and <b>Bridge password</b> it shows. Host stays <b>protonmail-bridge</b>, IMAP 143 / SMTP 25.' },
+  icloud:     { label: 'iCloud',     icon: '☁', imap: 'imap.mail.me.com',      imapPort: 993, smtp: 'smtp.mail.me.com',        smtpPort: 587, hint: 'iCloud Mail needs an <b>app-specific password</b> from <b>appleid.apple.com → Sign-In and Security</b>.' },
+  yahoo:      { label: 'Yahoo',      icon: '💜', imap: 'imap.mail.yahoo.com',   imapPort: 993, smtp: 'smtp.mail.yahoo.com',     smtpPort: 587, hint: 'Yahoo Mail needs an <b>App Password</b> from <b>Account Security</b>.' },
+  other:      { label: 'Other',      icon: '⚙', imap: '',                      imapPort: 993, smtp: '',                       smtpPort: 587, hint: 'Enter your provider\'s IMAP and SMTP servers below.' },
+}
+
+async function renderEmailTab(container) {
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  page.style.cssText = 'padding:18px;overflow-y:auto;max-width:560px'
+  container.appendChild(page)
+
+  let cfg = {}
+  try { cfg = await fetch('/api/email/config').then(r => r.json()) } catch {}
+
+  const matchProvider = () => {
+    for (const k in EMAIL_PROVIDERS) if (k !== 'other' && EMAIL_PROVIDERS[k].imap === cfg.imap_host) return k
+    return cfg.imap_host ? 'other' : 'gmail'
+  }
+  const sel = matchProvider()
+  const logos = Object.entries(EMAIL_PROVIDERS).map(([k, p]) =>
+    `<div class="eplogo${k === sel ? ' sel' : ''}" data-prov="${k}"><span class="epi">${p.icon}</span>${p.label}</div>`).join('')
+
+  page.innerHTML = `
+    <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">✉</span><span class="config-cat-name">Mailbox</span></div>
+    <div style="font-size:12px;color:var(--text2);margin:6px 0 16px;line-height:1.5">Pick your provider, then enter your email and password. Credentials are stored <b>encrypted</b> on your server.</div>
+    <div class="eplogos">${logos}</div>
+    <div class="efield"><label>Email</label><input id="e-user" value="${escHtml(cfg.user || '')}" placeholder="you@example.com"></div>
+    <div class="efield"><label>Password</label><input id="e-pass" type="password" placeholder="${cfg.has_password ? '•••••• (unchanged)' : ''}"></div>
+    <div class="efield"><label>Emails to load in the inbox</label><input id="e-limit" type="number" min="1" max="500" value="${cfg.list_limit || 60}" style="width:120px"></div>
+    <div class="eprov-hint" id="e-hint"></div>
+    <details id="e-adv">
+      <summary>Advanced — server settings</summary>
+      <div class="erow2">
+        <div class="efield"><label>IMAP host</label><input id="e-ih" value="${escHtml(cfg.imap_host || '')}"></div>
+        <div class="efield"><label>Port</label><input id="e-ip" value="${cfg.imap_port || ''}"></div>
+      </div>
+      <div class="erow2">
+        <div class="efield"><label>SMTP host</label><input id="e-sh" value="${escHtml(cfg.smtp_host || '')}"></div>
+        <div class="efield"><label>Port</label><input id="e-sp" value="${cfg.smtp_port || ''}"></div>
+      </div>
+      <div class="erow2">
+        <div class="efield"><label>Security</label><select id="e-sec"><option value="ssl">SSL/TLS</option><option value="starttls">STARTTLS</option></select></div>
+        <div class="efield" style="display:flex;align-items:flex-end;padding-bottom:7px"><label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;cursor:pointer"><input type="checkbox" id="e-insec" style="width:auto"> self-signed</label></div>
+      </div>
+      <div class="efield"><label>From (optional)</label><input id="e-from" value="${escHtml(cfg.from || '')}" placeholder="defaults to email"></div>
+    </details>
+    <div id="e-err" style="color:var(--red);font-size:12px;min-height:14px"></div>
+    <button class="btn btn-primary" id="e-save" style="margin-top:6px">Save & connect</button>`
+
+  const $ = id => document.getElementById(id)
+  const applyProvider = (name) => {
+    const p = EMAIL_PROVIDERS[name]; if (!p) return
+    $('e-ih').value = p.imap; $('e-ip').value = p.imapPort || ''
+    $('e-sh').value = p.smtp; $('e-sp').value = p.smtpPort || ''
+    $('e-sec').value = p.security || 'ssl'; $('e-insec').checked = !!p.insecure
+    if (name === 'other' || p.insecure) $('e-adv').open = true
+    $('e-hint').innerHTML = p.hint
+  }
+  page.querySelectorAll('.eplogo').forEach(el => el.addEventListener('click', () => {
+    page.querySelectorAll('.eplogo').forEach(x => x.classList.toggle('sel', x === el))
+    applyProvider(el.dataset.prov)
+  }))
+  // Only seed servers from the preset when none are saved yet.
+  if (!cfg.imap_host) applyProvider(sel)
+  else { $('e-sec').value = cfg.security || 'ssl'; $('e-insec').checked = !!cfg.insecure; $('e-hint').innerHTML = (EMAIL_PROVIDERS[sel] || {}).hint || '' }
+
+  $('e-save').addEventListener('click', async () => {
+    const v = id => $(id).value.trim()
+    const body = {
+      user: v('e-user'), imap_host: v('e-ih'), smtp_host: v('e-sh'), from: v('e-from'),
+      imap_port: parseInt(v('e-ip')) || 0, smtp_port: parseInt(v('e-sp')) || 0,
+      list_limit: Math.max(1, Math.min(500, parseInt(v('e-limit')) || 60)),
+      security: $('e-sec').value, insecure: $('e-insec').checked,
+    }
+    const pass = $('e-pass').value
+    if (pass) body.password = pass
+    $('e-save').disabled = true; $('e-err').textContent = ''
+    try {
+      const res = await fetch('/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!res.ok) throw new Error(await res.text())
+      showToast('Mailbox saved')
+    } catch (e) { $('e-err').textContent = 'Could not save: ' + e.message }
+    finally { $('e-save').disabled = false }
+  })
 }
 
 // ── RAG tab ───────────────────────────────────────────────────────────────────

@@ -151,6 +151,45 @@ func loadPersonality(ctx context.Context, ms *memory.Store, sessionID string) st
 	return ""
 }
 
+// handlePersonality reads/writes a workspace's editable personality (the same
+// value the agent edits via update_system_prompt). GET ?session=ID, POST body
+// {personality}. Takes effect on the session's next chat connection.
+func (s *Server) handlePersonality(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	s.mu.RLock()
+	ms := s.memStore
+	s.mu.RUnlock()
+	if ms == nil {
+		http.Error(w, "memory store not available", http.StatusServiceUnavailable)
+		return
+	}
+	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
+	if sessionID == "" {
+		sessionID = "default"
+	}
+	key := memory.KeyPersonality + "_" + sessionID
+	switch r.Method {
+	case "GET":
+		p, _, _ := ms.GetConfig(r.Context(), key)
+		json.NewEncoder(w).Encode(map[string]interface{}{"personality": p})
+	case "POST":
+		var b struct {
+			Personality string `json:"personality"`
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
+		if err := ms.SetConfig(r.Context(), key, b.Personality); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
 // ─── Secrets API ──────────────────────────────────────────────────────────────
 
 // sanitizeSessionID turns a string into a safe session ID slug.

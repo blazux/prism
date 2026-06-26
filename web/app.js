@@ -80,6 +80,7 @@ function handleServerMsg(msg) {
     case 'attachment':      pendingAttachments.push(...(msg.images || [])); break
     case 'tool_use':        appendToolUse(msg); break
     case 'tool_result':     appendToolResult(msg); break
+    case 'progress':        appendProgress(msg.content); break
     case 'plugin_load':
       addWidget(msg)
       clearTimeout(batchLoadingTimer)
@@ -445,6 +446,17 @@ function finalizeStream() {
   scrollChat()
 }
 
+// Live tool progress (e.g. deep_research step-by-step) — a muted log line.
+function appendProgress(text) {
+  const msgs = document.getElementById('chat-messages')
+  if (!msgs) return
+  const div = document.createElement('div')
+  div.className = 'chat-progress'
+  div.textContent = text || ''
+  msgs.appendChild(div)
+  msgs.scrollTop = msgs.scrollHeight
+}
+
 function appendToolUse(msg) {
   if (currentAssistantEl) {
     currentAssistantEl.classList.remove('cursor')
@@ -785,7 +797,7 @@ window.handleSecretKey = function(e) {
 
 // ─── View router (rail: apps + boards) ─────────────────────────────────────────
 
-const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar' }
+const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar', documents: 'Documents' }
 const ASSISTANT = 'assistant'            // reserved session: the global super-agent
 let currentView = { type: 'board' }      // { type:'board', workspace } | { type:'app', name }
 let allSessions = []
@@ -886,40 +898,100 @@ function setWorkspaceIcon(id, emoji) {
   localStorage.setItem(WS_ICON_KEY, JSON.stringify(m))
 }
 const escAttr = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
-const WS_EMOJI_SUGGEST = ['🗂','💼','🏠','🎮','🚀','📊','🧪','🎨','🛠','📅','💡','🌐','📁','🔬','📈','🎵']
+
+// Line icons (Feather-style) matching the app's aesthetic — they inherit
+// currentColor, so they take the theme accent when active.
+const WS_ICONS = {
+  layout: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>',
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  briefcase: '<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
+  rocket: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>',
+  code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+  chart: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
+  activity: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+  flask: '<path d="M9 3v6l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V3"/><path d="M8 3h8M7 14h10"/>',
+  droplet: '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  bulb: '<path d="M9 18h6M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12c1 1 1 2 1 3h6c0-1 0-2 1-3a7 7 0 0 0-4-12z"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
+  heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/>',
+  star: '<polygon points="12 2 15.1 8.6 22 9.3 17 14 18.2 21 12 17.6 5.8 21 7 14 2 9.3 8.9 8.6 12 2"/>',
+  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  cpu: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/>',
+  server: '<rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/>',
+  database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+  cloud: '<path d="M18 10a4 4 0 0 0-7.7-1.5A4.5 4.5 0 1 0 6 18h12a3.5 3.5 0 0 0 0-7z"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/>',
+  message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  coffee: '<path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+}
+function wsIconSvg(name) {
+  const p = WS_ICONS[name]
+  if (!p) return ''
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`
+}
 
 // editWorkspace opens a small dialog to rename a workspace AND pick its icon.
 function editWorkspace(sess) {
+  let selected = getWorkspaceIcon(sess.id)
+  if (selected && !WS_ICONS[selected]) selected = ''   // drop legacy emoji values
   const ov = document.createElement('div')
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:700;display:flex;align-items:center;justify-content:center'
   const dlg = document.createElement('div')
-  dlg.style.cssText = 'width:min(360px,92vw);background:var(--bg1);border:1px solid var(--border2);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px'
+  dlg.style.cssText = 'width:min(380px,92vw);background:var(--bg1);border:1px solid var(--border2);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px'
   dlg.innerHTML = `
     <div style="font-weight:600;color:var(--text)">Edit workspace</div>
     <label style="font-size:11px;color:var(--text2)">Name<input id="ws-name" type="text" value="${escAttr(sess.name)}" style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px"></label>
-    <label style="font-size:11px;color:var(--text2)">Icon (emoji — blank = default)<input id="ws-icon" type="text" value="${escAttr(getWorkspaceIcon(sess.id))}" maxlength="4" style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px"></label>
-    <div id="ws-suggest" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+    <div style="font-size:11px;color:var(--text2)">Icon</div>
+    <div id="ws-icons" style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px;max-height:150px;overflow-y:auto"></div>
+    <label style="font-size:11px;color:var(--text2)">Agent personality
+      <textarea id="ws-personality" rows="4" placeholder="How this workspace's agent should behave (tone, focus, rules)… Leave blank for the default." style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;font:inherit;font-size:12px;resize:vertical;box-sizing:border-box"></textarea></label>
+    <div style="font-size:10px;color:var(--text3);margin-top:-4px">Takes effect on this workspace's next chat message.</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
-      <button class="dock-chip-label" id="ws-cancel" style="border:1px solid var(--border2);border-radius:6px;padding:5px 12px">Cancel</button>
+      <button id="ws-cancel" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 12px;cursor:pointer">Cancel</button>
       <button id="ws-save" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 14px;cursor:pointer">Save</button>
     </div>`
   ov.appendChild(dlg); document.body.appendChild(ov)
-  const iconInput = dlg.querySelector('#ws-icon'), sug = dlg.querySelector('#ws-suggest')
-  for (const e of WS_EMOJI_SUGGEST) {
-    const b = document.createElement('button')
-    b.type = 'button'; b.textContent = e
-    b.style.cssText = 'font-size:16px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;width:30px;height:30px;cursor:pointer'
-    b.onclick = () => { iconInput.value = e }
-    sug.appendChild(b)
+
+  const grid = dlg.querySelector('#ws-icons')
+  function paint() { grid.querySelectorAll('button').forEach(b => { b.style.borderColor = b.dataset.ic === selected ? 'var(--accent)' : 'var(--border2)'; b.style.color = b.dataset.ic === selected ? 'var(--accent)' : 'var(--text2)' }) }
+  // "Default" (no icon) first, then all icons.
+  for (const name of ['', ...Object.keys(WS_ICONS)]) {
+    const b = document.createElement('button'); b.type = 'button'; b.dataset.ic = name
+    b.style.cssText = 'aspect-ratio:1;background:var(--bg2);border:1px solid var(--border2);border-radius:7px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2)'
+    b.innerHTML = name ? wsIconSvg(name).replace('viewBox', 'width="17" height="17" viewBox') : '<span style="font-size:10px">none</span>'
+    b.onclick = () => { selected = name; paint() }
+    grid.appendChild(b)
   }
+  paint()
+
+  // Load the workspace's stored personality (async — empty = default).
+  const persoEl = dlg.querySelector('#ws-personality')
+  let persoLoaded = ''
+  fetch(`/api/personality?session=${encodeURIComponent(sess.id)}`)
+    .then(r => r.json()).then(d => { persoLoaded = d.personality || ''; persoEl.value = persoLoaded })
+    .catch(() => {})
+
   const close = () => ov.remove()
   ov.addEventListener('click', e => { if (e.target === ov) close() })
   dlg.querySelector('#ws-cancel').onclick = close
   dlg.querySelector('#ws-save').onclick = async () => {
     const name = dlg.querySelector('#ws-name').value.trim()
-    setWorkspaceIcon(sess.id, iconInput.value.trim())
+    setWorkspaceIcon(sess.id, selected)
     if (name && name !== sess.name) {
       await fetch(`/api/sessions/${sess.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+    }
+    const perso = persoEl.value.trim()
+    if (perso !== persoLoaded.trim()) {
+      await fetch(`/api/personality?session=${encodeURIComponent(sess.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: perso }) })
     }
     close()
     loadSessions()
@@ -1003,9 +1075,10 @@ function renderBoardList(sessions) {
 
     const icon = document.createElement('span')
     icon.className = 'rail-icon'
-    const emoji = getWorkspaceIcon(sess.id)
-    if (emoji) icon.textContent = emoji
-    else icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'
+    const ic = getWorkspaceIcon(sess.id)
+    if (ic && WS_ICONS[ic]) icon.innerHTML = wsIconSvg(ic)
+    else if (ic) icon.textContent = ic                      // legacy emoji value
+    else icon.innerHTML = wsIconSvg('layout')
     const label = document.createElement('span')
     label.className = 'rail-label'
     label.textContent = sess.name
@@ -1040,21 +1113,55 @@ function selectBoard(id) {
   loadSessions()
 }
 
-async function promptNewSession() {
-  const name = prompt('New workspace name:')
-  if (!name || !name.trim()) return
-  try {
-    const res = await fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name.trim() })
-    })
-    const data = await res.json()
-    setView({ type: 'board', workspace: data.id })
-    loadSessions()
-  } catch (e) {
-    alert('Failed to create: ' + e.message)
+function promptNewSession() {
+  let selected = ''
+  const ov = document.createElement('div')
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:700;display:flex;align-items:center;justify-content:center'
+  const dlg = document.createElement('div')
+  dlg.style.cssText = 'width:min(380px,92vw);background:var(--bg1);border:1px solid var(--border2);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px'
+  dlg.innerHTML = `
+    <div style="font-weight:600;color:var(--text)">New workspace</div>
+    <label style="font-size:11px;color:var(--text2)">Name<input id="nw-name" type="text" placeholder="e.g. Research" style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;box-sizing:border-box"></label>
+    <div style="font-size:11px;color:var(--text2)">Icon</div>
+    <div id="nw-icons" style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px;max-height:170px;overflow-y:auto"></div>
+    <div class="nw-err" style="color:var(--red);font-size:12px;min-height:14px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+      <button id="nw-cancel" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 12px;cursor:pointer">Cancel</button>
+      <button id="nw-save" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 14px;cursor:pointer">Create</button>
+    </div>`
+  ov.appendChild(dlg); document.body.appendChild(ov)
+
+  const grid = dlg.querySelector('#nw-icons')
+  function paint() { grid.querySelectorAll('button').forEach(b => { b.style.borderColor = b.dataset.ic === selected ? 'var(--accent)' : 'var(--border2)'; b.style.color = b.dataset.ic === selected ? 'var(--accent)' : 'var(--text2)' }) }
+  for (const name of ['', ...Object.keys(WS_ICONS)]) {
+    const b = document.createElement('button'); b.type = 'button'; b.dataset.ic = name
+    b.style.cssText = 'aspect-ratio:1;background:var(--bg2);border:1px solid var(--border2);border-radius:7px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2)'
+    b.innerHTML = name ? wsIconSvg(name).replace('viewBox', 'width="17" height="17" viewBox') : '<span style="font-size:10px">none</span>'
+    b.onclick = () => { selected = name; paint() }
+    grid.appendChild(b)
   }
+  paint()
+
+  const close = () => ov.remove()
+  ov.addEventListener('click', e => { if (e.target === ov) close() })
+  dlg.querySelector('#nw-cancel').onclick = close
+  dlg.querySelector('#nw-save').onclick = async () => {
+    const name = dlg.querySelector('#nw-name').value.trim()
+    if (!name) { dlg.querySelector('.nw-err').textContent = 'Name is required.'; return }
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
+      })
+      const data = await res.json()
+      if (selected) setWorkspaceIcon(data.id, selected)
+      close()
+      setView({ type: 'board', workspace: data.id })
+      loadSessions()
+    } catch (e) {
+      dlg.querySelector('.nw-err').textContent = 'Failed: ' + e.message
+    }
+  }
+  setTimeout(() => dlg.querySelector('#nw-name').focus(), 50)
 }
 
 // Wire the rail app buttons.

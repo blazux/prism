@@ -18,23 +18,56 @@
   html, body { height: 100%; }
   body { padding: 0; overflow: hidden; }
   .app { display: flex; flex-direction: column; height: 100%; }
-  .head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
-  .head h1 { font-size: 16px; color: var(--text); flex: 1; }
-  .head .sub { font-size: 12px; color: var(--text2); }
-  .list { flex: 1; overflow-y: auto; padding: 14px 18px; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-content: start; }
+  .head { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .head h1 { font-size: 16px; color: var(--text); }
+  .head .sub { font-size: 12px; color: var(--text2); margin-left: auto; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { background: none; border: none; color: var(--text2); padding: 6px 12px; border-radius: 7px; cursor: pointer; font: inherit; font-size: 13px; }
+  .tab:hover { color: var(--text); }
+  .tab.active { background: var(--bg3); color: var(--accent); }
+  .view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
+  /* ── To-do ── */
+  .todo-add { display: flex; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap; }
+  .todo-add input[type=text] { flex: 1; min-width: 160px; }
+  .todo-add input, .todo-add select { background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 13px; }
+  .todo-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+  .todo { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--border); }
+  .todo:hover { background: var(--bg2); }
+  .check { width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%; border: 2px solid var(--border2); background: none; cursor: pointer; position: relative; }
+  .check:hover { border-color: var(--accent); }
+  .check.on { background: var(--accent); border-color: var(--accent); }
+  .check.on::after { content: '✓'; position: absolute; inset: 0; color: #fff; font-size: 12px; line-height: 16px; text-align: center; }
+  .todo-main { flex: 1; min-width: 0; }
+  .todo-title { color: var(--text); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .todo.done .todo-title { text-decoration: line-through; color: var(--text3); }
+  .due { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .due.over { color: var(--red); }
+  .prio { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; font-weight: 600; flex-shrink: 0; }
+  .prio.p-high { background: color-mix(in srgb, var(--red) 20%, transparent); color: var(--red); }
+  .prio.p-normal { background: var(--accent-dim); color: var(--accent); }
+  .prio.p-low { background: var(--bg4); color: var(--text2); }
+  .todofilter { display: flex; align-items: center; gap: 8px; padding: 8px 18px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text2); }
+
+  /* ── Scheduled (cron) ── */
+  .subhead { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--border); }
+  .subhead-t { font-size: 12px; color: var(--text2); flex: 1; }
+  .list { flex: 1; overflow-y: auto; padding: 14px 18px; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-content: start; }
   .job { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; transition: border-color .15s, opacity .15s; }
   .job.off { opacity: .55; }
   .job-top { display: flex; align-items: center; gap: 10px; }
   .job-name { font-weight: 600; color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .job-when { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--accent); background: var(--accent-dim); padding: 3px 9px; border-radius: 999px; align-self: flex-start; }
-  .job-cmd { font-family: var(--mono); font-size: 11px; color: var(--text2); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-all; max-height: 64px; overflow: auto; }
+  .job-next { font-size: 11px; color: var(--text2); }
+  .job-desc { font-size: 12.5px; color: var(--text); line-height: 1.45; }
+  .job-cmd-wrap > summary { font-size: 11px; color: var(--text3); cursor: pointer; user-select: none; list-style-position: inside; }
+  .job-cmd-wrap > summary:hover { color: var(--text2); }
+  .job-cmd { font-family: var(--mono); font-size: 11px; color: var(--text2); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 6px; white-space: pre-wrap; word-break: break-all; max-height: 64px; overflow: auto; }
   .job-foot { display: flex; align-items: center; gap: 10px; }
   .job-status { font-size: 11px; color: var(--text2); flex: 1; }
-  .job-del { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 6px; }
-  .job-del:hover { color: var(--red); background: var(--bg3); }
-
-  /* toggle switch */
+  .ico-btn { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 6px; }
+  .ico-btn:hover { color: var(--text); background: var(--bg3); }
+  .ico-btn.del:hover { color: var(--red); }
   .switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
   .switch input { opacity: 0; width: 0; height: 0; }
   .slider { position: absolute; inset: 0; background: var(--bg4); border-radius: 999px; cursor: pointer; transition: background .15s; }
@@ -44,87 +77,430 @@
 
   .empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text3); padding: 40px; text-align: center; }
   .empty .big { font-size: 40px; opacity: .3; }
+
+  /* modals */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .overlay.open { display: flex; }
+  .form { width: min(440px, 92vw); background: var(--bg1); border: 1px solid var(--border2); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .form-title { font-weight: 600; color: var(--text); }
+  .form label { font-size: 11px; color: var(--text2); display: flex; flex-direction: column; gap: 4px; }
+  .form input, .form textarea { background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; }
+  .form textarea.mono { font-family: var(--mono); font-size: 12px; resize: vertical; min-height: 54px; }
+  .form textarea.plain { font-size: 13px; resize: vertical; min-height: 64px; }
+  .presets { display: flex; flex-wrap: wrap; gap: 5px; }
+  .preset { font-size: 11px; background: var(--bg2); border: 1px solid var(--border2); color: var(--text2); border-radius: 999px; padding: 2px 9px; cursor: pointer; }
+  .preset:hover { color: var(--accent); border-color: var(--accent); }
+  .form-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  .err { color: var(--red); font-size: 12px; }
+  .bd-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
 </style>
 </head>
 <body>
   <div class="app">
     <div class="head">
-      <h1>Scheduled tasks</h1>
+      <h1>Tasks</h1>
+      <div class="tabs">
+        <button class="tab active" data-tab="todo" onclick="switchTab('todo')">✓ To-do</button>
+        <button class="tab" data-tab="cron" onclick="switchTab('cron')">⏱ Scheduled</button>
+      </div>
       <span class="sub" id="count"></span>
     </div>
-    <div class="list" id="list"></div>
+
+    <!-- To-do view -->
+    <div class="view" id="todo-view">
+      <div class="todo-add">
+        <input id="t-title" type="text" placeholder="Add a task… (Enter)" onkeydown="if(event.key==='Enter')addTodo()">
+        <select id="t-prio" title="Priority"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option></select>
+        <input id="t-due" type="date" title="Due date (optional)">
+        <button class="btn btn-accent" onclick="addTodo()">Add</button>
+        <button class="btn" onclick="openBreakdown()" title="Break an objective into tasks with AI">✨ Break down</button>
+      </div>
+      <div class="todo-list" id="todo-list"></div>
+      <div class="todofilter"><label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="show-done" onchange="renderTodos()"> Show completed</label></div>
+    </div>
+
+    <!-- Scheduled (cron) view -->
+    <div class="view" id="cron-view" style="display:none">
+      <div class="subhead">
+        <span class="subhead-t">Recurring jobs the agent runs on a schedule.</span>
+        <button class="btn btn-accent" onclick="openForm()">＋ New</button>
+      </div>
+      <div class="list" id="list"></div>
+    </div>
+  </div>
+
+  <!-- cron form -->
+  <div class="overlay" id="overlay">
+    <div class="form">
+      <div class="form-title" id="form-title">New task</div>
+      <label>Name<input id="f-name" placeholder="backup-db"></label>
+      <label>Description<input id="f-desc" placeholder="What this job does (e.g. refreshes the weather widget)"></label>
+      <label>Schedule (cron)<input id="f-sched" placeholder="0 9 * * 1"></label>
+      <div class="presets">
+        <span class="preset" data-s="*/5 * * * *">Every 5 min</span>
+        <span class="preset" data-s="0 * * * *">Hourly</span>
+        <span class="preset" data-s="0 9 * * *">Daily 9am</span>
+        <span class="preset" data-s="0 9 * * 1">Mondays 9am</span>
+        <span class="preset" data-s="@daily">@daily</span>
+      </div>
+      <label>Command<textarea id="f-cmd" class="mono" placeholder="curl -s http://prism-server:8080/api/..."></textarea></label>
+      <div class="err" id="f-err"></div>
+      <div class="form-foot">
+        <button class="btn" onclick="closeForm()">Cancel</button>
+        <button class="btn btn-accent" onclick="saveForm()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI breakdown -->
+  <div class="overlay" id="bd-overlay">
+    <div class="form">
+      <div class="form-title">✨ Break down an objective</div>
+      <div id="bd-input">
+        <label>Objective<textarea id="bd-obj" class="plain" placeholder="e.g. Organize a team offsite in Lisbon"></textarea></label>
+      </div>
+      <div id="bd-review" style="display:none;flex-direction:column;gap:8px">
+        <div style="font-size:12px;color:var(--text2)">Pick the tasks to add:</div>
+        <div id="bd-list" style="max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+      <div class="err" id="bd-err"></div>
+      <div class="form-foot">
+        <button class="btn" onclick="closeBreakdown()">Cancel</button>
+        <button class="btn btn-accent" id="bd-go" onclick="runBreakdown()">Generate</button>
+      </div>
+    </div>
   </div>
 
 <script>
-const api = (opts) => fetch('/api/cron', opts);
-let jobs = [];
-
-// Friendly-ish rendering of a cron schedule.
-function humanize(sch) {
-  const map = { '@hourly': 'Every hour', '@daily': 'Every day', '@weekly': 'Every week', '@monthly': 'Every month', '@reboot': 'On start', '@yearly': 'Every year' };
-  if (map[sch]) return map[sch];
-  const f = sch.split(/\s+/);
-  if (f.length === 5) {
-    const [m, h, dom, mon, dow] = f;
-    if (dom === '*' && mon === '*' && dow === '*' && h !== '*' && m !== '*') return `Daily at ${pad(h)}:${pad(m)}`;
-    if (m.startsWith('*/')) return `Every ${m.slice(2)} min`;
-    if (h.startsWith('*/')) return `Every ${h.slice(2)} h`;
-  }
-  return sch;
-}
+const $ = id => document.getElementById(id);
+function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function pad(x) { return String(x).padStart(2, '0'); }
 
-async function load() {
-  try {
-    const data = await api().then(r => r.json());
-    jobs = data.jobs || [];
-  } catch { jobs = []; }
-  render();
+let tab = 'todo';
+function switchTab(t) {
+  tab = t;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  $('todo-view').style.display = t === 'todo' ? 'flex' : 'none';
+  $('cron-view').style.display = t === 'cron' ? 'flex' : 'none';
+  try { parent.postMessage({ type: 'context', text: t === 'todo' ? 'Viewing the to-do list' : 'Viewing the agent\'s scheduled (cron) tasks' }, '*'); } catch (_) {}
+  updateCount();
+}
+function updateCount() {
+  if (tab === 'todo') { const open = todos.filter(t => !t.done).length; $('count').textContent = open ? `${open} open` : 'All done'; }
+  else { const on = jobs.filter(j => j.enabled).length; $('count').textContent = jobs.length ? `${on} active · ${jobs.length} total` : ''; }
 }
 
-function render() {
-  const list = document.getElementById('list');
-  const count = document.getElementById('count');
-  const on = jobs.filter(j => j.enabled).length;
-  count.textContent = jobs.length ? `${on} active · ${jobs.length} total` : '';
+// ═══════════════════════ To-do (PIM tasks) ═══════════════════════
+let todos = [];
+const PRANK = { high: 0, normal: 1, low: 2 };
+
+async function loadTodos() {
+  try { todos = (await fetch('/api/tasks?include_done=true').then(r => r.json())).tasks || []; } catch { todos = []; }
+  renderTodos();
+}
+function isOverdue(t) { return t.dueAt && !t.done && new Date(t.dueAt) < new Date(new Date().toDateString()); }
+function dueLabel(due) {
+  const d = new Date(due), now = new Date(), tom = new Date(now); tom.setDate(now.getDate() + 1);
+  if (d.toDateString() === now.toDateString()) return 'Due today';
+  if (d.toDateString() === tom.toDateString()) return 'Due tomorrow';
+  return 'Due ' + d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+}
+function renderTodos() {
+  const host = $('todo-list'); host.innerHTML = '';
+  const showDone = $('show-done').checked;
+  let items = todos.slice().sort((a, b) =>
+    (a.done - b.done) ||
+    ((PRANK[a.priority] ?? 1) - (PRANK[b.priority] ?? 1)) ||
+    String(a.dueAt || '9999').localeCompare(String(b.dueAt || '9999')));
+  if (!showDone) items = items.filter(t => !t.done);
+  if (!items.length) {
+    host.innerHTML = '<div class="empty"><div class="big">✓</div><div>' + (showDone ? 'No tasks yet' : 'Nothing to do') + '</div><div style="font-size:12px">Add one above, or break down an objective with AI.</div></div>';
+    updateCount(); return;
+  }
+  for (const t of items) {
+    const row = document.createElement('div');
+    row.className = 'todo' + (t.done ? ' done' : '');
+    const due = t.dueAt ? `<div class="due ${isOverdue(t) ? 'over' : ''}">${esc(dueLabel(t.dueAt))}</div>` : '';
+    row.innerHTML = `
+      <button class="check ${t.done ? 'on' : ''}" title="Toggle done"></button>
+      <div class="todo-main"><div class="todo-title">${esc(t.title)}</div>${due}</div>
+      <span class="prio p-${esc(t.priority || 'normal')}">${esc(t.priority || 'normal')}</span>
+      <button class="ico-btn del" title="Delete">🗑</button>`;
+    row.querySelector('.check').onclick = () => toggleTodo(t);
+    row.querySelector('.del').onclick = () => removeTodo(t);
+    host.appendChild(row);
+  }
+  updateCount();
+}
+async function addTodo() {
+  const title = $('t-title').value.trim();
+  if (!title) return;
+  const body = { title, priority: $('t-prio').value, due: $('t-due').value || '' };
+  $('t-title').value = ''; $('t-due').value = '';
+  await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  loadTodos();
+}
+async function toggleTodo(t) {
+  await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: t.id, done: !t.done }) });
+  loadTodos();
+}
+async function removeTodo(t) {
+  await fetch('/api/tasks?id=' + t.id, { method: 'DELETE' });
+  loadTodos();
+}
+
+// ── AI breakdown ──
+let bdSuggestions = null;
+function openBreakdown() {
+  bdSuggestions = null;
+  $('bd-obj').value = ''; $('bd-err').textContent = '';
+  $('bd-input').style.display = ''; $('bd-review').style.display = 'none';
+  $('bd-go').textContent = 'Generate';
+  $('bd-overlay').classList.add('open');
+  setTimeout(() => $('bd-obj').focus(), 30);
+}
+function closeBreakdown() { $('bd-overlay').classList.remove('open'); }
+async function runBreakdown() {
+  if (bdSuggestions) { return addBreakdown(); }
+  const obj = $('bd-obj').value.trim();
+  if (!obj) { $('bd-err').textContent = 'Describe an objective first.'; return; }
+  $('bd-go').disabled = true; $('bd-go').textContent = 'Thinking…'; $('bd-err').textContent = '';
+  try {
+    const r = await fetch('/api/ai/assist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task: 'task_breakdown', text: obj }) });
+    if (!r.ok) throw new Error(await r.text());
+    const out = (await r.json()).result || '';
+    let arr; try { arr = JSON.parse(out.replace(/```json|```/g, '').trim()); } catch { throw new Error('AI returned an unexpected format.'); }
+    bdSuggestions = (arr || []).filter(x => typeof x === 'string' && x.trim());
+    if (!bdSuggestions.length) throw new Error('No tasks generated.');
+    renderBdReview();
+  } catch (e) { $('bd-err').textContent = e.message; }
+  finally { $('bd-go').disabled = false; }
+}
+function renderBdReview() {
+  $('bd-input').style.display = 'none';
+  $('bd-review').style.display = 'flex';
+  const list = $('bd-list'); list.innerHTML = '';
+  bdSuggestions.forEach((s, i) => {
+    const row = document.createElement('label'); row.className = 'bd-item';
+    row.innerHTML = `<input type="checkbox" checked data-i="${i}"><span>${esc(s)}</span>`;
+    list.appendChild(row);
+  });
+  $('bd-go').textContent = 'Add tasks';
+}
+async function addBreakdown() {
+  const picks = [...$('bd-list').querySelectorAll('input:checked')].map(c => bdSuggestions[+c.dataset.i]);
+  if (!picks.length) { closeBreakdown(); return; }
+  $('bd-go').disabled = true;
+  for (const title of picks) {
+    await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, priority: 'normal' }) });
+  }
+  $('bd-go').disabled = false;
+  closeBreakdown();
+  loadTodos();
+}
+
+// ═══════════════════════ Scheduled (cron) ═══════════════════════
+const cronApi = (opts) => fetch('/api/cron', opts);
+let jobs = [], editName = null;
+
+// Turn a cron expression into a plain-English phrase — never raw cron syntax.
+const DOW_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MON_FULL = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function ord(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+function hhmm(h, m) { return pad(h) + ':' + pad(m); }
+function joinNames(a) { if (a.length <= 1) return a[0] || ''; if (a.length === 2) return a[0] + ' and ' + a[1]; return a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]; }
+
+function dayInfo(dom, mon, dow) {
+  // { lead: sentence-leading form, tail: appended form } describing which days.
+  if (dom === '*' && dow === '*') {
+    if (mon === '*') return { lead: 'Every day', tail: '' };
+    const ms = parseField(mon, 1, 12);
+    if (ms) { const j = joinNames([...ms].map(m => MON_FULL[m])); return { lead: `Every day in ${j}`, tail: `in ${j}` }; }
+    return { lead: 'Every day', tail: '' };
+  }
+  if (dow !== '*') {
+    const ds = parseField(dow, 0, 7);
+    if (ds) {
+      const norm = [...new Set([...ds].map(x => x === 7 ? 0 : x))].sort((a, b) => a - b);
+      const key = norm.join(',');
+      if (key === '1,2,3,4,5') return { lead: 'Every weekday', tail: 'on weekdays' };
+      if (key === '0,6') return { lead: 'Every weekend day', tail: 'on weekends' };
+      const names = norm.map(d => DOW_FULL[d]);
+      const tail = norm.length === 1 ? DOW_FULL[norm[0]] + 's' : joinNames(names);
+      return { lead: `Every ${joinNames(names)}`, tail: `on ${tail}` };
+    }
+  }
+  if (dom !== '*') {
+    const ds = parseField(dom, 1, 31);
+    const monS = mon !== '*' ? parseField(mon, 1, 12) : null;
+    if (ds) {
+      const days = [...ds].sort((a, b) => a - b);
+      if (days.length === 1) {
+        const D = days[0];
+        if (monS) { const j = joinNames([...monS].map(m => MON_FULL[m])); return { lead: `On ${j} ${D}`, tail: `on ${j} ${D}` }; }
+        return { lead: `On the ${ord(D)} of each month`, tail: `on the ${ord(D)} of each month` };
+      }
+      const list = days.join(', ');
+      if (monS) { const j = joinNames([...monS].map(m => MON_FULL[m])); return { lead: `On days ${list} of ${j}`, tail: `on days ${list}` }; }
+      return { lead: `On days ${list} of each month`, tail: `on days ${list} of the month` };
+    }
+  }
+  return { lead: 'On a schedule', tail: '' };
+}
+
+function expandTimes(min, hr) {
+  const mins = parseField(min, 0, 59), hrs = parseField(hr, 0, 23);
+  if (!mins || !hrs || mins.size * hrs.size > 24) return null;
+  const out = [];
+  for (const h of [...hrs].sort((a, b) => a - b)) for (const m of [...mins].sort((a, b) => a - b)) out.push(hhmm(h, m));
+  return out;
+}
+
+function describeCron(expr) {
+  expr = (expr || '').trim();
+  const kw = { '@hourly': 'Every hour', '@daily': 'Every day at 00:00', '@midnight': 'Every day at 00:00', '@weekly': 'Every Sunday at 00:00', '@monthly': 'On the 1st of each month at 00:00', '@yearly': 'On January 1 at 00:00', '@annually': 'On January 1 at 00:00', '@reboot': 'On startup' };
+  if (kw[expr]) return kw[expr];
+  const f = expr.split(/\s+/);
+  if (f.length !== 5) return expr ? 'Custom schedule' : '';
+  const [min, hr, dom, mon, dow] = f;
+  const day = dayInfo(dom, mon, dow);
+  const tail = s => day.tail ? `${s} ${day.tail}` : s;
+  let m;
+
+  if (hr === '*') {
+    if (min === '*') return tail('Every minute');
+    if ((m = min.match(/^\*\/(\d+)$/))) return tail(`Every ${m[1]} minutes`);
+    if (/^\d+$/.test(min)) return tail(min === '0' ? 'Every hour' : `Every hour at :${pad(min)}`);
+    const ms = parseField(min, 0, 59);
+    if (ms && ms.size <= 6) return tail(`Every hour at :${[...ms].sort((a, b) => a - b).map(pad).join(', :')}`);
+    return tail('Every hour');
+  }
+  if ((m = hr.match(/^\*\/(\d+)$/)) && /^\d+$/.test(min)) {
+    const base = `Every ${m[1]} hours`;
+    return tail(min === '0' ? base : `${base} at :${pad(min)}`);
+  }
+  const times = expandTimes(min, hr);
+  if (times && times.length) {
+    const tp = times.length === 1 ? `at ${times[0]}` : `at ${joinNames(times)}`;
+    return cap(`${day.lead} ${tp}`);
+  }
+  return cap(day.lead);
+}
+function parseField(s, min, max) {
+  const set = new Set();
+  for (const part of String(s).split(',')) {
+    let m;
+    if (part === '*') { for (let i = min; i <= max; i++) set.add(i); }
+    else if ((m = part.match(/^\*\/(\d+)$/))) { for (let i = min; i <= max; i += +m[1]) set.add(i); }
+    else if ((m = part.match(/^(\d+)-(\d+)(?:\/(\d+))?$/))) { for (let i = +m[1]; i <= +m[2]; i += (+m[3] || 1)) set.add(i); }
+    else if ((m = part.match(/^(\d+)$/))) { set.add(+m[1]); }
+    else return null;
+  }
+  return set;
+}
+function nextRun(expr) {
+  expr = (expr || '').trim();
+  if (expr === '@reboot') return null;
+  const km = { '@hourly': '0 * * * *', '@daily': '0 0 * * *', '@midnight': '0 0 * * *', '@weekly': '0 0 * * 0', '@monthly': '0 0 1 * *', '@yearly': '0 0 1 1 *', '@annually': '0 0 1 1 *' };
+  if (km[expr]) expr = km[expr];
+  const f = expr.split(/\s+/);
+  if (f.length !== 5) return null;
+  const mins = parseField(f[0], 0, 59), hrs = parseField(f[1], 0, 23), doms = parseField(f[2], 1, 31), mons = parseField(f[3], 1, 12), dows = parseField(f[4], 0, 7);
+  if (!mins || !hrs || !doms || !mons || !dows) return null;
+  const dowSet = new Set([...dows].map(d => d === 7 ? 0 : d));
+  const domStar = f[2] === '*', dowStar = f[4] === '*';
+  let d = new Date(); d.setSeconds(0, 0); d.setMinutes(d.getMinutes() + 1);
+  const cap = new Date(d.getTime() + 366 * 24 * 3600 * 1000);
+  while (d < cap) {
+    const dayOk = (domStar || dowStar) ? (doms.has(d.getDate()) && dowSet.has(d.getDay())) : (doms.has(d.getDate()) || dowSet.has(d.getDay()));
+    if (mins.has(d.getMinutes()) && hrs.has(d.getHours()) && mons.has(d.getMonth() + 1) && dayOk) return d;
+    d.setMinutes(d.getMinutes() + 1);
+  }
+  return null;
+}
+function nextRunLabel(expr) {
+  const d = nextRun(expr);
+  if (!d) return '';
+  const now = new Date(), tom = new Date(now); tom.setDate(now.getDate() + 1);
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (d.toDateString() === now.toDateString()) return `today ${hm}`;
+  if (d.toDateString() === tom.toDateString()) return `tomorrow ${hm}`;
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ' ' + hm;
+}
+async function loadJobs() {
+  try { jobs = (await cronApi().then(r => r.json())).jobs || []; } catch { jobs = []; }
+  renderJobs();
+}
+function renderJobs() {
+  const list = $('list');
   list.innerHTML = '';
   if (!jobs.length) {
-    list.innerHTML = '<div class="empty"><div class="big">⏱</div><div>No scheduled tasks yet</div><div style="font-size:12px">Ask the agent to schedule something — it appears here.</div></div>';
-    return;
+    list.innerHTML = '<div class="empty"><div class="big">⏱</div><div>No scheduled tasks yet</div><div style="font-size:12px">Create one, or ask the agent to schedule something.</div></div>';
+    updateCount(); return;
   }
   for (const j of jobs) {
     const card = document.createElement('div');
     card.className = 'job' + (j.enabled ? '' : ' off');
+    const next = j.enabled ? nextRunLabel(j.schedule) : '';
     card.innerHTML = `
       <div class="job-top">
         <span class="job-name">${esc(j.name)}</span>
+        <button class="ico-btn edit" title="Edit">✎</button>
         <label class="switch"><input type="checkbox" ${j.enabled ? 'checked' : ''}><span class="slider"></span></label>
       </div>
-      <span class="job-when">⏱ ${esc(humanize(j.schedule))}</span>
-      <div class="job-cmd">${esc(j.command)}</div>
+      ${j.description ? `<div class="job-desc">${esc(j.description)}</div>` : ''}
+      <span class="job-when">⏱ ${esc(describeCron(j.schedule))}</span>
+      ${next ? `<div class="job-next">Next: ${esc(next)}</div>` : ''}
+      <details class="job-cmd-wrap"><summary>Command</summary><div class="job-cmd">${esc(j.command)}</div></details>
       <div class="job-foot">
         <span class="job-status">${j.enabled ? 'Active' : 'Paused'}</span>
-        <button class="job-del" title="Delete">🗑 Delete</button>
+        <button class="ico-btn del" title="Delete">🗑</button>
       </div>`;
-    card.querySelector('input').addEventListener('change', e => toggle(j.name, e.target.checked));
-    card.querySelector('.job-del').addEventListener('click', () => remove(j.name));
+    card.querySelector('input').addEventListener('change', e => toggleJob(j.name, e.target.checked));
+    card.querySelector('.edit').addEventListener('click', () => openForm(j));
+    card.querySelector('.del').addEventListener('click', () => removeJob(j.name));
     list.appendChild(card);
   }
+  updateCount();
 }
-
-async function toggle(name, enabled) {
-  await api({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, enabled }) });
-  load();
+async function toggleJob(name, enabled) {
+  await cronApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, enabled }) });
+  loadJobs();
 }
-async function remove(name) {
+async function removeJob(name) {
   if (!confirm(`Delete scheduled task "${name}"?`)) return;
   await fetch('/api/cron?name=' + encodeURIComponent(name), { method: 'DELETE' });
-  load();
+  loadJobs();
 }
-function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function openForm(job) {
+  editName = job ? job.name : null;
+  $('form-title').textContent = job ? 'Edit task' : 'New task';
+  $('f-name').value = job ? job.name : '';
+  $('f-name').disabled = !!job;
+  $('f-desc').value = job ? (job.description || '') : '';
+  $('f-sched').value = job ? job.schedule : '';
+  $('f-cmd').value = job ? job.command : '';
+  $('f-err').textContent = '';
+  $('overlay').classList.add('open');
+}
+function closeForm() { $('overlay').classList.remove('open'); }
+document.querySelectorAll('.preset').forEach(p => p.onclick = () => { $('f-sched').value = p.dataset.s; });
+async function saveForm() {
+  const name = $('f-name').value.trim(), schedule = $('f-sched').value.trim(), command = $('f-cmd').value.trim();
+  const description = $('f-desc').value.trim();
+  if (!name || !schedule || !command) { $('f-err').textContent = 'Name, schedule and command are required.'; return; }
+  const res = await cronApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description, schedule, command }) });
+  if (!res.ok) { $('f-err').textContent = 'Failed: ' + (await res.text()); return; }
+  closeForm();
+  loadJobs();
+}
 
-load();
-setInterval(load, 15000);
+// init
+loadTodos();
+loadJobs();
+switchTab('todo');
+setInterval(loadJobs, 30000);
 </script>
 </body>
 </html>

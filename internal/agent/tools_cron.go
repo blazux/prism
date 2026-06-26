@@ -17,7 +17,7 @@ func (e *ToolExecutor) cronList(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command string) (string, error) {
+func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, description string) (string, error) {
 	if name == "" || schedule == "" || command == "" {
 		return "", fmt.Errorf("name, schedule, and command are required")
 	}
@@ -31,6 +31,7 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command stri
 	if strings.ContainsAny(command, "\n\r") {
 		return "", fmt.Errorf("command must not contain newlines")
 	}
+	description = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(description, "\n", " "), "\r", " "))
 
 	current, _ := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)
 	current = strings.TrimSpace(current)
@@ -53,7 +54,11 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command stri
 	command = strings.ReplaceAll(command, "${PRISM_SESSION}", session)
 	command = strings.ReplaceAll(command, "$PRISM_TOKEN", e.prismToken)
 	command = strings.ReplaceAll(command, "${PRISM_TOKEN}", e.prismToken)
-	entry := fmt.Sprintf("%s\n%s %s", marker, schedule, command)
+	entry := marker
+	if description != "" {
+		entry += "\n# agent-desc: " + description
+	}
+	entry += fmt.Sprintf("\n%s %s", schedule, command)
 	var newCrontab string
 	if current == "" {
 		newCrontab = entry + "\n"
@@ -85,7 +90,12 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 			continue
 		}
 		if skip {
-			skip = false // drop the cron line immediately after the marker
+			// Drop the marker's block: an optional "# agent-desc:" line, then the
+			// cron line. Keep skipping until we've consumed the cron command line.
+			if strings.HasPrefix(strings.TrimSpace(line), "# agent-desc:") {
+				continue
+			}
+			skip = false
 			continue
 		}
 		kept = append(kept, line)

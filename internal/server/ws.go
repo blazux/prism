@@ -251,6 +251,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Wire plugin/file callbacks to WebSocket events
+	executor.SetProgressFn(func(text string) {
+		client.sendJSON(map[string]interface{}{"type": "progress", "content": text})
+	})
 	executor.SetCallbacks(
 		func(id, title, content string, cols, height int) {
 			client.sendJSON(map[string]interface{}{

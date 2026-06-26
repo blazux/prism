@@ -200,14 +200,15 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "cron",
-			Description: "Manage scheduled cron jobs running inside the workspace container. Actions: list, add (name+schedule+command), remove (name).",
+			Description: "Manage scheduled cron jobs running inside the workspace container. Actions: list, add (name+schedule+command, plus a description), remove (name).",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":   {Type: "string", Description: "One of: list, add, remove"},
-					"name":     {Type: "string", Description: "Unique job identifier (e.g. 'daily-backup', 'sync-feed')"},
-					"schedule": {Type: "string", Description: "Cron expression (e.g. '*/5 * * * *' every 5 min, '0 9 * * 1-5' weekdays 9am)"},
-					"command":  {Type: "string", Description: "Shell command to run (e.g. 'python3 /workspace/myscript.py >> /workspace/logs/myscript.log 2>&1')"},
+					"action":      {Type: "string", Description: "One of: list, add, remove"},
+					"name":        {Type: "string", Description: "Unique job identifier (e.g. 'daily-backup', 'sync-feed')"},
+					"schedule":    {Type: "string", Description: "Cron expression (e.g. '*/5 * * * *' every 5 min, '0 9 * * 1-5' weekdays 9am)"},
+					"command":     {Type: "string", Description: "Shell command to run (e.g. 'python3 /workspace/myscript.py >> /workspace/logs/myscript.log 2>&1')"},
+					"description": {Type: "string", Description: "Required for 'add': one short human sentence explaining what this job does and which widget/dashboard it feeds, so the user can tell at a glance what it's for (e.g. 'Refreshes the weather widget's data every 30 min')."},
 				},
 				Required: []string{"action"},
 			},

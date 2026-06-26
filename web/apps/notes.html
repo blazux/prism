@@ -6,8 +6,8 @@
 <title>Notes</title>
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <script>
-  // Live theme updates pushed from the dashboard.
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
       const r = document.documentElement.style;
@@ -21,15 +21,23 @@
   .app { display: flex; height: 100%; }
 
   /* List pane */
-  .list-pane { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .list-pane { width: 290px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .list-head { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }
   .list-head input { flex: 1; }
   .btn-new { white-space: nowrap; }
+  .tag-bar { display: flex; gap: 5px; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .tag-chip { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--bg2); color: var(--text2); border: 1px solid var(--border2); cursor: pointer; }
+  .tag-chip:hover { color: var(--text); }
+  .tag-chip.active { background: var(--bg3); color: var(--accent); border-color: var(--accent); }
   .notes { flex: 1; overflow-y: auto; }
   .note-row { padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .12s; }
   .note-row:hover { background: var(--bg2); }
-  .note-row.active { background: var(--bg3); border-left: 2px solid var(--accent); padding-left: 10px; }
-  .note-row .nt { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note-row.active { background: var(--bg3); box-shadow: inset 2px 0 0 var(--accent); }
+  .nt-row { display: flex; align-items: center; gap: 6px; }
+  .note-row .nt { flex: 1; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note-pin { background: none; border: none; cursor: pointer; font-size: 12px; padding: 0 2px; line-height: 1; color: var(--text3); opacity: 0; transition: opacity .12s, color .12s; }
+  .note-row:hover .note-pin { opacity: .6; }
+  .note-pin.pinned { opacity: 1; color: var(--accent); }
   .note-row .ns { font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
   .note-row .ntags { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
   .tag { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--bg3); color: var(--text2); }
@@ -41,10 +49,20 @@
   .editor-head .title-in:focus { outline: none; border-bottom: 1px solid var(--accent); }
   .editor-body { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px 14px; gap: 10px; }
   .editor-body textarea { flex: 1; resize: none; line-height: 1.5; }
+  .md-preview { flex: 1; overflow-y: auto; line-height: 1.55; }
+  .md-preview h1,.md-preview h2,.md-preview h3 { margin: .6em 0 .3em; }
+  .md-preview ul,.md-preview ol { padding-left: 1.3em; }
+  .md-preview code { background: var(--bg3); padding: 1px 5px; border-radius: 4px; }
+  .md-preview pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow: auto; }
+  .md-preview a { color: var(--accent); }
+  .md-preview blockquote { border-left: 3px solid var(--border2); margin: .5em 0; padding-left: 10px; color: var(--text2); }
   .tags-in { font-size: 12px; }
   .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text3); flex-direction: column; gap: 8px; }
   .empty .big { font-size: 36px; opacity: .3; }
   .back-btn { display: none; }
+  .seg { display: flex; border: 1px solid var(--border2); border-radius: 6px; overflow: hidden; }
+  .seg button { background: var(--bg2); border: none; color: var(--text2); font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; }
+  .seg button.active { background: var(--bg3); color: var(--accent); }
 
   @media (max-width: 560px) {
     .list-pane { width: 100%; }
@@ -61,6 +79,7 @@
         <input id="search" placeholder="Search notes…">
         <button class="btn btn-accent btn-new" onclick="newNote()">＋ New</button>
       </div>
+      <div class="tag-bar" id="tag-bar"></div>
       <div class="notes" id="notes"></div>
     </div>
 
@@ -73,12 +92,17 @@
         <div class="editor-head">
           <button class="btn back-btn" onclick="closeEditor()">←</button>
           <input class="title-in" id="e-title" placeholder="Title">
+          <div class="seg">
+            <button id="tab-edit" class="active" onclick="setMode('edit')">Edit</button>
+            <button id="tab-preview" onclick="setMode('preview')">Preview</button>
+          </div>
           <button class="btn" onclick="saveNote()">Save</button>
           <button class="btn" onclick="deleteNote()" title="Delete" style="color:var(--red)">🗑</button>
         </div>
         <div class="editor-body">
           <input class="tags-in" id="e-tags" placeholder="tags, comma, separated">
-          <textarea id="e-body" placeholder="Write your note…"></textarea>
+          <textarea id="e-body" placeholder="Write your note… (Markdown supported)"></textarea>
+          <div class="md-preview" id="e-preview" style="display:none"></div>
         </div>
       </div>
     </div>
@@ -87,7 +111,15 @@
 <script>
 const session = new URLSearchParams(location.search).get('session') || 'default';
 const api = (path, opts) => fetch(`/api/notes${path}`, opts).then(r => r.json());
-let notes = [], selectedId = null, filter = '';
+let notes = [], selectedId = null, filter = '', tagFilter = '', mode = 'edit';
+
+// Pins (client-side, by note id).
+const PIN_KEY = 'prism-pinned-notes';
+function pins() { try { return new Set(JSON.parse(localStorage.getItem(PIN_KEY) || '[]')); } catch { return new Set(); } }
+function isPinned(id) { return pins().has(id); }
+function togglePin(id) { const p = pins(); p.has(id) ? p.delete(id) : p.add(id); localStorage.setItem(PIN_KEY, JSON.stringify([...p])); render(); }
+
+const noteTags = n => (n.tags || '').split(',').map(t => t.trim()).filter(Boolean);
 
 async function load() {
   const data = await api(`?session=${encodeURIComponent(session)}`);
@@ -95,23 +127,52 @@ async function load() {
   render();
 }
 
+function renderTagBar() {
+  const bar = document.getElementById('tag-bar');
+  const all = new Set();
+  for (const n of notes) for (const t of noteTags(n)) all.add(t);
+  if (!all.size) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = `<span class="tag-chip ${tagFilter === '' ? 'active' : ''}" data-t="">All</span>` +
+    [...all].sort().map(t => `<span class="tag-chip ${tagFilter === t ? 'active' : ''}" data-t="${esc(t)}">${esc(t)}</span>`).join('');
+  bar.querySelectorAll('.tag-chip').forEach(c => c.onclick = () => { tagFilter = c.dataset.t; render(); });
+}
+
 function render() {
+  renderTagBar();
   const host = document.getElementById('notes');
   host.innerHTML = '';
   const f = filter.toLowerCase();
-  const shown = notes.filter(n => !f || (n.title + ' ' + n.body + ' ' + n.tags).toLowerCase().includes(f));
+  let shown = notes.filter(n =>
+    (!f || (n.title + ' ' + n.body + ' ' + n.tags).toLowerCase().includes(f)) &&
+    (!tagFilter || noteTags(n).includes(tagFilter)));
+  // Pinned first, then by updated date desc.
+  shown.sort((a, b) => (isPinned(b.id) - isPinned(a.id)) || (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   for (const n of shown) {
     const row = document.createElement('div');
     row.className = 'note-row' + (n.id === selectedId ? ' active' : '');
     row.onclick = () => select(n.id);
-    const tags = (n.tags || '').split(',').map(t => t.trim()).filter(Boolean)
-      .map(t => `<span class="tag">${esc(t)}</span>`).join('');
-    row.innerHTML = `<div class="nt">${esc(n.title) || '(untitled)'}</div>
+    const tags = noteTags(n).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+    row.innerHTML = `<div class="nt-row"><span class="nt">${esc(n.title) || '(untitled)'}</span><button class="note-pin ${isPinned(n.id) ? 'pinned' : ''}" title="Pin">📌</button></div>
       <div class="ns">${esc((n.body || '').replace(/\n/g, ' ')) || '—'}</div>
       ${tags ? `<div class="ntags">${tags}</div>` : ''}`;
+    row.querySelector('.note-pin').onclick = (e) => { e.stopPropagation(); togglePin(n.id); };
     host.appendChild(row);
   }
   if (!shown.length) host.innerHTML = '<div class="empty" style="padding:30px"><div>No notes</div></div>';
+}
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('tab-edit').classList.toggle('active', m === 'edit');
+  document.getElementById('tab-preview').classList.toggle('active', m === 'preview');
+  const ta = document.getElementById('e-body'), pv = document.getElementById('e-preview');
+  if (m === 'preview') {
+    pv.innerHTML = window.marked ? marked.parse(ta.value || '') : esc(ta.value);
+    ta.style.display = 'none'; pv.style.display = '';
+  } else {
+    ta.style.display = ''; pv.style.display = 'none';
+  }
 }
 
 function select(id) {
@@ -125,6 +186,7 @@ function select(id) {
   document.getElementById('e-title').value = n.title || '';
   document.getElementById('e-tags').value = n.tags || '';
   document.getElementById('e-body').value = n.body || '';
+  setMode('edit');
   document.getElementById('app').classList.add('editing');
   render();
 }
@@ -171,7 +233,6 @@ function closeEditor() {
 function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 document.getElementById('search').addEventListener('input', e => { filter = e.target.value; render(); });
-// Save when leaving a field.
 ['e-title', 'e-tags', 'e-body'].forEach(id =>
   document.getElementById(id).addEventListener('blur', () => { if (selectedId) saveNote(); }));
 

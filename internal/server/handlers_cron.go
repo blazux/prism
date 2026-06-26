@@ -13,6 +13,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,13 +22,15 @@ import (
 )
 
 const cronJobMarker = "# agent-job: "
+const cronDescMarker = "# agent-desc: "
 const cronDisabledPrefix = "#DISABLED# "
 
 type CronJob struct {
-	Name     string `json:"name"`
-	Schedule string `json:"schedule"`
-	Command  string `json:"command"`
-	Enabled  bool   `json:"enabled"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Schedule    string `json:"schedule"`
+	Command     string `json:"command"`
+	Enabled     bool   `json:"enabled"`
 }
 
 func (s *Server) readCrontab() string {
@@ -76,10 +79,18 @@ func parseCronJobs(raw string) []CronJob {
 			continue
 		}
 		name := strings.TrimSpace(strings.TrimPrefix(l, cronJobMarker))
-		// Find the following non-empty line: the job itself.
+		// Find the following non-empty line, capturing an optional description line.
 		j := i + 1
+		desc := ""
 		for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
 			j++
+		}
+		if j < len(lines) && strings.HasPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker) {
+			desc = strings.TrimSpace(strings.TrimPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker))
+			j++
+			for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
+				j++
+			}
 		}
 		if j >= len(lines) {
 			break
@@ -91,7 +102,7 @@ func parseCronJobs(raw string) []CronJob {
 			jobLine = strings.TrimPrefix(jobLine, cronDisabledPrefix)
 		}
 		schedule, command := splitSchedule(jobLine)
-		jobs = append(jobs, CronJob{Name: name, Schedule: schedule, Command: command, Enabled: enabled})
+		jobs = append(jobs, CronJob{Name: name, Description: desc, Schedule: schedule, Command: command, Enabled: enabled})
 		i = j
 	}
 	return jobs
@@ -108,20 +119,32 @@ func (s *Server) mutateJob(name string, fn func(line string) string) error {
 		l := strings.TrimRight(lines[i], "\r")
 		if strings.HasPrefix(l, cronJobMarker) &&
 			strings.TrimSpace(strings.TrimPrefix(l, cronJobMarker)) == name {
-			// Locate the job line.
+			// Locate an optional description line, then the job line.
 			j := i + 1
+			descLine := ""
 			for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
 				j++
+			}
+			if j < len(lines) && strings.HasPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker) {
+				descLine = strings.TrimRight(lines[j], "\r")
+				j++
+				for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
+					j++
+				}
 			}
 			if j < len(lines) {
 				cur := strings.TrimRight(lines[j], "\r")
 				bare := strings.TrimPrefix(cur, cronDisabledPrefix)
 				repl := fn(bare)
 				if repl == "" {
-					i = j // drop marker + job line
+					i = j // drop marker + desc + job line
 					continue
 				}
-				out = append(out, l, repl)
+				out = append(out, l)
+				if descLine != "" {
+					out = append(out, descLine)
+				}
+				out = append(out, repl)
 				i = j
 				continue
 			}
@@ -134,6 +157,79 @@ func (s *Server) mutateJob(name string, fn func(line string) string) error {
 		_, err := s.docker.Exec(context.Background(), "crontab -r 2>/dev/null || true", 10*time.Second)
 		return err
 	}
+	return s.applyCrontab(content)
+}
+
+// editJobBlock rewrites an existing job's block (schedule + command + optional
+// description) in place, re-enabling it. An empty desc keeps the current one.
+func (s *Server) editJobBlock(name, schedule, command, desc string) error {
+	raw := s.readCrontab()
+	lines := strings.Split(raw, "\n")
+	var out []string
+	for i := 0; i < len(lines); i++ {
+		l := strings.TrimRight(lines[i], "\r")
+		if strings.HasPrefix(l, cronJobMarker) &&
+			strings.TrimSpace(strings.TrimPrefix(l, cronJobMarker)) == name {
+			j := i + 1
+			oldDesc := ""
+			for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
+				j++
+			}
+			if j < len(lines) && strings.HasPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker) {
+				oldDesc = strings.TrimSpace(strings.TrimPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker))
+				j++
+				for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
+					j++
+				}
+			}
+			if j < len(lines) {
+				d := desc
+				if d == "" {
+					d = oldDesc
+				}
+				out = append(out, l)
+				if d != "" {
+					out = append(out, cronDescMarker+d)
+				}
+				out = append(out, schedule+" "+command)
+				i = j
+				continue
+			}
+		}
+		out = append(out, l)
+	}
+	content := strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+	return s.applyCrontab(content)
+}
+
+// upsertCronJob creates a job or, if a job with that name exists, replaces its
+// schedule + command + description (re-enabling it).
+func (s *Server) upsertCronJob(name, schedule, command, desc string) error {
+	name = strings.TrimSpace(name)
+	schedule = strings.TrimSpace(schedule)
+	command = strings.TrimSpace(command)
+	desc = strings.TrimSpace(desc)
+	if name == "" || schedule == "" || command == "" {
+		return fmt.Errorf("name, schedule and command are required")
+	}
+	if strings.ContainsAny(name+schedule+command+desc, "\n\r") {
+		return fmt.Errorf("fields must not contain newlines")
+	}
+	raw := s.readCrontab()
+	for _, j := range parseCronJobs(raw) {
+		if j.Name == name {
+			return s.editJobBlock(name, schedule, command, desc)
+		}
+	}
+	content := strings.TrimRight(raw, "\n")
+	if content != "" {
+		content += "\n"
+	}
+	content += cronJobMarker + name + "\n"
+	if desc != "" {
+		content += cronDescMarker + desc + "\n"
+	}
+	content += schedule + " " + command + "\n"
 	return s.applyCrontab(content)
 }
 
@@ -150,22 +246,33 @@ func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{"jobs": jobs})
 	case "POST":
 		var b struct {
-			Name    string `json:"name"`
-			Enabled bool   `json:"enabled"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Schedule    string `json:"schedule"`
+			Command     string `json:"command"`
+			Enabled     bool   `json:"enabled"`
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil || b.Name == "" {
 			http.Error(w, "bad body", 400)
 			return
 		}
-		err := s.mutateJob(b.Name, func(line string) string {
-			if b.Enabled {
-				return line // already un-prefixed by mutateJob
+		// schedule present → create/edit a job; otherwise → enable/disable toggle.
+		if b.Schedule != "" {
+			if err := s.upsertCronJob(b.Name, b.Schedule, b.Command, b.Description); err != nil {
+				http.Error(w, err.Error(), 400)
+				return
 			}
-			return cronDisabledPrefix + line
-		})
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
+		} else {
+			err := s.mutateJob(b.Name, func(line string) string {
+				if b.Enabled {
+					return line // already un-prefixed by mutateJob
+				}
+				return cronDisabledPrefix + line
+			})
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 	case "DELETE":

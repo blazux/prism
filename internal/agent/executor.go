@@ -35,6 +35,7 @@ type ToolExecutor struct {
 	onToolsReload   func()
 	onMCPReload     func()
 	onNotification  func(title, message, level string)
+	onProgress      func(text string) // live tool progress streamed into the chat
 	onSecretRequest func(ctx context.Context, name, description string) error
 }
 
@@ -54,6 +55,10 @@ func (e *ToolExecutor) SetLLM(backend ollama.Backend, model string) {
 	e.backend = backend
 	e.model = model
 }
+
+// SetProgressFn registers a callback for live tool progress (e.g. deep_research
+// step-by-step), streamed into the chat.
+func (e *ToolExecutor) SetProgressFn(fn func(text string)) { e.onProgress = fn }
 
 func (e *ToolExecutor) SetRAG(store *rag.Store, embedder *rag.Embedder, captioner *rag.Captioner) {
 	e.ragStore = store
@@ -280,7 +285,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		case "list":
 			return wrap(e.cronList(ctx))
 		case "add":
-			return wrap(e.cronAdd(ctx, str("name"), str("schedule"), str("command")))
+			return wrap(e.cronAdd(ctx, str("name"), str("schedule"), str("command"), str("description")))
 		case "remove":
 			return wrap(e.cronRemove(ctx, str("name")))
 		default:
@@ -289,7 +294,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 	case "cron_list": // legacy alias
 		return wrap(e.cronList(ctx))
 	case "cron_add": // legacy alias
-		return wrap(e.cronAdd(ctx, str("name"), str("schedule"), str("command")))
+		return wrap(e.cronAdd(ctx, str("name"), str("schedule"), str("command"), str("description")))
 	case "cron_remove": // legacy alias
 		return wrap(e.cronRemove(ctx, str("name")))
 	case "http_request":

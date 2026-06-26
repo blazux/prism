@@ -34,7 +34,25 @@
   .cell .dnum { font-size: 12px; color: var(--text2); text-align: right; flex-shrink: 0; }
   .cell.today .dnum { color: #fff; background: var(--accent); border-radius: 50%; width: 22px; height: 22px; line-height: 22px; text-align: center; margin-left: auto; font-weight: 600; }
   .ev { font-size: 11px; padding: 2px 6px; border-radius: 5px; background: var(--accent-dim); color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .ev-more { font-size: 10px; color: var(--text3); padding: 1px 6px; cursor: default; }
   .ev .t { color: var(--text2); }
+
+  /* event modal */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .overlay.open { display: flex; }
+  .form { width: min(420px, 92vw); background: var(--bg1); border: 1px solid var(--border2); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .form-title { font-weight: 600; color: var(--text); }
+  .form label { font-size: 11px; color: var(--text2); display: flex; flex-direction: column; gap: 4px; }
+  .form label.row { flex-direction: row; align-items: center; gap: 7px; font-size: 12px; color: var(--text); cursor: pointer; }
+  .form label.row input { width: auto; }
+  .form input, .form textarea { background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; box-sizing: border-box; }
+  .form textarea { resize: vertical; min-height: 52px; }
+  .times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .form-foot { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+  .form-foot .grow { flex: 1; }
+  .btn-del { background: none; border: 1px solid var(--border2); color: var(--red); }
+  .btn-del:hover { background: var(--bg3); }
+  .err { color: var(--red); font-size: 12px; min-height: 14px; }
 </style>
 </head>
 <body>
@@ -50,6 +68,28 @@
     <div class="grid">
       <div class="weekdays" id="weekdays"></div>
       <div class="weeks" id="weeks"></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="form">
+      <div class="form-title" id="form-title">New event</div>
+      <label>Title<input id="f-title" placeholder="Event title"></label>
+      <label>Date<input id="f-date" type="date"></label>
+      <label class="row"><input type="checkbox" id="f-allday"> All day</label>
+      <div class="times" id="f-times">
+        <label>Start<input id="f-start" type="time"></label>
+        <label>End<input id="f-end" type="time"></label>
+      </div>
+      <label>Location<input id="f-loc" placeholder="Optional"></label>
+      <label>Description<textarea id="f-desc" placeholder="Optional"></textarea></label>
+      <div class="err" id="f-err"></div>
+      <div class="form-foot">
+        <button class="btn btn-del" id="f-del" onclick="deleteEvent()">Delete</button>
+        <span class="grow"></span>
+        <button class="btn" onclick="closeForm()">Cancel</button>
+        <button class="btn btn-accent" onclick="saveForm()">Save</button>
+      </div>
     </div>
   </div>
 
@@ -98,18 +138,26 @@ function render() {
     const key = ymd(d);
     const cell = document.createElement('div');
     cell.className = 'cell' + (d.getMonth() !== m ? ' dim' : '') + (key === todayStr ? ' today' : '');
-    cell.onclick = () => addOn(key);
+    cell.onclick = () => openForm(key);
     const num = document.createElement('div'); num.className = 'dnum'; num.textContent = d.getDate();
     cell.appendChild(num);
-    for (const ev of (byDay[key] || []).sort((a,b)=>a.startAt.localeCompare(b.startAt))) {
+    const dayEvents = (byDay[key] || []).sort((a,b)=>a.startAt.localeCompare(b.startAt));
+    const MAXSHOW = 3;
+    for (const ev of dayEvents.slice(0, MAXSHOW)) {
       const chip = document.createElement('div');
       chip.className = 'ev';
       const t = new Date(ev.startAt);
       const time = (t.getHours() || t.getMinutes()) ? `<span class="t">${pad(t.getHours())}:${pad(t.getMinutes())}</span> ` : '';
       chip.innerHTML = time + esc(ev.title);
-      chip.title = ev.title + (ev.location ? ' @ ' + ev.location : '');
+      chip.title = `${ev.title} · ${evRange(ev)}${ev.location ? ' @ ' + ev.location : ''}`;
       chip.onclick = (e) => { e.stopPropagation(); openEvent(ev); };
       cell.appendChild(chip);
+    }
+    if (dayEvents.length > MAXSHOW) {
+      const more = document.createElement('div');
+      more.className = 'ev-more';
+      more.textContent = `+${dayEvents.length - MAXSHOW} more`;
+      cell.appendChild(more);
     }
     weeks.appendChild(cell);
   }
@@ -118,26 +166,91 @@ function render() {
 function move(n) { view.setMonth(view.getMonth() + n); load(); }
 function today() { view = new Date(); view.setDate(1); load(); }
 
-async function addOn(dateKey) {
-  const title = prompt(`New event on ${dateKey}\nTitle:`);
-  if (!title || !title.trim()) return;
-  const time = prompt('Time (HH:MM, blank = all-day):', '09:00') || '';
-  const start = time.trim() ? `${dateKey}T${time.trim()}` : `${dateKey}T00:00`;
-  await fetch(`/api/events?session=${encodeURIComponent(session)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: title.trim(), start })
+// Human time range "09:00–10:30", "09:00" (no end), or "All day".
+function evRange(ev) {
+  const s = new Date(ev.startAt);
+  const timed = s.getHours() || s.getMinutes() || (ev.endAt && (new Date(ev.endAt).getHours() || new Date(ev.endAt).getMinutes()));
+  if (!timed) return 'All day';
+  let str = `${pad(s.getHours())}:${pad(s.getMinutes())}`;
+  if (ev.endAt) { const e = new Date(ev.endAt); str += `–${pad(e.getHours())}:${pad(e.getMinutes())}`; }
+  return str;
+}
+
+// ── Event modal (create / edit) ────────────────────────────────────────────────
+let editing = null;   // event being edited, or null for a new one
+
+function $(id) { return document.getElementById(id); }
+function toggleTimes() { $('f-times').style.display = $('f-allday').checked ? 'none' : ''; }
+$('f-allday').addEventListener('change', toggleTimes);
+$('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeForm(); });
+
+function openForm(dateKey) {
+  editing = null;
+  $('form-title').textContent = 'New event';
+  $('f-del').style.display = 'none';
+  setFields({ title: '', date: dateKey, allday: false, start: '09:00', end: '10:00', loc: '', desc: '' });
+  $('f-err').textContent = '';
+  $('overlay').classList.add('open');
+  setTimeout(() => $('f-title').focus(), 30);
+}
+
+function openEvent(ev) {
+  editing = ev;
+  $('form-title').textContent = 'Edit event';
+  $('f-del').style.display = '';
+  const s = new Date(ev.startAt);
+  const e = ev.endAt ? new Date(ev.endAt) : null;
+  const allday = !(s.getHours() || s.getMinutes()) && !(e && (e.getHours() || e.getMinutes()));
+  setFields({
+    title: ev.title || '', date: ymd(s), allday,
+    start: `${pad(s.getHours())}:${pad(s.getMinutes())}`,
+    end: e ? `${pad(e.getHours())}:${pad(e.getMinutes())}` : '',
+    loc: ev.location || '', desc: ev.description || '',
   });
+  $('f-err').textContent = '';
+  $('overlay').classList.add('open');
+}
+
+function setFields(v) {
+  $('f-title').value = v.title; $('f-date').value = v.date;
+  $('f-allday').checked = v.allday;
+  $('f-start').value = v.start; $('f-end').value = v.end;
+  $('f-loc').value = v.loc; $('f-desc').value = v.desc;
+  toggleTimes();
+}
+function closeForm() { $('overlay').classList.remove('open'); }
+
+async function saveForm() {
+  const title = $('f-title').value.trim();
+  const date = $('f-date').value;
+  if (!title) { $('f-err').textContent = 'Title is required.'; return; }
+  if (!date) { $('f-err').textContent = 'Date is required.'; return; }
+  let start, end = '';
+  if ($('f-allday').checked) {
+    start = `${date}T00:00`;
+  } else {
+    start = `${date}T${$('f-start').value || '00:00'}`;
+    if ($('f-end').value) end = `${date}T${$('f-end').value}`;
+  }
+  const body = { title, start, end, location: $('f-loc').value.trim(), description: $('f-desc').value.trim() };
+  // Editing has no backend update endpoint → replace (delete + recreate).
+  if (editing) await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${editing.id}`, { method: 'DELETE' });
+  const res = await fetch(`/api/events?session=${encodeURIComponent(session)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  if (!res.ok) { $('f-err').textContent = 'Failed: ' + (await res.text()); return; }
+  closeForm();
   load();
 }
-function addToday() { addOn(ymd(new Date())); }
 
-async function openEvent(ev) {
-  const when = new Date(ev.startAt).toLocaleString();
-  if (confirm(`${ev.title}\n${when}${ev.location ? '\n@ ' + ev.location : ''}${ev.description ? '\n\n' + ev.description : ''}\n\nDelete this event?`)) {
-    await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${ev.id}`, { method: 'DELETE' });
-    load();
-  }
+async function deleteEvent() {
+  if (!editing || !confirm(`Delete "${editing.title}"?`)) return;
+  await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${editing.id}`, { method: 'DELETE' });
+  closeForm();
+  load();
 }
+
+function addToday() { openForm(ymd(new Date())); }
 
 function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 

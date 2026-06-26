@@ -119,7 +119,7 @@ func (e *ToolExecutor) deepResearch(ctx context.Context, question string, maxRou
 	}
 	final = drAppendSources(final, findings)
 
-	e.drProgress(fmt.Sprintf("Research complete — %d sources in %s", len(findings), time.Since(start).Round(time.Second)))
+	e.drProgress(fmt.Sprintf("✓ Research complete — %d sources in %s", len(findings), time.Since(start).Round(time.Second)))
 	return final, nil
 }
 
@@ -159,10 +159,12 @@ func (e *ToolExecutor) chatOnce(ctx context.Context, system, user string, temp f
 	return strings.TrimSpace(stripThinkingBlocks(sb.String())), nil
 }
 
+// drProgress streams each step into the chat (not dashboard notifications, which
+// would flood the panel) and logs it.
 func (e *ToolExecutor) drProgress(msg string) {
 	log.Printf("[deep_research] %s", msg)
-	if e.onNotification != nil {
-		e.onNotification("Deep Research", msg, "info")
+	if e.onProgress != nil {
+		e.onProgress(msg)
 	}
 }
 

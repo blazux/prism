@@ -23,10 +23,11 @@ type emailStoredConfig struct {
 	IMAPPort int    `json:"imap_port"`
 	SMTPHost string `json:"smtp_host"`
 	SMTPPort int    `json:"smtp_port"`
-	User     string `json:"user"`
-	From     string `json:"from"`
-	Security string `json:"security,omitempty"`
-	Insecure bool   `json:"insecure,omitempty"`
+	User      string `json:"user"`
+	From      string `json:"from"`
+	Security  string `json:"security,omitempty"`
+	Insecure  bool   `json:"insecure,omitempty"`
+	ListLimit int    `json:"list_limit,omitempty"`
 }
 
 func (s *Server) loadEmailCfg(r *http.Request) (email.Config, bool) {
@@ -72,6 +73,7 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 			"from":         sc.From,
 			"security":     sc.Security,
 			"insecure":     sc.Insecure,
+			"list_limit":   sc.ListLimit,
 			"has_password": hasPass && pass != "",
 		})
 	case "POST":
@@ -97,6 +99,50 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), 500)
 				return
 			}
+		}
+		writeJSON(w, map[string]interface{}{"ok": true})
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+const emailTagsKey = "email_tags"
+
+// GET /api/email/tags -> stored {uid: {category, tags}} map.
+// POST a {uid: {category, tags}} map to merge it in (used by AI triage + manual).
+func (s *Server) handleEmailTags(w http.ResponseWriter, r *http.Request) {
+	if !s.pimStore(w) {
+		return
+	}
+	switch r.Method {
+	case "GET":
+		raw, _, _ := s.memStore.GetConfig(r.Context(), emailTagsKey)
+		if raw == "" {
+			raw = "{}"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(raw))
+	case "POST":
+		var incoming map[string]json.RawMessage
+		if json.NewDecoder(r.Body).Decode(&incoming) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
+		cur := map[string]json.RawMessage{}
+		if raw, ok, _ := s.memStore.GetConfig(r.Context(), emailTagsKey); ok && raw != "" {
+			json.Unmarshal([]byte(raw), &cur)
+		}
+		for k, v := range incoming {
+			if string(v) == "null" {
+				delete(cur, k)
+			} else {
+				cur[k] = v
+			}
+		}
+		out, _ := json.Marshal(cur)
+		if err := s.memStore.SetConfig(r.Context(), emailTagsKey, string(out)); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
 		}
 		writeJSON(w, map[string]interface{}{"ok": true})
 	default:
