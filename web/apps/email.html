@@ -69,6 +69,10 @@
   .fchip { font-size: 11px; padding: 3px 10px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--border2); color: var(--text2); cursor: pointer; white-space: nowrap; }
   .fchip:hover { color: var(--text); }
   .fchip.on { background: var(--bg3); color: var(--text); border-color: var(--accent); }
+  .fchip.ftag-more { color: var(--text3); border-style: dashed; }
+  .fchip.ftag-more:hover { color: var(--accent); border-color: var(--accent); }
+  .ftag-search { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--accent); color: var(--text); width: 120px; }
+  .ftag-search:focus { outline: none; }
   .mtags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
   .mtag { font-size: 9.5px; padding: 1px 7px; border-radius: 999px; background: var(--bg4); color: var(--text2); }
   .mcat { font-size: 9.5px; padding: 1px 7px; border-radius: 999px; font-weight: 600; color: #fff; }
@@ -115,6 +119,8 @@
 <script>
 const J = (r) => r.json();
 let cfg = null, messages = [], current = null, replyUid = 0, mailTags = {}, activeFilter = '';
+let showAllTags = false, tagSearch = '', tagEntriesCache = [];
+const TOP_TAGS = 5;
 
 // Category → colour for triage chips.
 const CAT_COLORS = { Action: 'var(--red)', FYI: 'var(--accent)', Newsletter: 'var(--text3)', Personal: 'var(--green)', Promo: 'var(--yellow)', Spam: 'var(--red)' };
@@ -145,7 +151,7 @@ function renderInbox() {
     <div class="toolbar">
       <button class="btn btn-accent" onclick="compose()">＋ Compose</button>
       <button class="btn" onclick="loadInbox()" title="Refresh">⟳</button>
-      <button class="btn" id="triage-btn" onclick="triage()" title="Classify inbox with AI">✨ Triage</button>
+      <button class="btn" id="triage-btn" onclick="triage()" title="Categorize the inbox with AI">✨ Categorize</button>
       <input class="search" id="search" placeholder="Search mail… (Enter)">
       <button class="btn" onclick="openSettings()" title="Mailbox settings">⚙</button>
     </div>
@@ -204,21 +210,67 @@ function renderFilters() {
     if (t.category) catCount[t.category] = (catCount[t.category] || 0) + 1;
     for (const tg of (t.tags || [])) tagCount[tg] = (tagCount[tg] || 0) + 1;
   }
-  const cats = Object.keys(catCount), tags = Object.keys(tagCount);
+  const cats = Object.keys(catCount);
+  // Tags sorted by frequency (most common first).
+  tagEntriesCache = Object.entries(tagCount).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   host.innerHTML = '';
-  if (!cats.length && !tags.length) { host.style.display = 'none'; return; }
+  if (!cats.length && !tagEntriesCache.length) { host.style.display = 'none'; return; }
   host.style.display = 'flex';
-  const chip = (label, val, color) => {
+  const mkChip = (label, val, color) => {
     const b = document.createElement('button');
     b.className = 'fchip' + (activeFilter === val ? ' on' : '');
     const dot = color ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle"></span>` : '';
     b.innerHTML = dot + esc(label);
     b.onclick = () => setFilter(val);
-    host.appendChild(b);
+    return b;
   };
-  chip(`All (${messages.length})`, '');
-  for (const c of cats) chip(`${c} (${catCount[c]})`, c, CAT_COLORS[c] || 'var(--text3)');
-  for (const tg of tags) chip(`#${tg} (${tagCount[tg]})`, 'tag:' + tg);
+  // In the expanded tag view, put the filter field first so it's easy to spot.
+  if (showAllTags && tagEntriesCache.length) {
+    const inp = document.createElement('input');
+    inp.className = 'ftag-search'; inp.placeholder = '🔍 Filter tags…'; inp.value = tagSearch;
+    inp.oninput = () => { tagSearch = inp.value; renderTagChips(); };
+    host.appendChild(inp);
+    setTimeout(() => inp.focus(), 0);
+  }
+  host.appendChild(mkChip(`All (${messages.length})`, ''));
+  for (const c of cats) host.appendChild(mkChip(`${c} (${catCount[c]})`, c, CAT_COLORS[c] || 'var(--text3)'));
+  if (!tagEntriesCache.length) return;
+
+  if (!showAllTags) {
+    const top = tagEntriesCache.slice(0, TOP_TAGS);
+    // Always keep the active tag visible even if it's not in the top.
+    if (activeFilter.slice(0, 4) === 'tag:' && !top.some(([t]) => 'tag:' + t === activeFilter)) {
+      const a = tagEntriesCache.find(([t]) => 'tag:' + t === activeFilter); if (a) top.push(a);
+    }
+    for (const [tg, c] of top) host.appendChild(mkChip(`#${tg} (${c})`, 'tag:' + tg));
+    if (tagEntriesCache.length > top.length) {
+      const more = document.createElement('button'); more.className = 'fchip ftag-more';
+      more.textContent = `＋${tagEntriesCache.length - TOP_TAGS} more tags`;
+      more.onclick = () => { showAllTags = true; renderFilters(); };
+      host.appendChild(more);
+    }
+  } else {
+    const wrap = document.createElement('span'); wrap.id = 'ftag-chips'; wrap.style.display = 'contents';
+    host.appendChild(wrap);
+    const less = document.createElement('button'); less.className = 'fchip ftag-more'; less.textContent = 'show less';
+    less.onclick = () => { showAllTags = false; tagSearch = ''; renderFilters(); };
+    host.appendChild(less);
+    renderTagChips();
+  }
+}
+// Tag chips inside the expanded view — re-rendered alone on search so the input keeps focus.
+function renderTagChips() {
+  const wrap = document.getElementById('ftag-chips'); if (!wrap) return;
+  wrap.innerHTML = '';
+  const q = tagSearch.trim().toLowerCase();
+  for (const [tg, c] of tagEntriesCache) {
+    if (q && !tg.toLowerCase().includes(q)) continue;
+    const b = document.createElement('button');
+    b.className = 'fchip' + (activeFilter === 'tag:' + tg ? ' on' : '');
+    b.textContent = `#${tg} (${c})`;
+    b.onclick = () => setFilter('tag:' + tg);
+    wrap.appendChild(b);
+  }
 }
 function setFilter(f) { activeFilter = f; renderFilters(); renderList(); }
 function passesFilter(m) {
@@ -335,20 +387,27 @@ async function aiReply() {
   catch (e) { ta.value = ''; document.getElementById('c-err').textContent = 'Draft failed: ' + e.message; }
 }
 
-// AI triage: classify the visible inbox into categories + tags, persist them.
+// AI categorize: classify the not-yet-categorized mails into categories + tags.
 async function triage() {
   if (!messages.length) return;
   const btn = document.getElementById('triage-btn');
-  const label = btn.textContent; btn.textContent = '✨ Triaging…'; btn.disabled = true;
+  const label = btn.textContent;
+  // Only the mails without tags yet — saves time on re-runs.
+  const todo = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).filter(m => !mailTags[m.uid]);
+  if (!todo.length) {
+    btn.textContent = '✓ All categorized';
+    setTimeout(() => { btn.textContent = label; }, 2000);
+    return;
+  }
+  btn.textContent = '✨ Categorizing…'; btn.disabled = true;
   try {
-    const sorted = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-    const payload = sorted.map((m, i) => ({ i, from: senderName(m.from), subject: (m.subject || '').slice(0, 140) }));
+    const payload = todo.map((m, i) => ({ i, from: senderName(m.from), subject: (m.subject || '').slice(0, 140) }));
     const out = await assist('email_triage', JSON.stringify(payload));
     let arr;
     try { arr = JSON.parse(out.replace(/```json|```/g, '').trim()); } catch { throw new Error('AI returned an unexpected format.'); }
     const updates = {};
     for (const it of (arr || [])) {
-      const m = sorted[it.i]; if (!m) continue;
+      const m = todo[it.i]; if (!m) continue;
       const rec = { category: it.category || '', tags: Array.isArray(it.tags) ? it.tags.slice(0, 2) : [] };
       mailTags[m.uid] = rec; updates[m.uid] = rec;
     }
@@ -358,7 +417,7 @@ async function triage() {
     renderList();
     btn.textContent = label;
   } catch (e) {
-    btn.textContent = '✨ Triage failed';
+    btn.textContent = '✨ Categorize failed';
     setTimeout(() => { btn.textContent = label; }, 2500);
   } finally { btn.disabled = false; }
 }

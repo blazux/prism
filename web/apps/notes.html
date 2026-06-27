@@ -45,29 +45,62 @@
   /* Editor pane */
   .editor { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .editor-head { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
-  .editor-head .title-in { flex: 1; font-size: 16px; font-weight: 600; background: none; border: none; padding: 4px 0; }
+  .editor-head .title-in { flex: 1; font-size: 16px; font-weight: 600; background: none; border: none; padding: 4px 0; color: var(--text); }
   .editor-head .title-in:focus { outline: none; border-bottom: 1px solid var(--accent); }
-  .editor-body { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 12px 14px; gap: 10px; }
-  .editor-body textarea { flex: 1; resize: none; line-height: 1.5; }
-  .md-preview { flex: 1; overflow-y: auto; line-height: 1.55; }
+  .tags-in { font-size: 12px; margin: 8px 14px 0; }
+  .seg { display: flex; border: 1px solid var(--border2); border-radius: 6px; overflow: hidden; }
+  .seg button { background: var(--bg2); border: none; color: var(--text2); font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; }
+  .seg button.active { background: var(--bg3); color: var(--accent); }
+
+  .ai-bar { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--border); align-items: center; }
+  .ai-bar .ai-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); font-weight: 600; }
+  .ai-btn { font-size: 12px; background: var(--bg2); border: 1px solid var(--border2); color: var(--text2); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+  .ai-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .ai-btn:disabled { opacity: .5; cursor: default; }
+  .ai-scope { font-size: 11px; color: var(--text3); margin-left: auto; }
+
+  .panes { flex: 1; display: flex; min-height: 0; }
+  .panes textarea { flex: 1; resize: none; border: none; line-height: 1.5; padding: 12px 14px; min-width: 0; font: inherit; font-size: 14px; background: none; color: var(--text); }
+  .panes textarea:focus { outline: none; }
+  .md-preview { flex: 1; overflow-y: auto; line-height: 1.55; padding: 12px 14px; min-width: 0; }
+  #editor.mode-edit .md-preview { display: none; }
+  #editor.mode-preview .panes textarea { display: none; }
+  #editor.mode-split .md-preview { border-left: 1px solid var(--border); }
   .md-preview h1,.md-preview h2,.md-preview h3 { margin: .6em 0 .3em; }
   .md-preview ul,.md-preview ol { padding-left: 1.3em; }
   .md-preview code { background: var(--bg3); padding: 1px 5px; border-radius: 4px; }
   .md-preview pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow: auto; }
+  .md-preview pre code { background: none; padding: 0; }
   .md-preview a { color: var(--accent); }
   .md-preview blockquote { border-left: 3px solid var(--border2); margin: .5em 0; padding-left: 10px; color: var(--text2); }
-  .tags-in { font-size: 12px; }
+  .md-preview .wikilink { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); cursor: pointer; }
+  .md-preview .wikilink.missing { color: var(--red); border-bottom-color: color-mix(in srgb, var(--red) 45%, transparent); }
+
+  .ai-result { border-top: 1px solid var(--accent); background: var(--bg2); padding: 10px 14px; display: none; flex-direction: column; gap: 8px; max-height: 40%; }
+  .ai-result.open { display: flex; }
+  .ai-result .lbl { font-size: 11px; color: var(--accent); font-weight: 600; }
+  .ai-result .artext { overflow-y: auto; white-space: pre-wrap; font-size: 13px; line-height: 1.55; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .ai-result .arf { display: flex; gap: 8px; }
+
   .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text3); flex-direction: column; gap: 8px; }
   .empty .big { font-size: 36px; opacity: .3; }
   .back-btn { display: none; }
-  .seg { display: flex; border: 1px solid var(--border2); border-radius: 6px; overflow: hidden; }
-  .seg button { background: var(--bg2); border: none; color: var(--text2); font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; }
-  .seg button.active { background: var(--bg3); color: var(--accent); }
+
+  /* custom-instruction modal */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .overlay.open { display: flex; }
+  .pform { width: min(420px, 92vw); background: var(--bg1); border: 1px solid var(--border2); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .pform .ttl { font-weight: 600; color: var(--text); }
+  .pform input, .pform select { background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 6px; padding: 7px 9px; font: inherit; width: 100%; box-sizing: border-box; }
+  .pform label { font-size: 11px; color: var(--text2); display: flex; flex-direction: column; gap: 4px; }
+  .pform .pf-err { color: var(--red); font-size: 12px; min-height: 14px; }
+  .pform .pf-foot { display: flex; gap: 8px; justify-content: flex-end; }
 
   @media (max-width: 560px) {
     .list-pane { width: 100%; }
     .app.editing .list-pane { display: none; }
     .app:not(.editing) .editor { display: none; }
+    .app .md-preview { display: none; }
     .back-btn { display: inline-flex; }
   }
 </style>
@@ -88,22 +121,68 @@
         <div class="big">📝</div>
         <div>Select a note, or create one</div>
       </div>
-      <div id="editor" style="display:none; height:100%; flex-direction:column; min-height:0;">
+      <div id="editor" class="mode-edit" style="display:none; height:100%; flex-direction:column; min-height:0;">
         <div class="editor-head">
           <button class="btn back-btn" onclick="closeEditor()">←</button>
           <input class="title-in" id="e-title" placeholder="Title">
           <div class="seg">
             <button id="tab-edit" class="active" onclick="setMode('edit')">Edit</button>
+            <button id="tab-split" onclick="setMode('split')">Split</button>
             <button id="tab-preview" onclick="setMode('preview')">Preview</button>
           </div>
+          <button class="btn" id="kn-btn" onclick="addToKnowledge()" title="Add this note to the agent's knowledge base (RAG)">🧠</button>
           <button class="btn" onclick="saveNote()">Save</button>
           <button class="btn" onclick="deleteNote()" title="Delete" style="color:var(--red)">🗑</button>
         </div>
-        <div class="editor-body">
-          <input class="tags-in" id="e-tags" placeholder="tags, comma, separated">
-          <textarea id="e-body" placeholder="Write your note… (Markdown supported)"></textarea>
-          <div class="md-preview" id="e-preview" style="display:none"></div>
+        <input class="tags-in" id="e-tags" placeholder="tags, comma, separated">
+        <div class="ai-bar">
+          <span class="ai-lbl">✨ AI</span>
+          <button class="ai-btn" data-task="doc_rewrite">Rewrite</button>
+          <button class="ai-btn" data-task="doc_continue">Continue</button>
+          <button class="ai-btn" data-task="doc_grammar">Fix grammar</button>
+          <button class="ai-btn" data-task="doc_shorten">Shorten</button>
+          <button class="ai-btn" data-task="doc_summarize">Summarize</button>
+          <button class="ai-btn" onclick="customAI()">Custom…</button>
+          <span class="ai-scope" id="ai-scope"></span>
         </div>
+        <div class="panes">
+          <textarea id="e-body" placeholder="Write your note… Markdown supported. Link to another note with [[Title]]. Select text, then use an AI action — or run it on the whole note."></textarea>
+          <div class="md-preview" id="e-preview"></div>
+        </div>
+        <div class="ai-result" id="ai-result">
+          <div class="lbl" id="ar-title">✨ Result</div>
+          <div class="artext" id="ar-text"></div>
+          <div class="arf">
+            <button class="btn btn-accent" onclick="applyResult('replace')">Replace</button>
+            <button class="btn" onclick="applyResult('insert')">Insert at cursor</button>
+            <button class="btn" onclick="applyResult('copy')">Copy</button>
+            <button class="btn" onclick="closeResult()" style="margin-left:auto">Dismiss</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="pform">
+      <div class="ttl">Custom AI instruction</div>
+      <input id="p-instr" placeholder="e.g. Make this sound more formal">
+      <div class="pf-foot">
+        <button class="btn" onclick="closePrompt()">Cancel</button>
+        <button class="btn btn-accent" onclick="runCustom()">Run</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="kn-overlay">
+    <div class="pform">
+      <div class="ttl">🧠 Add to knowledge base</div>
+      <label>Collection<select id="kn-col" onchange="toggleKnNew()"></select></label>
+      <input id="kn-new" placeholder="New collection name (e.g. research)" style="display:none">
+      <div class="pf-err" id="kn-err"></div>
+      <div class="pf-foot">
+        <button class="btn" onclick="closeKn()">Cancel</button>
+        <button class="btn btn-accent" id="kn-go" onclick="confirmKnowledge()">Add</button>
       </div>
     </div>
   </div>
@@ -111,7 +190,8 @@
 <script>
 const session = new URLSearchParams(location.search).get('session') || 'default';
 const api = (path, opts) => fetch(`/api/notes${path}`, opts).then(r => r.json());
-let notes = [], selectedId = null, filter = '', tagFilter = '', mode = 'edit';
+const $ = id => document.getElementById(id);
+let notes = [], selectedId = null, filter = '', tagFilter = '', mode = 'edit', lastTarget = null;
 
 // Pins (client-side, by note id).
 const PIN_KEY = 'prism-pinned-notes';
@@ -120,6 +200,7 @@ function isPinned(id) { return pins().has(id); }
 function togglePin(id) { const p = pins(); p.has(id) ? p.delete(id) : p.add(id); localStorage.setItem(PIN_KEY, JSON.stringify([...p])); render(); }
 
 const noteTags = n => (n.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 async function load() {
   const data = await api(`?session=${encodeURIComponent(session)}`);
@@ -128,7 +209,7 @@ async function load() {
 }
 
 function renderTagBar() {
-  const bar = document.getElementById('tag-bar');
+  const bar = $('tag-bar');
   const all = new Set();
   for (const n of notes) for (const t of noteTags(n)) all.add(t);
   if (!all.size) { bar.style.display = 'none'; return; }
@@ -140,13 +221,12 @@ function renderTagBar() {
 
 function render() {
   renderTagBar();
-  const host = document.getElementById('notes');
+  const host = $('notes');
   host.innerHTML = '';
   const f = filter.toLowerCase();
   let shown = notes.filter(n =>
     (!f || (n.title + ' ' + n.body + ' ' + n.tags).toLowerCase().includes(f)) &&
     (!tagFilter || noteTags(n).includes(tagFilter)));
-  // Pinned first, then by updated date desc.
   shown.sort((a, b) => (isPinned(b.id) - isPinned(a.id)) || (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   for (const n of shown) {
     const row = document.createElement('div');
@@ -164,15 +244,85 @@ function render() {
 
 function setMode(m) {
   mode = m;
-  document.getElementById('tab-edit').classList.toggle('active', m === 'edit');
-  document.getElementById('tab-preview').classList.toggle('active', m === 'preview');
-  const ta = document.getElementById('e-body'), pv = document.getElementById('e-preview');
-  if (m === 'preview') {
-    pv.innerHTML = window.marked ? marked.parse(ta.value || '') : esc(ta.value);
-    ta.style.display = 'none'; pv.style.display = '';
-  } else {
-    ta.style.display = ''; pv.style.display = 'none';
+  $('editor').className = 'mode-' + m;
+  ['edit', 'split', 'preview'].forEach(x => $('tab-' + x).classList.toggle('active', x === m));
+  if (m !== 'edit') updatePreview();
+}
+function escAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+// Render Markdown, turning [[Title]] into wiki links to other notes.
+function renderMarkdown(src) {
+  const withLinks = (src || '').replace(/\[\[([^\]\n]+)\]\]/g, (_, t) => {
+    const title = t.trim();
+    const exists = notes.some(x => (x.title || '').toLowerCase() === title.toLowerCase());
+    return `<a href="#" class="wikilink${exists ? '' : ' missing'}" data-note="${escAttr(title)}">${esc(title)}</a>`;
+  });
+  return window.marked ? marked.parse(withLinks) : esc(withLinks);
+}
+function updatePreview() {
+  if (mode === 'edit') return;
+  const pv = $('e-preview');
+  pv.innerHTML = renderMarkdown($('e-body').value);
+  pv.querySelectorAll('.wikilink').forEach(a => a.addEventListener('click', e => { e.preventDefault(); openWikiLink(a.dataset.note); }));
+}
+async function openWikiLink(title) {
+  if (selectedId) await saveNote();
+  const n = notes.find(x => (x.title || '').toLowerCase() === title.toLowerCase());
+  if (n) { select(n.id); return; }
+  if (confirm(`Note "${title}" doesn't exist yet. Create it?`)) {
+    const { id } = await api(`?session=${encodeURIComponent(session)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, body: '', tags: '' })
+    });
+    await load(); select(id);
   }
+}
+
+// Push the current note into the agent's RAG knowledge base — pick a collection.
+async function addToKnowledge() {
+  if (!selectedId) return;
+  if (!$('e-body').value.trim()) { flashKn('🧠', 'Empty'); return; }
+  await saveNote();
+  const sel = $('kn-col'); sel.innerHTML = '';
+  $('kn-err').textContent = ''; $('kn-new').style.display = 'none'; $('kn-new').value = '';
+  let cols = [];
+  try { const r = await fetch(`/api/rag/collections?session=${encodeURIComponent(session)}`); if (r.ok) cols = await r.json(); } catch (_) {}
+  for (const c of (cols || [])) {
+    const o = document.createElement('option'); o.value = c.name; o.textContent = `${c.name} (${c.doc_count || 0})`; sel.appendChild(o);
+  }
+  const nw = document.createElement('option'); nw.value = '__new__'; nw.textContent = '＋ New collection…'; sel.appendChild(nw);
+  const hasNotes = (cols || []).some(c => c.name === 'notes');
+  sel.value = hasNotes ? 'notes' : (cols && cols.length ? cols[0].name : '__new__');
+  toggleKnNew();
+  $('kn-overlay').classList.add('open');
+}
+function toggleKnNew() {
+  const isNew = $('kn-col').value === '__new__';
+  $('kn-new').style.display = isNew ? '' : 'none';
+  if (isNew) setTimeout(() => $('kn-new').focus(), 20);
+}
+function closeKn() { $('kn-overlay').classList.remove('open'); }
+async function confirmKnowledge() {
+  let col = $('kn-col').value;
+  if (col === '__new__') {
+    col = $('kn-new').value.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!col) { $('kn-err').textContent = 'Enter a collection name.'; return; }
+  }
+  const title = ($('e-title').value.trim() || 'note'), body = $('e-body').value;
+  const go = $('kn-go'); go.disabled = true; go.textContent = 'Adding…'; $('kn-err').textContent = '';
+  try {
+    const fd = new FormData();
+    fd.append('file', new Blob([`# ${title}\n\n${body}`], { type: 'text/markdown' }), `${title.replace(/[\/\\]/g, '-')}.md`);
+    fd.append('collection', col); fd.append('session', session);
+    const r = await fetch('/api/rag/upload', { method: 'POST', body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.error) throw new Error(d.error || 'failed');
+    closeKn(); flashKn('✓', 'Added to ' + col);
+  } catch (e) { $('kn-err').textContent = 'Failed: ' + e.message; }
+  finally { go.disabled = false; go.textContent = 'Add'; }
+}
+function flashKn(icon, msg) {
+  const btn = $('kn-btn'); btn.textContent = icon; btn.title = msg;
+  setTimeout(() => { btn.textContent = '🧠'; btn.title = "Add this note to the agent's knowledge base (RAG)"; }, 2000);
 }
 
 function select(id) {
@@ -180,14 +330,14 @@ function select(id) {
   const n = notes.find(x => x.id === id);
   if (!n) return;
   try { parent.postMessage({ type: 'context', text: `Editing a note titled "${n.title || 'untitled'}"` }, '*'); } catch (_) {}
-  document.getElementById('empty').style.display = 'none';
-  const ed = document.getElementById('editor');
-  ed.style.display = 'flex';
-  document.getElementById('e-title').value = n.title || '';
-  document.getElementById('e-tags').value = n.tags || '';
-  document.getElementById('e-body').value = n.body || '';
+  $('empty').style.display = 'none';
+  $('editor').style.display = 'flex';
+  $('e-title').value = n.title || '';
+  $('e-tags').value = n.tags || '';
+  $('e-body').value = n.body || '';
+  closeResult();
   setMode('edit');
-  document.getElementById('app').classList.add('editing');
+  $('app').classList.add('editing');
   render();
 }
 
@@ -198,20 +348,14 @@ async function newNote() {
   });
   await load();
   select(id);
-  document.getElementById('e-title').focus();
-  document.getElementById('e-title').select();
+  $('e-title').focus(); $('e-title').select();
 }
 
 async function saveNote() {
   if (!selectedId) return;
   await api(`?session=${encodeURIComponent(session)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      id: selectedId,
-      title: document.getElementById('e-title').value,
-      body: document.getElementById('e-body').value,
-      tags: document.getElementById('e-tags').value,
-    })
+    body: JSON.stringify({ id: selectedId, title: $('e-title').value, body: $('e-body').value, tags: $('e-tags').value })
   });
   await load();
 }
@@ -225,16 +369,59 @@ async function deleteNote() {
 }
 
 function closeEditor() {
-  document.getElementById('editor').style.display = 'none';
-  document.getElementById('empty').style.display = 'flex';
-  document.getElementById('app').classList.remove('editing');
+  $('editor').style.display = 'none';
+  $('empty').style.display = 'flex';
+  $('app').classList.remove('editing');
 }
 
-function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+// ── AI (one-shot via /api/ai/assist) ──────────────────────────────────────────
+function aiTarget() {
+  const ta = $('e-body'), s = ta.selectionStart, e = ta.selectionEnd;
+  if (s !== e) return { text: ta.value.slice(s, e), start: s, end: e, isSel: true };
+  return { text: ta.value, start: 0, end: ta.value.length, isSel: false };
+}
+async function assist(task, text, instruction) {
+  const r = await fetch('/api/ai/assist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task, text, instruction: instruction || '' }) });
+  if (!r.ok) throw new Error(await r.text());
+  return (await r.json()).result || '';
+}
+async function runAI(task, instruction, label) {
+  const tgt = aiTarget();
+  if (!tgt.text.trim()) return;
+  lastTarget = tgt;
+  $('ar-title').textContent = '✨ ' + (label || 'Result') + (tgt.isSel ? ' (selection)' : ' (whole note)');
+  $('ar-text').textContent = 'Working…';
+  $('ai-result').classList.add('open');
+  document.querySelectorAll('.ai-btn').forEach(b => b.disabled = true);
+  try { $('ar-text').textContent = await assist(task, tgt.text, instruction); }
+  catch (e) { $('ar-text').textContent = 'Failed: ' + e.message; }
+  finally { document.querySelectorAll('.ai-btn').forEach(b => b.disabled = false); }
+}
+function applyResult(how) {
+  const ta = $('e-body'), text = $('ar-text').textContent;
+  if (how === 'copy') { navigator.clipboard?.writeText(text); return; }
+  const t = lastTarget || { start: ta.value.length, end: ta.value.length };
+  if (how === 'replace') ta.value = ta.value.slice(0, t.start) + text + ta.value.slice(t.end);
+  else { const at = ta.selectionStart != null ? ta.selectionStart : ta.value.length; ta.value = ta.value.slice(0, at) + text + ta.value.slice(at); }
+  if (mode !== 'edit') updatePreview();
+  closeResult(); saveNote();
+}
+function closeResult() { $('ai-result').classList.remove('open'); }
+function customAI() { $('p-instr').value = ''; $('overlay').classList.add('open'); setTimeout(() => $('p-instr').focus(), 30); }
+function closePrompt() { $('overlay').classList.remove('open'); }
+function runCustom() { const i = $('p-instr').value.trim(); closePrompt(); if (i) runAI('custom', i, 'Custom'); }
 
-document.getElementById('search').addEventListener('input', e => { filter = e.target.value; render(); });
-['e-title', 'e-tags', 'e-body'].forEach(id =>
-  document.getElementById(id).addEventListener('blur', () => { if (selectedId) saveNote(); }));
+document.querySelectorAll('.ai-btn[data-task]').forEach(b => b.addEventListener('click', () => runAI(b.dataset.task, '', b.textContent)));
+$('p-instr').addEventListener('keydown', e => { if (e.key === 'Enter') runCustom(); });
+function updateScope() { const ta = $('e-body'); $('ai-scope').textContent = ta.selectionStart !== ta.selectionEnd ? 'AI → selection' : 'AI → whole note'; }
+['select', 'keyup', 'mouseup'].forEach(ev => $('e-body').addEventListener(ev, updateScope));
+$('e-body').addEventListener('input', () => { if (mode !== 'edit') updatePreview(); });
+
+$('search').addEventListener('input', e => { filter = e.target.value; render(); });
+['e-title', 'e-tags', 'e-body'].forEach(id => $(id).addEventListener('blur', () => { if (selectedId) saveNote(); }));
+
+// Reload when the agent changes notes via chat.
+addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') load(); });
 
 load();
 </script>

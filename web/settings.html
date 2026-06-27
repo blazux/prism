@@ -1300,6 +1300,13 @@ async function createCollection() {
   if (!name) { input.focus(); return }
   document.getElementById('modal-overlay').classList.remove('visible')
   input.value = ''
+  // Persist an empty collection so it survives with zero documents.
+  try {
+    await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description: '' }),
+    })
+  } catch (_) {}
   if (!collections.find(c => c.name === name)) {
     collections.push({ name, doc_count: 0, chunk_count: 0 })
     renderCollections()

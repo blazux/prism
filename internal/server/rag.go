@@ -135,7 +135,9 @@ func (s *Server) handleRAGCollections(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		cols, err := s.ragStore.ListCollections(r.Context(), sessionID)
+		// One shared knowledge base: list all collections regardless of which
+		// session created them (RAG data is keyed by collection name).
+		cols, err := s.ragStore.ListAllCollections(r.Context())
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return

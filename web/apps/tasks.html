@@ -496,6 +496,9 @@ async function saveForm() {
   loadJobs();
 }
 
+// Reload when the agent changes tasks/cron via chat.
+addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') { loadTodos(); loadJobs(); } });
+
 // init
 loadTodos();
 loadJobs();

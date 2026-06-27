@@ -262,8 +262,48 @@ func (s *Store) ListCollections(ctx context.Context, sessionID string) ([]Collec
 	var cols []Collection
 	for rows.Next() {
 		var c Collection
-		if err := rows.Scan(&c.Name, &c.SessionID, &c.Description, &c.DocCount, &c.ChunkCount, &c.UpdatedAt); err != nil {
+		var updated *time.Time // NULL for a collection with no documents
+		if err := rows.Scan(&c.Name, &c.SessionID, &c.Description, &c.DocCount, &c.ChunkCount, &updated); err != nil {
 			return nil, err
+		}
+		if updated != nil {
+			c.UpdatedAt = *updated
+		}
+		cols = append(cols, c)
+	}
+	return cols, rows.Err()
+}
+
+// ListAllCollections returns every collection regardless of which session created
+// it. RAG data is keyed by collection name (globally searchable), so the UI shows
+// one shared knowledge base rather than a per-session view.
+func (s *Store) ListAllCollections(ctx context.Context) ([]Collection, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+		    rc.name,
+		    rc.session_id,
+		    rc.description,
+		    COUNT(DISTINCT d.id)            AS doc_count,
+		    COALESCE(SUM(d.chunk_count), 0) AS chunk_count,
+		    MAX(d.updated_at)               AS updated_at
+		FROM rag_collections rc
+		LEFT JOIN rag_documents d ON d.collection = rc.name
+		GROUP BY rc.name, rc.session_id, rc.description
+		ORDER BY rc.name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cols []Collection
+	for rows.Next() {
+		var c Collection
+		var updated *time.Time // NULL for a collection with no documents
+		if err := rows.Scan(&c.Name, &c.SessionID, &c.Description, &c.DocCount, &c.ChunkCount, &updated); err != nil {
+			return nil, err
+		}
+		if updated != nil {
+			c.UpdatedAt = *updated
 		}
 		cols = append(cols, c)
 	}

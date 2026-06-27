@@ -71,6 +71,20 @@ function send(obj) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
 }
 
+// When the agent uses a PIM tool, refresh the matching app iframe if it's open
+// so changes the agent makes via chat show up without a manual reload.
+const PIM_TOOL_APP = { calendar: 'calendar', event: 'calendar', events: 'calendar', note: 'notes', notes: 'notes', task: 'tasks', tasks: 'tasks', cron: 'tasks' }
+const pendingPimTools = {}
+function trackPimTool(msg) { const app = PIM_TOOL_APP[msg.tool]; if (app) pendingPimTools[msg.id] = app }
+function maybeRefreshApp(msg) {
+  const app = pendingPimTools[msg.id]
+  if (!app) return
+  delete pendingPimTools[msg.id]
+  if (currentView?.type === 'app' && currentView.name === app) {
+    document.getElementById('app-frame')?.contentWindow?.postMessage({ type: 'data-changed', app }, '*')
+  }
+}
+
 // ─── Server messages ──────────────────────────────────────────────────────────
 
 function handleServerMsg(msg) {
@@ -78,8 +92,8 @@ function handleServerMsg(msg) {
     case 'stream':          appendStream(msg.content); break
     case 'stream_end':      finalizeStream(); break
     case 'attachment':      pendingAttachments.push(...(msg.images || [])); break
-    case 'tool_use':        appendToolUse(msg); break
-    case 'tool_result':     appendToolResult(msg); break
+    case 'tool_use':        appendToolUse(msg); trackPimTool(msg); break
+    case 'tool_result':     appendToolResult(msg); maybeRefreshApp(msg); break
     case 'progress':        appendProgress(msg.content); break
     case 'plugin_load':
       addWidget(msg)
@@ -797,7 +811,7 @@ window.handleSecretKey = function(e) {
 
 // ─── View router (rail: apps + boards) ─────────────────────────────────────────
 
-const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar', documents: 'Documents' }
+const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar' }
 const ASSISTANT = 'assistant'            // reserved session: the global super-agent
 let currentView = { type: 'board' }      // { type:'board', workspace } | { type:'app', name }
 let allSessions = []

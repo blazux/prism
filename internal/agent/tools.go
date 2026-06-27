@@ -282,7 +282,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name: "note",
-			Description: "Personal notes (per board). action=add|list|update|delete. Notes have a title, body and comma-separated tags. Use to remember free-form information the user wants kept.",
+			Description: "Personal notes, shared across the dashboard. action=add|list|update|delete. Notes have a title, body (Markdown) and comma-separated tags. Use to remember free-form information the user wants kept — and proactively offer to save substantial outputs (deep_research reports, summaries, drafts) as a note so they persist in the Notes app.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{

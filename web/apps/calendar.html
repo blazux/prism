@@ -19,11 +19,18 @@
   body { padding: 0; overflow: hidden; }
   .app { display: flex; flex-direction: column; height: 100%; }
   .head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-  .head h1 { font-size: 16px; color: var(--text); min-width: 170px; }
+  .head h1 { font-size: 16px; color: var(--text); min-width: 150px; }
   .head .spacer { flex: 1; }
   .nav-btn { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+  .seg { display: flex; border: 1px solid var(--border2); border-radius: 7px; overflow: hidden; }
+  .seg button { background: var(--bg2); border: none; color: var(--text2); font: inherit; font-size: 12px; padding: 5px 10px; cursor: pointer; }
+  .seg button:hover { color: var(--text); }
+  .seg button.active { background: var(--bg3); color: var(--accent); }
 
-  .grid { flex: 1; display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+  .body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Month ── */
+  .month { flex: 1; display: grid; grid-template-rows: auto 1fr; min-height: 0; }
   .weekdays { display: grid; grid-template-columns: repeat(7, 1fr); }
   .weekdays div { padding: 6px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); text-align: right; }
   .weeks { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; min-height: 0; }
@@ -36,6 +43,42 @@
   .ev { font-size: 11px; padding: 2px 6px; border-radius: 5px; background: var(--accent-dim); color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
   .ev-more { font-size: 10px; color: var(--text3); padding: 1px 6px; cursor: default; }
   .ev .t { color: var(--text2); }
+
+  /* ── Time grid (week / day) ── */
+  .tg { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .tg-head { display: flex; border-bottom: 1px solid var(--border); }
+  .tg-corner { width: 52px; flex-shrink: 0; }
+  .tg-headcols { flex: 1; display: grid; }
+  .tg-dh { text-align: center; padding: 6px 2px; font-size: 11px; color: var(--text2); cursor: pointer; border-left: 1px solid var(--border); text-transform: uppercase; letter-spacing: .03em; }
+  .tg-dh:hover { background: var(--bg2); }
+  .tg-dh .dnum2 { display: block; font-size: 16px; color: var(--text); margin-top: 2px; text-transform: none; }
+  .tg-dh.today .dnum2 { color: var(--accent); font-weight: 700; }
+  .tg-allday { display: flex; border-bottom: 1px solid var(--border); min-height: 26px; max-height: 84px; overflow-y: auto; }
+  .tg-allday .lab { width: 52px; flex-shrink: 0; font-size: 10px; color: var(--text3); padding: 4px 6px 0 0; text-align: right; }
+  .tg-adcols { flex: 1; display: grid; }
+  .tg-adcell { border-left: 1px solid var(--border); padding: 2px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+  .ad-ev { font-size: 11px; padding: 2px 6px; border-radius: 5px; background: var(--accent-dim); color: var(--accent); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tg-scroll { flex: 1; overflow-y: auto; display: flex; }
+  .tg-gutter { width: 52px; flex-shrink: 0; }
+  .tg-hour { font-size: 10px; color: var(--text3); text-align: right; padding-right: 6px; box-sizing: border-box; }
+  .tg-hour span { position: relative; top: -6px; }
+  .tg-cols { flex: 1; display: grid; }
+  .tg-col { position: relative; border-left: 1px solid var(--border); cursor: pointer; }
+  .tg-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); pointer-events: none; }
+  .tg-ev { position: absolute; background: var(--accent-dim); border-left: 3px solid var(--accent); border-radius: 4px; padding: 1px 5px; font-size: 11px; line-height: 1.3; color: var(--text); overflow: hidden; cursor: pointer; box-sizing: border-box; }
+  .tg-ev .et { color: var(--accent); font-size: 10px; }
+
+  /* ── Agenda ── */
+  .agenda { flex: 1; overflow-y: auto; }
+  .ag-day { padding: 10px 18px 5px; font-size: 12px; color: var(--text2); font-weight: 600; position: sticky; top: 0; background: var(--bg1); border-bottom: 1px solid var(--border); }
+  .ag-day.today { color: var(--accent); }
+  .ag-row { display: flex; gap: 12px; padding: 9px 18px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .ag-row:hover { background: var(--bg2); }
+  .ag-time { width: 116px; flex-shrink: 0; font-size: 12px; color: var(--text2); }
+  .ag-main { flex: 1; min-width: 0; }
+  .ag-title { color: var(--text); font-size: 13px; }
+  .ag-loc { font-size: 11px; color: var(--text3); margin-top: 1px; }
+  .ag-empty { padding: 44px; text-align: center; color: var(--text3); }
 
   /* event modal */
   .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 10; }
@@ -62,13 +105,16 @@
       <button class="btn nav-btn" onclick="move(-1)" title="Previous">‹</button>
       <button class="btn" onclick="today()">Today</button>
       <button class="btn nav-btn" onclick="move(1)" title="Next">›</button>
+      <div class="seg" id="seg">
+        <button data-m="month" onclick="setMode('month')">Month</button>
+        <button data-m="week" onclick="setMode('week')">Week</button>
+        <button data-m="day" onclick="setMode('day')">Day</button>
+        <button data-m="agenda" onclick="setMode('agenda')">Agenda</button>
+      </div>
       <span class="spacer"></span>
       <button class="btn btn-accent" onclick="addToday()">＋ Event</button>
     </div>
-    <div class="grid">
-      <div class="weekdays" id="weekdays"></div>
-      <div class="weeks" id="weeks"></div>
-    </div>
+    <div class="body" id="cal"></div>
   </div>
 
   <div class="overlay" id="overlay">
@@ -97,19 +143,63 @@
 const session = new URLSearchParams(location.search).get('session') || 'default';
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const WD = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-let view = new Date(); view.setDate(1);
+const HOUR_H = 44;       // px per hour in the time grid
+const AGENDA_DAYS = 30;
+const MODE_KEY = 'prism-cal-mode';
+
+let mode = localStorage.getItem(MODE_KEY) || 'month';
+let view = new Date();
 let events = [];
 
-document.getElementById('weekdays').innerHTML = WD.map(d => `<div>${d}</div>`).join('');
-
-function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+function $(id) { return document.getElementById(id); }
 function pad(x) { return String(x).padStart(2, '0'); }
+function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function el(tag, cls) { const x = document.createElement(tag); if (cls) x.className = cls; return x; }
+function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+function weekStart(d) { const x = startOfDay(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+function shortDate(d) { return MONTHS[d.getMonth()].slice(0, 3) + ' ' + d.getDate(); }
+function isAllDay(ev) {
+  const s = new Date(ev.startAt), e = ev.endAt ? new Date(ev.endAt) : null;
+  return !(s.getHours() || s.getMinutes()) && !(e && (e.getHours() || e.getMinutes()));
+}
+function minutesOf(d) { return d.getHours() * 60 + d.getMinutes(); }
+
+function setMode(m) {
+  mode = m; localStorage.setItem(MODE_KEY, m);
+  document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.m === m));
+  load();
+}
+function move(n) {
+  if (mode === 'month') view.setMonth(view.getMonth() + n);
+  else if (mode === 'week') view.setDate(view.getDate() + 7 * n);
+  else if (mode === 'day') view.setDate(view.getDate() + n);
+  else view.setDate(view.getDate() + AGENDA_DAYS * n);
+  load();
+}
+function today() { view = new Date(); load(); }
 
 async function load() {
+  document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.m === mode));
+  let from, to, title;
   const y = view.getFullYear(), m = view.getMonth();
-  const from = new Date(y, m, 1), to = new Date(y, m + 1, 0, 23, 59);
-  document.getElementById('title').textContent = `${MONTHS[m]} ${y}`;
-  try { parent.postMessage({ type: 'context', text: `Viewing the calendar — ${MONTHS[m]} ${y}` }, '*'); } catch (_) {}
+  if (mode === 'month') {
+    const first = new Date(y, m, 1);
+    from = new Date(y, m, 1 - ((first.getDay() + 6) % 7));
+    to = new Date(from); to.setDate(from.getDate() + 41);
+    title = `${MONTHS[m]} ${y}`;
+  } else if (mode === 'week') {
+    from = weekStart(view); to = new Date(from); to.setDate(from.getDate() + 6);
+    title = `${shortDate(from)} – ${shortDate(to)}, ${to.getFullYear()}`;
+  } else if (mode === 'day') {
+    from = startOfDay(view); to = new Date(from);
+    title = view.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  } else {
+    from = startOfDay(view); to = new Date(from); to.setDate(from.getDate() + AGENDA_DAYS);
+    title = 'Agenda';
+  }
+  $('title').textContent = title;
+  try { parent.postMessage({ type: 'context', text: `Viewing the calendar (${mode} view) — ${title}` }, '*'); } catch (_) {}
   try {
     const data = await fetch(`/api/events?session=${encodeURIComponent(session)}&from=${ymd(from)}&to=${ymd(to)} 23:59`).then(r => r.json());
     events = data.events || [];
@@ -118,34 +208,35 @@ async function load() {
 }
 
 function render() {
-  const weeks = document.getElementById('weeks');
-  weeks.innerHTML = '';
-  const y = view.getFullYear(), m = view.getMonth();
-  const first = new Date(y, m, 1);
-  let start = (first.getDay() + 6) % 7;             // Monday-based offset
-  const gridStart = new Date(y, m, 1 - start);
-  const todayStr = ymd(new Date());
+  const cal = $('cal'); cal.innerHTML = '';
+  if (mode === 'month') renderMonth(cal);
+  else if (mode === 'agenda') renderAgenda(cal);
+  else renderTimeGrid(cal, mode === 'week' ? 7 : 1);
+}
 
-  // bucket events by day
+// ── Month ──
+function renderMonth(cal) {
+  const wrap = el('div', 'month');
+  const wds = el('div', 'weekdays'); wds.innerHTML = WD.map(d => `<div>${d}</div>`).join('');
+  const weeks = el('div', 'weeks');
+  wrap.appendChild(wds); wrap.appendChild(weeks);
+  cal.appendChild(wrap);
+
+  const y = view.getFullYear(), m = view.getMonth();
+  const gridStart = new Date(y, m, 1 - ((new Date(y, m, 1).getDay() + 6) % 7));
+  const todayStr = ymd(new Date());
   const byDay = {};
-  for (const ev of events) {
-    const key = ymd(new Date(ev.startAt));
-    (byDay[key] = byDay[key] || []).push(ev);
-  }
+  for (const ev of events) (byDay[ymd(new Date(ev.startAt))] = byDay[ymd(new Date(ev.startAt))] || []).push(ev);
 
   for (let i = 0; i < 42; i++) {
     const d = new Date(gridStart); d.setDate(gridStart.getDate() + i);
     const key = ymd(d);
-    const cell = document.createElement('div');
-    cell.className = 'cell' + (d.getMonth() !== m ? ' dim' : '') + (key === todayStr ? ' today' : '');
+    const cell = el('div', 'cell' + (d.getMonth() !== m ? ' dim' : '') + (key === todayStr ? ' today' : ''));
     cell.onclick = () => openForm(key);
-    const num = document.createElement('div'); num.className = 'dnum'; num.textContent = d.getDate();
-    cell.appendChild(num);
-    const dayEvents = (byDay[key] || []).sort((a,b)=>a.startAt.localeCompare(b.startAt));
-    const MAXSHOW = 3;
-    for (const ev of dayEvents.slice(0, MAXSHOW)) {
-      const chip = document.createElement('div');
-      chip.className = 'ev';
+    const num = el('div', 'dnum'); num.textContent = d.getDate(); cell.appendChild(num);
+    const dayEvents = (byDay[key] || []).sort((a, b) => a.startAt.localeCompare(b.startAt));
+    for (const ev of dayEvents.slice(0, 3)) {
+      const chip = el('div', 'ev');
       const t = new Date(ev.startAt);
       const time = (t.getHours() || t.getMinutes()) ? `<span class="t">${pad(t.getHours())}:${pad(t.getMinutes())}</span> ` : '';
       chip.innerHTML = time + esc(ev.title);
@@ -153,56 +244,170 @@ function render() {
       chip.onclick = (e) => { e.stopPropagation(); openEvent(ev); };
       cell.appendChild(chip);
     }
-    if (dayEvents.length > MAXSHOW) {
-      const more = document.createElement('div');
-      more.className = 'ev-more';
-      more.textContent = `+${dayEvents.length - MAXSHOW} more`;
-      cell.appendChild(more);
-    }
+    if (dayEvents.length > 3) { const more = el('div', 'ev-more'); more.textContent = `+${dayEvents.length - 3} more`; cell.appendChild(more); }
     weeks.appendChild(cell);
   }
 }
 
-function move(n) { view.setMonth(view.getMonth() + n); load(); }
-function today() { view = new Date(); view.setDate(1); load(); }
+// ── Time grid (week / day) ──
+// Pack overlapping events into side-by-side columns.
+function layout(evs) {
+  const items = evs.map(ev => {
+    const s = new Date(ev.startAt), e = ev.endAt ? new Date(ev.endAt) : new Date(s.getTime() + 30 * 60000);
+    const start = minutesOf(s);
+    return { ev, start, end: Math.max(minutesOf(e), start + 20) };
+  }).sort((a, b) => a.start - b.start || a.end - b.end);
+  let cluster = [], clusterEnd = -1;
+  const flush = () => {
+    const colsEnd = [];
+    for (const it of cluster) {
+      let placed = false;
+      for (let c = 0; c < colsEnd.length; c++) { if (it.start >= colsEnd[c]) { it.col = c; colsEnd[c] = it.end; placed = true; break; } }
+      if (!placed) { it.col = colsEnd.length; colsEnd.push(it.end); }
+    }
+    for (const it of cluster) it.cols = colsEnd.length;
+  };
+  for (const it of items) {
+    if (cluster.length && it.start >= clusterEnd) { flush(); cluster = []; clusterEnd = -1; }
+    cluster.push(it); clusterEnd = Math.max(clusterEnd, it.end);
+  }
+  if (cluster.length) flush();
+  return items;
+}
+
+function renderTimeGrid(cal, ndays) {
+  const base = ndays === 7 ? weekStart(view) : startOfDay(view);
+  const days = []; for (let i = 0; i < ndays; i++) { const d = new Date(base); d.setDate(base.getDate() + i); days.push(d); }
+  const todayStr = ymd(new Date());
+  const colsCss = `repeat(${ndays},minmax(0,1fr))`;
+
+  const tg = el('div', 'tg');
+
+  const head = el('div', 'tg-head');
+  head.appendChild(el('div', 'tg-corner'));
+  const hc = el('div', 'tg-headcols'); hc.style.gridTemplateColumns = colsCss;
+  for (const d of days) {
+    const dh = el('div', 'tg-dh' + (ymd(d) === todayStr ? ' today' : ''));
+    dh.innerHTML = `${WD[(d.getDay() + 6) % 7]}<span class="dnum2">${d.getDate()}</span>`;
+    dh.onclick = () => { view = new Date(d); setMode('day'); };
+    hc.appendChild(dh);
+  }
+  head.appendChild(hc); tg.appendChild(head);
+
+  // all-day row
+  const ad = el('div', 'tg-allday');
+  const lab = el('div', 'lab'); lab.textContent = 'all-day'; ad.appendChild(lab);
+  const adcols = el('div', 'tg-adcols'); adcols.style.gridTemplateColumns = colsCss;
+  for (const d of days) {
+    const key = ymd(d);
+    const cell = el('div', 'tg-adcell');
+    cell.onclick = (e) => { if (e.target === cell) openForm(key, null, true); };
+    for (const ev of events.filter(e => isAllDay(e) && ymd(new Date(e.startAt)) === key)) {
+      const c = el('div', 'ad-ev'); c.textContent = ev.title; c.title = ev.title + (ev.location ? ' @ ' + ev.location : '');
+      c.onclick = (e) => { e.stopPropagation(); openEvent(ev); };
+      cell.appendChild(c);
+    }
+    adcols.appendChild(cell);
+  }
+  ad.appendChild(adcols); tg.appendChild(ad);
+
+  // scrollable body
+  const scroll = el('div', 'tg-scroll');
+  const gutter = el('div', 'tg-gutter');
+  for (let h = 0; h < 24; h++) { const hh = el('div', 'tg-hour'); hh.style.height = HOUR_H + 'px'; hh.innerHTML = h === 0 ? '' : `<span>${pad(h)}:00</span>`; gutter.appendChild(hh); }
+  scroll.appendChild(gutter);
+  const cols = el('div', 'tg-cols'); cols.style.gridTemplateColumns = colsCss;
+  for (const d of days) {
+    const key = ymd(d);
+    const col = el('div', 'tg-col'); col.style.height = (HOUR_H * 24) + 'px';
+    for (let h = 1; h < 24; h++) { const ln = el('div', 'tg-line'); ln.style.top = (h * HOUR_H) + 'px'; col.appendChild(ln); }
+    col.onclick = (e) => {
+      if (e.target !== col) return;
+      const mins = Math.max(0, Math.min(23 * 60 + 30, Math.round(e.offsetY / HOUR_H * 60 / 30) * 30));
+      openForm(key, pad(Math.floor(mins / 60)) + ':' + pad(mins % 60));
+    };
+    for (const it of layout(events.filter(ev => !isAllDay(ev) && ymd(new Date(ev.startAt)) === key))) {
+      const ev = it.ev, s = new Date(ev.startAt);
+      const box = el('div', 'tg-ev');
+      box.style.top = (it.start / 60 * HOUR_H) + 'px';
+      box.style.height = Math.max(15, (it.end - it.start) / 60 * HOUR_H - 2) + 'px';
+      box.style.left = `calc(${(it.col / it.cols * 100).toFixed(2)}% + 2px)`;
+      box.style.width = `calc(${(100 / it.cols).toFixed(2)}% - 4px)`;
+      box.innerHTML = `<span class="et">${pad(s.getHours())}:${pad(s.getMinutes())}</span> ${esc(ev.title)}`;
+      box.title = `${ev.title} · ${evRange(ev)}${ev.location ? ' @ ' + ev.location : ''}`;
+      box.onclick = (e) => { e.stopPropagation(); openEvent(ev); };
+      col.appendChild(box);
+    }
+    cols.appendChild(col);
+  }
+  scroll.appendChild(cols); tg.appendChild(scroll); cal.appendChild(tg);
+  requestAnimationFrame(() => {
+    scroll.scrollTop = 7 * HOUR_H;
+    // The scrollable body has a vertical scrollbar that the header/all-day rows
+    // don't — reserve the same width on them so the columns line up.
+    const sb = scroll.offsetWidth - scroll.clientWidth;
+    if (sb > 0) { head.style.marginRight = sb + 'px'; ad.style.marginRight = sb + 'px'; }
+  });
+}
+
+// ── Agenda ──
+function renderAgenda(cal) {
+  const ag = el('div', 'agenda');
+  const todayStr = ymd(new Date());
+  const bound = startOfDay(view).getTime();
+  const list = events.filter(ev => new Date(ev.startAt).getTime() >= bound).sort((a, b) => a.startAt.localeCompare(b.startAt));
+  if (!list.length) { ag.innerHTML = '<div class="ag-empty">No upcoming events</div>'; cal.appendChild(ag); return; }
+  let curKey = null;
+  for (const ev of list) {
+    const d = new Date(ev.startAt), key = ymd(d);
+    if (key !== curKey) {
+      curKey = key;
+      const h = el('div', 'ag-day' + (key === todayStr ? ' today' : ''));
+      h.textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+      ag.appendChild(h);
+    }
+    const row = el('div', 'ag-row'); row.onclick = () => openEvent(ev);
+    row.innerHTML = `<div class="ag-time">${esc(evRange(ev))}</div><div class="ag-main"><div class="ag-title">${esc(ev.title)}</div>${ev.location ? `<div class="ag-loc">@ ${esc(ev.location)}</div>` : ''}</div>`;
+    ag.appendChild(row);
+  }
+  cal.appendChild(ag);
+}
 
 // Human time range "09:00–10:30", "09:00" (no end), or "All day".
 function evRange(ev) {
+  if (isAllDay(ev)) return 'All day';
   const s = new Date(ev.startAt);
-  const timed = s.getHours() || s.getMinutes() || (ev.endAt && (new Date(ev.endAt).getHours() || new Date(ev.endAt).getMinutes()));
-  if (!timed) return 'All day';
   let str = `${pad(s.getHours())}:${pad(s.getMinutes())}`;
   if (ev.endAt) { const e = new Date(ev.endAt); str += `–${pad(e.getHours())}:${pad(e.getMinutes())}`; }
   return str;
 }
 
 // ── Event modal (create / edit) ────────────────────────────────────────────────
-let editing = null;   // event being edited, or null for a new one
-
-function $(id) { return document.getElementById(id); }
+let editing = null;
 function toggleTimes() { $('f-times').style.display = $('f-allday').checked ? 'none' : ''; }
 $('f-allday').addEventListener('change', toggleTimes);
 $('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeForm(); });
 
-function openForm(dateKey) {
+function openForm(dateKey, start, allday) {
   editing = null;
   $('form-title').textContent = 'New event';
   $('f-del').style.display = 'none';
-  setFields({ title: '', date: dateKey, allday: false, start: '09:00', end: '10:00', loc: '', desc: '' });
+  const s = start || '09:00';
+  const [hh, mm] = s.split(':').map(Number);
+  const endM = hh * 60 + mm + 60;
+  const end = pad(Math.floor(endM / 60) % 24) + ':' + pad(endM % 60);
+  setFields({ title: '', date: dateKey, allday: !!allday, start: s, end, loc: '', desc: '' });
   $('f-err').textContent = '';
   $('overlay').classList.add('open');
   setTimeout(() => $('f-title').focus(), 30);
 }
-
 function openEvent(ev) {
   editing = ev;
   $('form-title').textContent = 'Edit event';
   $('f-del').style.display = '';
-  const s = new Date(ev.startAt);
-  const e = ev.endAt ? new Date(ev.endAt) : null;
-  const allday = !(s.getHours() || s.getMinutes()) && !(e && (e.getHours() || e.getMinutes()));
+  const s = new Date(ev.startAt), e = ev.endAt ? new Date(ev.endAt) : null;
   setFields({
-    title: ev.title || '', date: ymd(s), allday,
+    title: ev.title || '', date: ymd(s), allday: isAllDay(ev),
     start: `${pad(s.getHours())}:${pad(s.getMinutes())}`,
     end: e ? `${pad(e.getHours())}:${pad(e.getMinutes())}` : '',
     loc: ev.location || '', desc: ev.description || '',
@@ -210,7 +415,6 @@ function openEvent(ev) {
   $('f-err').textContent = '';
   $('overlay').classList.add('open');
 }
-
 function setFields(v) {
   $('f-title').value = v.title; $('f-date').value = v.date;
   $('f-allday').checked = v.allday;
@@ -221,38 +425,27 @@ function setFields(v) {
 function closeForm() { $('overlay').classList.remove('open'); }
 
 async function saveForm() {
-  const title = $('f-title').value.trim();
-  const date = $('f-date').value;
+  const title = $('f-title').value.trim(), date = $('f-date').value;
   if (!title) { $('f-err').textContent = 'Title is required.'; return; }
   if (!date) { $('f-err').textContent = 'Date is required.'; return; }
   let start, end = '';
-  if ($('f-allday').checked) {
-    start = `${date}T00:00`;
-  } else {
-    start = `${date}T${$('f-start').value || '00:00'}`;
-    if ($('f-end').value) end = `${date}T${$('f-end').value}`;
-  }
+  if ($('f-allday').checked) { start = `${date}T00:00`; }
+  else { start = `${date}T${$('f-start').value || '00:00'}`; if ($('f-end').value) end = `${date}T${$('f-end').value}`; }
   const body = { title, start, end, location: $('f-loc').value.trim(), description: $('f-desc').value.trim() };
-  // Editing has no backend update endpoint → replace (delete + recreate).
   if (editing) await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${editing.id}`, { method: 'DELETE' });
-  const res = await fetch(`/api/events?session=${encodeURIComponent(session)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-  });
+  const res = await fetch(`/api/events?session=${encodeURIComponent(session)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) { $('f-err').textContent = 'Failed: ' + (await res.text()); return; }
-  closeForm();
-  load();
+  closeForm(); load();
 }
-
 async function deleteEvent() {
   if (!editing || !confirm(`Delete "${editing.title}"?`)) return;
   await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${editing.id}`, { method: 'DELETE' });
-  closeForm();
-  load();
+  closeForm(); load();
 }
-
 function addToday() { openForm(ymd(new Date())); }
 
-function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+// Reload when the agent changes calendar data via chat.
+addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') load(); });
 
 load();
 </script>
