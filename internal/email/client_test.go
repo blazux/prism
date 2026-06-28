@@ -30,9 +30,9 @@ func TestConfigFromDefault(t *testing.T) {
 	}
 }
 
-func TestExtractTextMIME(t *testing.T) {
+func TestParseBodyMIME(t *testing.T) {
 	raw := "Content-Type: text/plain; charset=utf-8\r\n\r\nHello world"
-	if got := extractText([]byte(raw)); !strings.Contains(got, "Hello world") {
-		t.Errorf("extractText = %q", got)
+	if got, _ := parseBody([]byte(raw)); !strings.Contains(got, "Hello world") {
+		t.Errorf("parseBody = %q", got)
 	}
 }

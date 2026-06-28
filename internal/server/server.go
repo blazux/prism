@@ -179,6 +179,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/email/read", s.handleEmailRead)
 	mux.HandleFunc("/api/email/search", s.handleEmailSearch)
 	mux.HandleFunc("/api/email/send", s.handleEmailSend)
+	mux.HandleFunc("/api/email/attachment", s.handleEmailAttachment)
 	mux.HandleFunc("/api/email/tags", s.handleEmailTags)
 	mux.HandleFunc("/api/ai/assist", s.handleAIAssist)
 	mux.HandleFunc("/api/chat", s.handleChatHTTP)

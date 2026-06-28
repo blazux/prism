@@ -7,6 +7,7 @@ package email
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -56,8 +57,24 @@ type Message struct {
 	Cc        string    `json:"cc,omitempty"`
 	Date      time.Time `json:"date"`
 	Seen      bool      `json:"seen"`
-	MessageID string    `json:"messageId,omitempty"`
-	Body      string    `json:"body,omitempty"`
+	MessageID   string       `json:"messageId,omitempty"`
+	Body        string       `json:"body,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+// Attachment is one file attached to a received message (metadata only; bytes
+// are fetched on demand via Config.Attachment).
+type Attachment struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"contentType"`
+	Size        int    `json:"size"`
+}
+
+// OutAttachment is a file to attach to an outgoing message.
+type OutAttachment struct {
+	Filename    string
+	ContentType string
+	Data        []byte
 }
 
 // ─── IMAP ─────────────────────────────────────────────────────────────────────
@@ -246,9 +263,60 @@ func (c Config) Read(uid uint32) (Message, error) {
 	}
 	m := toMessage(msgs[0])
 	if raw := msgs[0].FindBodySection(&imap.FetchItemBodySection{}); raw != nil {
-		m.Body = extractText(raw)
+		m.Body, m.Attachments = parseBody(raw)
 	}
 	return m, nil
+}
+
+// Attachment fetches the bytes of the index-th attachment of a message.
+func (c Config) Attachment(uid uint32, index int) (filename, contentType string, data []byte, err error) {
+	cl, err := c.dial()
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer cl.Close()
+	if _, err = cl.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+		return "", "", nil, fmt.Errorf("select inbox: %w", err)
+	}
+	uidSet := imap.UIDSetNum(imap.UID(uid))
+	msgs, err := cl.Fetch(uidSet, &imap.FetchOptions{BodySection: []*imap.FetchItemBodySection{{}}}).Collect()
+	if err != nil {
+		return "", "", nil, fmt.Errorf("fetch: %w", err)
+	}
+	if len(msgs) == 0 {
+		return "", "", nil, fmt.Errorf("message uid %d not found", uid)
+	}
+	raw := msgs[0].FindBodySection(&imap.FetchItemBodySection{})
+	if raw == nil {
+		return "", "", nil, fmt.Errorf("no body")
+	}
+	mr, err := gomail.CreateReader(bytes.NewReader(raw))
+	if err != nil {
+		return "", "", nil, err
+	}
+	n := 0
+	for {
+		p, e := mr.NextPart()
+		if e == io.EOF || e != nil {
+			break
+		}
+		if h, ok := p.Header.(*gomail.AttachmentHeader); ok {
+			if n == index {
+				fn, _ := h.Filename()
+				ct, _, _ := h.ContentType()
+				b, _ := io.ReadAll(p.Body)
+				if fn == "" {
+					fn = "attachment"
+				}
+				if ct == "" {
+					ct = "application/octet-stream"
+				}
+				return fn, ct, b, nil
+			}
+			n++
+		}
+	}
+	return "", "", nil, fmt.Errorf("attachment %d not found", index)
 }
 
 // Search runs a server-side text search and returns matching messages (newest
@@ -354,21 +422,22 @@ func (c Config) SetSeen(uid uint32, seen bool) error {
 
 // extractText pulls the text/plain part out of a raw RFC822 message, falling
 // back to the raw bytes if MIME parsing fails.
-func extractText(raw []byte) string {
+// parseBody walks a message's MIME parts, returning the best text body and the
+// list of attachments (metadata only).
+func parseBody(raw []byte) (string, []Attachment) {
 	mr, err := gomail.CreateReader(bytes.NewReader(raw))
 	if err != nil {
-		return string(raw)
+		return string(raw), nil
 	}
 	var text, htmlFallback strings.Builder
+	var atts []Attachment
 	for {
 		p, err := mr.NextPart()
-		if err == io.EOF {
+		if err == io.EOF || err != nil {
 			break
 		}
-		if err != nil {
-			break
-		}
-		if h, ok := p.Header.(*gomail.InlineHeader); ok {
+		switch h := p.Header.(type) {
+		case *gomail.InlineHeader:
 			ct, _, _ := h.ContentType()
 			b, _ := io.ReadAll(p.Body)
 			switch {
@@ -377,22 +446,51 @@ func extractText(raw []byte) string {
 			case strings.HasPrefix(ct, "text/html"):
 				htmlFallback.Write(b)
 			}
+		case *gomail.AttachmentHeader:
+			fn, _ := h.Filename()
+			ct, _, _ := h.ContentType()
+			b, _ := io.ReadAll(p.Body)
+			if fn == "" {
+				fn = "attachment"
+			}
+			atts = append(atts, Attachment{Filename: fn, ContentType: ct, Size: len(b)})
 		}
 	}
 	if text.Len() > 0 {
-		return text.String()
+		return text.String(), atts
 	}
 	if htmlFallback.Len() > 0 {
-		return htmlFallback.String()
+		return htmlFallback.String(), atts
 	}
-	return string(raw)
+	return string(raw), atts
 }
 
 // ─── SMTP ─────────────────────────────────────────────────────────────────────
 
 // Send sends a plain-text email. inReplyTo (a Message-ID) is optional and, when
 // set, threads the message as a reply.
-func (c Config) Send(to, subject, body, inReplyTo string) error {
+// b64wrap base64-encodes data into 76-char CRLF-wrapped lines (RFC 2045).
+func b64wrap(data []byte) string {
+	enc := base64.StdEncoding.EncodeToString(data)
+	var sb strings.Builder
+	for i := 0; i < len(enc); i += 76 {
+		end := i + 76
+		if end > len(enc) {
+			end = len(enc)
+		}
+		sb.WriteString(enc[i:end])
+		sb.WriteString("\r\n")
+	}
+	return sb.String()
+}
+
+// sanitizeHeaderVal strips characters that could break a MIME header (CR/LF and
+// double quotes) from a value such as a filename.
+func sanitizeHeaderVal(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "", "\"", "'").Replace(s)
+}
+
+func (c Config) Send(to, subject, body, inReplyTo string, atts []OutAttachment) error {
 	if c.SMTPHost == "" {
 		return fmt.Errorf("SMTP host not configured")
 	}
@@ -413,9 +511,31 @@ func (c Config) Send(to, subject, body, inReplyTo string) error {
 		fmt.Fprintf(&msg, "References: %s\r\n", inReplyTo)
 	}
 	msg.WriteString("MIME-Version: 1.0\r\n")
-	msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	msg.WriteString("\r\n")
-	msg.WriteString(body)
+	if len(atts) == 0 {
+		msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+		msg.WriteString(body)
+	} else {
+		boundary := fmt.Sprintf("prism%d", time.Now().UnixNano())
+		fmt.Fprintf(&msg, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
+		fmt.Fprintf(&msg, "--%s\r\n", boundary)
+		msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+		msg.WriteString(body)
+		msg.WriteString("\r\n")
+		for _, a := range atts {
+			ct := a.ContentType
+			if ct == "" {
+				ct = "application/octet-stream"
+			}
+			fn := sanitizeHeaderVal(a.Filename)
+			fmt.Fprintf(&msg, "--%s\r\n", boundary)
+			fmt.Fprintf(&msg, "Content-Type: %s; name=%q\r\n", ct, fn)
+			fmt.Fprintf(&msg, "Content-Disposition: attachment; filename=%q\r\n", fn)
+			msg.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+			msg.WriteString(b64wrap(a.Data))
+			msg.WriteString("\r\n")
+		}
+		fmt.Fprintf(&msg, "--%s--\r\n", boundary)
+	}
 
 	auth := smtp.PlainAuth("", c.User, c.Pass, c.SMTPHost)
 	serverAddr := fmt.Sprintf("%s:%d", c.SMTPHost, port)

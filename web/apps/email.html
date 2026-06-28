@@ -91,7 +91,15 @@
   .compose-head { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; color: var(--text); }
   .compose-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
   .compose-body textarea { min-height: 200px; resize: vertical; }
-  .compose-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--border); }
+  .compose-foot { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--border); }
+  .mgroup { position: sticky; top: 0; z-index: 1; padding: 5px 14px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); background: var(--bg1); border-bottom: 1px solid var(--border); }
+  .ratts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .c-atts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .att-chip { display: inline-flex; align-items: center; gap: 2px; font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--border2); color: var(--text2); text-decoration: none; white-space: nowrap; }
+  a.att-chip:hover { color: var(--accent); border-color: var(--accent); }
+  .att-sz { color: var(--text3); }
+  .att-x { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 11px; padding: 0 0 0 4px; }
+  .att-x:hover { color: var(--red); }
   .err { color: var(--red); font-size: 12px; }
 
   @media (max-width: 620px) { .mlist { width: 100%; } .mail.reading-open .mlist { display: none; } }
@@ -107,9 +115,12 @@
         <input id="c-to" placeholder="To">
         <input id="c-subject" placeholder="Subject">
         <textarea id="c-body" placeholder="Write your message…"></textarea>
+        <div id="c-atts" class="c-atts"></div>
         <div class="err" id="c-err"></div>
       </div>
       <div class="compose-foot">
+        <label class="btn" title="Attach files">📎 Attach<input type="file" id="c-file" multiple style="display:none"></label>
+        <span style="flex:1"></span>
         <button class="btn" onclick="closeCompose()">Cancel</button>
         <button class="btn btn-accent" onclick="doSend()">Send</button>
       </div>
@@ -119,6 +130,7 @@
 <script>
 const J = (r) => r.json();
 function suggest(items) { try { parent.postMessage({ type: 'suggest', items }, '*'); } catch (_) {} }
+function fmtSize(n) { n = n || 0; if (n < 1024) return ' · ' + n + ' B'; if (n < 1048576) return ' · ' + (n / 1024).toFixed(0) + ' KB'; return ' · ' + (n / 1048576).toFixed(1) + ' MB'; }
 let cfg = null, messages = [], current = null, replyUid = 0, mailTags = {}, activeFilter = '';
 let showAllTags = false, tagSearch = '', tagEntriesCache = [];
 const TOP_TAGS = 5;
@@ -289,7 +301,10 @@ function renderList() {
   // Newest first, by actual message date.
   const sorted = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).filter(passesFilter);
   if (!sorted.length) { setList('<div class="placeholder" style="padding:30px">No messages in this filter</div>'); return; }
+  let curGroup = null;
   for (const m of sorted) {
+    const g = dateGroup(m.date);
+    if (g !== curGroup) { curGroup = g; const hd = document.createElement('div'); hd.className = 'mgroup'; hd.textContent = g; l.appendChild(hd); }
     const row = document.createElement('div');
     row.className = 'mrow' + (m.seen ? '' : ' unread') + (current && current.uid === m.uid ? ' active' : '');
     const nm = senderName(m.from);
@@ -339,6 +354,7 @@ async function openMessage(uid) {
           <button class="btn" onclick="aiSummarize()">✨ Summarize</button>
           <button class="btn" onclick="aiReply()">✨ AI reply</button>
         </div>
+        ${current.attachments && current.attachments.length ? `<div class="ratts">${current.attachments.map((a, i) => `<a class="att-chip" href="/api/email/attachment?uid=${current.uid}&i=${i}" download="${esc(a.filename)}" title="${esc(a.filename)} — ${fmtSize(a.size)}">📎 ${esc(a.filename)}<span class="att-sz">${fmtSize(a.size)}</span></a>`).join('')}</div>` : ''}
       </div>`;
     const raw = current.body || '';
     if (looksHTML(raw)) {
@@ -454,14 +470,26 @@ function forward() {
   const quoted = `\n\n---------- Forwarded message ----------\nFrom: ${current.from}\nDate: ${new Date(current.date).toLocaleString()}\nSubject: ${current.subject}\nTo: ${current.to || ''}\n\n${body}`;
   openCompose('Forward', '', sub, quoted);
 }
+let composeAtts = []; // File objects to attach
 function openCompose(title, to, subject, body) {
   document.getElementById('compose-title').textContent = title;
   document.getElementById('c-to').value = to || '';
   document.getElementById('c-subject').value = subject || '';
   document.getElementById('c-body').value = body || '';
   document.getElementById('c-err').textContent = '';
+  composeAtts = []; renderComposeAtts();
   document.getElementById('overlay').classList.add('open');
 }
+function renderComposeAtts() {
+  const host = document.getElementById('c-atts');
+  host.innerHTML = composeAtts.map((f, i) =>
+    `<span class="att-chip">📎 ${esc(f.name)}<span class="att-sz">${fmtSize(f.size)}</span><button class="att-x" data-i="${i}" title="Remove">✕</button></span>`).join('');
+  host.querySelectorAll('.att-x').forEach(b => b.onclick = () => { composeAtts.splice(+b.dataset.i, 1); renderComposeAtts(); });
+}
+document.getElementById('c-file').addEventListener('change', e => {
+  for (const f of e.target.files) composeAtts.push(f);
+  e.target.value = ''; renderComposeAtts();
+});
 
 // ── Read state ──────────────────────────────────────────────────────────────
 function notifyBadge() { try { parent.postMessage({ type: 'mail-unread-changed' }, '*'); } catch (_) {} }
@@ -485,18 +513,32 @@ function stripHtml(s) {
 function closeCompose() { document.getElementById('overlay').classList.remove('open'); }
 
 async function doSend() {
-  const body = {
-    to: document.getElementById('c-to').value.trim(),
-    subject: document.getElementById('c-subject').value,
-    body: document.getElementById('c-body').value,
-  };
-  if (replyUid) body.uid = replyUid;
-  if (!body.body.trim()) { document.getElementById('c-err').textContent = 'Message is empty.'; return; }
-  const res = await fetch('/api/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const body = document.getElementById('c-body').value;
+  if (!body.trim()) { document.getElementById('c-err').textContent = 'Message is empty.'; return; }
+  const fd = new FormData();
+  fd.append('to', document.getElementById('c-to').value.trim());
+  fd.append('subject', document.getElementById('c-subject').value);
+  fd.append('body', body);
+  if (replyUid) fd.append('uid', String(replyUid));
+  for (const f of composeAtts) fd.append('file', f, f.name);
+  const res = await fetch('/api/email/send', { method: 'POST', body: fd });
   if (!res.ok) { document.getElementById('c-err').textContent = 'Send failed: ' + (await res.text()); return; }
+  composeAtts = [];
   closeCompose();
 }
 
+// Relative date bucket for the list group headers.
+function dateGroup(s) {
+  if (!s) return 'Unknown date';
+  const d = new Date(s), now = new Date();
+  const day0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dd = Math.round((day0 - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+  if (dd <= 0) return 'Today';
+  if (dd === 1) return 'Yesterday';
+  if (dd < 7) return 'This week';
+  if (dd < 30) return 'This month';
+  return d.toLocaleDateString([], { month: 'long', year: 'numeric' });
+}
 function fmtDate(s) {
   if (!s) return '';
   const d = new Date(s); const now = new Date();
