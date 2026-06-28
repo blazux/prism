@@ -966,9 +966,9 @@ function editWorkspace(sess) {
     <label style="font-size:11px;color:var(--text2)">Name<input id="ws-name" type="text" value="${escAttr(sess.name)}" style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px"></label>
     <div style="font-size:11px;color:var(--text2)">Icon</div>
     <div id="ws-icons" style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px;max-height:150px;overflow-y:auto"></div>
-    <label style="font-size:11px;color:var(--text2)">Agent personality
-      <textarea id="ws-personality" rows="4" placeholder="How this workspace's agent should behave (tone, focus, rules)… Leave blank for the default." style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;font:inherit;font-size:12px;resize:vertical;box-sizing:border-box"></textarea></label>
-    <div style="font-size:10px;color:var(--text3);margin-top:-4px">Takes effect on this workspace's next chat message.</div>
+    <label style="font-size:11px;color:var(--text2)">Workspace adaptation
+      <textarea id="ws-personality" rows="4" placeholder="Extra instructions for this workspace, layered on top of the default personality. Leave blank to use the default as-is." style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;font:inherit;font-size:12px;resize:vertical;box-sizing:border-box"></textarea></label>
+    <div style="font-size:10px;color:var(--text3);margin-top:-4px">Edit the default in Settings → Agent. Takes effect on this workspace's next message.</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
       <button id="ws-cancel" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 12px;cursor:pointer">Cancel</button>
       <button id="ws-save" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 14px;cursor:pointer">Save</button>

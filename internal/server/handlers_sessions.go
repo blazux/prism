@@ -128,24 +128,14 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// loadPersonality returns the personality for a session:
-// 1. session-specific personality_<sessionID>
-// 2. default session's personality (personality_default) — acts as a global default
-// 3. empty string → agent.New falls back to the hardcoded default
+// loadPersonality returns a session's OWN editable adaptation. The shared base
+// personality (memory.KeyPersonalityBase) is layered under it by the agent (see
+// agent.loadProfile), so this must NOT include the base.
 func loadPersonality(ctx context.Context, ms *memory.Store, sessionID string) string {
 	if ms == nil {
 		return ""
 	}
 	if p, ok, err := ms.GetConfig(ctx, memory.KeyPersonality+"_"+sessionID); err == nil && ok {
-		return p
-	}
-	if sessionID != "default" {
-		if p, ok, err := ms.GetConfig(ctx, memory.KeyPersonality+"_default"); err == nil && ok {
-			return p
-		}
-	}
-	// Legacy fallback: global key written by older versions.
-	if p, ok, err := ms.GetConfig(ctx, memory.KeyPersonality); err == nil && ok {
 		return p
 	}
 	return ""
@@ -181,6 +171,71 @@ func (s *Server) handlePersonality(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := ms.SetConfig(r.Context(), key, b.Personality); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// handleAgentPersonality reads/writes the global base personality (layered under
+// every session). GET -> {personality}; POST {personality}.
+func (s *Server) handleAgentPersonality(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	s.mu.RLock()
+	ms := s.memStore
+	s.mu.RUnlock()
+	if ms == nil {
+		http.Error(w, "memory store not available", http.StatusServiceUnavailable)
+		return
+	}
+	switch r.Method {
+	case "GET":
+		p, _, _ := ms.GetConfig(r.Context(), memory.KeyPersonalityBase)
+		json.NewEncoder(w).Encode(map[string]interface{}{"personality": p})
+	case "POST":
+		var b struct {
+			Personality string `json:"personality"`
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
+		if err := ms.SetConfig(r.Context(), memory.KeyPersonalityBase, b.Personality); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// handleAgentName reads/writes the global agent name. GET -> {name}; POST {name}.
+func (s *Server) handleAgentName(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	s.mu.RLock()
+	ms := s.memStore
+	s.mu.RUnlock()
+	if ms == nil {
+		http.Error(w, "memory store not available", http.StatusServiceUnavailable)
+		return
+	}
+	switch r.Method {
+	case "GET":
+		name, _, _ := ms.GetConfig(r.Context(), memory.KeyAgentName)
+		json.NewEncoder(w).Encode(map[string]interface{}{"name": name})
+	case "POST":
+		var b struct {
+			Name string `json:"name"`
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
+		if err := ms.SetConfig(r.Context(), memory.KeyAgentName, strings.TrimSpace(b.Name)); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}

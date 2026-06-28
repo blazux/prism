@@ -476,6 +476,21 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "search_history",
+			Description: "Full-text search across ALL past conversations — every workspace, the global assistant, and Telegram. Use it to recall what was said or decided earlier (even in another session) when the current context doesn't contain it. Returns matching messages with their date and session.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"query": {Type: "string", Description: "Keywords to search for (e.g. 'postgres password', 'lisbon offsite plan')"},
+					"limit": {Type: "integer", Description: "Max results (default 15)"},
+				},
+				Required: []string{"query"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name: "register_tool",
 			Description: "Write a Python script that becomes a callable tool. " +
 				"The script must start with exactly this comment (one line, valid JSON): " +

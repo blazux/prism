@@ -97,18 +97,34 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		body.Session = "default"
 	}
 
+	sessionID := sanitizeSessionID(body.Session)
+	if sessionID == "" {
+		sessionID = "default"
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	resp, err := s.runHeadlessChat(ctx, sessionID, body.Message, body.Model)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"response": resp,
+		"session":  sessionID,
+	})
+}
+
+// runHeadlessChat runs a single agent turn for a session outside the WebSocket
+// (used by /api/chat and the Telegram bridge). sessionID must already be
+// sanitized. Returns the assistant's final text (thinking blocks stripped).
+func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model string) (string, error) {
 	s.mu.RLock()
 	ms := s.memStore
 	s.mu.RUnlock()
 
-	model := body.Model
 	if model == "" {
 		model = s.cfg.Model
-	}
-
-	sessionID := sanitizeSessionID(body.Session)
-	if sessionID == "" {
-		sessionID = "default"
 	}
 
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
@@ -135,7 +151,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		executor.SetNotificationCallback(func(title, msg, level string) {
 			id, err := ms.AddNotification(context.Background(), sessionID, title, msg, level)
 			if err != nil {
-				log.Printf("[chat-http] notification: %v", err)
+				log.Printf("[chat-headless] notification: %v", err)
 				return
 			}
 			s.pushNotificationToSession(sessionID, id, title, msg, level)
@@ -150,10 +166,10 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		func() {},
 	)
 	executor.SetSecretRequestCallback(func(ctx context.Context, name, description string) error {
-		return fmt.Errorf("request_secret non disponible en mode headless (cron)")
+		return fmt.Errorf("request_secret unavailable in headless mode")
 	})
 
-	personality := loadPersonality(r.Context(), ms, sessionID)
+	personality := loadPersonality(ctx, ms, sessionID)
 
 	ag := agent.New(ollamaClient, executor, model, ms, personality)
 	ag.SetSession(sessionID, personality)
@@ -185,12 +201,9 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		return executor.SearchLearnings(ctx, query)
 	})
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
-
 	events := make(chan agent.Event, 200)
 	go func() {
-		ag.Chat(ctx, body.Message, nil, events)
+		ag.Chat(ctx, message, nil, events)
 		close(events)
 	}()
 
@@ -212,9 +225,6 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	log.Printf("[chat-http] session=%q response=%d chars", sessionID, response.Len())
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"response": strings.TrimSpace(response.String()),
-		"session":  sessionID,
-	})
+	log.Printf("[chat-headless] session=%q response=%d chars", sessionID, response.Len())
+	return strings.TrimSpace(response.String()), nil
 }

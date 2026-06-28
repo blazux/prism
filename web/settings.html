@@ -14,6 +14,19 @@ html, body { height: 100%; overflow: hidden; margin: 0; }
 .brain-sub { background: var(--bg2); border: 1px solid var(--border2); color: var(--text2); font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 8px; cursor: pointer; }
 .brain-sub:hover { color: var(--text); }
 .brain-sub.active { background: var(--bg3); color: var(--accent); border-color: var(--accent); }
+.brain-sub svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 3px; }
+.config-cat-header { display: flex; align-items: center; gap: 7px; }
+.config-cat-icon { display: inline-flex; align-items: center; line-height: 0; }
+.ag-label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); margin-bottom: 14px; }
+.ag-label input, .ag-label textarea { text-transform: none; letter-spacing: 0; background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+.ag-label textarea { resize: vertical; line-height: 1.5; }
+.ag-status { font-size: 12px; color: var(--accent); }
+.ag-ws { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: var(--bg1); }
+.ag-ws > summary { padding: 10px 12px; cursor: pointer; font-weight: 600; color: var(--text); font-size: 13px; user-select: none; }
+.ag-ws[open] > summary { border-bottom: 1px solid var(--border); }
+.ag-ws textarea { width: calc(100% - 24px); margin: 10px 12px 0; box-sizing: border-box; background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; resize: vertical; line-height: 1.5; }
+.ag-ws-foot { display: flex; align-items: center; gap: 10px; padding: 8px 12px 12px; }
+.ag-ws-status { font-size: 12px; color: var(--accent); }
 .appe-card { background: var(--bg1); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .appe-row { display: flex; align-items: center; gap: 12px; }
 .appe-row > label { width: 140px; flex-shrink: 0; font-size: 12.5px; color: var(--text2); }
@@ -55,7 +68,8 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 }
 .nav-item:hover { color: var(--text); background: var(--bg2); }
 .nav-item.active { color: var(--text); background: var(--bg3); }
-.nav-icon { font-size: 14px; width: 18px; text-align: center; }
+.nav-icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.nav-icon svg { width: 17px; height: 17px; }
 
 /* ── Content area ─────────────────────────────────────────────────────────── */
 #settings-content {
@@ -288,22 +302,28 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 
     <nav id="settings-nav">
       <div class="nav-item active" data-tab="tools">
-        <span class="nav-icon">⚒</span> Tools
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span> Tools
+      </div>
+      <div class="nav-item" data-tab="agent">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></span> Agent
+      </div>
+      <div class="nav-item" data-tab="channels">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></span> Channels
       </div>
       <div class="nav-item" data-tab="mcp">
-        <span class="nav-icon">⬡</span> MCP
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></span> MCP
       </div>
       <div class="nav-item" data-tab="secrets">
-        <span class="nav-icon">🔑</span> Secrets
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4"/><path d="m18 5 2 2"/><path d="m15 8 2 2"/></svg></span> Secrets
       </div>
       <div class="nav-item" data-tab="email">
-        <span class="nav-icon">✉</span> Email
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg></span> Email
       </div>
       <div class="nav-item" data-tab="knowledge">
-        <span class="nav-icon">📚</span> Knowledge
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span> Knowledge
       </div>
       <div class="nav-item" data-tab="appearance">
-        <span class="nav-icon">🎨</span> Appearance
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor" stroke="none"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.555C21.965 6.012 17.461 2 12 2z"/></svg></span> Appearance
       </div>
     </nav>
 
@@ -364,6 +384,8 @@ function renderTab(tab) {
   const content = document.getElementById('settings-content')
   content.innerHTML = ''
   if (tab === 'tools')   renderToolsTab(content)
+  else if (tab === 'agent') renderAgentTab(content)
+  else if (tab === 'channels') renderChannelsTab(content)
   else if (tab === 'mcp')     renderMCPTab(content)
   else if (tab === 'secrets') renderSecretsTab(content)
   else if (tab === 'email') renderEmailTab(content)
@@ -484,7 +506,7 @@ function renderAppearanceTab(container) {
   // Import / export custom themes (JSON)
   const ioBar = document.createElement('div')
   ioBar.style.cssText = 'display:flex;gap:8px;margin-top:8px'
-  ioBar.innerHTML = `<button class="btn" id="appe-export">⬇ Export</button><button class="btn" id="appe-import">⬆ Import</button><input type="file" id="appe-import-file" accept="application/json" style="display:none">`
+  ioBar.innerHTML = `<button class="btn" id="appe-export">${icon('download',14)} Export</button><button class="btn" id="appe-import">${icon('upload',14)} Import</button><input type="file" id="appe-import-file" accept="application/json" style="display:none">`
   pane.querySelector('#appe-custom-list').after(ioBar)
   ioBar.querySelector('#appe-export').onclick = () => {
     const customs = Object.entries(T.getAllThemes()).filter(([, t]) => t.custom).map(([id, t]) => ({ id, label: t.label, vars: t.vars }))
@@ -524,8 +546,8 @@ function renderBrainTab(container) {
   wrap.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0'
   wrap.innerHTML = `
     <div class="brain-subnav" style="display:flex;gap:6px;padding:12px 16px 0">
-      <button class="brain-sub ${brainSubTab==='knowledge'?'active':''}" data-sub="knowledge">📚 Documents</button>
-      <button class="brain-sub ${brainSubTab==='skills'?'active':''}" data-sub="skills">⚡ Skills</button>
+      <button class="brain-sub ${brainSubTab==='knowledge'?'active':''}" data-sub="knowledge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h6"/></svg> Documents</button>
+      <button class="brain-sub ${brainSubTab==='skills'?'active':''}" data-sub="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Skills</button>
     </div>
     <div id="brain-sub-content" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>`
   container.appendChild(wrap)
@@ -541,7 +563,9 @@ function renderBrainTab(container) {
 async function renderSkillsPanel(container) {
   const pane = document.createElement('div')
   pane.style.cssText = 'padding:16px;overflow-y:auto'
-  pane.innerHTML = '<p class="settings-page-title">Saved skills</p><div id="skills-list" style="display:flex;flex-direction:column;gap:8px"></div>'
+  pane.innerHTML = '<p class="settings-page-title">Saved skills</p>'
+    + '<div style="font-size:12px;color:var(--text2);margin:-4px 0 12px;line-height:1.5">Reusable procedures the agent learns. It now <b>self-improves</b>: after a non-trivial multi-step task it saves a skill, and refines an existing one when it finds a better way — so it gets better at recurring work over time.</div>'
+    + '<div id="skills-list" style="display:flex;flex-direction:column;gap:8px"></div>'
   container.appendChild(pane)
   const list = pane.querySelector('#skills-list')
   let skills = []
@@ -628,18 +652,157 @@ function makeSectionHeader(icon, color, label) {
   return hdr
 }
 
+// ── Theme-consistent line icons (Feather/Lucide style, inherit currentColor) ──
+const ICON_PATHS = {
+  dashboard: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+  files: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  system: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+  web: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+  personal: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  scheduling: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  knowledge: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+  custom: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  mcp: '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4"/><path d="m18 5 2 2"/><path d="m15 8 2 2"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/>',
+  agent: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  layers: '<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+  send: '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 9l5-5 5 5"/><path d="M12 4v12"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 11l5 5 5-5"/><path d="M12 16V4"/>',
+}
+function icon(name, size = 16) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-.18em">${ICON_PATHS[name] || ''}</svg>`
+}
+
+// ── Agent tab — name, default personality, per-workspace adaptations ────────────
+async function renderAgentTab(container) {
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  page.style.cssText = 'padding:18px;overflow-y:auto;max-width:620px'
+  container.appendChild(page)
+
+  let name = '', base = '', sessions = []
+  const NO_CACHE = { cache: 'no-store' }
+  try { name = (await fetch('/api/agent/name', NO_CACHE).then(r => r.json())).name || '' } catch (_) {}
+  try { base = (await fetch('/api/agent/personality', NO_CACHE).then(r => r.json())).personality || '' } catch (_) {}
+  try { sessions = (await fetch('/api/sessions', NO_CACHE).then(r => r.json())).sessions || [] } catch (_) {}
+
+  page.innerHTML = `
+    <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('agent')}</span><span class="config-cat-name">Agent identity</span></div>
+    <div style="font-size:12px;color:var(--text2);margin:6px 0 14px;line-height:1.5">The name and base personality apply to your agent everywhere. Each workspace can layer its own tweaks on top.</div>
+    <label class="ag-label">Name<input id="ag-name" type="text" placeholder="e.g. Prism, Jarvis…" value="${escHtml(name)}"></label>
+    <label class="ag-label">Default personality
+      <textarea id="ag-base" rows="9" placeholder="The base persona applied everywhere — tone, style, rules, what it should focus on.">${escHtml(base)}</textarea></label>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:4px">
+      <button class="btn btn-primary" id="ag-save">Save</button>
+      <span id="ag-status" class="ag-status"></span>
+    </div>
+
+    <div class="config-cat-header" style="margin-top:26px"><span class="config-cat-icon" style="color:var(--accent)">${icon('layers')}</span><span class="config-cat-name">Per-workspace adaptations</span></div>
+    <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.5">Extra instructions layered on top of the default for one workspace. Leave blank to use the default as-is.</div>
+    <div id="ag-workspaces"></div>`
+
+  page.querySelector('#ag-save').addEventListener('click', async () => {
+    const st = page.querySelector('#ag-status'); st.textContent = 'Saving…'
+    try {
+      await fetch('/api/agent/name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: page.querySelector('#ag-name').value }) })
+      await fetch('/api/agent/personality', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: page.querySelector('#ag-base').value }) })
+      st.textContent = '✓ Saved — takes effect on the next message'
+    } catch (e) { st.textContent = 'Failed: ' + e.message }
+    setTimeout(() => { st.textContent = '' }, 3000)
+  })
+
+  const wsHost = page.querySelector('#ag-workspaces')
+  // 'assistant' is the internal global assistant, not a user workspace.
+  const wsList = sessions.filter(s => s.id !== 'assistant')
+  if (!wsList.length) { wsHost.innerHTML = '<div style="color:var(--text3);font-size:12px">No workspaces yet.</div>'; return }
+  for (const s of wsList) {
+    const card = document.createElement('details')
+    card.className = 'ag-ws'
+    const label = escHtml(s.name) || 'Untitled workspace'
+    card.innerHTML = `<summary>${label}</summary>
+      <textarea rows="4" placeholder="Adaptation for this workspace…"></textarea>
+      <div class="ag-ws-foot"><button class="btn ag-ws-save">Save</button><span class="ag-ws-status"></span></div>`
+    const ta = card.querySelector('textarea')
+    card.addEventListener('toggle', async () => {
+      if (card.open && !ta.dataset.loaded) {
+        ta.dataset.loaded = '1'
+        try { ta.value = (await fetch(`/api/personality?session=${encodeURIComponent(s.id)}`).then(r => r.json())).personality || '' } catch (_) {}
+      }
+    })
+    card.querySelector('.ag-ws-save').addEventListener('click', async () => {
+      const st = card.querySelector('.ag-ws-status'); st.textContent = 'Saving…'
+      try {
+        await fetch(`/api/personality?session=${encodeURIComponent(s.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: ta.value }) })
+        st.textContent = '✓ Saved'
+      } catch (e) { st.textContent = 'Failed' }
+      setTimeout(() => { st.textContent = '' }, 2500)
+    })
+    wsHost.appendChild(card)
+  }
+}
+
+// ── Channels tab — reach the agent from outside (Telegram) ─────────────────────
+async function renderChannelsTab(container) {
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  page.style.cssText = 'padding:18px;overflow-y:auto;max-width:560px'
+  container.appendChild(page)
+
+  let tg = { configured: false, linked: false }
+  try { tg = await fetch('/api/telegram/config', { cache: 'no-store' }).then(r => r.json()) } catch (_) {}
+
+  page.innerHTML = `
+    <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('send')}</span><span class="config-cat-name">Telegram</span></div>
+    <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.55">Chat with your agent from your phone. Create a bot with <b>@BotFather</b>, paste its token below, then send <b>/start</b> to your bot to link it. <b>Only the first chat to send /start is allowed</b> — your agent has powerful tools, so keep the token private.</div>
+    <div id="tg-state" style="font-size:12px;margin-bottom:10px"></div>
+    <label class="ag-label">Bot token<input id="tg-token" type="password" placeholder="${tg.configured ? '•••••• (set — paste to replace)' : '123456:ABC-DEF…'}"></label>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn btn-primary" id="tg-save">Save token</button>
+      <button class="btn" id="tg-unlink" style="${tg.linked ? '' : 'display:none'}">Unlink chat</button>
+      <span id="tg-status" class="ag-status"></span>
+    </div>
+    <div style="margin-top:20px;font-size:11.5px;color:var(--text3)">More channels (Discord, Slack…) can be added later — the bridge is generic.</div>`
+
+  const tgState = page.querySelector('#tg-state')
+  tgState.innerHTML = !tg.configured
+    ? '<span style="color:var(--text3)">Not configured.</span>'
+    : (tg.linked
+      ? '<span style="color:var(--green)">✓ Linked and active.</span>'
+      : '<span style="color:var(--yellow)">Token set — send /start to your bot to link this chat.</span>')
+
+  page.querySelector('#tg-save').addEventListener('click', async () => {
+    const st = page.querySelector('#tg-status'), tok = page.querySelector('#tg-token').value.trim()
+    if (!tok) { st.textContent = 'Enter a token.'; return }
+    st.textContent = 'Saving…'
+    try {
+      await fetch('/api/telegram/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) })
+      st.textContent = '✓ Saved — now send /start to your bot'
+      page.querySelector('#tg-token').value = ''
+    } catch (e) { st.textContent = 'Failed: ' + e.message }
+    setTimeout(() => { st.textContent = '' }, 4000)
+  })
+  page.querySelector('#tg-unlink').addEventListener('click', async () => {
+    const st = page.querySelector('#tg-status'); st.textContent = 'Unlinking…'
+    try { await fetch('/api/telegram/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unlink: true }) }); st.textContent = '✓ Unlinked — next /start re-links' }
+    catch (e) { st.textContent = 'Failed' }
+    setTimeout(() => { st.textContent = '' }, 3000)
+  })
+}
+
 // ── Tools tab ─────────────────────────────────────────────────────────────────
 
 const TOOL_CATEGORIES = [
   {
-    name: 'Dashboard', icon: '⊞', color: 'var(--accent)',
+    name: 'Dashboard', icon: icon('dashboard'), color: 'var(--accent)',
     tools: [
       { id: 'add_widget',    name: 'Create widget',  desc: 'Generate and add an HTML/JS panel to the dashboard' },
       { id: 'remove_widget', name: 'Remove widget',  desc: 'Remove an existing widget from the dashboard' },
     ]
   },
   {
-    name: 'Files', icon: '📁', color: 'var(--yellow)',
+    name: 'Files', icon: icon('files'), color: 'var(--yellow)',
     tools: [
       { id: 'write_file', name: 'Write file',      desc: 'Create or edit a file in the workspace' },
       { id: 'read_file',  name: 'Read file',        desc: 'Read the contents of a file' },
@@ -648,7 +811,7 @@ const TOOL_CATEGORIES = [
     ]
   },
   {
-    name: 'System', icon: '⚡', color: 'var(--orange)',
+    name: 'System', icon: icon('system'), color: 'var(--orange)',
     tools: [
       { id: 'exec_command', name: 'Run command',   desc: 'Run a shell command in the Docker container' },
       { id: 'apt_install',  name: 'Install (apt)', desc: 'Install system packages with apt-get' },
@@ -656,7 +819,7 @@ const TOOL_CATEGORIES = [
     ]
   },
   {
-    name: 'Web', icon: '🌐', color: 'var(--green)',
+    name: 'Web', icon: icon('web'), color: 'var(--green)',
     tools: [
       { id: 'web_search',  name: 'Web search',      desc: 'Search the web via SearXNG' },
       { id: 'deep_research', name: 'Deep research',  desc: 'Multi-round web research: plans, searches, reads and synthesizes a sourced report' },
@@ -666,7 +829,7 @@ const TOOL_CATEGORIES = [
     ]
   },
   {
-    name: 'Personal', icon: '🗓', color: 'var(--accent)',
+    name: 'Personal', icon: icon('personal'), color: 'var(--accent)',
     tools: [
       { id: 'note',     name: 'Notes',    desc: 'Create, list and edit personal notes' },
       { id: 'task',     name: 'Tasks',    desc: 'Manage a to-do list with priorities and due dates' },
@@ -675,7 +838,7 @@ const TOOL_CATEGORIES = [
     ]
   },
   {
-    name: 'Scheduling', icon: '⏰', color: 'var(--red)',
+    name: 'Scheduling', icon: icon('scheduling'), color: 'var(--red)',
     tools: [
       { id: 'cron_list',   name: 'List jobs',    desc: 'List all scheduled cron jobs' },
       { id: 'cron_add',    name: 'Add job',       desc: 'Schedule a recurring command' },
@@ -684,12 +847,13 @@ const TOOL_CATEGORIES = [
     ]
   },
   {
-    name: 'Knowledge (RAG)', icon: '📚', color: 'var(--muted)',
+    name: 'Knowledge (RAG)', icon: icon('knowledge'), color: 'var(--muted)',
     tools: [
       { id: 'rag_ingest', name: 'Add document', desc: 'Index a document for semantic search' },
       { id: 'rag_search', name: 'Search',       desc: 'Search a RAG collection by meaning' },
       { id: 'rag_list',   name: 'List',         desc: 'List collections or documents inside one' },
       { id: 'skill',      name: 'Skills',       desc: 'Save and recall reusable procedures the agent learns' },
+      { id: 'search_history', name: 'Search history', desc: 'Full-text search across all past conversations (cross-session recall)' },
     ]
   },
 ]
@@ -721,7 +885,7 @@ async function renderToolsTab(container) {
   if (customTools.length > 0) {
     const section = document.createElement('div')
     section.className = 'config-section'
-    section.appendChild(makeSectionHeader('🔧', 'var(--green)', 'Custom Tools'))
+    section.appendChild(makeSectionHeader(icon('custom'), 'var(--green)', 'Custom Tools'))
     const grid = document.createElement('div')
     grid.className = 'config-tools-grid'
     for (const t of customTools) grid.appendChild(makeToolCard(t.name, t.name, t.description || '', t.filename))
@@ -740,7 +904,7 @@ async function renderToolsTab(container) {
   if (enabledMCP.length > 0) {
     const section = document.createElement('div')
     section.className = 'config-section'
-    section.appendChild(makeSectionHeader('⬡', 'var(--accent)', 'MCP Tools'))
+    section.appendChild(makeSectionHeader(icon('mcp'), 'var(--accent)', 'MCP Tools'))
     for (const srv of enabledMCP) {
       const label = document.createElement('div')
       label.className = 'config-mcp-server-label'
@@ -909,7 +1073,7 @@ async function renderSecretsTab(container) {
   section.className = 'config-section'
   section.innerHTML = `
     <div class="config-cat-header">
-      <span class="config-cat-icon" style="color:var(--accent)">🔑</span>
+      <span class="config-cat-icon" style="color:var(--accent)">${icon('key')}</span>
       <span class="config-cat-name">Secrets</span>
     </div>
     <div id="secrets-list" class="config-secrets-list">
@@ -1018,7 +1182,7 @@ async function renderEmailTab(container) {
     `<div class="eplogo${k === sel ? ' sel' : ''}" data-prov="${k}"><span class="epi">${p.icon}</span>${p.label}</div>`).join('')
 
   page.innerHTML = `
-    <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">✉</span><span class="config-cat-name">Mailbox</span></div>
+    <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('mail')}</span><span class="config-cat-name">Mailbox</span></div>
     <div style="font-size:12px;color:var(--text2);margin:6px 0 16px;line-height:1.5">Pick your provider, then enter your email and password. Credentials are stored <b>encrypted</b> on your server.</div>
     <div class="eplogos">${logos}</div>
     <div class="efield"><label>Email</label><input id="e-user" value="${escHtml(cfg.user || '')}" placeholder="you@example.com"></div>
@@ -1119,7 +1283,7 @@ async function renderRAGTab(container) {
   // Content
   const content = document.createElement('div')
   content.id = 'rag-content'
-  content.innerHTML = `<div id="no-collection-msg"><div class="icon">📚</div><div>Select a collection or create a new one</div></div>`
+  content.innerHTML = `<div id="no-collection-msg"><div class="icon">${icon('knowledge',40)}</div><div>Select a collection or create a new one</div></div>`
   tab.appendChild(content)
 
   await loadCollections()
@@ -1170,7 +1334,7 @@ async function deleteCollection(name) {
   if (currentCollection === name) {
     currentCollection = null
     const content = document.getElementById('rag-content')
-    if (content) content.innerHTML = `<div id="no-collection-msg"><div class="icon">📚</div><div>Select a collection or create a new one</div></div>`
+    if (content) content.innerHTML = `<div id="no-collection-msg"><div class="icon">${icon('knowledge',40)}</div><div>Select a collection or create a new one</div></div>`
   }
   await loadCollections()
 }
@@ -1183,7 +1347,7 @@ function renderRAGContent() {
   content.innerHTML = `
     <div id="rag-content-header">
       <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
-        <span style="font-size:14px;font-weight:600;color:var(--text)">📁 ${escHtml(currentCollection)}</span>
+        <span style="font-size:14px;font-weight:600;color:var(--text)">${icon('files',15)} ${escHtml(currentCollection)}</span>
         <input id="desc-input" type="text" value="${escHtml(desc)}"
                placeholder="Description for the agent (e.g. internal API docs…)"
                style="background:transparent;border:none;border-bottom:1px dashed var(--border2);
@@ -1192,7 +1356,7 @@ function renderRAGContent() {
       </div>
     </div>
     <div id="upload-zone">
-      <div id="upload-icon">⬆</div>
+      <div id="upload-icon">${icon('upload',26)}</div>
       <div id="upload-label">Drop a file here or click to select</div>
       <div id="upload-hint">PDF, DOCX, TXT, CSV, MD, JSON — max 50 MB</div>
       <input id="upload-input" type="file" multiple accept=".pdf,.docx,.txt,.csv,.md,.json,.tsv"

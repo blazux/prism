@@ -41,24 +41,26 @@ const (
 )
 
 type Agent struct {
-	ollama         ollama.Backend
-	executor       *ToolExecutor
-	model          string
-	histMu         sync.Mutex // guards history, toolSeq and historyLoaded (Chat goroutine vs WS read pump: InjectNote, ResetHistory, SetSession)
-	history        []ollama.Message
-	toolSeq        int // monotonically increasing tool call ID across all iterations
-	disabledTools  []string
-	ragCtxFn       func() string                                  // returns live RAG context block for system prompt
-	mcpCtxFn       func() string                                  // returns MCP servers context block for system prompt
-	userProfileFn  func() string                                  // returns full user profile for system prompt injection
-	skillsCtxFn    func() string                                  // returns saved-skills index for system prompt
-	viewCtxFn      func() string                                  // returns what the user is currently looking at
-	globalCtxFn    func() string                                  // global assistant: overview of all workspaces
-	learningsCtxFn func(ctx context.Context, query string) string // searches agent-learnings RAG for relevant past lessons
-	memStore       *memory.Store
-	sessionID      string
-	personality    string // editable section of the system prompt
-	historyLoaded  bool   // true after first DB load
+	ollama          ollama.Backend
+	executor        *ToolExecutor
+	model           string
+	histMu          sync.Mutex // guards history, toolSeq and historyLoaded (Chat goroutine vs WS read pump: InjectNote, ResetHistory, SetSession)
+	history         []ollama.Message
+	toolSeq         int // monotonically increasing tool call ID across all iterations
+	disabledTools   []string
+	ragCtxFn        func() string                                  // returns live RAG context block for system prompt
+	mcpCtxFn        func() string                                  // returns MCP servers context block for system prompt
+	userProfileFn   func() string                                  // returns full user profile for system prompt injection
+	skillsCtxFn     func() string                                  // returns saved-skills index for system prompt
+	viewCtxFn       func() string                                  // returns what the user is currently looking at
+	globalCtxFn     func() string                                  // global assistant: overview of all workspaces
+	learningsCtxFn  func(ctx context.Context, query string) string // searches agent-learnings RAG for relevant past lessons
+	memStore        *memory.Store
+	sessionID       string
+	personality     string // this session's own editable section (the adaptation, or the base for the default session)
+	basePersonality string // default personality prepended for non-default sessions (layered model)
+	agentName       string // optional global agent name injected into the prompt
+	historyLoaded   bool   // true after first DB load
 }
 
 // SetRAGContextFn registers a callback that returns the RAG collections section
@@ -134,10 +136,7 @@ func (a *Agent) buildToolList() []ollama.Tool {
 // New creates a new Agent. personality is the editable system prompt section loaded
 // from DB by the caller; pass "" to use the default.
 func New(ollamaClient ollama.Backend, executor *ToolExecutor, model string, memStore *memory.Store, personality string) *Agent {
-	if personality == "" {
-		personality = systemPromptPersonalityDefault
-	}
-	return &Agent{
+	a := &Agent{
 		ollama:      ollamaClient,
 		executor:    executor,
 		model:       model,
@@ -145,6 +144,26 @@ func New(ollamaClient ollama.Backend, executor *ToolExecutor, model string, memS
 		memStore:    memStore,
 		sessionID:   defaultSessionID,
 		personality: personality,
+	}
+	a.loadProfile()
+	return a
+}
+
+// loadProfile loads the global agent name and, for non-default sessions, the
+// base (default) personality that the session's own text is layered on top of.
+func (a *Agent) loadProfile() {
+	a.basePersonality = ""
+	a.agentName = ""
+	if a.memStore == nil {
+		return
+	}
+	ctx := context.Background()
+	if name, ok, err := a.memStore.GetConfig(ctx, memory.KeyAgentName); err == nil && ok {
+		a.agentName = name
+	}
+	// The base persona is layered under every session (including the default one).
+	if base, ok, err := a.memStore.GetConfig(ctx, memory.KeyPersonalityBase); err == nil && ok {
+		a.basePersonality = base
 	}
 }
 
@@ -165,10 +184,8 @@ func (a *Agent) ResetHistory() {
 // SetSession switches the agent to a different session, resetting in-memory state.
 func (a *Agent) SetSession(sessionID, personality string) {
 	a.sessionID = sessionID
-	if personality == "" {
-		personality = systemPromptPersonalityDefault
-	}
 	a.personality = personality
+	a.loadProfile()
 	a.histMu.Lock()
 	a.history = []ollama.Message{}
 	a.toolSeq = 0
@@ -256,7 +273,23 @@ var agentLocation = time.Local
 // learningsCtx is a pre-fetched snippet from the agent-learnings RAG (may be empty).
 func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) string {
 	var sb strings.Builder
-	sb.WriteString(a.personality)
+	// Layered personality: base (default) + this session's own adaptation.
+	persona := a.basePersonality
+	if a.personality != "" {
+		if persona != "" {
+			persona += "\n\n# Workspace-specific adaptation\n"
+		}
+		persona += a.personality
+	}
+	if strings.TrimSpace(persona) == "" {
+		persona = systemPromptPersonalityDefault
+	}
+	if a.agentName != "" {
+		sb.WriteString("Your name is ")
+		sb.WriteString(a.agentName)
+		sb.WriteString(".\n\n")
+	}
+	sb.WriteString(persona)
 	sb.WriteString(systemPromptCore)
 
 	// Inject conversation summary if any

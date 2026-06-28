@@ -53,6 +53,7 @@ type Server struct {
 	memStore       *memory.Store
 	mcpMgr         *mcp.Manager
 	socketSessions sync.Map // socket.io sid → targetHost (for WebSocket upgrade routing)
+	tgCancel       context.CancelFunc // cancels the running Telegram poller, if any
 }
 
 func New(cfg Config) *Server {
@@ -91,6 +92,7 @@ func (s *Server) Start() error {
 					s.mu.Unlock()
 					s.mcpMgr.SetStore(ms)
 					log.Printf("[memory] store initialized")
+					s.startTelegram() // launch the Telegram bridge if a token is set
 					return
 				}
 				log.Printf("[memory] init failed (attempt %d): %v", attempt, err)
@@ -165,6 +167,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/cron", s.handleCron)
 	mux.HandleFunc("/api/personality", s.handlePersonality)
+	mux.HandleFunc("/api/agent/name", s.handleAgentName)
+	mux.HandleFunc("/api/agent/personality", s.handleAgentPersonality)
+	mux.HandleFunc("/api/telegram/config", s.handleTelegramConfig)
 	mux.HandleFunc("/api/skills", s.handleSkills)
 	mux.HandleFunc("/api/email/config", s.handleEmailConfig)
 	mux.HandleFunc("/api/email/unread", s.handleEmailUnread)

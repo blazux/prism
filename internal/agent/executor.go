@@ -367,6 +367,9 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.saveUserInfo(ctx, str("topic"), str("content")))
 	case "save_learning":
 		return wrap(e.saveLearning(ctx, str("title"), str("content")))
+	case "search_history":
+		limitFloat, _ := args["limit"].(float64)
+		return wrap(e.searchHistory(ctx, str("query"), int(limitFloat)))
 	case "notify":
 		delayFloat, _ := args["delay_seconds"].(float64)
 		delay := int(delayFloat)

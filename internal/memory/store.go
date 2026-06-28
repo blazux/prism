@@ -16,7 +16,9 @@ import (
 )
 
 const (
-	KeyPersonality = "system_prompt_personality"
+	KeyPersonality     = "system_prompt_personality"
+	KeyAgentName       = "agent_name"
+	KeyPersonalityBase = "system_prompt_personality_base" // global base persona, layered under every session
 )
 
 // HistoryEntry is one row from conversation_history.
@@ -47,7 +49,66 @@ func NewStore(ctx context.Context, connStr string, encKey []byte) (*Store, error
 		pool.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
+	s.migratePersonalityBase(ctx)
 	return s, nil
+}
+
+// migratePersonalityBase moves the old "default = base" personality into the
+// dedicated base key, so the default workspace becomes a normal workspace whose
+// own adaptation layers on top of the shared base (like every other workspace).
+// Runs once; guarded by a flag config key.
+func (s *Store) migratePersonalityBase(ctx context.Context) {
+	if _, ok, _ := s.GetConfig(ctx, "personality_base_migrated"); ok {
+		return
+	}
+	old := ""
+	if v, ok, _ := s.GetConfig(ctx, KeyPersonality+"_default"); ok && v != "" {
+		old = v
+	} else if v, ok, _ := s.GetConfig(ctx, KeyPersonality); ok && v != "" {
+		old = v
+	}
+	if old != "" {
+		s.SetConfig(ctx, KeyPersonalityBase, old)
+		// Clear the default session's own value so it isn't applied twice.
+		s.SetConfig(ctx, KeyPersonality+"_default", "")
+	}
+	s.SetConfig(ctx, "personality_base_migrated", "1")
+}
+
+// HistoryHit is one match from a cross-session conversation search.
+type HistoryHit struct {
+	SessionID string    `json:"sessionId"`
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// SearchHistory full-text searches user/assistant messages across all sessions.
+func (s *Store) SearchHistory(ctx context.Context, query string, limit int) ([]HistoryHit, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 15
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT session_id, role, content, created_at
+		FROM conversation_history
+		WHERE role IN ('user', 'assistant')
+		  AND content_tsv @@ websearch_to_tsquery('simple', $1)
+		ORDER BY ts_rank(content_tsv, websearch_to_tsquery('simple', $1)) DESC, created_at DESC
+		LIMIT $2
+	`, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HistoryHit
+	for rows.Next() {
+		var h HistoryHit
+		if err := rows.Scan(&h.SessionID, &h.Role, &h.Content, &h.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) Close() { s.pool.Close() }
@@ -74,6 +135,9 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS conv_history_session_idx ON conversation_history(session_id, id)`,
+		// Full-text search across all conversations (cross-session recall).
+		`ALTER TABLE conversation_history ADD COLUMN IF NOT EXISTS content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED`,
+		`CREATE INDEX IF NOT EXISTS conv_history_tsv_idx ON conversation_history USING GIN(content_tsv)`,
 		`CREATE TABLE IF NOT EXISTS notifications (
 			id         BIGSERIAL PRIMARY KEY,
 			session_id TEXT NOT NULL DEFAULT 'default',
