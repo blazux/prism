@@ -182,8 +182,19 @@ function switchTab(t) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
   $('todo-view').style.display = t === 'todo' ? 'flex' : 'none';
   $('cron-view').style.display = t === 'cron' ? 'flex' : 'none';
-  try { parent.postMessage({ type: 'context', text: t === 'todo' ? 'Viewing the to-do list' : 'Viewing the agent\'s scheduled (cron) tasks' }, '*'); } catch (_) {}
+  if (t === 'todo') postTodoContext();
+  else { try { parent.postMessage({ type: 'context', text: 'Viewing the agent\'s scheduled (cron) tasks in the Tasks app.' }, '*'); } catch (_) {} }
   updateCount();
+}
+// Announce the open to-do items so the agent can act on "this task" / "the X task".
+function postTodoContext() {
+  if (tab !== 'todo') return;
+  const open = todos.filter(t => !t.done).slice(0, 12);
+  const list = open.map(t => `#${t.id} "${t.title}"${t.priority && t.priority !== 'normal' ? ' [' + t.priority + ']' : ''}`).join('; ');
+  const text = open.length
+    ? `Viewing the to-do list in the Tasks app. Open tasks: ${list}. To act on a task use the task tool with its id.`
+    : 'Viewing the to-do list in the Tasks app (no open tasks).';
+  try { parent.postMessage({ type: 'context', text }, '*'); } catch (_) {}
 }
 function updateCount() {
   if (tab === 'todo') { const open = todos.filter(t => !t.done).length; $('count').textContent = open ? `${open} open` : 'All done'; }
@@ -197,6 +208,7 @@ const PRANK = { high: 0, normal: 1, low: 2 };
 async function loadTodos() {
   try { todos = (await fetch('/api/tasks?include_done=true').then(r => r.json())).tasks || []; } catch { todos = []; }
   renderTodos();
+  postTodoContext();
 }
 function isOverdue(t) { return t.dueAt && !t.done && new Date(t.dueAt) < new Date(new Date().toDateString()); }
 function dueLabel(due) {

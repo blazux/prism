@@ -350,7 +350,8 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		if v := a.viewCtxFn(); v != "" {
 			sb.WriteString("\n\n## What the user is looking at right now\n")
 			sb.WriteString(v)
-			sb.WriteString("\nWhen the user says \"this\", \"it\", \"this email/note/event\", assume they mean what they are looking at above.")
+			sb.WriteString("\nWhen the user says \"this\", \"it\", \"this email/note/event/task\", assume they mean what they are looking at above; act on it directly using the ids given (no need to ask which one).")
+			sb.WriteString("\nYou are the glue between the apps: freely turn one thing into another when asked — an email into a task or calendar event, a task or note into a dashboard widget, etc. Use the relevant tools in sequence (e.g. read the email by UID, then create the task). When it's clearly useful, briefly offer such a bridge yourself (\"Want me to add this to your calendar?\"), but don't act without being asked.")
 		}
 	}
 

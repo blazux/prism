@@ -329,7 +329,10 @@ function select(id) {
   selectedId = id;
   const n = notes.find(x => x.id === id);
   if (!n) return;
-  try { parent.postMessage({ type: 'context', text: `Editing a note titled "${n.title || 'untitled'}"` }, '*'); } catch (_) {}
+  try {
+    const tg = noteTags(n).join(', ');
+    parent.postMessage({ type: 'context', text: `Viewing note #${n.id} titled "${n.title || 'untitled'}"${tg ? ` (tags: ${tg})` : ''} in the Notes app. To act on "this note" use the note tool with id=${n.id}.` }, '*');
+  } catch (_) {}
   $('empty').style.display = 'none';
   $('editor').style.display = 'flex';
   $('e-title').value = n.title || '';

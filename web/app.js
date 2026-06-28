@@ -98,9 +98,9 @@ function handleServerMsg(msg) {
     case 'plugin_load':
       addWidget(msg)
       clearTimeout(batchLoadingTimer)
-      batchLoadingTimer = setTimeout(() => { batchLoading = false }, 0)
+      batchLoadingTimer = setTimeout(() => { batchLoading = false; refreshBoardContext() }, 0)
       break
-    case 'plugin_unload':   removeWidget(msg.id); break
+    case 'plugin_unload':   removeWidget(msg.id); refreshBoardContext(); break
     case 'container_status':
       setContainerBadge(msg.status)
       if (msg.model) setCurrentModel(msg.model)
@@ -883,8 +883,19 @@ function setView(view) {
     if (title) title.textContent = boardName(ws_id)
     document.querySelector(`.rail-item[data-board-id="${CSS.escape(ws_id)}"]`)?.classList.add('active')
     setChatAgentLabel(boardName(ws_id))
-    setContext(`Workspace "${boardName(ws_id)}" — its dashboard (${widgets.size} widget(s))`)
+    refreshBoardContext()
   }
+}
+
+// Tell the agent which workspace it's looking at (id + existing widgets) so
+// "build a dashboard here" / "add a widget" target this workspace. Re-posted
+// when widgets load or change since they arrive asynchronously.
+function refreshBoardContext() {
+  if (currentView.type !== 'board') return
+  const ws_id = currentView.workspace
+  const titles = [...widgets.values()].map(r => r.title).filter(Boolean).slice(0, 20)
+  const wlist = titles.length ? ` Existing widgets: ${titles.join(', ')}.` : ' No widgets yet.'
+  setContext(`Viewing the "${boardName(ws_id)}" workspace dashboard (workspace id ${ws_id}, ${widgets.size} widget(s)).${wlist} Widgets you create go into THIS workspace — build, add or remove them here when asked.`)
 }
 
 async function loadSessions() {
