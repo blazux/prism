@@ -1045,6 +1045,12 @@ body {
 #chat-resize-handle:hover,
 #chat-resize-handle.dragging { background: var(--accent-dim); }
 
+/* Chat panel docked on the left instead of the right */
+[data-chat-side="left"] #chat-drawer { order: 1; border-left: none; border-right: 1px solid var(--border); }
+[data-chat-side="left"] #main { order: 2; }
+[data-chat-side="left"] #chat-resize-handle { left: auto; right: 0; }
+[data-chat-side="left"] #chat-fab { right: auto; left: 24px; }
+
 #chat-agent {
   text-transform: none;
   letter-spacing: 0.01em;

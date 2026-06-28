@@ -431,6 +431,12 @@ function renderAppearanceTab(container) {
         <select id="appe-density"><option value="compact">Compact</option><option value="comfortable">Comfortable</option><option value="spacious">Spacious</option></select></div>
       <div class="appe-row"><label>Animated background</label>
         <span style="display:flex;gap:10px;align-items:center;flex:1;max-width:240px"><input type="range" id="appe-bgfx" min="0" max="100" step="5" style="flex:1"><span id="appe-bgfx-val" style="font-size:12px;color:var(--text2);width:34px;text-align:right"></span></span></div>
+    </div>
+    <div class="appe-card">
+      <div class="appe-row"><label>Chat panel side</label>
+        <select id="appe-chatside"><option value="right">Right</option><option value="left">Left</option></select></div>
+      <div class="appe-row"><label>Open chat on load</label>
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;flex:1"><input type="checkbox" id="appe-chatdefault"><span style="font-size:12px;color:var(--text2)">Start with the chat panel open</span></label></div>
     </div>`
   container.appendChild(pane)
 
@@ -536,6 +542,13 @@ function renderAppearanceTab(container) {
   densSel.value = T.getPref(T.KEYS.DENSITY, 'comfortable'); densSel.addEventListener('change', () => T.applyDensity(densSel.value))
   bgfx.value = T.getPref(T.KEYS.BGFX, '100'); bgfxVal.textContent = bgfx.value + '%'
   bgfx.addEventListener('input', () => { bgfxVal.textContent = bgfx.value + '%'; T.applyBgfx(bgfx.value) })
+
+  // Layout
+  const chatSide = pane.querySelector('#appe-chatside'), chatDefault = pane.querySelector('#appe-chatdefault')
+  chatSide.value = T.getPref(T.KEYS.CHATSIDE, 'right')
+  chatSide.addEventListener('change', () => T.applyChatSide(chatSide.value))
+  chatDefault.checked = localStorage.getItem('prism-chat-default') === 'open'
+  chatDefault.addEventListener('change', () => localStorage.setItem('prism-chat-default', chatDefault.checked ? 'open' : 'closed'))
 }
 
 // ── Brain tab: the agent's mind — Knowledge (RAG: documents, memories,

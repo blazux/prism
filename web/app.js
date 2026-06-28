@@ -311,6 +311,9 @@ window.toggleChat = function() {
   if (chatOpen) setTimeout(() => document.getElementById('chat-input').focus(), 50)
 }
 
+// Layout preference: open the chat on load if the user chose so (Settings → Appearance).
+if (localStorage.getItem('prism-chat-default') === 'open') toggleChat()
+
 // ─── Context-aware chat ─────────────────────────────────────────────────────────
 // Tells the agent what the user is currently looking at (workspace, app, the
 // open email/note…) so "summarize this" / "reply to it" resolve on their own.
@@ -1682,7 +1685,10 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
 
   document.addEventListener('mousemove', e => {
     if (!resizing) return
-    const newWidth = Math.min(Math.max(startWidth + (startX - e.clientX), 300), 720)
+    // Right dock: drag left widens. Left dock: drag right widens.
+    const left = document.documentElement.getAttribute('data-chat-side') === 'left'
+    const delta = left ? (e.clientX - startX) : (startX - e.clientX)
+    const newWidth = Math.min(Math.max(startWidth + delta, 300), 720)
     chatDrawer.style.width = newWidth + 'px'
   })
 
