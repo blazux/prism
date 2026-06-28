@@ -1115,7 +1115,11 @@ function openCmdK() {
   const all = [
     ...(currentView.type === 'board' ? [{ kind: 'action', label: 'Tidy up windows', icon: '▦', run: tidyWindows }] : []),
     ...Object.keys(APP_TITLES).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
-    ...allSessions.filter(s => s.id !== ASSISTANT).map(s => ({ kind: 'board', id: s.id, label: s.name, icon: getWorkspaceIcon(s.id) || '▣' })),
+    ...allSessions.filter(s => s.id !== ASSISTANT).map(s => {
+      const ic = getWorkspaceIcon(s.id)
+      const icon = (ic && WS_ICONS[ic]) ? wsIconSvg(ic).replace('viewBox', 'width="16" height="16" viewBox') : (ic || '▣')
+      return { kind: 'board', id: s.id, label: s.name, icon }
+    }),
   ]
   let filtered = all, sel = 0
   function render() {
