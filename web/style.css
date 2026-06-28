@@ -2273,6 +2273,16 @@ body {
 /* ── Prism Light — kept sober (a whisper of the default aurora) ────────────── */
 [data-theme="prism-light"] #bg-fx::before { opacity: .05; }
 
+/* Themes with a canvas animation (bgfx.js) drop their CSS pattern layer so the
+   two don't double up; the gradient base and ambient ::after glow stay. */
+[data-theme="midnight"] #bg-fx::before,
+[data-theme="nord"] #bg-fx::before,
+[data-theme="solarized-dark"] #bg-fx::before,
+[data-theme="rose-pine"] #bg-fx::before,
+[data-theme="tech"] #bg-fx::before,
+[data-theme="synthwave"] #bg-fx::before,
+[data-theme="synthwave"] #bg-fx::after { display: none; }
+
 @keyframes bgTwinkle { from { opacity: .35; } to { opacity: .6; } }
 @keyframes bgFloat   { from { transform: translateY(2%); } to { transform: translateY(-6%); } }
 @keyframes bgBands {
