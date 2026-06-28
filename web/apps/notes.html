@@ -332,6 +332,11 @@ function select(id) {
   try {
     const tg = noteTags(n).join(', ');
     parent.postMessage({ type: 'context', text: `Viewing note #${n.id} titled "${n.title || 'untitled'}"${tg ? ` (tags: ${tg})` : ''} in the Notes app. To act on "this note" use the note tool with id=${n.id}.` }, '*');
+    parent.postMessage({ type: 'suggest', items: [
+      { label: '📅 To event', prompt: 'Create a calendar event from this note', send: true },
+      { label: '✅ To tasks', prompt: 'Create tasks from the action items in this note', send: true },
+      { label: '📝 Summarize', prompt: 'Summarize this note', send: true },
+    ] }, '*');
   } catch (_) {}
   $('empty').style.display = 'none';
   $('editor').style.display = 'flex';

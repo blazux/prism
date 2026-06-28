@@ -414,7 +414,10 @@ function openEvent(ev) {
   });
   $('f-err').textContent = '';
   $('overlay').classList.add('open');
-  try { parent.postMessage({ type: 'context', text: `Viewing calendar event #${ev.id}: "${ev.title}" on ${ymd(s)} ${evRange(ev)}${ev.location ? ' @ ' + ev.location : ''}. To act on "this event" use the calendar tool with id=${ev.id}.` }, '*'); } catch (_) {}
+  try {
+    parent.postMessage({ type: 'context', text: `Viewing calendar event #${ev.id}: "${ev.title}" on ${ymd(s)} ${evRange(ev)}${ev.location ? ' @ ' + ev.location : ''}. To act on "this event" use the calendar tool with id=${ev.id}.` }, '*');
+    parent.postMessage({ type: 'suggest', items: [{ label: '✅ Make a task', prompt: 'Create a task to prepare for this event', send: true }] }, '*');
+  } catch (_) {}
 }
 function setFields(v) {
   $('f-title').value = v.title; $('f-date').value = v.date;
@@ -425,7 +428,10 @@ function setFields(v) {
 }
 function closeForm() {
   $('overlay').classList.remove('open');
-  try { parent.postMessage({ type: 'context', text: `Viewing the calendar — ${$('title').textContent}` }, '*'); } catch (_) {}
+  try {
+    parent.postMessage({ type: 'context', text: `Viewing the calendar — ${$('title').textContent}` }, '*');
+    parent.postMessage({ type: 'suggest', items: [] }, '*');
+  } catch (_) {}
 }
 
 async function saveForm() {

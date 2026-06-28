@@ -325,6 +325,37 @@ function setContext(text) {
   send({ type: 'set_context', content: currentContext })
 }
 
+// Context-aware suggestion chips above the chat input. Apps emit their own via
+// postMessage({type:'suggest', items:[{label, prompt, send}]}); clicking a chip
+// pre-fills the chat (and sends it when send:true) so cross-app actions are
+// discoverable without dedicated buttons.
+let viewSuggestions = []
+function setSuggestions(items) {
+  viewSuggestions = Array.isArray(items) ? items : []
+  renderSuggestions()
+}
+function renderSuggestions() {
+  const host = document.getElementById('chat-suggestions')
+  if (!host) return
+  host.innerHTML = ''
+  if (!viewSuggestions.length) { host.style.display = 'none'; return }
+  host.style.display = 'flex'
+  for (const s of viewSuggestions) {
+    const b = document.createElement('button')
+    b.className = 'suggest-chip'
+    b.textContent = s.label
+    b.onclick = () => {
+      const input = document.getElementById('chat-input')
+      input.value = s.prompt
+      if (!chatOpen) toggleChat()
+      autoResizeTextarea(input)
+      if (s.send) sendChat()
+      else input.focus()
+    }
+    host.appendChild(b)
+  }
+}
+
 document.querySelectorAll('.empty-examples span').forEach(el => {
   el.addEventListener('click', () => {
     document.getElementById('chat-input').value = el.dataset.prompt
@@ -870,6 +901,7 @@ function setView(view) {
     document.querySelector(`.rail-item[data-app="${view.name}"]`)?.classList.add('active')
     setChatAgentLabel('🌐 Global assistant')
     setContext(`Viewing the ${APP_TITLES[view.name] || view.name} app`)
+    setSuggestions([]) // the app posts its own context-specific suggestions
   } else {
     // Workspace dashboard → chat is that workspace's agent.
     const ws_id = view.workspace || lastWorkspace
@@ -884,6 +916,10 @@ function setView(view) {
     document.querySelector(`.rail-item[data-board-id="${CSS.escape(ws_id)}"]`)?.classList.add('active')
     setChatAgentLabel(boardName(ws_id))
     refreshBoardContext()
+    setSuggestions([
+      { label: '➕ Add a widget', prompt: 'Add a widget to this dashboard: ' },
+      { label: '📊 Build a dashboard', prompt: 'Build me a dashboard for ' },
+    ])
   }
 }
 
@@ -1583,6 +1619,8 @@ window.addEventListener('message', e => {
     send({ type: 'file_open', path: d.path.replace(/^\/workspace\//, '') })
   } else if (d.type === 'context' && typeof d.text === 'string') {
     setContext(d.text)
+  } else if (d.type === 'suggest' && Array.isArray(d.items)) {
+    setSuggestions(d.items)
   } else if (d.type === 'mail-unread-changed') {
     refreshMailBadge()
   } else if (d.type === 'sendChat' && d.text) {

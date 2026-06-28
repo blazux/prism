@@ -118,6 +118,7 @@
 
 <script>
 const J = (r) => r.json();
+function suggest(items) { try { parent.postMessage({ type: 'suggest', items }, '*'); } catch (_) {} }
 let cfg = null, messages = [], current = null, replyUid = 0, mailTags = {}, activeFilter = '';
 let showAllTags = false, tagSearch = '', tagEntriesCache = [];
 const TOP_TAGS = 5;
@@ -163,6 +164,7 @@ function renderInbox() {
   document.getElementById('search').addEventListener('keydown', e => {
     if (e.key === 'Enter') { const q = e.target.value.trim(); q ? search(q) : loadInbox(); }
   });
+  suggest([{ label: '📋 Summarize unread', prompt: 'Summarize my unread emails', send: true }]);
   loadInbox();
 }
 
@@ -318,6 +320,11 @@ async function openMessage(uid) {
   try {
     current = (await fetch('/api/email/read?uid=' + uid).then(J)).message;
     try { parent.postMessage({ type: 'context', text: `Reading an email — from ${current.from}, subject "${current.subject}", UID ${current.uid}` }, '*'); } catch (_) {}
+    suggest([
+      { label: '✅ Make a task', prompt: 'Turn this email into a task', send: true },
+      { label: '📅 Add to calendar', prompt: 'Add this email to my calendar as an event', send: true },
+      { label: '📝 Summarize', prompt: 'Summarize this email', send: true },
+    ]);
     if (!current.seen) markSeen(current.uid, true);   // opening = mark read
     renderList();
     reading.innerHTML = `
