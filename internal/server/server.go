@@ -170,6 +170,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/agent/name", s.handleAgentName)
 	mux.HandleFunc("/api/agent/personality", s.handleAgentPersonality)
 	mux.HandleFunc("/api/telegram/config", s.handleTelegramConfig)
+	mux.HandleFunc("/api/telegram/send", s.handleTelegramSend)
 	mux.HandleFunc("/api/skills", s.handleSkills)
 	mux.HandleFunc("/api/email/config", s.handleEmailConfig)
 	mux.HandleFunc("/api/email/unread", s.handleEmailUnread)

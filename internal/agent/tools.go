@@ -200,7 +200,10 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "cron",
-			Description: "Manage scheduled cron jobs running inside the workspace container. Actions: list, add (name+schedule+command, plus a description), remove (name).",
+			Description: "Manage scheduled cron jobs running inside the workspace container. Actions: list, add (name+schedule+command, plus a description), remove (name).\n" +
+				"To deliver a result to the user on Telegram on a schedule, make the command POST a prompt to yourself with delivery enabled, e.g.:\n" +
+				"curl -s -X POST $PRISM_URL/api/chat -H \"Authorization: Bearer $PRISM_TOKEN\" -H 'Content-Type: application/json' -d '{\"message\":\"Summarize my unread emails in 5 bullet points\",\"session\":\"telegram\",\"deliver\":\"telegram\"}'\n" +
+				"You can also push a raw line with: curl -s -X POST $PRISM_URL/api/telegram/send -H \"Authorization: Bearer $PRISM_TOKEN\" -d '{\"text\":\"Backup finished ✅\"}'. ($PRISM_URL/$PRISM_TOKEN are substituted automatically.)",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{

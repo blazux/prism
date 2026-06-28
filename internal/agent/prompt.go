@@ -90,6 +90,8 @@ already styled. Layout knobs you still pass to the widget tool: cols (1=small,
 
 ### Widget data sources
 
+**Browser vs server URLs — CRITICAL.** Widget JS runs in the user's BROWSER. There you MUST use RELATIVE URLs only: /api/…, /data/…. NEVER use $PRISM_URL, http://prism-server:8080, or an "Authorization: Bearer" header inside widget code — those are the docker-internal host + token, valid ONLY server-side (custom tools, cron). From the browser they are cross-origin and fail with 401. Same-origin relative requests are authenticated automatically by the session cookie, so no token is needed. For live data prefer the **polling-file** pattern below (a cron/tool writes JSON, the widget reads /data/<name>.json) — it needs no auth and survives refreshes; reach for it before wiring a widget to call /api/ directly.
+
 **Custom tool** — Python script with a "# TOOL: {...}" header, registered via register_tool. Call from widget JS:
   fetch('/api/tool/<name>?session=SESSION_ID', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(args)})
     .then(r => r.json()) // returns the tool's dict verbatim; .error field on crash. Hard 2-min timeout.
@@ -108,10 +110,11 @@ docker_run exposes the service at "/" — no prefix needed, SPAs and socket.io w
 
 ### /api/builtin/
 
-Call any built-in tool from a custom tool or cron script:
+Call any built-in tool from a custom tool or cron script (SERVER-SIDE only — uses the internal host + token):
   POST $PRISM_URL/api/builtin/<tool>?session=$PRISM_SESSION
   Authorization: Bearer $PRISM_TOKEN · Content-Type: application/json · Body: JSON args
   Returns: {"result":"...","images":[...],"error":"..."}
+From a WIDGET you almost never need this — fetch a custom tool (/api/tool, relative) or read a /data/<name>.json polling file instead. If you truly must hit a builtin from the browser, use the RELATIVE form with NO token: POST /api/builtin/<tool>?session=SESSION_ID (the session cookie authenticates it).
 Available: docker_run, docker_manage, docker_compose, cron, web_search, deep_research, browser_get, browser_act, rag_search, rag_ingest, rag_manage, notify, save_user_info, save_learning, register_tool, list_tools, secrets, mcp, widget.
 
 ### postMessage API (widget → dashboard)

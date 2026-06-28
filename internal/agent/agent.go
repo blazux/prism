@@ -38,6 +38,8 @@ const (
 	keepRecentMessages = 20
 	// defaultSessionID is used for single-user deployments.
 	defaultSessionID = "default"
+	// telegramSessionID is the reserved session for the Telegram bridge.
+	telegramSessionID = "telegram"
 )
 
 type Agent struct {
@@ -291,6 +293,11 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	}
 	sb.WriteString(persona)
 	sb.WriteString(systemPromptCore)
+
+	// Channel guidance: the "telegram" session is the user texting from their phone.
+	if a.sessionID == telegramSessionID {
+		sb.WriteString("\n\n## Channel: Telegram\nYou are texting the user on Telegram (their phone), not the dashboard. Reply like a text message: short and conversational, usually one or two sentences, no headings or long recaps. A simple \"thanks\" just needs a brief \"you're welcome\" — do not re-check state, recap, or re-run any task. Only perform actions or use tools when the user clearly asks for something new in their latest message; otherwise just reply in words.")
+	}
 
 	// Inject conversation summary if any
 	if a.memStore != nil {

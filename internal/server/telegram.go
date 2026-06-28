@@ -198,6 +198,41 @@ func (s *Server) tgAction(api string, chatID int64, action string) {
 	}
 }
 
+// tgSendToOwner delivers a message to the linked chat. Used by scheduled jobs
+// (cron → Telegram) and /api/chat's deliver option.
+func (s *Server) tgSendToOwner(text string) error {
+	token := s.telegramToken()
+	if token == "" {
+		return fmt.Errorf("telegram not configured")
+	}
+	chatID, ok := s.telegramAllowedChat()
+	if !ok {
+		return fmt.Errorf("no linked telegram chat — send /start to your bot first")
+	}
+	s.tgSend("https://api.telegram.org/bot"+token, chatID, text)
+	return nil
+}
+
+// POST /api/telegram/send {text} — deliver an arbitrary message to the linked chat.
+func (s *Server) handleTelegramSend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	var b struct {
+		Text string `json:"text"`
+	}
+	if json.NewDecoder(r.Body).Decode(&b) != nil || strings.TrimSpace(b.Text) == "" {
+		http.Error(w, "text required", 400)
+		return
+	}
+	if err := s.tgSendToOwner(b.Text); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
 // GET /api/telegram/config -> {configured, linked}. POST {token} to set (resets
 // the linked chat), or {unlink:true} to forget the linked chat.
 func (s *Server) handleTelegramConfig(w http.ResponseWriter, r *http.Request) {

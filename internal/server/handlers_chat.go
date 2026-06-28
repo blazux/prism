@@ -88,6 +88,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		Session string `json:"session"`
 		Message string `json:"message"`
 		Model   string `json:"model"`
+		Deliver string `json:"deliver"` // optional: "telegram" to push the reply to the linked chat
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Message == "" {
 		http.Error(w, "message required", 400)
@@ -109,9 +110,18 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	delivered := false
+	if body.Deliver == "telegram" && strings.TrimSpace(resp) != "" {
+		if err := s.tgSendToOwner(resp); err != nil {
+			log.Printf("[chat-http] telegram deliver: %v", err)
+		} else {
+			delivered = true
+		}
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"response": resp,
-		"session":  sessionID,
+		"response":  resp,
+		"session":   sessionID,
+		"delivered": delivered,
 	})
 }
 
@@ -207,11 +217,18 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 		close(events)
 	}()
 
-	// Collect the final assistant text, skipping <think>…</think> blocks
+	// Collect only the FINAL assistant message. Reset on each tool call so the
+	// step-by-step planning narration the agent emits between tools doesn't get
+	// concatenated into one delivered message (e.g. a Telegram reply). Also skip
+	// <think>…</think> blocks.
 	var response strings.Builder
 	inThink := false
 	for ev := range events {
-		if ev.Type == "stream" {
+		switch ev.Type {
+		case "tool_use":
+			response.Reset()
+			inThink = false
+		case "stream":
 			switch ev.Content {
 			case "<think>":
 				inThink = true
