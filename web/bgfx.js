@@ -294,7 +294,7 @@
       ctx.strokeStyle = hexToRgba(colAccent, 0.16);
       ctx.beginPath(); ctx.moveTo(cx, horizon); ctx.lineTo(cx + (i / cols) * w * 1.1, h); ctx.stroke();
     }
-    gridPhase = (gridPhase + 0.006) % 1;
+    gridPhase = (gridPhase + 0.002) % 1;
     const rows = 18;
     for (let k = 0; k < rows; k++) {
       const t = (k / rows + gridPhase) % 1, y = horizon + (h - horizon) * (t * t);
