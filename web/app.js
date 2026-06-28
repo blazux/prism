@@ -295,7 +295,42 @@ function renderDock() {
     chip.append(btn, del)
     dock.appendChild(chip)
   }
+
+  // Tidy-up control (only worthwhile with 2+ open windows).
+  if ([...widgets.values()].filter(r => r.open).length >= 2) {
+    const tidy = document.createElement('button')
+    tidy.className = 'dock-tidy'
+    tidy.textContent = '▦ Tidy up'
+    tidy.title = 'Arrange the open windows into a uniform grid'
+    tidy.addEventListener('click', tidyWindows)
+    dock.appendChild(tidy)
+  }
 }
+
+// Arrange all open windows of the current workspace into a uniform, aligned grid.
+function tidyWindows() {
+  if (currentView.type !== 'board') return
+  const cont = dashboard()
+  const open = [...widgets.values()].filter(r => r.el && r.open && r.el.offsetParent !== null)
+  const n = open.length
+  if (!n) return
+  const gap = 12, pad = 12
+  const W = cont.clientWidth, H = cont.clientHeight
+  let cols = Math.min(Math.max(Math.round(Math.sqrt(n * (W / Math.max(H, 1)))), 1), n)
+  const rows = Math.ceil(n / cols)
+  const cellW = Math.max(200, Math.floor((W - pad * 2 - gap * (cols - 1)) / cols))
+  const cellH = Math.max(120, Math.floor((H - pad * 2 - gap * (rows - 1)) / rows))
+  open.sort((a, b) => (a.y - b.y) || (a.x - b.x)) // keep current reading order
+  open.forEach((r, i) => {
+    const col = i % cols, row = Math.floor(i / cols)
+    const g = { x: pad + col * (cellW + gap), y: pad + row * (cellH + gap), w: cellW, h: cellH }
+    r.el.style.left = g.x + 'px'; r.el.style.top = g.y + 'px'
+    r.el.style.width = g.w + 'px'; r.el.style.height = g.h + 'px'
+    r.x = g.x; r.y = g.y; r.w = g.w; r.h = g.h
+    persistState(r.id, g)
+  })
+}
+window.tidyWindows = tidyWindows
 
 function updateEmptyState() {
   const anyOpen = [...widgets.values()].some(w => w.open)
@@ -1078,6 +1113,7 @@ function openCmdK() {
   ov.appendChild(box); document.body.appendChild(ov)
   const input = box.querySelector('#cmdk-input'), list = box.querySelector('#cmdk-list')
   const all = [
+    ...(currentView.type === 'board' ? [{ kind: 'action', label: 'Tidy up windows', icon: '▦', run: tidyWindows }] : []),
     ...Object.keys(APP_TITLES).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
     ...allSessions.filter(s => s.id !== ASSISTANT).map(s => ({ kind: 'board', id: s.id, label: s.name, icon: getWorkspaceIcon(s.id) || '▣' })),
   ]
@@ -1087,13 +1123,13 @@ function openCmdK() {
     filtered.forEach((it, i) => {
       const row = document.createElement('div')
       row.style.cssText = `display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;${i === sel ? 'background:var(--bg3)' : ''}`
-      row.innerHTML = `<span style="width:20px;text-align:center">${it.icon}</span><span style="flex:1;color:var(--text);font-size:13px">${escAttr(it.label)}</span><span style="font-size:11px;color:var(--text3)">${it.kind === 'app' ? 'App' : 'Workspace'}</span>`
+      row.innerHTML = `<span style="width:20px;text-align:center">${it.icon}</span><span style="flex:1;color:var(--text);font-size:13px">${escAttr(it.label)}</span><span style="font-size:11px;color:var(--text3)">${it.kind === 'app' ? 'App' : it.kind === 'action' ? 'Action' : 'Workspace'}</span>`
       row.onmouseenter = () => { sel = i; render() }
       row.onclick = () => choose(i)
       list.appendChild(row)
     })
   }
-  function choose(i) { const it = filtered[i]; if (!it) return; close(); if (it.kind === 'app') setView({ type: 'app', name: it.name }); else selectBoard(it.id) }
+  function choose(i) { const it = filtered[i]; if (!it) return; close(); if (it.kind === 'action') it.run(); else if (it.kind === 'app') setView({ type: 'app', name: it.name }); else selectBoard(it.id) }
   function close() { ov.remove(); document.removeEventListener('keydown', onKey, true) }
   function onKey(e) {
     if (e.key === 'Escape') { e.preventDefault(); close() }
