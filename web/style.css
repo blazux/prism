@@ -617,6 +617,11 @@ body {
 
 /* ── Window resize handle ─────────────────────────────────────────────────── */
 
+/* Alignment guides shown while snapping a window */
+.snap-guide { position: absolute; z-index: 205; pointer-events: none; display: none; background: var(--accent); box-shadow: 0 0 4px var(--accent); }
+.snap-guide.v { top: 0; bottom: 0; width: 1px; }
+.snap-guide.h { left: 0; right: 0; height: 1px; }
+
 .window-resize {
   position: absolute;
   right: 0;

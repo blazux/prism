@@ -15,6 +15,19 @@
 
   const MIN_W = 200;
   const MIN_H = 120;
+  const SNAP = 8; // magnetic snap threshold (px)
+  // Snapping is on by default; users can turn it off (Settings → Appearance) or
+  // hold Alt to place freely during a single drag.
+  function snapEnabled() { try { return localStorage.getItem('prism-window-snap') !== '0'; } catch (_) { return true; } }
+  // Best alignment within SNAP: cands = [[edgeValue, offsetFromBase], …].
+  function snapAxis(cands, lines) {
+    let best = null;
+    for (const c of cands) for (const ln of lines) {
+      const d = Math.abs(c[0] - ln);
+      if (d <= SNAP && (!best || d < best.d)) best = { d: d, line: ln, off: c[1] };
+    }
+    return best;
+  }
   // Widgets live in the band 20..Z_CAP. The left rail sits just above this band
   // (see #rail z-index in style.css) so its hover flyout is never hidden behind
   // a window. When the counter reaches the cap we compact every window's z-index
@@ -58,6 +71,34 @@
       return [clamp(left, 0, maxLeft), clamp(top, 0, maxTop)];
     }
 
+    // ── Snapping & alignment guides ───────────────────────────────────────
+    let guideV = null, guideH = null;
+    function guide(axis, pos) {
+      let g = axis === 'v' ? guideV : guideH;
+      if (!g) {
+        g = document.createElement('div');
+        g.className = 'snap-guide ' + axis;
+        container.appendChild(g);
+        if (axis === 'v') guideV = g; else guideH = g;
+      }
+      if (pos == null) { g.style.display = 'none'; return; }
+      g.style.display = 'block';
+      if (axis === 'v') g.style.left = pos + 'px'; else g.style.top = pos + 'px';
+    }
+    function clearGuides() { guide('v', null); guide('h', null); }
+    // Snap lines from the container edges and every other visible window.
+    function collectLines() {
+      const vlines = [0, container.clientWidth], hlines = [0, container.clientHeight], widths = [], heights = [];
+      document.querySelectorAll('.widget-window').forEach((w) => {
+        if (w === el || w.offsetParent === null) return; // skip self + hidden/minimized
+        const l = w.offsetLeft, t = w.offsetTop, ww = w.offsetWidth, hh = w.offsetHeight;
+        vlines.push(l, l + ww, l + ww / 2);
+        hlines.push(t, t + hh, t + hh / 2);
+        widths.push(ww); heights.push(hh);
+      });
+      return { vlines: vlines, hlines: hlines, widths: widths, heights: heights };
+    }
+
     // ── Raise on interaction ──────────────────────────────────────────────
     const onDown = () => bringToFront(el);
     el.addEventListener('pointerdown', onDown, true);
@@ -78,7 +119,15 @@
     }
     function dragMove(e) {
       if (e.pointerId !== dragId) return;
-      const [l, t] = clampPos(ol + (e.clientX - sx), ot + (e.clientY - sy));
+      let [l, t] = clampPos(ol + (e.clientX - sx), ot + (e.clientY - sy));
+      if (snapEnabled() && !e.altKey) {
+        const w = el.offsetWidth, h = el.offsetHeight;
+        const lines = collectLines();
+        const sX = snapAxis([[l, 0], [l + w / 2, w / 2], [l + w, w]], lines.vlines);
+        const sY = snapAxis([[t, 0], [t + h / 2, h / 2], [t + h, h]], lines.hlines);
+        if (sX) { l = sX.line - sX.off; guide('v', sX.line); } else guide('v', null);
+        if (sY) { t = sY.line - sY.off; guide('h', sY.line); } else guide('h', null);
+      } else clearGuides();
       el.style.left = l + 'px';
       el.style.top = t + 'px';
     }
@@ -88,6 +137,7 @@
       dragId = null;
       setIframePE(el, true);
       handle.classList.remove('dragging');
+      clearGuides();
       emit();
     }
     handle.addEventListener('pointerdown', dragStart);
@@ -114,14 +164,30 @@
     }
     function rzMove(e) {
       if (e.pointerId !== rzId) return;
-      el.style.width = Math.max(MIN_W, ow + (e.clientX - rsx)) + 'px';
-      el.style.height = Math.max(MIN_H, oh + (e.clientY - rsy)) + 'px';
+      let w = Math.max(MIN_W, ow + (e.clientX - rsx));
+      let h = Math.max(MIN_H, oh + (e.clientY - rsy));
+      if (snapEnabled() && !e.altKey) {
+        const left0 = el.offsetLeft, top0 = el.offsetTop;
+        const lines = collectLines();
+        // Right edge → a snap line, OR width → a neighbour's width.
+        let bw = null;
+        lines.vlines.forEach((ln) => { const cw = ln - left0, d = Math.abs((left0 + w) - ln); if (cw >= MIN_W && d <= SNAP && (!bw || d < bw.d)) bw = { d: d, v: cw, g: ln }; });
+        lines.widths.forEach((ww) => { const d = Math.abs(w - ww); if (ww >= MIN_W && d <= SNAP && (!bw || d < bw.d)) bw = { d: d, v: ww, g: left0 + ww }; });
+        let bh = null;
+        lines.hlines.forEach((ln) => { const ch = ln - top0, d = Math.abs((top0 + h) - ln); if (ch >= MIN_H && d <= SNAP && (!bh || d < bh.d)) bh = { d: d, v: ch, g: ln }; });
+        lines.heights.forEach((hh) => { const d = Math.abs(h - hh); if (hh >= MIN_H && d <= SNAP && (!bh || d < bh.d)) bh = { d: d, v: hh, g: top0 + hh }; });
+        if (bw) { w = bw.v; guide('v', bw.g); } else guide('v', null);
+        if (bh) { h = bh.v; guide('h', bh.g); } else guide('h', null);
+      } else clearGuides();
+      el.style.width = w + 'px';
+      el.style.height = h + 'px';
     }
     function rzEnd(e) {
       if (e.pointerId !== rzId) return;
       try { grip.releasePointerCapture(rzId); } catch (_) {}
       rzId = null;
       setIframePE(el, true);
+      clearGuides();
       emit();
     }
     grip.addEventListener('pointerdown', rzStart);
@@ -144,6 +210,8 @@
         handle.removeEventListener('pointerup', dragEnd);
         handle.removeEventListener('pointercancel', dragEnd);
         grip.remove();
+        if (guideV) guideV.remove();
+        if (guideH) guideH.remove();
       },
     };
   }

@@ -437,6 +437,8 @@ function renderAppearanceTab(container) {
         <select id="appe-chatside"><option value="right">Right</option><option value="left">Left</option></select></div>
       <div class="appe-row"><label>Open chat on load</label>
         <label style="display:flex;align-items:center;gap:7px;cursor:pointer;flex:1"><input type="checkbox" id="appe-chatdefault"><span style="font-size:12px;color:var(--text2)">Start with the chat panel open</span></label></div>
+      <div class="appe-row"><label>Snap &amp; align windows</label>
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;flex:1"><input type="checkbox" id="appe-snap"><span style="font-size:12px;color:var(--text2)">Magnetic edges &amp; matching sizes (hold Alt to bypass)</span></label></div>
     </div>`
   container.appendChild(pane)
 
@@ -549,6 +551,9 @@ function renderAppearanceTab(container) {
   chatSide.addEventListener('change', () => T.applyChatSide(chatSide.value))
   chatDefault.checked = localStorage.getItem('prism-chat-default') === 'open'
   chatDefault.addEventListener('change', () => localStorage.setItem('prism-chat-default', chatDefault.checked ? 'open' : 'closed'))
+  const snap = pane.querySelector('#appe-snap')
+  snap.checked = localStorage.getItem('prism-window-snap') !== '0'
+  snap.addEventListener('change', () => localStorage.setItem('prism-window-snap', snap.checked ? '1' : '0'))
 }
 
 // ── Brain tab: the agent's mind — Knowledge (RAG: documents, memories,
