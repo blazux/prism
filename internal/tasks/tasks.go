@@ -29,8 +29,12 @@ type Provider interface {
 	Kind() string
 }
 
-// ProviderFor returns the configured provider, preferring CalDAV when set up.
+// ProviderFor returns the configured provider. Todoist wins when connected,
+// then CalDAV, otherwise the local Postgres store.
 func ProviderFor(ctx context.Context, store *memory.Store, session string) Provider {
+	if tok := todoistToken(ctx, store); tok != "" {
+		return &TodoistProvider{token: tok}
+	}
 	if cfg, ok := caldav.Load(ctx, store); ok {
 		return &CalDAVProvider{cfg: cfg}
 	}
