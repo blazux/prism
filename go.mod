@@ -5,6 +5,7 @@ go 1.25.0
 require github.com/gorilla/websocket v1.5.1
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/emersion/go-message v0.18.2
 	github.com/jackc/pgx/v5 v5.9.2

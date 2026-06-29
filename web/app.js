@@ -1153,112 +1153,55 @@ document.addEventListener('keydown', e => {
   else if ((e.metaKey || e.ctrlKey) && e.key === '`') { e.preventDefault(); toggleTerm() }
 })
 
-// ─── Workspace terminal (one-shot command runner over /api/exec) ─────────────────
-// A hidden bottom panel — Ctrl+` to toggle. Each command runs in the agent's
-// workspace container. State (cwd) is tracked client-side since each exec is a
-// fresh shell.
-let termCwd = '/workspace', termVisible = false, termHist = [], termHistIdx = -1
-function shellQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
+// ─── Workspace terminal (interactive PTY via xterm.js over WebSocket) ────────────
+// Hidden bottom panel toggled with Ctrl+`. A real shell in the agent's workspace
+// container; the session persists while the page stays open.
+let termVisible = false, term = null, termFit = null, termWs = null
 function termPanel() {
   let p = document.getElementById('term-panel')
   if (p) return p
   p = document.createElement('div'); p.id = 'term-panel'
-  p.innerHTML = `<div id="term-head"><span>Terminal — agent workspace</span><span style="flex:1"></span><span id="term-hint">↑↓ history · "clear" to wipe · Esc to close</span><button id="term-close" title="Close">✕</button></div>
-    <div id="term-log"></div>
-    <div id="term-row"><span id="term-prompt"></span><input id="term-input" spellcheck="false" autocomplete="off" autocapitalize="off"></div>`
+  p.innerHTML = `<div id="term-head"><span>Terminal — agent workspace</span><span style="flex:1"></span><span id="term-hint">Ctrl+\` to toggle</span><button id="term-close" title="Close">✕</button></div><div id="term-body"></div>`
   document.body.appendChild(p)
   p.querySelector('#term-close').onclick = () => toggleTerm(false)
-  p.querySelector('#term-input').addEventListener('keydown', onTermKey)
-  updateTermPrompt()
   return p
 }
-function updateTermPrompt() { const el = document.getElementById('term-prompt'); if (el) el.textContent = termCwd + ' $' }
-function termWrite(text, cls) {
-  const log = document.getElementById('term-log'); if (!log) return
-  const div = document.createElement('div'); div.className = 'term-line' + (cls ? ' ' + cls : ''); div.textContent = text
-  log.appendChild(div); log.scrollTop = log.scrollHeight
+function termTheme() {
+  const cs = getComputedStyle(document.documentElement)
+  const v = (n, d) => (cs.getPropertyValue(n).trim() || d)
+  return { background: v('--bg', '#0b0d12'), foreground: v('--text', '#dce0e8'), cursor: v('--accent', '#7c9bff'), cursorAccent: v('--bg', '#0b0d12'), selectionBackground: v('--accent-dim', 'rgba(124,155,255,.35)') }
 }
-function termWriteAnsi(text, cls) {
-  const log = document.getElementById('term-log'); if (!log) return
-  const div = document.createElement('div'); div.className = 'term-line' + (cls ? ' ' + cls : ''); div.innerHTML = ansiToHtml(text)
-  log.appendChild(div); log.scrollTop = log.scrollHeight
+function termSendResize() {
+  if (termWs && termWs.readyState === 1 && term) termWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
 }
-// Minimal ANSI (SGR) → HTML: colors, bold; other escape sequences are stripped.
-const ANSI_FG = { 30: '#5c6370', 31: '#e06c75', 32: '#98c379', 33: '#e5c07b', 34: '#61afef', 35: '#c678dd', 36: '#56b6c2', 37: '#cdd0d6', 90: '#7f848e', 91: '#ff7b86', 92: '#b5e08f', 93: '#f0d08a', 94: '#7cc4ff', 95: '#d7a6ef', 96: '#7fdce8', 97: '#ffffff' }
-function ansiToHtml(s) {
-  s = String(s)
-    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')          // OSC (titles)
-    .replace(/\x1b\[[0-9;?]*[\x40-\x6c\x6e-\x7e]/g, '')      // CSI except SGR 'm'
-    .replace(/\x1b[=>]/g, '')
-  const escHtml = (t) => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
-  let fg = null, bg = null, bold = false
-  const style = () => {
-    const st = []
-    let f = fg
-    if (bold && f != null && f >= 30 && f <= 37) f += 60
-    if (f != null && ANSI_FG[f]) st.push('color:' + ANSI_FG[f])
-    if (bg != null && ANSI_FG[bg - 10]) st.push('background:' + ANSI_FG[bg - 10])
-    if (bold) st.push('font-weight:bold')
-    return st.join(';')
+function termConnect() {
+  const body = termPanel().querySelector('#term-body')
+  if (!term) {
+    const cs = getComputedStyle(document.documentElement)
+    term = new Terminal({ fontFamily: cs.getPropertyValue('--mono').trim() || 'monospace', fontSize: 13, cursorBlink: true, theme: termTheme(), scrollback: 5000 })
+    termFit = new FitAddon.FitAddon(); term.loadAddon(termFit)
+    term.open(body)
+    term.onData(d => { if (termWs && termWs.readyState === 1) termWs.send(new TextEncoder().encode(d)) })
+    term.onResize(() => termSendResize())
+    window.addEventListener('resize', () => { if (termVisible && termFit) { try { termFit.fit() } catch (_) {} } })
   }
-  const parts = s.split(/\x1b\[([0-9;]*)m/)
-  let html = '', cur = ''
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 0) {
-      if (!parts[i]) continue
-      const t = escHtml(parts[i])
-      html += cur ? `<span style="${cur}">${t}</span>` : t
-    } else {
-      const codes = parts[i].split(';').filter(x => x !== '').map(Number)
-      if (!codes.length) codes.push(0)
-      for (const c of codes) {
-        if (c === 0) { fg = null; bg = null; bold = false }
-        else if (c === 1) bold = true
-        else if (c === 22) bold = false
-        else if (c === 39) fg = null
-        else if (c === 49) bg = null
-        else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) fg = c
-        else if ((c >= 40 && c <= 47) || (c >= 100 && c <= 107)) bg = c
-      }
-      cur = style()
-    }
+  if (!termWs || termWs.readyState > 1) {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    termWs = new WebSocket(`${proto}://${location.host}/api/terminal`)
+    termWs.binaryType = 'arraybuffer'
+    termWs.onopen = () => termSendResize()
+    termWs.onmessage = (e) => term.write(typeof e.data === 'string' ? e.data : new Uint8Array(e.data))
+    termWs.onclose = () => { if (term) term.write('\r\n\x1b[90m[session closed — reopen to reconnect]\x1b[0m\r\n') }
   }
-  return html
-}
-function onTermKey(e) {
-  const input = e.target
-  if (e.key === 'Enter') {
-    e.preventDefault(); const cmd = input.value; input.value = ''
-    if (cmd.trim()) { termHist.push(cmd); termHistIdx = termHist.length; runTermCommand(cmd) }
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault(); if (termHistIdx > 0) { termHistIdx--; input.value = termHist[termHistIdx] }
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault(); if (termHistIdx < termHist.length - 1) { termHistIdx++; input.value = termHist[termHistIdx] } else { termHistIdx = termHist.length; input.value = '' }
-  } else if (e.key === 'Escape') { e.preventDefault(); toggleTerm(false) }
-}
-async function runTermCommand(cmd) {
-  termWrite(termCwd + ' $ ' + cmd, 'term-cmd')
-  if (cmd.trim() === 'clear') { document.getElementById('term-log').innerHTML = ''; return }
-  const marker = '__PRISM_PWD__'
-  // Force colour for tools that honour these (git, npm, grep, BSD ls…). GNU ls
-  // still needs --color, but its output now renders in colour.
-  const wrapped = `export CLICOLOR_FORCE=1 FORCE_COLOR=1 CLICOLOR=1; cd ${shellQuote(termCwd)} 2>/dev/null; ${cmd}\nprintf "\\n${marker}:%s" "$(pwd)"`
-  try {
-    const d = await (await fetch('/api/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: wrapped }) })).json()
-    let out = d.output || ''
-    const m = out.lastIndexOf('\n' + marker + ':')
-    if (m >= 0) { termCwd = out.slice(m + marker.length + 2).split('\n')[0].trim() || termCwd; out = out.slice(0, m) }
-    if (out) termWriteAnsi(out.replace(/\s+$/, ''))
-    if (d.error) termWriteAnsi(d.error, 'term-err')
-    updateTermPrompt()
-  } catch (e) { termWrite('Failed: ' + e.message, 'term-err') }
 }
 function toggleTerm(force) {
   const show = force == null ? !termVisible : force
   const p = termPanel(); termVisible = show; p.classList.toggle('open', show)
-  if (show) setTimeout(() => p.querySelector('#term-input').focus(), 30)
+  if (show) { termConnect(); setTimeout(() => { try { termFit.fit() } catch (_) {} ; term.focus(); termSendResize() }, 60) }
 }
+window.addEventListener('prism-theme-change', () => { if (term) term.options.theme = termTheme() })
 window.toggleTerm = toggleTerm
+
 
 // ─── Unread mail badge on the rail Email icon ────────────────────────────────────
 async function refreshMailBadge() {

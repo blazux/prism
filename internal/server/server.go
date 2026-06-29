@@ -153,6 +153,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/files", s.handleFiles)
 	mux.HandleFunc("/api/file", s.handleFile)
 	mux.HandleFunc("/api/exec", s.handleExec)
+	mux.HandleFunc("/api/terminal", s.handleTerminal)
 	mux.HandleFunc("/api/models", s.handleModels)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/tools", s.handleTools)
