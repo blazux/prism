@@ -27,8 +27,11 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	if container == "" {
 		container = "prism-workspace"
 	}
-	// Prefer an interactive bash, fall back to sh.
-	cmd := exec.Command("docker", "exec", "-it", container, "sh", "-c", "exec bash -i 2>/dev/null || exec sh -i")
+	// Prefer an interactive bash, fall back to sh. NB: don't redirect bash's
+	// stderr — its prompt and readline echo are written there, so 2>/dev/null
+	// would silently swallow the prompt and the characters you type.
+	cmd := exec.Command("docker", "exec", "-it", container, "sh", "-c",
+		"if command -v bash >/dev/null 2>&1; then exec bash -i; else exec sh -i; fi")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		conn.WriteMessage(websocket.BinaryMessage, []byte("\r\nFailed to start terminal: "+err.Error()+"\r\n"))
