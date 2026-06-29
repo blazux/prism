@@ -442,14 +442,14 @@ async function saveForm() {
   if ($('f-allday').checked) { start = `${date}T00:00`; }
   else { start = `${date}T${$('f-start').value || '00:00'}`; if ($('f-end').value) end = `${date}T${$('f-end').value}`; }
   const body = { title, start, end, location: $('f-loc').value.trim(), description: $('f-desc').value.trim() };
-  if (editing) await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${editing.id}`, { method: 'DELETE' });
+  if (editing) await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${encodeURIComponent(editing.id)}`, { method: 'DELETE' });
   const res = await fetch(`/api/events?session=${encodeURIComponent(session)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) { $('f-err').textContent = 'Failed: ' + (await res.text()); return; }
   closeForm(); load();
 }
 async function deleteEvent() {
   if (!editing || !confirm(`Delete "${editing.title}"?`)) return;
-  await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${editing.id}`, { method: 'DELETE' });
+  await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${encodeURIComponent(editing.id)}`, { method: 'DELETE' });
   closeForm(); load();
 }
 function addToday() { openForm(ymd(new Date())); }

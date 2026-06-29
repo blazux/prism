@@ -295,7 +295,42 @@ function renderDock() {
     chip.append(btn, del)
     dock.appendChild(chip)
   }
+
+  // Tidy-up control (only worthwhile with 2+ open windows).
+  if ([...widgets.values()].filter(r => r.open).length >= 2) {
+    const tidy = document.createElement('button')
+    tidy.className = 'dock-tidy'
+    tidy.textContent = '▦ Tidy up'
+    tidy.title = 'Arrange the open windows into a uniform grid'
+    tidy.addEventListener('click', tidyWindows)
+    dock.appendChild(tidy)
+  }
 }
+
+// Arrange all open windows of the current workspace into a uniform, aligned grid.
+function tidyWindows() {
+  if (currentView.type !== 'board') return
+  const cont = dashboard()
+  const open = [...widgets.values()].filter(r => r.el && r.open && r.el.offsetParent !== null)
+  const n = open.length
+  if (!n) return
+  const gap = 12, pad = 12
+  const W = cont.clientWidth, H = cont.clientHeight
+  let cols = Math.min(Math.max(Math.round(Math.sqrt(n * (W / Math.max(H, 1)))), 1), n)
+  const rows = Math.ceil(n / cols)
+  const cellW = Math.max(200, Math.floor((W - pad * 2 - gap * (cols - 1)) / cols))
+  const cellH = Math.max(120, Math.floor((H - pad * 2 - gap * (rows - 1)) / rows))
+  open.sort((a, b) => (a.y - b.y) || (a.x - b.x)) // keep current reading order
+  open.forEach((r, i) => {
+    const col = i % cols, row = Math.floor(i / cols)
+    const g = { x: pad + col * (cellW + gap), y: pad + row * (cellH + gap), w: cellW, h: cellH }
+    r.el.style.left = g.x + 'px'; r.el.style.top = g.y + 'px'
+    r.el.style.width = g.w + 'px'; r.el.style.height = g.h + 'px'
+    r.x = g.x; r.y = g.y; r.w = g.w; r.h = g.h
+    persistState(r.id, g)
+  })
+}
+window.tidyWindows = tidyWindows
 
 function updateEmptyState() {
   const anyOpen = [...widgets.values()].some(w => w.open)
@@ -310,6 +345,9 @@ window.toggleChat = function() {
   document.getElementById('chat-fab').classList.toggle('active', chatOpen)
   if (chatOpen) setTimeout(() => document.getElementById('chat-input').focus(), 50)
 }
+
+// Layout preference: open the chat on load if the user chose so (Settings → Appearance).
+if (localStorage.getItem('prism-chat-default') === 'open') toggleChat()
 
 // ─── Context-aware chat ─────────────────────────────────────────────────────────
 // Tells the agent what the user is currently looking at (workspace, app, the
@@ -1075,8 +1113,14 @@ function openCmdK() {
   ov.appendChild(box); document.body.appendChild(ov)
   const input = box.querySelector('#cmdk-input'), list = box.querySelector('#cmdk-list')
   const all = [
+    { kind: 'action', label: 'Terminal (Ctrl+`)', icon: '▸', run: () => toggleTerm(true) },
+    ...(currentView.type === 'board' ? [{ kind: 'action', label: 'Tidy up windows', icon: '▦', run: tidyWindows }] : []),
     ...Object.keys(APP_TITLES).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
-    ...allSessions.filter(s => s.id !== ASSISTANT).map(s => ({ kind: 'board', id: s.id, label: s.name, icon: getWorkspaceIcon(s.id) || '▣' })),
+    ...allSessions.filter(s => s.id !== ASSISTANT).map(s => {
+      const ic = getWorkspaceIcon(s.id)
+      const icon = (ic && WS_ICONS[ic]) ? wsIconSvg(ic).replace('viewBox', 'width="16" height="16" viewBox') : (ic || '▣')
+      return { kind: 'board', id: s.id, label: s.name, icon }
+    }),
   ]
   let filtered = all, sel = 0
   function render() {
@@ -1084,13 +1128,13 @@ function openCmdK() {
     filtered.forEach((it, i) => {
       const row = document.createElement('div')
       row.style.cssText = `display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;${i === sel ? 'background:var(--bg3)' : ''}`
-      row.innerHTML = `<span style="width:20px;text-align:center">${it.icon}</span><span style="flex:1;color:var(--text);font-size:13px">${escAttr(it.label)}</span><span style="font-size:11px;color:var(--text3)">${it.kind === 'app' ? 'App' : 'Workspace'}</span>`
+      row.innerHTML = `<span style="width:20px;text-align:center">${it.icon}</span><span style="flex:1;color:var(--text);font-size:13px">${escAttr(it.label)}</span><span style="font-size:11px;color:var(--text3)">${it.kind === 'app' ? 'App' : it.kind === 'action' ? 'Action' : 'Workspace'}</span>`
       row.onmouseenter = () => { sel = i; render() }
       row.onclick = () => choose(i)
       list.appendChild(row)
     })
   }
-  function choose(i) { const it = filtered[i]; if (!it) return; close(); if (it.kind === 'app') setView({ type: 'app', name: it.name }); else selectBoard(it.id) }
+  function choose(i) { const it = filtered[i]; if (!it) return; close(); if (it.kind === 'action') it.run(); else if (it.kind === 'app') setView({ type: 'app', name: it.name }); else selectBoard(it.id) }
   function close() { ov.remove(); document.removeEventListener('keydown', onKey, true) }
   function onKey(e) {
     if (e.key === 'Escape') { e.preventDefault(); close() }
@@ -1105,7 +1149,59 @@ function openCmdK() {
 }
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openCmdK() }
+  // Ctrl+` (or ⌘+`) toggles the workspace terminal. (Ctrl+T is reserved by the browser.)
+  else if ((e.metaKey || e.ctrlKey) && e.key === '`') { e.preventDefault(); toggleTerm() }
 })
+
+// ─── Workspace terminal (interactive PTY via xterm.js over WebSocket) ────────────
+// Hidden bottom panel toggled with Ctrl+`. A real shell in the agent's workspace
+// container; the session persists while the page stays open.
+let termVisible = false, term = null, termFit = null, termWs = null
+function termPanel() {
+  let p = document.getElementById('term-panel')
+  if (p) return p
+  p = document.createElement('div'); p.id = 'term-panel'
+  p.innerHTML = `<div id="term-head"><span>Terminal — agent workspace</span><span style="flex:1"></span><span id="term-hint">Ctrl+\` to toggle</span><button id="term-close" title="Close">✕</button></div><div id="term-body"></div>`
+  document.body.appendChild(p)
+  p.querySelector('#term-close').onclick = () => toggleTerm(false)
+  return p
+}
+function termTheme() {
+  const cs = getComputedStyle(document.documentElement)
+  const v = (n, d) => (cs.getPropertyValue(n).trim() || d)
+  return { background: v('--bg', '#0b0d12'), foreground: v('--text', '#dce0e8'), cursor: v('--accent', '#7c9bff'), cursorAccent: v('--bg', '#0b0d12'), selectionBackground: v('--accent-dim', 'rgba(124,155,255,.35)') }
+}
+function termSendResize() {
+  if (termWs && termWs.readyState === 1 && term) termWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+}
+function termConnect() {
+  const body = termPanel().querySelector('#term-body')
+  if (!term) {
+    const cs = getComputedStyle(document.documentElement)
+    term = new Terminal({ fontFamily: cs.getPropertyValue('--mono').trim() || 'monospace', fontSize: 13, cursorBlink: true, theme: termTheme(), scrollback: 5000 })
+    termFit = new FitAddon.FitAddon(); term.loadAddon(termFit)
+    term.open(body)
+    term.onData(d => { if (termWs && termWs.readyState === 1) termWs.send(new TextEncoder().encode(d)) })
+    term.onResize(() => termSendResize())
+    window.addEventListener('resize', () => { if (termVisible && termFit) { try { termFit.fit() } catch (_) {} } })
+  }
+  if (!termWs || termWs.readyState > 1) {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    termWs = new WebSocket(`${proto}://${location.host}/api/terminal`)
+    termWs.binaryType = 'arraybuffer'
+    termWs.onopen = () => termSendResize()
+    termWs.onmessage = (e) => term.write(typeof e.data === 'string' ? e.data : new Uint8Array(e.data))
+    termWs.onclose = () => { if (term) term.write('\r\n\x1b[90m[session closed — reopen to reconnect]\x1b[0m\r\n') }
+  }
+}
+function toggleTerm(force) {
+  const show = force == null ? !termVisible : force
+  const p = termPanel(); termVisible = show; p.classList.toggle('open', show)
+  if (show) { termConnect(); setTimeout(() => { try { termFit.fit() } catch (_) {} ; term.focus(); termSendResize() }, 60) }
+}
+window.addEventListener('prism-theme-change', () => { if (term) term.options.theme = termTheme() })
+window.toggleTerm = toggleTerm
+
 
 // ─── Unread mail badge on the rail Email icon ────────────────────────────────────
 async function refreshMailBadge() {
@@ -1682,7 +1778,10 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
 
   document.addEventListener('mousemove', e => {
     if (!resizing) return
-    const newWidth = Math.min(Math.max(startWidth + (startX - e.clientX), 300), 720)
+    // Right dock: drag left widens. Left dock: drag right widens.
+    const left = document.documentElement.getAttribute('data-chat-side') === 'left'
+    const delta = left ? (e.clientX - startX) : (startX - e.clientX)
+    const newWidth = Math.min(Math.max(startWidth + delta, 300), 720)
     chatDrawer.style.width = newWidth + 'px'
   })
 

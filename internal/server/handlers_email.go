@@ -8,8 +8,11 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"prism/internal/email"
 )
@@ -243,45 +246,113 @@ func (s *Server) handleEmailSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"messages": msgs})
 }
 
-// POST /api/email/send  {to, subject, body}  or reply {uid, body[, to]}
+// POST /api/email/send — multipart/form-data: to, subject, body, uid (for a
+// reply), plus optional file[] attachments. Falls back to a JSON body when not
+// multipart (no attachments).
 func (s *Server) handleEmailSend(w http.ResponseWriter, r *http.Request) {
 	cfg, ok := s.loadEmailCfg(r)
 	if !ok {
 		http.Error(w, "email not configured", 400)
 		return
 	}
-	var b struct {
-		To      string `json:"to"`
-		Subject string `json:"subject"`
-		Body    string `json:"body"`
-		UID     uint32 `json:"uid"`
+	var to, subject, body string
+	var uid uint32
+	var atts []email.OutAttachment
+
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		if err := r.ParseMultipartForm(25 << 20); err != nil { // 25 MB
+			http.Error(w, "bad form: "+err.Error(), 400)
+			return
+		}
+		to = r.FormValue("to")
+		subject = r.FormValue("subject")
+		body = r.FormValue("body")
+		if v, err := strconv.ParseUint(r.FormValue("uid"), 10, 32); err == nil {
+			uid = uint32(v)
+		}
+		if r.MultipartForm != nil {
+			for _, fh := range r.MultipartForm.File["file"] {
+				f, err := fh.Open()
+				if err != nil {
+					continue
+				}
+				data, _ := io.ReadAll(f)
+				f.Close()
+				atts = append(atts, email.OutAttachment{
+					Filename:    fh.Filename,
+					ContentType: fh.Header.Get("Content-Type"),
+					Data:        data,
+				})
+			}
+		}
+	} else {
+		var b struct {
+			To, Subject, Body string
+			UID               uint32
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
+		to, subject, body, uid = b.To, b.Subject, b.Body, b.UID
 	}
-	if json.NewDecoder(r.Body).Decode(&b) != nil || b.Body == "" {
+
+	if strings.TrimSpace(body) == "" {
 		http.Error(w, "body required", 400)
 		return
 	}
 	inReplyTo := ""
-	if b.UID > 0 {
-		orig, err := cfg.Read(b.UID)
+	if uid > 0 {
+		orig, err := cfg.Read(uid)
 		if err != nil {
 			http.Error(w, "could not load original: "+err.Error(), 502)
 			return
 		}
 		inReplyTo = orig.MessageID
-		if b.To == "" {
-			b.To = orig.From
+		if to == "" {
+			to = orig.From
 		}
-		if b.Subject == "" {
-			b.Subject = "Re: " + orig.Subject
+		if subject == "" {
+			subject = "Re: " + orig.Subject
 		}
 	}
-	if b.To == "" {
+	if to == "" {
 		http.Error(w, "recipient required", 400)
 		return
 	}
-	if err := cfg.Send(b.To, b.Subject, b.Body, inReplyTo); err != nil {
+	if err := cfg.Send(to, subject, body, inReplyTo, atts); err != nil {
 		http.Error(w, err.Error(), 502)
 		return
 	}
 	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
+// GET /api/email/attachment?uid=X&i=N — download the N-th attachment.
+func (s *Server) handleEmailAttachment(w http.ResponseWriter, r *http.Request) {
+	cfg, ok := s.loadEmailCfg(r)
+	if !ok {
+		http.Error(w, "email not configured", 400)
+		return
+	}
+	uid, _ := strconv.ParseUint(r.URL.Query().Get("uid"), 10, 32)
+	idx, _ := strconv.Atoi(r.URL.Query().Get("i"))
+	if uid == 0 {
+		http.Error(w, "uid required", 400)
+		return
+	}
+	fn, ct, data, err := cfg.Attachment(uint32(uid), idx)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", sanitizeFilename(fn)))
+	w.Write(data)
+}
+
+func sanitizeFilename(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "", "\"", "'", "/", "-", "\\", "-").Replace(s)
 }

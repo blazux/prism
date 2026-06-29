@@ -617,6 +617,21 @@ body {
 
 /* ── Window resize handle ─────────────────────────────────────────────────── */
 
+/* Workspace terminal (Ctrl+`) — hidden bottom panel */
+#term-panel { position: fixed; left: 0; right: 0; bottom: 0; height: 42vh; background: var(--bg); border-top: 1px solid var(--border2); z-index: 300; display: flex; flex-direction: column; transform: translateY(100%); transition: transform .18s ease; box-shadow: 0 -10px 36px rgba(0,0,0,.45); }
+#term-panel.open { transform: translateY(0); }
+#term-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 11px; color: var(--text2); border-bottom: 1px solid var(--border); background: var(--bg2); }
+#term-hint { font-size: 10px; color: var(--text3); }
+#term-close { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 13px; padding: 0 4px; }
+#term-close:hover { color: var(--text); }
+#term-body { flex: 1; min-height: 0; padding: 4px 4px 4px 10px; overflow: hidden; }
+#term-body .xterm { height: 100%; }
+
+/* Alignment guides shown while snapping a window */
+.snap-guide { position: absolute; z-index: 205; pointer-events: none; display: none; background: var(--accent); box-shadow: 0 0 4px var(--accent); }
+.snap-guide.v { top: 0; bottom: 0; width: 1px; }
+.snap-guide.h { left: 0; right: 0; height: 1px; }
+
 .window-resize {
   position: absolute;
   right: 0;
@@ -668,6 +683,8 @@ body {
 }
 .dock-chip.open { opacity: 1; border-color: var(--accent-dim); }
 .dock-chip:hover { opacity: 1; }
+.dock-tidy { margin-left: auto; background: var(--bg2); border: 1px solid var(--border2); color: var(--text2); border-radius: 999px; padding: 4px 12px; font-size: 11.5px; cursor: pointer; white-space: nowrap; transition: color .15s, border-color .15s; }
+.dock-tidy:hover { color: var(--accent); border-color: var(--accent); }
 .dock-chip-label {
   background: none;
   border: none;
@@ -1044,6 +1061,12 @@ body {
 }
 #chat-resize-handle:hover,
 #chat-resize-handle.dragging { background: var(--accent-dim); }
+
+/* Chat panel docked on the left instead of the right */
+[data-chat-side="left"] #chat-drawer { order: 1; border-left: none; border-right: 1px solid var(--border); }
+[data-chat-side="left"] #main { order: 2; }
+[data-chat-side="left"] #chat-resize-handle { left: auto; right: 0; }
+[data-chat-side="left"] #chat-fab { right: auto; left: 24px; }
 
 #chat-agent {
   text-transform: none;
@@ -2259,6 +2282,16 @@ body {
 
 /* ── Prism Light — kept sober (a whisper of the default aurora) ────────────── */
 [data-theme="prism-light"] #bg-fx::before { opacity: .05; }
+
+/* Themes with a canvas animation (bgfx.js) drop their CSS pattern layer so the
+   two don't double up; the gradient base and ambient ::after glow stay. */
+[data-theme="midnight"] #bg-fx::before,
+[data-theme="nord"] #bg-fx::before,
+[data-theme="solarized-dark"] #bg-fx::before,
+[data-theme="rose-pine"] #bg-fx::before,
+[data-theme="tech"] #bg-fx::before,
+[data-theme="synthwave"] #bg-fx::before,
+[data-theme="synthwave"] #bg-fx::after { display: none; }
 
 @keyframes bgTwinkle { from { opacity: .35; } to { opacity: .6; } }
 @keyframes bgFloat   { from { transform: translateY(2%); } to { transform: translateY(-6%); } }

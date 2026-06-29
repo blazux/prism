@@ -270,7 +270,24 @@
     v = (v == null ? getPref(BGFX_KEY, '100') : String(v)); localStorage.setItem(BGFX_KEY, v);
     document.documentElement.style.setProperty('--bgfx-opacity', String(Number(v) / 100));
   }
-  function applyPrefs() { applyTheme(getThemeId(), false); applyUIScale(); applyDensity(); applyBgfx(); }
+  // ─── Interface font (overrides --sans) ────────────────────────────────────
+  const FONT_KEY = 'prism-ui-font';
+  function applyFont(v) {
+    v = v == null ? getPref(FONT_KEY, '') : v;
+    localStorage.setItem(FONT_KEY, v);
+    const r = document.documentElement.style;
+    if (v) r.setProperty('--sans', v); else r.removeProperty('--sans');
+  }
+
+  // ─── Layout (chat panel side) ─────────────────────────────────────────────
+  const CHATSIDE_KEY = 'prism-chat-side';
+  function applyChatSide(v) {
+    v = v || getPref(CHATSIDE_KEY, 'right');
+    if (v !== 'left' && v !== 'right') v = 'right';
+    localStorage.setItem(CHATSIDE_KEY, v);
+    document.documentElement.setAttribute('data-chat-side', v);
+  }
+  function applyPrefs() { applyTheme(getThemeId(), false); applyUIScale(); applyDensity(); applyBgfx(); applyChatSide(); applyFont(); }
 
   // Wrap an agent-authored widget document with the active theme tokens, the
   // shared widget stylesheet and the live-update bootstrap.
@@ -306,8 +323,8 @@
     THEMES, getAllThemes, getThemeId, activeVars,
     applyTheme, previewVars, composeWidgetDoc, populateSelect,
     saveCustomTheme, deleteCustomTheme, generatePalette,
-    applyUIScale, applyDensity, applyBgfx, getPref,
-    KEYS: { THEME: STORAGE_KEY, SCALE: SCALE_KEY, DENSITY: DENSITY_KEY, BGFX: BGFX_KEY },
+    applyUIScale, applyDensity, applyBgfx, applyChatSide, applyFont, getPref,
+    KEYS: { THEME: STORAGE_KEY, SCALE: SCALE_KEY, DENSITY: DENSITY_KEY, BGFX: BGFX_KEY, CHATSIDE: CHATSIDE_KEY, FONT: FONT_KEY },
   };
 
   // Cross-tab: when settings change prefs/themes, re-apply + refresh the picker.

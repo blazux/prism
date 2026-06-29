@@ -163,7 +163,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		if to == "" || body == "" {
 			return "", fmt.Errorf("send requires 'to' and 'body'")
 		}
-		if err := cfg.Send(to, subject, body, ""); err != nil {
+		if err := cfg.Send(to, subject, body, "", nil); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Email sent to %s.", to), nil
@@ -190,7 +190,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		if to == "" {
 			to = orig.From
 		}
-		if err := cfg.Send(to, subject, body, orig.MessageID); err != nil {
+		if err := cfg.Send(to, subject, body, orig.MessageID, nil); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Reply sent to %s.", to), nil
