@@ -1755,13 +1755,20 @@ document.addEventListener('keydown', e => {
 })
 
 fetch('/api/auth').then(r => r.json()).then(d => {
-  if (!d.authenticated) { location.href = '/'; return }
+  if (!d.authenticated) { window.top.location.href = '/'; return }
   if (d.auth_enabled) document.getElementById('logout-btn').style.display = 'block'
 })
 
 async function logout() {
   await fetch('/api/auth', { method: 'DELETE' })
-  location.href = '/'
+  window.top.location.href = '/'
+}
+
+// When embedded in the dashboard shell, the "back" link returns to the board via
+// the parent instead of navigating this iframe to the dashboard.
+if (window.parent !== window) {
+  const bl = document.getElementById('back-link')
+  if (bl) bl.addEventListener('click', e => { e.preventDefault(); window.parent.postMessage({ type: 'close-settings' }, '*') })
 }
 </script>
 </body>

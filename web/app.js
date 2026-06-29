@@ -19,7 +19,15 @@ let currentSessionID = lastWorkspace
 
 function updateSettingsLink() {
   const link = document.getElementById('settings-link')
-  if (link) link.href = `/settings.html?session=${encodeURIComponent(currentSessionID)}#tools`
+  if (!link) return
+  link.href = `/settings.html?session=${encodeURIComponent(currentSessionID)}#tools`
+  // Open Settings inside the shell (so the chat dock stays available) on a plain
+  // click; let ctrl/cmd/middle-click open the full page in a new tab.
+  link.onclick = (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return
+    e.preventDefault()
+    setView({ type: 'settings' })
+  }
 }
 let batchLoading = false
 let batchLoadingTimer = null
@@ -928,6 +936,23 @@ function setView(view) {
 
   document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'))
 
+  if (view.type === 'settings') {
+    // Settings in the app-frame so the chat dock stays — the agent helps with
+    // configuration (connecting accounts, OAuth). Chat stays on the current
+    // workspace's agent.
+    frame.src = `/settings.html?session=${encodeURIComponent(currentSessionID)}#${view.tab || 'tools'}`
+    frame.style.display = ''
+    dash.style.display = 'none'
+    dock.style.display = 'none'
+    if (title) title.textContent = 'Settings'
+    setContext('Viewing the Settings page. The user may be configuring email, a Notes vault, CalDAV, Todoist, or Google Calendar (OAuth). Help them set it up step by step using the Prism help docs (search the prism-help collection).')
+    setSuggestions([
+      { label: '🔗 Connect Google Calendar', prompt: 'Walk me through connecting my Google Calendar, step by step.' },
+      { label: '🗂 Connect my notes vault', prompt: 'Help me connect my Obsidian/Logseq vault to Notes.' },
+      { label: '❓ What can you do?', prompt: 'What can you do in Prism?' },
+    ])
+    return
+  }
   if (view.type === 'app') {
     // Global apps → chat is the global assistant.
     gotoSession(ASSISTANT)
@@ -1713,6 +1738,8 @@ window.addEventListener('message', e => {
   if (!d || !d.type) return
   if (d.type === 'openFile' && d.path) {
     send({ type: 'file_open', path: d.path.replace(/^\/workspace\//, '') })
+  } else if (d.type === 'close-settings') {
+    setView({ type: 'board', workspace: lastWorkspace })
   } else if (d.type === 'context' && typeof d.text === 'string') {
     setContext(d.text)
   } else if (d.type === 'suggest' && Array.isArray(d.items)) {
