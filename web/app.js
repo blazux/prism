@@ -1113,6 +1113,7 @@ function openCmdK() {
   ov.appendChild(box); document.body.appendChild(ov)
   const input = box.querySelector('#cmdk-input'), list = box.querySelector('#cmdk-list')
   const all = [
+    { kind: 'action', label: 'Terminal (Ctrl+`)', icon: '▸', run: () => toggleTerm(true) },
     ...(currentView.type === 'board' ? [{ kind: 'action', label: 'Tidy up windows', icon: '▦', run: tidyWindows }] : []),
     ...Object.keys(APP_TITLES).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
     ...allSessions.filter(s => s.id !== ASSISTANT).map(s => {
@@ -1148,7 +1149,67 @@ function openCmdK() {
 }
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openCmdK() }
+  // Ctrl+` (or ⌘+`) toggles the workspace terminal. (Ctrl+T is reserved by the browser.)
+  else if ((e.metaKey || e.ctrlKey) && e.key === '`') { e.preventDefault(); toggleTerm() }
 })
+
+// ─── Workspace terminal (one-shot command runner over /api/exec) ─────────────────
+// A hidden bottom panel — Ctrl+` to toggle. Each command runs in the agent's
+// workspace container. State (cwd) is tracked client-side since each exec is a
+// fresh shell.
+let termCwd = '/workspace', termVisible = false, termHist = [], termHistIdx = -1
+function shellQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
+function termPanel() {
+  let p = document.getElementById('term-panel')
+  if (p) return p
+  p = document.createElement('div'); p.id = 'term-panel'
+  p.innerHTML = `<div id="term-head"><span>Terminal — agent workspace</span><span style="flex:1"></span><span id="term-hint">↑↓ history · "clear" to wipe · Esc to close</span><button id="term-close" title="Close">✕</button></div>
+    <div id="term-log"></div>
+    <div id="term-row"><span id="term-prompt"></span><input id="term-input" spellcheck="false" autocomplete="off" autocapitalize="off"></div>`
+  document.body.appendChild(p)
+  p.querySelector('#term-close').onclick = () => toggleTerm(false)
+  p.querySelector('#term-input').addEventListener('keydown', onTermKey)
+  updateTermPrompt()
+  return p
+}
+function updateTermPrompt() { const el = document.getElementById('term-prompt'); if (el) el.textContent = termCwd + ' $' }
+function termWrite(text, cls) {
+  const log = document.getElementById('term-log'); if (!log) return
+  const div = document.createElement('div'); div.className = 'term-line' + (cls ? ' ' + cls : ''); div.textContent = text
+  log.appendChild(div); log.scrollTop = log.scrollHeight
+}
+function onTermKey(e) {
+  const input = e.target
+  if (e.key === 'Enter') {
+    e.preventDefault(); const cmd = input.value; input.value = ''
+    if (cmd.trim()) { termHist.push(cmd); termHistIdx = termHist.length; runTermCommand(cmd) }
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault(); if (termHistIdx > 0) { termHistIdx--; input.value = termHist[termHistIdx] }
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault(); if (termHistIdx < termHist.length - 1) { termHistIdx++; input.value = termHist[termHistIdx] } else { termHistIdx = termHist.length; input.value = '' }
+  } else if (e.key === 'Escape') { e.preventDefault(); toggleTerm(false) }
+}
+async function runTermCommand(cmd) {
+  termWrite(termCwd + ' $ ' + cmd, 'term-cmd')
+  if (cmd.trim() === 'clear') { document.getElementById('term-log').innerHTML = ''; return }
+  const marker = '__PRISM_PWD__'
+  const wrapped = `cd ${shellQuote(termCwd)} 2>/dev/null; ${cmd}\nprintf "\\n${marker}:%s" "$(pwd)"`
+  try {
+    const d = await (await fetch('/api/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: wrapped }) })).json()
+    let out = d.output || ''
+    const m = out.lastIndexOf('\n' + marker + ':')
+    if (m >= 0) { termCwd = out.slice(m + marker.length + 2).split('\n')[0].trim() || termCwd; out = out.slice(0, m) }
+    if (out) termWrite(out.replace(/\s+$/, ''))
+    if (d.error) termWrite(d.error, 'term-err')
+    updateTermPrompt()
+  } catch (e) { termWrite('Failed: ' + e.message, 'term-err') }
+}
+function toggleTerm(force) {
+  const show = force == null ? !termVisible : force
+  const p = termPanel(); termVisible = show; p.classList.toggle('open', show)
+  if (show) setTimeout(() => p.querySelector('#term-input').focus(), 30)
+}
+window.toggleTerm = toggleTerm
 
 // ─── Unread mail badge on the rail Email icon ────────────────────────────────────
 async function refreshMailBadge() {

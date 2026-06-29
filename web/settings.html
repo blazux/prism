@@ -431,6 +431,18 @@ function renderAppearanceTab(container) {
         <select id="appe-density"><option value="compact">Compact</option><option value="comfortable">Comfortable</option><option value="spacious">Spacious</option></select></div>
       <div class="appe-row"><label>Animated background</label>
         <span style="display:flex;gap:10px;align-items:center;flex:1;max-width:240px"><input type="range" id="appe-bgfx" min="0" max="100" step="5" style="flex:1"><span id="appe-bgfx-val" style="font-size:12px;color:var(--text2);width:34px;text-align:right"></span></span></div>
+      <div class="appe-row"><label>Interface font</label>
+        <select id="appe-font">
+          <option value="">System (default)</option>
+          <option value="'Inter', -apple-system, 'Segoe UI', sans-serif">Inter</option>
+          <option value="'Helvetica Neue', Arial, sans-serif">Helvetica / Arial</option>
+          <option value="Georgia, 'Times New Roman', serif">Serif</option>
+          <option value="'JetBrains Mono', 'Cascadia Code', ui-monospace, monospace">Monospace</option>
+          <option value="'SF Pro Rounded', 'Segoe UI Variable', system-ui, sans-serif">Rounded</option>
+          <option value="__custom__">Custom…</option>
+        </select></div>
+      <div class="appe-row" id="appe-font-custom-row" style="display:none"><label>Custom font</label>
+        <input id="appe-font-custom" placeholder="e.g. 'IBM Plex Sans', sans-serif" style="flex:1;max-width:300px"></div>
     </div>
     <div class="appe-card">
       <div class="appe-row"><label>Chat panel side</label>
@@ -544,6 +556,19 @@ function renderAppearanceTab(container) {
   densSel.value = T.getPref(T.KEYS.DENSITY, 'comfortable'); densSel.addEventListener('change', () => T.applyDensity(densSel.value))
   bgfx.value = T.getPref(T.KEYS.BGFX, '100'); bgfxVal.textContent = bgfx.value + '%'
   bgfx.addEventListener('input', () => { bgfxVal.textContent = bgfx.value + '%'; T.applyBgfx(bgfx.value) })
+
+  // Interface font (presets + custom). Matches a preset option, else "Custom…".
+  const fontSel = pane.querySelector('#appe-font'), fontCustom = pane.querySelector('#appe-font-custom'), fontRow = pane.querySelector('#appe-font-custom-row')
+  const curFont = T.getPref(T.KEYS.FONT, '')
+  const preset = [...fontSel.options].some(o => o.value === curFont)
+  fontSel.value = preset ? curFont : (curFont ? '__custom__' : '')
+  fontCustom.value = preset ? '' : curFont
+  fontRow.style.display = fontSel.value === '__custom__' ? '' : 'none'
+  fontSel.addEventListener('change', () => {
+    if (fontSel.value === '__custom__') { fontRow.style.display = ''; T.applyFont(fontCustom.value.trim()) }
+    else { fontRow.style.display = 'none'; T.applyFont(fontSel.value) }
+  })
+  fontCustom.addEventListener('input', () => { if (fontSel.value === '__custom__') T.applyFont(fontCustom.value.trim()) })
 
   // Layout
   const chatSide = pane.querySelector('#appe-chatside'), chatDefault = pane.querySelector('#appe-chatdefault')
