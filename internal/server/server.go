@@ -38,6 +38,7 @@ type Config struct {
 	EmbedModel       string
 	AuthToken        string
 	WebFS            embed.FS
+	HelpFS           embed.FS
 }
 
 type Server struct {
@@ -100,6 +101,11 @@ func (s *Server) Start() error {
 			}
 		}()
 	}
+
+	// Bundle Prism's own docs into the workspace so the agent can read them even
+	// when RAG is unavailable. (RAG indexing happens in initRAG once ready.)
+	helpDocs, _ := s.loadHelpDocs()
+	s.materializeHelpDocs(helpDocs)
 
 	// Initialize RAG in background (embedding probe can take a moment)
 	go s.initRAG(context.Background())
