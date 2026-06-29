@@ -322,6 +322,9 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
       <div class="nav-item" data-tab="notes">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H2z"/><path d="M22 6a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z"/></svg></span> Notes
       </div>
+      <div class="nav-item" data-tab="calendar">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span> Calendar
+      </div>
       <div class="nav-item" data-tab="knowledge">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span> Knowledge
       </div>
@@ -393,6 +396,7 @@ function renderTab(tab) {
   else if (tab === 'secrets') renderSecretsTab(content)
   else if (tab === 'email') renderEmailTab(content)
   else if (tab === 'notes') renderNotesTab(content)
+  else if (tab === 'calendar') renderCalendarTab(content)
   else if (tab === 'knowledge') renderBrainTab(content)
   else if (tab === 'appearance') renderAppearanceTab(content)
 }
@@ -1331,6 +1335,79 @@ async function renderNotesTab(container) {
       const r = await fetch('/api/notes/source', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: prov.value, path: pathInput.value.trim() }) })
       if (!r.ok) { status.style.color = 'var(--red)'; status.textContent = (await r.text()).trim() || 'Failed'; return }
       status.style.color = 'var(--green)'; status.textContent = 'Saved ✓'
+    } catch (e) { status.style.color = 'var(--red)'; status.textContent = e.message }
+  })
+}
+
+async function renderCalendarTab(container) {
+  const wrap = document.createElement('div')
+  wrap.style.cssText = 'max-width:640px;padding:24px'
+  wrap.innerHTML = `
+    <h2 style="margin:0 0 4px;font-size:16px">Calendar &amp; Tasks (CalDAV)</h2>
+    <p style="color:var(--text3);font-size:12.5px;margin:0 0 18px;line-height:1.5">Connect a CalDAV account so the Calendar and Tasks apps read and write your <b>real</b> calendar — Apple iCloud, Nextcloud, Fastmail, mailbox.org… Use an <b>app-specific password</b>. Leave disconnected to keep events/tasks in Prism's own database.</p>
+    <div class="appe-card">
+      <div class="appe-row"><label>Server URL</label><input id="cd-url" placeholder="https://caldav.icloud.com" spellcheck="false" style="flex:1;max-width:360px"></div>
+      <div class="appe-row"><label>Username</label><input id="cd-user" placeholder="you@icloud.com" spellcheck="false" style="flex:1;max-width:360px"></div>
+      <div class="appe-row"><label>App password</label><input id="cd-pass" type="password" placeholder="••••••••" autocomplete="new-password" style="flex:1;max-width:360px"></div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-primary" id="cd-connect">Connect</button>
+      <button class="btn" id="cd-disconnect" style="display:none;color:var(--red)">Disconnect</button>
+      <span id="cd-status" style="font-size:12px;color:var(--text3)"></span>
+    </div>
+    <div id="cd-cals" class="appe-card" style="display:none;margin-top:16px">
+      <div class="appe-row"><label>Events calendar</label><select id="cd-evpath" style="flex:1;max-width:360px"></select></div>
+      <div class="appe-row"><label>Tasks list</label><select id="cd-taskpath" style="flex:1;max-width:360px"></select></div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn btn-primary" id="cd-savepaths">Save selection</button><span id="cd-status2" style="font-size:12px;color:var(--text3)"></span></div>
+    </div>`
+  container.appendChild(wrap)
+  const $ = s => wrap.querySelector(s)
+  const status = $('#cd-status'), known = { eventPath: '', taskPath: '' }
+  const fillCals = (cals) => {
+    const ev = $('#cd-evpath'), tk = $('#cd-taskpath')
+    ev.innerHTML = ''; tk.innerHTML = ''
+    for (const c of (cals || [])) {
+      const label = (c.name || c.path) + (c.components && c.components.length ? ` · ${c.components.join(', ')}` : '')
+      ev.appendChild(new Option(label, c.path)); tk.appendChild(new Option(label, c.path))
+    }
+    if (known.eventPath) ev.value = known.eventPath
+    if (known.taskPath) tk.value = known.taskPath
+    $('#cd-cals').style.display = (cals && cals.length) ? '' : 'none'
+  }
+  try {
+    const d = await (await fetch('/api/caldav/config')).json()
+    known.eventPath = d.eventPath || ''; known.taskPath = d.taskPath || ''
+    $('#cd-url').value = d.url || ''; $('#cd-user').value = d.user || ''
+    if (d.configured) { $('#cd-disconnect').style.display = ''; status.style.color = 'var(--green)'; status.textContent = 'Connected' }
+  } catch {}
+  const post = async (payload) => {
+    const r = await fetch('/api/caldav/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
+    return r.json()
+  }
+  $('#cd-connect').addEventListener('click', async () => {
+    status.style.color = 'var(--text3)'; status.textContent = 'Connecting…'
+    try {
+      const d = await post({ url: $('#cd-url').value.trim(), user: $('#cd-user').value.trim(), password: $('#cd-pass').value })
+      status.style.color = 'var(--green)'; status.textContent = 'Connected ✓'
+      $('#cd-disconnect').style.display = ''
+      fillCals(d.calendars)
+    } catch (e) { status.style.color = 'var(--red)'; status.textContent = e.message }
+  })
+  $('#cd-savepaths').addEventListener('click', async () => {
+    const st = $('#cd-status2'); st.style.color = 'var(--text3)'; st.textContent = 'Saving…'
+    try {
+      await post({ url: $('#cd-url').value.trim(), user: $('#cd-user').value.trim(), eventPath: $('#cd-evpath').value, taskPath: $('#cd-taskpath').value })
+      known.eventPath = $('#cd-evpath').value; known.taskPath = $('#cd-taskpath').value
+      st.style.color = 'var(--green)'; st.textContent = 'Saved ✓'
+    } catch (e) { st.style.color = 'var(--red)'; st.textContent = e.message }
+  })
+  $('#cd-disconnect').addEventListener('click', async () => {
+    if (!confirm('Disconnect CalDAV? Calendar and Tasks will fall back to the Prism database.')) return
+    try {
+      await post({ disconnect: true })
+      $('#cd-disconnect').style.display = 'none'; $('#cd-cals').style.display = 'none'; $('#cd-pass').value = ''
+      status.style.color = 'var(--text3)'; status.textContent = 'Disconnected'
     } catch (e) { status.style.color = 'var(--red)'; status.textContent = e.message }
   })
 }

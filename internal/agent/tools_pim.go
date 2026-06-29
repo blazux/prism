@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/calendar"
 	"prism/internal/notes"
+	"prism/internal/tasks"
 )
 
 // pimScope is the shared scope for personal data (notes, tasks, calendar). These
@@ -89,50 +91,47 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 	if e.memStore == nil {
 		return "", fmt.Errorf("tasks unavailable: no database")
 	}
-	sess := pimScope
+	prov := tasks.ProviderFor(ctx, e.memStore, pimScope)
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
-		id, err := e.memStore.AddTask(ctx, sess, title, priority, parseTimePtr(due))
+		id, err := prov.Add(ctx, title, priority, parseTimePtr(due))
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Task #%d added.", id), nil
+		return fmt.Sprintf("Task %q added.", id), nil
 	case "list", "":
-		tasks, err := e.memStore.ListTasks(ctx, sess, includeDone)
+		items, err := prov.List(ctx, includeDone)
 		if err != nil {
 			return "", err
 		}
-		if len(tasks) == 0 {
+		if len(items) == 0 {
 			return "No tasks.", nil
 		}
-		return jsonResult(tasks), nil
+		return jsonResult(items), nil
 	case "done", "complete":
-		id := parseID(idStr)
-		if id == 0 {
-			return "", fmt.Errorf("done requires a numeric id")
+		if strings.TrimSpace(idStr) == "" {
+			return "", fmt.Errorf("done requires an id")
 		}
-		if err := e.memStore.SetTaskDone(ctx, sess, id, true); err != nil {
+		if err := prov.SetDone(ctx, idStr, true); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Task #%d completed.", id), nil
+		return fmt.Sprintf("Task %q completed.", idStr), nil
 	case "reopen", "undone":
-		id := parseID(idStr)
-		if id == 0 {
-			return "", fmt.Errorf("reopen requires a numeric id")
+		if strings.TrimSpace(idStr) == "" {
+			return "", fmt.Errorf("reopen requires an id")
 		}
-		if err := e.memStore.SetTaskDone(ctx, sess, id, false); err != nil {
+		if err := prov.SetDone(ctx, idStr, false); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Task #%d reopened.", id), nil
+		return fmt.Sprintf("Task %q reopened.", idStr), nil
 	case "delete", "remove":
-		id := parseID(idStr)
-		if id == 0 {
-			return "", fmt.Errorf("delete requires a numeric id")
+		if strings.TrimSpace(idStr) == "" {
+			return "", fmt.Errorf("delete requires an id")
 		}
-		if err := e.memStore.DeleteTask(ctx, sess, id); err != nil {
+		if err := prov.Delete(ctx, idStr); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Task #%d deleted.", id), nil
+		return fmt.Sprintf("Task %q deleted.", idStr), nil
 	default:
 		return "", fmt.Errorf("task: unknown action %q (add, list, done, reopen, delete)", action)
 	}
@@ -144,36 +143,35 @@ func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, d
 	if e.memStore == nil {
 		return "", fmt.Errorf("calendar unavailable: no database")
 	}
-	sess := pimScope
+	prov := calendar.ProviderFor(ctx, e.memStore, pimScope)
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
 		st, err := parseTime(start)
 		if err != nil {
 			return "", fmt.Errorf("add requires a valid start time: %w", err)
 		}
-		id, err := e.memStore.AddEvent(ctx, sess, title, description, location, st, parseTimePtr(end))
+		id, err := prov.Add(ctx, title, description, location, st, parseTimePtr(end))
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Event #%d added.", id), nil
+		return fmt.Sprintf("Event %q added.", id), nil
 	case "list", "":
-		events, err := e.memStore.ListEvents(ctx, sess, parseTimePtr(from), parseTimePtr(to))
+		items, err := prov.List(ctx, parseTimePtr(from), parseTimePtr(to))
 		if err != nil {
 			return "", err
 		}
-		if len(events) == 0 {
+		if len(items) == 0 {
 			return "No events.", nil
 		}
-		return jsonResult(events), nil
+		return jsonResult(items), nil
 	case "delete", "remove":
-		id := parseID(idStr)
-		if id == 0 {
-			return "", fmt.Errorf("delete requires a numeric id")
+		if strings.TrimSpace(idStr) == "" {
+			return "", fmt.Errorf("delete requires an id")
 		}
-		if err := e.memStore.DeleteEvent(ctx, sess, id); err != nil {
+		if err := prov.Delete(ctx, idStr); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Event #%d deleted.", id), nil
+		return fmt.Sprintf("Event %q deleted.", idStr), nil
 	default:
 		return "", fmt.Errorf("calendar: unknown action %q (add, list, delete)", action)
 	}

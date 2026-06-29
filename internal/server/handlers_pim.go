@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/calendar"
 	"prism/internal/notes"
+	"prism/internal/tasks"
 )
 
 // pimScope is the shared scope for personal data — notes, tasks and calendar are
@@ -147,18 +149,18 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
-	sess := pimScope
+	prov := tasks.ProviderFor(r.Context(), s.memStore, pimScope)
 	switch r.Method {
 	case "GET":
-		tasks, err := s.memStore.ListTasks(r.Context(), sess, r.URL.Query().Get("include_done") == "true")
+		items, err := prov.List(r.Context(), r.URL.Query().Get("include_done") == "true")
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		writeJSON(w, map[string]interface{}{"tasks": tasks})
+		writeJSON(w, map[string]interface{}{"tasks": items, "source": prov.Kind()})
 	case "POST":
 		var b struct {
-			ID       int64  `json:"id"`
+			ID       string `json:"id"`
 			Title    string `json:"title"`
 			Priority string `json:"priority"`
 			Due      string `json:"due"`
@@ -168,22 +170,22 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad body", 400)
 			return
 		}
-		if b.ID > 0 && b.Done != nil {
-			if err := s.memStore.SetTaskDone(r.Context(), sess, b.ID, *b.Done); err != nil {
+		if b.ID != "" && b.Done != nil {
+			if err := prov.SetDone(r.Context(), b.ID, *b.Done); err != nil {
 				http.Error(w, err.Error(), 500)
 				return
 			}
 			writeJSON(w, map[string]interface{}{"id": b.ID})
 			return
 		}
-		id, err := s.memStore.AddTask(r.Context(), sess, b.Title, b.Priority, parsePIMTime(b.Due))
+		id, err := prov.Add(r.Context(), b.Title, b.Priority, parsePIMTime(b.Due))
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		writeJSON(w, map[string]interface{}{"id": id})
 	case "DELETE":
-		if err := s.memStore.DeleteTask(r.Context(), sess, idParam(r)); err != nil {
+		if err := prov.Delete(r.Context(), r.URL.Query().Get("id")); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -199,16 +201,16 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
-	sess := pimScope
+	prov := calendar.ProviderFor(r.Context(), s.memStore, pimScope)
 	switch r.Method {
 	case "GET":
-		events, err := s.memStore.ListEvents(r.Context(), sess,
+		items, err := prov.List(r.Context(),
 			parsePIMTime(r.URL.Query().Get("from")), parsePIMTime(r.URL.Query().Get("to")))
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		writeJSON(w, map[string]interface{}{"events": events})
+		writeJSON(w, map[string]interface{}{"events": items, "source": prov.Kind()})
 	case "POST":
 		var b struct {
 			Title       string `json:"title"`
@@ -226,14 +228,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "valid start time required", 400)
 			return
 		}
-		id, err := s.memStore.AddEvent(r.Context(), sess, b.Title, b.Description, b.Location, *start, parsePIMTime(b.End))
+		id, err := prov.Add(r.Context(), b.Title, b.Description, b.Location, *start, parsePIMTime(b.End))
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		writeJSON(w, map[string]interface{}{"id": id})
 	case "DELETE":
-		if err := s.memStore.DeleteEvent(r.Context(), sess, idParam(r)); err != nil {
+		if err := prov.Delete(r.Context(), r.URL.Query().Get("id")); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}

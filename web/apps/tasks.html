@@ -257,7 +257,7 @@ async function toggleTodo(t) {
   loadTodos();
 }
 async function removeTodo(t) {
-  await fetch('/api/tasks?id=' + t.id, { method: 'DELETE' });
+  await fetch('/api/tasks?id=' + encodeURIComponent(t.id), { method: 'DELETE' });
   loadTodos();
 }
 

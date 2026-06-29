@@ -308,7 +308,7 @@ var ToolDefinitions = []ollama.Tool{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"action":       {Type: "string", Description: "add, list, done, reopen, or delete"},
-					"id":           {Type: "integer", Description: "Task id (for done/reopen/delete)"},
+					"id":           {Type: "string", Description: "Task id from list, used for done/reopen/delete. Opaque: a number locally, or an object path when a CalDAV account is connected."},
 					"title":        {Type: "string", Description: "Task title (for add)"},
 					"priority":     {Type: "string", Description: "low, normal, or high"},
 					"due":          {Type: "string", Description: "Due date, e.g. '2026-07-01 09:00' or '2026-07-01'"},
@@ -354,7 +354,7 @@ var ToolDefinitions = []ollama.Tool{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"action":      {Type: "string", Description: "add, list, or delete"},
-					"id":          {Type: "integer", Description: "Event id (for delete)"},
+					"id":          {Type: "string", Description: "Event id from list, used for delete. Opaque: a number locally, or an object path when a CalDAV account is connected."},
 					"title":       {Type: "string", Description: "Event title (for add)"},
 					"description": {Type: "string", Description: "Event description"},
 					"location":    {Type: "string", Description: "Event location"},

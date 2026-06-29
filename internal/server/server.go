@@ -165,6 +165,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/notify", s.handleExternalNotify)
 	mux.HandleFunc("/api/notes", s.handleNotes)
 	mux.HandleFunc("/api/notes/source", s.handleNotesSource)
+	mux.HandleFunc("/api/caldav/config", s.handleCalDAVConfig)
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/cron", s.handleCron)
