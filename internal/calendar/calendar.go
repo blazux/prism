@@ -11,6 +11,7 @@ import (
 
 	"prism/internal/caldav"
 	"prism/internal/memory"
+	"prism/internal/oauthx"
 )
 
 type Item struct {
@@ -30,8 +31,14 @@ type Provider interface {
 	Kind() string
 }
 
-// ProviderFor returns the configured provider, preferring CalDAV when set up.
+// ProviderFor returns the configured provider. Google (OAuth) wins when
+// connected, then CalDAV, otherwise the local Postgres store.
 func ProviderFor(ctx context.Context, store *memory.Store, session string) Provider {
+	if store != nil && oauthx.Connected(ctx, store, "google") {
+		if c, err := oauthx.HTTPClient(ctx, store, "google"); err == nil {
+			return &GoogleProvider{client: c}
+		}
+	}
 	if cfg, ok := caldav.Load(ctx, store); ok {
 		return &CalDAVProvider{cfg: cfg}
 	}

@@ -1361,6 +1361,21 @@ async function renderCalendarTab(container) {
       <div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn btn-primary" id="cd-savepaths">Save selection</button><span id="cd-status2" style="font-size:12px;color:var(--text3)"></span></div>
     </div>
     <div style="margin-top:26px;border-top:1px solid var(--border);padding-top:18px">
+      <h3 style="margin:0 0 4px;font-size:13px">Google Calendar <span style="font-weight:400;color:var(--text3)">(your own OAuth app)</span></h3>
+      <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">Create your <b>own</b> Google OAuth app, then paste the credentials here — ask the agent, it has a step-by-step guide. Register the <b>Redirect URI</b> below in your Google app. When connected, the Calendar app uses your Google Calendar (events only — for Google tasks use Todoist).</p>
+      <div class="appe-card">
+        <div class="appe-row"><label>Redirect URI</label><input id="gg-redirect" readonly title="Register this exact URI in your Google OAuth client" style="flex:1;max-width:360px;color:var(--text3)"></div>
+        <div class="appe-row"><label>Client ID</label><input id="gg-id" spellcheck="false" style="flex:1;max-width:360px"></div>
+        <div class="appe-row"><label>Client secret</label><input id="gg-secret" type="password" autocomplete="new-password" placeholder="••••••••" style="flex:1;max-width:360px"></div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <button class="btn" id="gg-save">Save credentials</button>
+        <button class="btn btn-primary" id="gg-auth">Authorize</button>
+        <button class="btn" id="gg-disconnect" style="display:none;color:var(--red)">Disconnect</button>
+        <span id="gg-status" style="font-size:12px;color:var(--text3)"></span>
+      </div>
+    </div>
+    <div style="margin-top:26px;border-top:1px solid var(--border);padding-top:18px">
       <h3 style="margin:0 0 4px;font-size:13px">Tasks via Todoist <span style="font-weight:400;color:var(--text3)">(optional)</span></h3>
       <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">Connect Todoist with a personal API token (Todoist → Settings → Integrations → Developer). When connected, the Tasks app uses Todoist <b>instead of</b> CalDAV / Prism.</p>
       <div class="appe-card">
@@ -1421,6 +1436,47 @@ async function renderCalendarTab(container) {
       $('#cd-disconnect').style.display = 'none'; $('#cd-cals').style.display = 'none'; $('#cd-pass').value = ''
       status.style.color = 'var(--text3)'; status.textContent = 'Disconnected'
     } catch (e) { status.style.color = 'var(--red)'; status.textContent = e.message }
+  })
+
+  // Google Calendar (bring-your-own OAuth app)
+  const ggStatus = $('#gg-status')
+  async function ggLoad() {
+    try {
+      const d = await (await fetch('/api/oauth/google/config')).json()
+      $('#gg-redirect').value = d.redirectUri || (location.origin + '/api/oauth/google/callback')
+      $('#gg-id').value = d.clientId || ''
+      if (d.connected) { $('#gg-disconnect').style.display = ''; ggStatus.style.color = 'var(--green)'; ggStatus.textContent = 'Connected' }
+      else { $('#gg-disconnect').style.display = 'none'; ggStatus.textContent = '' }
+    } catch {}
+  }
+  const ggSaveCreds = async () => {
+    const r = await fetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#gg-id').value.trim(), clientSecret: $('#gg-secret').value }) })
+    if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
+  }
+  await ggLoad()
+  $('#gg-save').addEventListener('click', async () => {
+    ggStatus.style.color = 'var(--text3)'; ggStatus.textContent = 'Saving…'
+    try { await ggSaveCreds(); ggStatus.style.color = 'var(--green)'; ggStatus.textContent = 'Saved ✓' }
+    catch (e) { ggStatus.style.color = 'var(--red)'; ggStatus.textContent = e.message }
+  })
+  $('#gg-auth').addEventListener('click', async () => {
+    ggStatus.style.color = 'var(--text3)'; ggStatus.textContent = 'Saving…'
+    try { if ($('#gg-id').value.trim() && $('#gg-secret').value.trim()) await ggSaveCreds() }
+    catch (e) { ggStatus.style.color = 'var(--red)'; ggStatus.textContent = e.message; return }
+    ggStatus.textContent = 'Waiting for Google…'
+    window.open('/api/oauth/google/start', 'prism-oauth', 'width=520,height=680')
+  })
+  window.addEventListener('message', (e) => {
+    if (!e.data || e.data.type !== 'oauth-done') return
+    setTimeout(ggLoad, 300)
+    if (e.data.ok) { ggStatus.style.color = 'var(--green)'; ggStatus.textContent = 'Connected ✓' }
+    else { ggStatus.style.color = 'var(--red)'; ggStatus.textContent = 'Authorization failed' }
+  })
+  $('#gg-disconnect').addEventListener('click', async () => {
+    try {
+      await fetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
+      ggLoad(); ggStatus.style.color = 'var(--text3)'; ggStatus.textContent = 'Disconnected'
+    } catch (e) { ggStatus.style.color = 'var(--red)'; ggStatus.textContent = e.message }
   })
 
   // Todoist task backend

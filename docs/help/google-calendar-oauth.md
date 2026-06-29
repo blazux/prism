@@ -31,9 +31,13 @@ about 10 minutes. The agent can walk you through each step.
 4. Create. Copy the **Client ID** and **Client secret**.
 
 ## 5. Connect in Prism
-In **Settings → Calendar → Google**, paste the Client ID and Client secret, then
-click **Authorize**. A Google consent window opens; approve it, and Prism
-receives a token it refreshes automatically.
+In **Settings → Calendar → Google**, paste the Client ID and Client secret and
+click **Save credentials**, then **Authorize**. A Google consent window opens;
+approve it, and Prism receives a token it refreshes automatically. The Calendar
+app now shows your Google Calendar.
+
+Note: this connects calendar **events** only. For Google tasks, use Todoist or
+keep tasks in CalDAV / Prism.
 
 ## Troubleshooting
 - "redirect_uri_mismatch": the redirect URI in Google must match exactly what

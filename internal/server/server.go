@@ -55,6 +55,7 @@ type Server struct {
 	mcpMgr         *mcp.Manager
 	socketSessions sync.Map // socket.io sid → targetHost (for WebSocket upgrade routing)
 	tgCancel       context.CancelFunc // cancels the running Telegram poller, if any
+	oauthStates    sync.Map // CSRF state → oauthState (pending OAuth authorizations)
 }
 
 func New(cfg Config) *Server {
@@ -173,6 +174,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/notes/source", s.handleNotesSource)
 	mux.HandleFunc("/api/caldav/config", s.handleCalDAVConfig)
 	mux.HandleFunc("/api/todoist/config", s.handleTodoistConfig)
+	mux.HandleFunc("/api/oauth/", s.handleOAuth)
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/cron", s.handleCron)
