@@ -1178,6 +1178,53 @@ function termWrite(text, cls) {
   const div = document.createElement('div'); div.className = 'term-line' + (cls ? ' ' + cls : ''); div.textContent = text
   log.appendChild(div); log.scrollTop = log.scrollHeight
 }
+function termWriteAnsi(text, cls) {
+  const log = document.getElementById('term-log'); if (!log) return
+  const div = document.createElement('div'); div.className = 'term-line' + (cls ? ' ' + cls : ''); div.innerHTML = ansiToHtml(text)
+  log.appendChild(div); log.scrollTop = log.scrollHeight
+}
+// Minimal ANSI (SGR) → HTML: colors, bold; other escape sequences are stripped.
+const ANSI_FG = { 30: '#5c6370', 31: '#e06c75', 32: '#98c379', 33: '#e5c07b', 34: '#61afef', 35: '#c678dd', 36: '#56b6c2', 37: '#cdd0d6', 90: '#7f848e', 91: '#ff7b86', 92: '#b5e08f', 93: '#f0d08a', 94: '#7cc4ff', 95: '#d7a6ef', 96: '#7fdce8', 97: '#ffffff' }
+function ansiToHtml(s) {
+  s = String(s)
+    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')          // OSC (titles)
+    .replace(/\x1b\[[0-9;?]*[\x40-\x6c\x6e-\x7e]/g, '')      // CSI except SGR 'm'
+    .replace(/\x1b[=>]/g, '')
+  const escHtml = (t) => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+  let fg = null, bg = null, bold = false
+  const style = () => {
+    const st = []
+    let f = fg
+    if (bold && f != null && f >= 30 && f <= 37) f += 60
+    if (f != null && ANSI_FG[f]) st.push('color:' + ANSI_FG[f])
+    if (bg != null && ANSI_FG[bg - 10]) st.push('background:' + ANSI_FG[bg - 10])
+    if (bold) st.push('font-weight:bold')
+    return st.join(';')
+  }
+  const parts = s.split(/\x1b\[([0-9;]*)m/)
+  let html = '', cur = ''
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 0) {
+      if (!parts[i]) continue
+      const t = escHtml(parts[i])
+      html += cur ? `<span style="${cur}">${t}</span>` : t
+    } else {
+      const codes = parts[i].split(';').filter(x => x !== '').map(Number)
+      if (!codes.length) codes.push(0)
+      for (const c of codes) {
+        if (c === 0) { fg = null; bg = null; bold = false }
+        else if (c === 1) bold = true
+        else if (c === 22) bold = false
+        else if (c === 39) fg = null
+        else if (c === 49) bg = null
+        else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) fg = c
+        else if ((c >= 40 && c <= 47) || (c >= 100 && c <= 107)) bg = c
+      }
+      cur = style()
+    }
+  }
+  return html
+}
 function onTermKey(e) {
   const input = e.target
   if (e.key === 'Enter') {
@@ -1193,14 +1240,16 @@ async function runTermCommand(cmd) {
   termWrite(termCwd + ' $ ' + cmd, 'term-cmd')
   if (cmd.trim() === 'clear') { document.getElementById('term-log').innerHTML = ''; return }
   const marker = '__PRISM_PWD__'
-  const wrapped = `cd ${shellQuote(termCwd)} 2>/dev/null; ${cmd}\nprintf "\\n${marker}:%s" "$(pwd)"`
+  // Force colour for tools that honour these (git, npm, grep, BSD ls…). GNU ls
+  // still needs --color, but its output now renders in colour.
+  const wrapped = `export CLICOLOR_FORCE=1 FORCE_COLOR=1 CLICOLOR=1; cd ${shellQuote(termCwd)} 2>/dev/null; ${cmd}\nprintf "\\n${marker}:%s" "$(pwd)"`
   try {
     const d = await (await fetch('/api/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: wrapped }) })).json()
     let out = d.output || ''
     const m = out.lastIndexOf('\n' + marker + ':')
     if (m >= 0) { termCwd = out.slice(m + marker.length + 2).split('\n')[0].trim() || termCwd; out = out.slice(0, m) }
-    if (out) termWrite(out.replace(/\s+$/, ''))
-    if (d.error) termWrite(d.error, 'term-err')
+    if (out) termWriteAnsi(out.replace(/\s+$/, ''))
+    if (d.error) termWriteAnsi(d.error, 'term-err')
     updateTermPrompt()
   } catch (e) { termWrite('Failed: ' + e.message, 'term-err') }
 }
