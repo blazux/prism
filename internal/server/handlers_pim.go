@@ -7,8 +7,12 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"prism/internal/notes"
 )
 
 // pimScope is the shared scope for personal data — notes, tasks and calendar are
@@ -55,18 +59,18 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
-	sess := pimScope
+	prov := notes.ProviderFor(r.Context(), s.memStore, pimScope)
 	switch r.Method {
 	case "GET":
-		notes, err := s.memStore.ListNotes(r.Context(), sess)
+		items, err := prov.List(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		writeJSON(w, map[string]interface{}{"notes": notes})
+		writeJSON(w, map[string]interface{}{"notes": items, "source": prov.Kind()})
 	case "POST":
 		var b struct {
-			ID    int64  `json:"id"`
+			ID    string `json:"id"`
 			Title string `json:"title"`
 			Body  string `json:"body"`
 			Tags  string `json:"tags"`
@@ -75,24 +79,61 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad body", 400)
 			return
 		}
-		if b.ID > 0 {
-			if err := s.memStore.UpdateNote(r.Context(), sess, b.ID, b.Title, b.Body, b.Tags); err != nil {
-				http.Error(w, err.Error(), 500)
-				return
-			}
-			writeJSON(w, map[string]interface{}{"id": b.ID})
-			return
-		}
-		id, err := s.memStore.AddNote(r.Context(), sess, b.Title, b.Body, b.Tags)
+		id, err := prov.Save(r.Context(), b.ID, b.Title, b.Body, b.Tags)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		writeJSON(w, map[string]interface{}{"id": id})
 	case "DELETE":
-		if err := s.memStore.DeleteNote(r.Context(), sess, idParam(r)); err != nil {
+		if err := prov.Delete(r.Context(), r.URL.Query().Get("id")); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
+		}
+		writeJSON(w, map[string]interface{}{"ok": true})
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// ─── /api/notes/source — choose where notes live (local DB or a Markdown vault) ──
+
+func (s *Server) handleNotesSource(w http.ResponseWriter, r *http.Request) {
+	if !s.pimStore(w) {
+		return
+	}
+	switch r.Method {
+	case "GET":
+		prov, _, _ := s.memStore.GetConfig(r.Context(), notes.KeyProvider)
+		path, _, _ := s.memStore.GetConfig(r.Context(), notes.KeyVaultPath)
+		if prov == "" {
+			prov = "local"
+		}
+		writeJSON(w, map[string]interface{}{"provider": prov, "path": path})
+	case "POST":
+		var b struct {
+			Provider string `json:"provider"`
+			Path     string `json:"path"`
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
+		if b.Provider == "vault" {
+			b.Path = strings.TrimSpace(b.Path)
+			if b.Path == "" {
+				http.Error(w, "vault path required", 400)
+				return
+			}
+			info, err := os.Stat(b.Path)
+			if err != nil || !info.IsDir() {
+				http.Error(w, "vault path is not a readable directory (is it mounted into the server container?)", 400)
+				return
+			}
+			s.memStore.SetConfig(r.Context(), notes.KeyVaultPath, b.Path)
+			s.memStore.SetConfig(r.Context(), notes.KeyProvider, "vault")
+		} else {
+			s.memStore.SetConfig(r.Context(), notes.KeyProvider, "local")
 		}
 		writeJSON(w, map[string]interface{}{"ok": true})
 	default:

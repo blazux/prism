@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"prism/internal/notes"
 )
 
 // pimScope is the shared scope for personal data (notes, tasks, calendar). These
@@ -43,41 +45,39 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body,
 	if e.memStore == nil {
 		return "", fmt.Errorf("notes unavailable: no database")
 	}
-	sess := pimScope
+	prov := notes.ProviderFor(ctx, e.memStore, pimScope)
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
-		id, err := e.memStore.AddNote(ctx, sess, title, body, tags)
+		id, err := prov.Save(ctx, "", title, body, tags)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Note #%d added.", id), nil
+		return fmt.Sprintf("Note %q added.", id), nil
 	case "list", "":
-		notes, err := e.memStore.ListNotes(ctx, sess)
+		items, err := prov.List(ctx)
 		if err != nil {
 			return "", err
 		}
-		if len(notes) == 0 {
+		if len(items) == 0 {
 			return "No notes.", nil
 		}
-		return jsonResult(notes), nil
+		return jsonResult(items), nil
 	case "update", "edit":
-		id := parseID(idStr)
-		if id == 0 {
-			return "", fmt.Errorf("update requires a numeric id")
+		if strings.TrimSpace(idStr) == "" {
+			return "", fmt.Errorf("update requires an id")
 		}
-		if err := e.memStore.UpdateNote(ctx, sess, id, title, body, tags); err != nil {
+		if _, err := prov.Save(ctx, idStr, title, body, tags); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Note #%d updated.", id), nil
+		return fmt.Sprintf("Note %q updated.", idStr), nil
 	case "delete", "remove":
-		id := parseID(idStr)
-		if id == 0 {
-			return "", fmt.Errorf("delete requires a numeric id")
+		if strings.TrimSpace(idStr) == "" {
+			return "", fmt.Errorf("delete requires an id")
 		}
-		if err := e.memStore.DeleteNote(ctx, sess, id); err != nil {
+		if err := prov.Delete(ctx, idStr); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Note #%d deleted.", id), nil
+		return fmt.Sprintf("Note %q deleted.", idStr), nil
 	default:
 		return "", fmt.Errorf("note: unknown action %q (add, list, update, delete)", action)
 	}

@@ -290,7 +290,7 @@ var ToolDefinitions = []ollama.Tool{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"action": {Type: "string", Description: "add, list, update, or delete"},
-					"id":     {Type: "integer", Description: "Note id (for update/delete)"},
+					"id":     {Type: "string", Description: "Note id from list, used for update/delete. Opaque: a number for local notes, or a file path like \"folder/Note.md\" when a Markdown vault is connected."},
 					"title":  {Type: "string", Description: "Note title"},
 					"body":   {Type: "string", Description: "Note body (Markdown)"},
 					"tags":   {Type: "string", Description: "Comma-separated tags"},

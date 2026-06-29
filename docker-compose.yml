@@ -8,6 +8,9 @@ services:
     volumes:
       - workspace:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
+      # To connect a Markdown vault (Obsidian/Logseq) to the Notes app, mount it
+      # here and set its path in Settings → Notes (e.g. /vault):
+      # - /path/to/your/ObsidianVault:/vault
     environment:
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
