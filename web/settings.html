@@ -1464,7 +1464,22 @@ async function renderCalendarTab(container) {
     try { if ($('#gg-id').value.trim() && $('#gg-secret').value.trim()) await ggSaveCreds() }
     catch (e) { ggStatus.style.color = 'var(--red)'; ggStatus.textContent = e.message; return }
     ggStatus.textContent = 'Waiting for Google…'
-    window.open('/api/oauth/google/start', 'prism-oauth', 'width=520,height=680')
+    const popup = window.open('/api/oauth/google/start', 'prism-oauth', 'width=520,height=680')
+    // Poll the server for connection — Google's COOP can sever window.opener, so
+    // the popup's postMessage may never arrive.
+    let tries = 0
+    const iv = setInterval(async () => {
+      tries++
+      let connected = false
+      try { connected = (await (await fetch('/api/oauth/google/config')).json()).connected } catch {}
+      if (connected) {
+        clearInterval(iv); ggLoad()
+        ggStatus.style.color = 'var(--green)'; ggStatus.textContent = 'Connected ✓'
+      } else if ((popup && popup.closed) || tries > 60) {
+        clearInterval(iv)
+        if (ggStatus.textContent === 'Waiting for Google…') { ggStatus.style.color = 'var(--text3)'; ggStatus.textContent = '' }
+      }
+    }, 2000)
   })
   window.addEventListener('message', (e) => {
     if (!e.data || e.data.type !== 'oauth-done') return

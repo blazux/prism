@@ -17,9 +17,17 @@ func (s *Server) isAuthenticated(r *http.Request) bool {
 	return false
 }
 
+func isOAuthCallback(p string) bool {
+	return strings.HasPrefix(p, "/api/oauth/") && strings.HasSuffix(p, "/callback")
+}
+
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.AuthToken == "" || r.URL.Path == "/api/auth" {
+		// The OAuth callback is a cross-site top-level redirect from the provider,
+		// so the (SameSite) session cookie may not ride along — and it doesn't
+		// need to: it's protected by the unguessable one-time `state`. Let it
+		// through so the token exchange can run.
+		if s.cfg.AuthToken == "" || r.URL.Path == "/api/auth" || isOAuthCallback(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -59,7 +67,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 			Path:     "/",
 			MaxAge:   30 * 24 * 3600,
 			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
+			SameSite: http.SameSiteLaxMode,
 		})
 		fmt.Fprint(w, `{"ok":true}`)
 	case http.MethodDelete:
@@ -69,7 +77,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 			Path:     "/",
 			MaxAge:   -1,
 			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
+			SameSite: http.SameSiteLaxMode,
 		})
 		fmt.Fprint(w, `{"ok":true}`)
 	default:
