@@ -33,6 +33,15 @@ Steps:
 3. Prism discovers your calendars. Pick which one holds **events** and which
    holds **tasks**, then Save selection.
 
+## Choosing the active source
+You can connect several providers. **Settings → Calendar → Active sources** lets
+you pick which one each app uses: a **Calendar (events)** selector (Auto, Local,
+CalDAV, Google) and a **Tasks** selector (Auto, Local, CalDAV, Todoist). Only
+connected providers appear. **Auto** uses the best connected one (for events:
+Google → CalDAV → local; for tasks: Todoist → CalDAV → local) and shows what it
+currently resolves to. So if events still show CalDAV after connecting Google,
+either leave it on Auto or pick **Google** explicitly here.
+
 ## Tasks → Todoist
 1. In Todoist: **Settings → Integrations → Developer**, copy your **API token**.
 2. In Prism: **Settings → Calendar → Tasks via Todoist**, paste the token,

@@ -1343,8 +1343,16 @@ async function renderCalendarTab(container) {
   const wrap = document.createElement('div')
   wrap.style.cssText = 'max-width:640px;padding:24px'
   wrap.innerHTML = `
-    <h2 style="margin:0 0 4px;font-size:16px">Calendar &amp; Tasks (CalDAV)</h2>
-    <p style="color:var(--text3);font-size:12.5px;margin:0 0 18px;line-height:1.5">Connect a CalDAV account so the Calendar and Tasks apps read and write your <b>real</b> calendar — Apple iCloud, Nextcloud, Fastmail, mailbox.org… Use an <b>app-specific password</b>. Leave disconnected to keep events/tasks in Prism's own database.</p>
+    <h2 style="margin:0 0 4px;font-size:16px">Calendar &amp; Tasks</h2>
+    <p style="color:var(--text3);font-size:12.5px;margin:0 0 16px;line-height:1.5">Connect your providers below, then choose which source each app uses. <b>Auto</b> picks the best connected one.</p>
+    <div class="appe-card" style="margin-bottom:24px">
+      <div class="appe-row"><label>Calendar (events)</label>
+        <span style="display:flex;gap:10px;align-items:center;flex:1;max-width:360px"><select id="src-cal" style="flex:1"></select><span id="src-cal-hint" style="font-size:11px;color:var(--text3);white-space:nowrap"></span></span></div>
+      <div class="appe-row"><label>Tasks</label>
+        <span style="display:flex;gap:10px;align-items:center;flex:1;max-width:360px"><select id="src-task" style="flex:1"></select><span id="src-task-hint" style="font-size:11px;color:var(--text3);white-space:nowrap"></span></span></div>
+    </div>
+    <h3 style="margin:0 0 4px;font-size:13px">CalDAV <span style="font-weight:400;color:var(--text3)">(Apple iCloud, Nextcloud, Fastmail…)</span></h3>
+    <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">Read/write your real calendar and tasks with an <b>app-specific password</b>.</p>
     <div class="appe-card">
       <div class="appe-row"><label>Server URL</label><input id="cd-url" placeholder="https://caldav.icloud.com" spellcheck="false" style="flex:1;max-width:360px"></div>
       <div class="appe-row"><label>Username</label><input id="cd-user" placeholder="you@icloud.com" spellcheck="false" style="flex:1;max-width:360px"></div>
@@ -1389,6 +1397,32 @@ async function renderCalendarTab(container) {
     </div>`
   container.appendChild(wrap)
   const $ = s => wrap.querySelector(s)
+
+  // Active sources: let the user pick which connected provider backs each app.
+  const SRC_LABEL = { auto: 'Auto', local: 'Local', caldav: 'CalDAV', google: 'Google', todoist: 'Todoist' }
+  const fillSrc = (sel, opts, val) => {
+    sel.innerHTML = ''
+    for (const o of opts) sel.appendChild(new Option(SRC_LABEL[o], o))
+    sel.value = opts.includes(val) ? val : 'auto'
+  }
+  async function loadSources() {
+    let d
+    try { d = await (await fetch('/api/pim/sources')).json() } catch { return }
+    const calOpts = ['auto', 'local'].concat(d.available.caldav ? ['caldav'] : [], d.available.google ? ['google'] : [])
+    const taskOpts = ['auto', 'local'].concat(d.available.caldav ? ['caldav'] : [], d.available.todoist ? ['todoist'] : [])
+    fillSrc($('#src-cal'), calOpts, d.calendar)
+    fillSrc($('#src-task'), taskOpts, d.tasks)
+    $('#src-cal-hint').textContent = d.calendar === 'auto' ? `→ ${SRC_LABEL[d.resolved.calendar] || d.resolved.calendar}` : ''
+    $('#src-task-hint').textContent = d.tasks === 'auto' ? `→ ${SRC_LABEL[d.resolved.tasks] || d.resolved.tasks}` : ''
+  }
+  const saveSources = async () => {
+    try { await fetch('/api/pim/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ calendar: $('#src-cal').value, tasks: $('#src-task').value }) }) } catch {}
+    loadSources()
+  }
+  $('#src-cal').addEventListener('change', saveSources)
+  $('#src-task').addEventListener('change', saveSources)
+  await loadSources()
+
   const status = $('#cd-status'), known = { eventPath: '', taskPath: '' }
   const fillCals = (cals) => {
     const ev = $('#cd-evpath'), tk = $('#cd-taskpath')
@@ -1418,7 +1452,7 @@ async function renderCalendarTab(container) {
       const d = await post({ url: $('#cd-url').value.trim(), user: $('#cd-user').value.trim(), password: $('#cd-pass').value })
       status.style.color = 'var(--green)'; status.textContent = 'Connected ✓'
       $('#cd-disconnect').style.display = ''
-      fillCals(d.calendars)
+      fillCals(d.calendars); loadSources()
     } catch (e) { status.style.color = 'var(--red)'; status.textContent = e.message }
   })
   $('#cd-savepaths').addEventListener('click', async () => {
@@ -1434,7 +1468,7 @@ async function renderCalendarTab(container) {
     try {
       await post({ disconnect: true })
       $('#cd-disconnect').style.display = 'none'; $('#cd-cals').style.display = 'none'; $('#cd-pass').value = ''
-      status.style.color = 'var(--text3)'; status.textContent = 'Disconnected'
+      status.style.color = 'var(--text3)'; status.textContent = 'Disconnected'; loadSources()
     } catch (e) { status.style.color = 'var(--red)'; status.textContent = e.message }
   })
 
@@ -1473,7 +1507,7 @@ async function renderCalendarTab(container) {
       let connected = false
       try { connected = (await (await fetch('/api/oauth/google/config')).json()).connected } catch {}
       if (connected) {
-        clearInterval(iv); ggLoad()
+        clearInterval(iv); ggLoad(); loadSources()
         ggStatus.style.color = 'var(--green)'; ggStatus.textContent = 'Connected ✓'
       } else if ((popup && popup.closed) || tries > 60) {
         clearInterval(iv)
@@ -1490,7 +1524,7 @@ async function renderCalendarTab(container) {
   $('#gg-disconnect').addEventListener('click', async () => {
     try {
       await fetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
-      ggLoad(); ggStatus.style.color = 'var(--text3)'; ggStatus.textContent = 'Disconnected'
+      ggLoad(); loadSources(); ggStatus.style.color = 'var(--text3)'; ggStatus.textContent = 'Disconnected'
     } catch (e) { ggStatus.style.color = 'var(--red)'; ggStatus.textContent = e.message }
   })
 
@@ -1504,7 +1538,7 @@ async function renderCalendarTab(container) {
     try {
       const r = await fetch('/api/todoist/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: $('#td-token').value.trim() }) })
       if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
-      st.style.color = 'var(--green)'; st.textContent = 'Connected ✓'; $('#td-disconnect').style.display = ''
+      st.style.color = 'var(--green)'; st.textContent = 'Connected ✓'; $('#td-disconnect').style.display = ''; loadSources()
     } catch (e) { st.style.color = 'var(--red)'; st.textContent = e.message }
   })
   $('#td-disconnect').addEventListener('click', async () => {
@@ -1512,7 +1546,7 @@ async function renderCalendarTab(container) {
     try {
       await fetch('/api/todoist/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
       $('#td-disconnect').style.display = 'none'; $('#td-token').value = ''
-      st.style.color = 'var(--text3)'; st.textContent = 'Disconnected'
+      st.style.color = 'var(--text3)'; st.textContent = 'Disconnected'; loadSources()
     } catch (e) { st.style.color = 'var(--red)'; st.textContent = e.message }
   })
 }

@@ -31,18 +31,52 @@ type Provider interface {
 	Kind() string
 }
 
-// ProviderFor returns the configured provider. Google (OAuth) wins when
-// connected, then CalDAV, otherwise the local Postgres store.
+// KeyProvider holds the user's explicit calendar source choice
+// (auto|local|caldav|google). "auto"/unset uses the precedence below.
+const KeyProvider = "calendar_provider"
+
+// ProviderFor returns the active provider. An explicit choice wins when its
+// backend is actually available; otherwise (auto) the precedence is Google →
+// CalDAV → local.
 func ProviderFor(ctx context.Context, store *memory.Store, session string) Provider {
+	if store != nil {
+		choice, _, _ := store.GetConfig(ctx, KeyProvider)
+		switch choice {
+		case "local":
+			return &DBProvider{Store: store, Session: session}
+		case "google":
+			if p := googleProvider(ctx, store); p != nil {
+				return p
+			}
+		case "caldav":
+			if p := caldavProvider(ctx, store); p != nil {
+				return p
+			}
+		}
+	}
+	if p := googleProvider(ctx, store); p != nil {
+		return p
+	}
+	if p := caldavProvider(ctx, store); p != nil {
+		return p
+	}
+	return &DBProvider{Store: store, Session: session}
+}
+
+func googleProvider(ctx context.Context, store *memory.Store) Provider {
 	if store != nil && oauthx.Connected(ctx, store, "google") {
 		if c, err := oauthx.HTTPClient(ctx, store, "google"); err == nil {
 			return &GoogleProvider{client: c}
 		}
 	}
+	return nil
+}
+
+func caldavProvider(ctx context.Context, store *memory.Store) Provider {
 	if cfg, ok := caldav.Load(ctx, store); ok {
 		return &CalDAVProvider{cfg: cfg}
 	}
-	return &DBProvider{Store: store, Session: session}
+	return nil
 }
 
 // ─── Local (Postgres) provider ──────────────────────────────────────────────────

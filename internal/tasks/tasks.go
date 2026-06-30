@@ -29,16 +29,50 @@ type Provider interface {
 	Kind() string
 }
 
-// ProviderFor returns the configured provider. Todoist wins when connected,
-// then CalDAV, otherwise the local Postgres store.
+// KeyProvider holds the user's explicit tasks source choice
+// (auto|local|caldav|todoist). "auto"/unset uses the precedence below.
+const KeyProvider = "tasks_provider"
+
+// ProviderFor returns the active provider. An explicit choice wins when its
+// backend is available; otherwise (auto) the precedence is Todoist → CalDAV →
+// local.
 func ProviderFor(ctx context.Context, store *memory.Store, session string) Provider {
+	if store != nil {
+		choice, _, _ := store.GetConfig(ctx, KeyProvider)
+		switch choice {
+		case "local":
+			return &DBProvider{Store: store, Session: session}
+		case "todoist":
+			if p := todoistProvider(ctx, store); p != nil {
+				return p
+			}
+		case "caldav":
+			if p := caldavProvider(ctx, store); p != nil {
+				return p
+			}
+		}
+	}
+	if p := todoistProvider(ctx, store); p != nil {
+		return p
+	}
+	if p := caldavProvider(ctx, store); p != nil {
+		return p
+	}
+	return &DBProvider{Store: store, Session: session}
+}
+
+func todoistProvider(ctx context.Context, store *memory.Store) Provider {
 	if tok := todoistToken(ctx, store); tok != "" {
 		return &TodoistProvider{token: tok}
 	}
+	return nil
+}
+
+func caldavProvider(ctx context.Context, store *memory.Store) Provider {
 	if cfg, ok := caldav.Load(ctx, store); ok {
 		return &CalDAVProvider{cfg: cfg}
 	}
-	return &DBProvider{Store: store, Session: session}
+	return nil
 }
 
 // ─── Local (Postgres) provider ──────────────────────────────────────────────────
