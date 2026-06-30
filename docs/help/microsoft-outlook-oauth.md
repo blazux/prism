@@ -4,6 +4,12 @@ Outlook.com and Microsoft 365 calendars use the **Microsoft Graph API** with
 **OAuth 2.0**. As with Google, you register your **own** app in Azure once, so
 your data stays between you and Microsoft. The agent can guide you through it.
 
+Prism does **not** need to be reachable from the internet: the redirect goes to
+your browser, not Microsoft's servers. The simplest setup is to open Prism at
+`http://localhost:48080` and register `http://localhost:48080/api/oauth/microsoft/callback`
+(localhost is allowed); otherwise use an https domain. (Microsoft Graph calendar
+support in Prism is still being rolled out — these are the Azure-side steps.)
+
 ## 1. Register an app
 1. Go to https://entra.microsoft.com/ (or the Azure portal) →
    **App registrations → New registration**.

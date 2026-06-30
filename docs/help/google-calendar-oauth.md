@@ -11,6 +11,26 @@ minutes. The agent can walk you through each step.
 > and if needed, web-search "Google Cloud create OAuth client ID <current year>"
 > for the current screens rather than insisting on these exact labels.
 
+## Does Prism need to be reachable from the internet? No.
+A common worry — but the OAuth redirect goes to **your browser**, not to Google's
+servers. Google never connects to Prism. After you approve, Google redirects your
+browser to Prism's callback URL, and Prism then calls Google's token endpoint
+**outbound** (which already works). So no inbound/public access is required.
+
+The only real constraint is which redirect URI Google accepts:
+- **Simplest (fully local):** open Prism at `http://localhost:48080` and register
+  `http://localhost:48080/api/oauth/google/callback`. Google allows `http://`
+  for `localhost` / `127.0.0.1` (loopback).
+- A **LAN IP over http** (e.g. `http://192.168.1.x:48080`) is often **rejected**
+  by Google — use loopback or an https domain instead.
+- A **domain over https** (e.g. via your reverse proxy) works, even if it only
+  resolves on your LAN — Google only checks the format, never reachability.
+- **Remote server?** Either use an https domain, or SSH port-forward
+  (`ssh -L 48080:localhost:48080 your-server`) and use `http://localhost:48080`.
+
+The Redirect URI shown in **Settings → Calendar → Google** already reflects the
+address you reached Prism at — copy that exact value into your Google app.
+
 ## 1. Create a Google Cloud project
 1. Go to https://console.cloud.google.com/ and sign in.
 2. Top bar → project dropdown → **New Project**. Name it (e.g. "Prism") → Create.
