@@ -13,6 +13,9 @@ import (
 //go:embed web
 var webFS embed.FS
 
+//go:embed docs/help
+var helpFS embed.FS
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -95,6 +98,7 @@ func main() {
 		EmbedModel:       embedModel,
 		AuthToken:        authToken,
 		WebFS:            webFS,
+		HelpFS:           helpFS,
 		ServicePortStart: servicePortStart,
 		ServicePortEnd:   servicePortEnd,
 	}

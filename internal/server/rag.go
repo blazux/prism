@@ -90,6 +90,11 @@ func (s *Server) initRAG(ctx context.Context) {
 	s.ragCaptioner = s.newCaptioner()
 	ragInitStatus.Store("ready")
 	log.Println("[rag] ready")
+
+	// Index Prism's bundled help docs for semantic search (idempotent).
+	if docs, hash := s.loadHelpDocs(); len(docs) > 0 {
+		s.ingestHelpDocs(ctx, docs, hash)
+	}
 }
 
 // registerRAGRoutes adds /api/rag/* handlers to the mux.

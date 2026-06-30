@@ -14,6 +14,7 @@ require (
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/xuri/excelize/v2 v2.10.1
 	golang.org/x/net v0.50.0
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (
