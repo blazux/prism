@@ -1306,7 +1306,7 @@ let collections = []
 
 async function renderNotesTab(container) {
   const wrap = document.createElement('div')
-  wrap.style.cssText = 'max-width:640px;padding:24px;height:100%;overflow-y:auto;box-sizing:border-box'
+  wrap.style.cssText = 'max-width:640px'
   wrap.innerHTML = `
     <h2 style="margin:0 0 4px;font-size:16px">Notes storage</h2>
     <p style="color:var(--text3);font-size:12.5px;margin:0 0 18px;line-height:1.5">Keep notes in Prism's database, or connect a Markdown <b>vault</b> (Obsidian / Logseq). In vault mode your notes are plain <code>.md</code> files in the folder — edit them here or in your own editor, both ways. The note's title is the filename; <code>[[wikilinks]]</code> and frontmatter are preserved.</p>
@@ -1321,7 +1321,7 @@ async function renderNotesTab(container) {
       <button class="btn btn-primary" id="notes-save">Save</button>
       <span id="notes-status" style="font-size:12px;color:var(--text3)"></span>
     </div>`
-  container.appendChild(wrap)
+  const page = document.createElement('div'); page.className = 'settings-page'; page.appendChild(wrap); container.appendChild(page)
   const prov = wrap.querySelector('#notes-prov'), pathRow = wrap.querySelector('#notes-path-row'),
         pathHelp = wrap.querySelector('#notes-path-help'), pathInput = wrap.querySelector('#notes-path'),
         status = wrap.querySelector('#notes-status')
@@ -1341,7 +1341,7 @@ async function renderNotesTab(container) {
 
 async function renderCalendarTab(container) {
   const wrap = document.createElement('div')
-  wrap.style.cssText = 'max-width:640px;padding:24px;height:100%;overflow-y:auto;box-sizing:border-box'
+  wrap.style.cssText = 'max-width:640px'
   wrap.innerHTML = `
     <h2 style="margin:0 0 4px;font-size:16px">Calendar &amp; Tasks</h2>
     <p style="color:var(--text3);font-size:12.5px;margin:0 0 16px;line-height:1.5">Connect your providers below, then choose which source each app uses. <b>Auto</b> picks the best connected one.</p>
@@ -1395,7 +1395,7 @@ async function renderCalendarTab(container) {
         <span id="td-status" style="font-size:12px;color:var(--text3)"></span>
       </div>
     </div>`
-  container.appendChild(wrap)
+  const page = document.createElement('div'); page.className = 'settings-page'; page.appendChild(wrap); container.appendChild(page)
   const $ = s => wrap.querySelector(s)
 
   // Active sources: let the user pick which connected provider backs each app.
