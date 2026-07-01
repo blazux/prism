@@ -104,6 +104,7 @@
         <button class="tab" data-tab="cron" onclick="switchTab('cron')">⏱ Scheduled</button>
       </div>
       <span class="sub" id="count"></span>
+      <span id="src-badge" style="display:none;font-size:11px;color:var(--text3);border:1px solid var(--border);border-radius:999px;padding:2px 9px;white-space:nowrap;margin-left:8px"></span>
     </div>
 
     <!-- To-do view -->
@@ -205,8 +206,13 @@ function updateCount() {
 let todos = [];
 const PRANK = { high: 0, normal: 1, low: 2 };
 
+function setSourceBadge(src) {
+  const el = document.getElementById('src-badge'); if (!el) return;
+  const L = { google: 'Google', caldav: 'CalDAV', todoist: 'Todoist', vault: 'Vault' };
+  if (src && L[src]) { el.textContent = '◦ ' + L[src]; el.style.display = 'inline-block'; } else { el.style.display = 'none'; }
+}
 async function loadTodos() {
-  try { todos = (await fetch('/api/tasks?include_done=true').then(r => r.json())).tasks || []; } catch { todos = []; }
+  try { const d = await fetch('/api/tasks?include_done=true').then(r => r.json()); todos = d.tasks || []; setSourceBadge(d.source); } catch { todos = []; }
   renderTodos();
   postTodoContext();
 }

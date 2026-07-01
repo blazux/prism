@@ -111,6 +111,7 @@
       <div class="list-head">
         <input id="search" placeholder="Search notes…">
         <button class="btn btn-accent btn-new" onclick="newNote()">＋ New</button>
+        <span id="src-badge" style="display:none;font-size:11px;color:var(--text3);border:1px solid var(--border);border-radius:999px;padding:2px 9px;white-space:nowrap"></span>
       </div>
       <div class="tag-bar" id="tag-bar"></div>
       <div class="notes" id="notes"></div>
@@ -202,9 +203,15 @@ function togglePin(id) { const p = pins(); p.has(id) ? p.delete(id) : p.add(id);
 const noteTags = n => (n.tags || '').split(',').map(t => t.trim()).filter(Boolean);
 function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
+function setSourceBadge(src) {
+  const el = document.getElementById('src-badge'); if (!el) return;
+  const L = { google: 'Google', caldav: 'CalDAV', todoist: 'Todoist', vault: 'Vault' };
+  if (src && L[src]) { el.textContent = '◦ ' + L[src]; el.style.display = 'inline-block'; } else { el.style.display = 'none'; }
+}
 async function load() {
   const data = await api(`?session=${encodeURIComponent(session)}`);
   notes = data.notes || [];
+  setSourceBadge(data.source);
   render();
 }
 

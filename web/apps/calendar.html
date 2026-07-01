@@ -102,6 +102,7 @@
   <div class="app">
     <div class="head">
       <h1 id="title"></h1>
+      <span id="src-badge" style="display:none;font-size:11px;color:var(--text3);border:1px solid var(--border);border-radius:999px;padding:2px 9px;white-space:nowrap"></span>
       <button class="btn nav-btn" onclick="move(-1)" title="Previous">‹</button>
       <button class="btn" onclick="today()">Today</button>
       <button class="btn nav-btn" onclick="move(1)" title="Next">›</button>
@@ -179,6 +180,11 @@ function move(n) {
 }
 function today() { view = new Date(); load(); }
 
+function setSourceBadge(src) {
+  const el = document.getElementById('src-badge'); if (!el) return;
+  const L = { google: 'Google', caldav: 'CalDAV', todoist: 'Todoist', vault: 'Vault' };
+  if (src && L[src]) { el.textContent = '◦ ' + L[src]; el.style.display = 'inline-block'; } else { el.style.display = 'none'; }
+}
 async function load() {
   document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.m === mode));
   let from, to, title;
@@ -203,6 +209,7 @@ async function load() {
   try {
     const data = await fetch(`/api/events?session=${encodeURIComponent(session)}&from=${ymd(from)}&to=${ymd(to)} 23:59`).then(r => r.json());
     events = data.events || [];
+    setSourceBadge(data.source);
   } catch { events = []; }
   render();
 }
