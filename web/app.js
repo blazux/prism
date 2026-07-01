@@ -351,7 +351,12 @@ window.toggleChat = function() {
   chatOpen = !chatOpen
   document.getElementById('chat-drawer').classList.toggle('open', chatOpen)
   document.getElementById('chat-fab').classList.toggle('active', chatOpen)
-  if (chatOpen) setTimeout(() => document.getElementById('chat-input').focus(), 50)
+  if (chatOpen) {
+    // Start at the newest messages — restoreChatHistory may have scrolled while
+    // the drawer was still hidden, so re-scroll once it's laid out.
+    requestAnimationFrame(scrollChat)
+    setTimeout(() => document.getElementById('chat-input').focus(), 50)
+  }
 }
 
 // Layout preference: open the chat on load if the user chose so (Settings → Appearance).
@@ -1808,7 +1813,7 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
     // Right dock: drag left widens. Left dock: drag right widens.
     const left = document.documentElement.getAttribute('data-chat-side') === 'left'
     const delta = left ? (e.clientX - startX) : (startX - e.clientX)
-    const newWidth = Math.min(Math.max(startWidth + delta, 300), 720)
+    const newWidth = Math.min(Math.max(startWidth + delta, 300), window.innerWidth - 60)
     chatDrawer.style.width = newWidth + 'px'
   })
 

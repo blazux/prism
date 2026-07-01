@@ -1037,13 +1037,17 @@ body {
 /* Docked side panel: a flex sibling of #main inside #body (no overlay) so you
    can read a mail / work a dashboard AND chat side by side. */
 #chat-drawer {
-  position: relative;
-  flex-shrink: 0;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
   width: var(--drawer-w);
   min-width: 300px;
-  max-width: 720px;
+  max-width: 95vw;
+  z-index: 250;
   background: var(--bg1);
   border-left: 1px solid var(--border);
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.28);
   flex-direction: column;
   overflow: hidden;
   display: none;
@@ -1062,9 +1066,8 @@ body {
 #chat-resize-handle:hover,
 #chat-resize-handle.dragging { background: var(--accent-dim); }
 
-/* Chat panel docked on the left instead of the right */
-[data-chat-side="left"] #chat-drawer { order: 1; border-left: none; border-right: 1px solid var(--border); }
-[data-chat-side="left"] #main { order: 2; }
+/* Chat panel docked on the left instead of the right (overlay) */
+[data-chat-side="left"] #chat-drawer { right: auto; left: 0; border-left: none; border-right: 1px solid var(--border); box-shadow: 10px 0 40px rgba(0, 0, 0, 0.28); }
 [data-chat-side="left"] #chat-resize-handle { left: auto; right: 0; }
 [data-chat-side="left"] #chat-fab { right: auto; left: 24px; }
 
@@ -1239,7 +1242,8 @@ body {
   background: none; border: none; padding: 0;
   color: var(--text); font-size: 12px;
 }
-.chat-msg-content ul { padding-left: 16px; margin: 4px 0; }
+.chat-msg-content ul { padding-left: 18px; margin: 4px 0; }
+.chat-msg-content ol { padding-left: 24px; margin: 4px 0; }
 .chat-msg-content li { margin: 2px 0; }
 .chat-msg-content h2, .chat-msg-content h3, .chat-msg-content h4 {
   margin: 8px 0 3px; color: var(--text); font-weight: 600;
