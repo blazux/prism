@@ -48,6 +48,10 @@ func ProviderFor(ctx context.Context, store *memory.Store, session string) Provi
 			if p := googleProvider(ctx, store); p != nil {
 				return p
 			}
+		case "microsoft":
+			if p := microsoftProvider(ctx, store); p != nil {
+				return p
+			}
 		case "caldav":
 			if p := caldavProvider(ctx, store); p != nil {
 				return p
@@ -55,6 +59,9 @@ func ProviderFor(ctx context.Context, store *memory.Store, session string) Provi
 		}
 	}
 	if p := googleProvider(ctx, store); p != nil {
+		return p
+	}
+	if p := microsoftProvider(ctx, store); p != nil {
 		return p
 	}
 	if p := caldavProvider(ctx, store); p != nil {
@@ -67,6 +74,15 @@ func googleProvider(ctx context.Context, store *memory.Store) Provider {
 	if store != nil && oauthx.Connected(ctx, store, "google") {
 		if c, err := oauthx.HTTPClient(ctx, store, "google"); err == nil {
 			return &GoogleProvider{client: c}
+		}
+	}
+	return nil
+}
+
+func microsoftProvider(ctx context.Context, store *memory.Store) Provider {
+	if store != nil && oauthx.Connected(ctx, store, "microsoft") {
+		if c, err := oauthx.HTTPClient(ctx, store, "microsoft"); err == nil {
+			return &MicrosoftProvider{client: c}
 		}
 	}
 	return nil

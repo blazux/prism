@@ -7,8 +7,8 @@ your data stays between you and Microsoft. The agent can guide you through it.
 Prism does **not** need to be reachable from the internet: the redirect goes to
 your browser, not Microsoft's servers. The simplest setup is to open Prism at
 `http://localhost:48080` and register `http://localhost:48080/api/oauth/microsoft/callback`
-(localhost is allowed); otherwise use an https domain. (Microsoft Graph calendar
-support in Prism is still being rolled out — these are the Azure-side steps.)
+(localhost is allowed); otherwise use an https domain. This connects calendar
+**events** only.
 
 ## 1. Register an app
 1. Go to https://entra.microsoft.com/ (or the Azure portal) →
@@ -25,7 +25,7 @@ support in Prism is still being rolled out — these are the Azure-side steps.)
 ## 2. Add API permissions
 1. **API permissions → Add a permission → Microsoft Graph → Delegated
    permissions**.
-2. Add **Calendars.ReadWrite** and **Tasks.ReadWrite**.
+2. Add **Calendars.ReadWrite**.
 3. Click **Grant admin consent** if you're on an org tenant (personal accounts
    consent at sign-in).
 
@@ -34,9 +34,10 @@ support in Prism is still being rolled out — these are the Azure-side steps.)
    immediately (it's only shown once).
 
 ## 4. Connect in Prism
-In **Settings → Calendar → Microsoft**, paste the Client ID, the Client secret
-value, and (if asked) the Tenant ID. Click **Authorize**, approve the Microsoft
-consent screen, and Prism stores a refreshable token.
+In **Settings → Calendar → Microsoft**, paste the Client ID and the Client secret
+value and click **Save credentials**, then **Authorize**. Approve the Microsoft
+consent screen, and Prism stores a refreshable token. The Calendar app now shows
+your Outlook calendar.
 
 ## Troubleshooting
 - "redirect_uri_mismatch": the redirect URI must match Prism's exactly.

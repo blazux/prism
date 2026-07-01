@@ -34,9 +34,10 @@ func (s *Server) handlePimSources(w http.ResponseWriter, r *http.Request) {
 			"calendar": cal,
 			"tasks":    tsk,
 			"available": map[string]bool{
-				"caldav":  caldavOK,
-				"google":  oauthx.Connected(ctx, s.memStore, "google"),
-				"todoist": todoTok != "",
+				"caldav":    caldavOK,
+				"google":    oauthx.Connected(ctx, s.memStore, "google"),
+				"microsoft": oauthx.Connected(ctx, s.memStore, "microsoft"),
+				"todoist":   todoTok != "",
 			},
 			// What each choice resolves to right now (so the UI can show "Auto → Google").
 			"resolved": map[string]string{
@@ -53,7 +54,7 @@ func (s *Server) handlePimSources(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad body", 400)
 			return
 		}
-		if validSource(b.Calendar, "google") {
+		if validSource(b.Calendar, "google", "microsoft") {
 			s.memStore.SetConfig(ctx, calendar.KeyProvider, b.Calendar)
 		}
 		if validSource(b.Tasks, "todoist") {
@@ -65,11 +66,16 @@ func (s *Server) handlePimSources(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// validSource accepts auto/local/caldav plus the domain-specific extra.
-func validSource(v, extra string) bool {
+// validSource accepts auto/local/caldav plus any domain-specific extras.
+func validSource(v string, extras ...string) bool {
 	switch v {
-	case "auto", "local", "caldav", extra:
+	case "auto", "local", "caldav":
 		return true
+	}
+	for _, e := range extras {
+		if v == e {
+			return true
+		}
 	}
 	return false
 }

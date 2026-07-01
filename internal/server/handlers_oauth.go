@@ -121,30 +121,30 @@ func (s *Server) oauthConfig(w http.ResponseWriter, r *http.Request, provider, r
 func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request, provider string) {
 	q := r.URL.Query()
 	if e := q.Get("error"); e != "" {
-		oauthDonePage(w, "Authorization was denied: "+e)
+		oauthDonePage(w, provider, "Authorization was denied: "+e)
 		return
 	}
 	state := q.Get("state")
 	v, ok := s.oauthStates.LoadAndDelete(state)
 	if !ok {
-		oauthDonePage(w, "Invalid or expired authorization. Please try again.")
+		oauthDonePage(w, provider, "Invalid or expired authorization. Please try again.")
 		return
 	}
 	st := v.(oauthState)
 	if st.provider != provider || time.Now().After(st.exp) {
-		oauthDonePage(w, "Authorization expired. Please try again.")
+		oauthDonePage(w, provider, "Authorization expired. Please try again.")
 		return
 	}
 	if err := oauthx.Exchange(r.Context(), s.memStore, provider, st.redirect, q.Get("code")); err != nil {
-		oauthDonePage(w, "Could not complete sign-in: "+err.Error())
+		oauthDonePage(w, provider, "Could not complete sign-in: "+err.Error())
 		return
 	}
-	oauthDonePage(w, "")
+	oauthDonePage(w, provider, "")
 }
 
 // oauthDonePage renders a tiny page that notifies the opener and closes itself.
 // msg empty ⇒ success.
-func oauthDonePage(w http.ResponseWriter, msg string) {
+func oauthDonePage(w http.ResponseWriter, provider, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	status := "Connected ✓ — you can close this window."
 	ok := "true"
@@ -155,7 +155,7 @@ func oauthDonePage(w http.ResponseWriter, msg string) {
 	w.Write([]byte(`<!doctype html><html><head><meta charset="utf-8"><title>Prism</title>
 <style>body{font:14px -apple-system,system-ui,sans-serif;background:#0b0d12;color:#dce0e8;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:24px}</style>
 </head><body><div><p>` + status + `</p></div>
-<script>try{window.opener&&window.opener.postMessage({type:'oauth-done',ok:` + ok + `},'*')}catch(e){};setTimeout(function(){window.close()}, ` + boolPick(ok, "800", "4000") + `)</script>
+<script>try{window.opener&&window.opener.postMessage({type:'oauth-done',provider:'` + provider + `',ok:` + ok + `},'*')}catch(e){};setTimeout(function(){window.close()}, ` + boolPick(ok, "800", "4000") + `)</script>
 </body></html>`))
 }
 

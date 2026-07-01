@@ -1353,6 +1353,7 @@ async function renderCalendarTab(container) {
     <div class="eplogos">
       <div class="eplogo sel" data-prov="caldav"><span class="epi">🗓️</span>CalDAV <span class="cal-st" data-st="caldav"></span><div class="cal-sub">Calendar + Tasks</div></div>
       <div class="eplogo" data-prov="google"><span class="epi">📅</span>Google <span class="cal-st" data-st="google"></span><div class="cal-sub">Calendar</div></div>
+      <div class="eplogo" data-prov="microsoft"><span class="epi">Ⓜ️</span>Microsoft <span class="cal-st" data-st="microsoft"></span><div class="cal-sub">Calendar</div></div>
       <div class="eplogo" data-prov="todoist"><span class="epi">✓</span>Todoist <span class="cal-st" data-st="todoist"></span><div class="cal-sub">Tasks</div></div>
     </div>
 
@@ -1391,6 +1392,21 @@ async function renderCalendarTab(container) {
       </div>
     </div>
 
+    <div class="cal-pane" data-prov="microsoft" style="display:none">
+      <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">For Outlook.com / Microsoft 365. Register your <b>own</b> app in Azure (the agent has a step-by-step guide), then paste the credentials here. Register the <b>Redirect URI</b> below in your Azure app. Connects calendar <b>events</b> only.</p>
+      <div class="appe-card">
+        <div class="appe-row"><label>Redirect URI</label><input id="ms-redirect" readonly title="Register this exact URI in your Azure app" style="flex:1;max-width:360px;color:var(--text3)"></div>
+        <div class="appe-row"><label>Client ID</label><input id="ms-id" spellcheck="false" style="flex:1;max-width:360px"></div>
+        <div class="appe-row"><label>Client secret</label><input id="ms-secret" type="password" autocomplete="new-password" placeholder="••••••••" style="flex:1;max-width:360px"></div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <button class="btn" id="ms-save">Save credentials</button>
+        <button class="btn btn-primary" id="ms-auth">Authorize</button>
+        <button class="btn" id="ms-disconnect" style="display:none;color:var(--red)">Disconnect</button>
+        <span id="ms-status" style="font-size:12px;color:var(--text3)"></span>
+      </div>
+    </div>
+
     <div class="cal-pane" data-prov="todoist" style="display:none">
       <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">Connect Todoist with a personal API token (Todoist → Settings → Integrations → Developer). When connected, the Tasks app uses Todoist.</p>
       <div class="appe-card">
@@ -1423,7 +1439,7 @@ async function renderCalendarTab(container) {
   wrap.querySelectorAll('.cd-preset').forEach(b => b.addEventListener('click', () => { $('#cd-url').value = b.dataset.url; $('#cd-user').focus() }))
 
   // Active sources + chip status dots, driven by /api/pim/sources.
-  const SRC_LABEL = { auto: 'Auto', local: 'Local', caldav: 'CalDAV', google: 'Google', todoist: 'Todoist' }
+  const SRC_LABEL = { auto: 'Auto', local: 'Local', caldav: 'CalDAV', google: 'Google', microsoft: 'Microsoft', todoist: 'Todoist' }
   let lastAvail = {}
   const fillSrc = (sel, opts, val) => {
     sel.innerHTML = ''
@@ -1434,12 +1450,12 @@ async function renderCalendarTab(container) {
     let d
     try { d = await (await fetch('/api/pim/sources')).json() } catch { return }
     lastAvail = d.available
-    for (const p of ['caldav', 'google', 'todoist']) {
+    for (const p of ['caldav', 'google', 'microsoft', 'todoist']) {
       const dot = wrap.querySelector(`.cal-st[data-st="${p}"]`); if (dot) dot.classList.toggle('on', !!d.available[p])
     }
     // The routing selectors only matter once 2+ providers are connected.
-    $('#cal-sources').style.display = ['caldav', 'google', 'todoist'].filter(p => d.available[p]).length >= 2 ? '' : 'none'
-    fillSrc($('#src-cal'), ['auto', 'local'].concat(d.available.caldav ? ['caldav'] : [], d.available.google ? ['google'] : []), d.calendar)
+    $('#cal-sources').style.display = ['caldav', 'google', 'microsoft', 'todoist'].filter(p => d.available[p]).length >= 2 ? '' : 'none'
+    fillSrc($('#src-cal'), ['auto', 'local'].concat(d.available.caldav ? ['caldav'] : [], d.available.google ? ['google'] : [], d.available.microsoft ? ['microsoft'] : []), d.calendar)
     fillSrc($('#src-task'), ['auto', 'local'].concat(d.available.caldav ? ['caldav'] : [], d.available.todoist ? ['todoist'] : []), d.tasks)
     $('#src-cal-hint').textContent = d.calendar === 'auto' ? `→ ${SRC_LABEL[d.resolved.calendar] || d.resolved.calendar}` : ''
     $('#src-task-hint').textContent = d.tasks === 'auto' ? `→ ${SRC_LABEL[d.resolved.tasks] || d.resolved.tasks}` : ''
@@ -1545,7 +1561,7 @@ async function renderCalendarTab(container) {
     }, 2000)
   })
   window.addEventListener('message', (e) => {
-    if (!e.data || e.data.type !== 'oauth-done') return
+    if (!e.data || e.data.type !== 'oauth-done' || e.data.provider !== 'google') return
     setTimeout(ggLoad, 300)
     if (e.data.ok) { ggStatus.style.color = 'var(--green)'; ggStatus.textContent = 'Connected ✓' }
     else { ggStatus.style.color = 'var(--red)'; ggStatus.textContent = 'Authorization failed' }
@@ -1555,6 +1571,60 @@ async function renderCalendarTab(container) {
       await fetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
       ggLoad(); loadSources(); ggStatus.style.color = 'var(--text3)'; ggStatus.textContent = 'Disconnected'
     } catch (e) { ggStatus.style.color = 'var(--red)'; ggStatus.textContent = e.message }
+  })
+
+  // Microsoft (Outlook / 365) — bring-your-own OAuth app
+  const msStatus = $('#ms-status')
+  async function msLoad() {
+    try {
+      const d = await (await fetch('/api/oauth/microsoft/config')).json()
+      $('#ms-redirect').value = d.redirectUri || (location.origin + '/api/oauth/microsoft/callback')
+      $('#ms-id').value = d.clientId || ''
+      if (d.connected) { $('#ms-disconnect').style.display = ''; msStatus.style.color = 'var(--green)'; msStatus.textContent = 'Connected' }
+      else { $('#ms-disconnect').style.display = 'none'; msStatus.textContent = '' }
+    } catch {}
+  }
+  const msSaveCreds = async () => {
+    const r = await fetch('/api/oauth/microsoft/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#ms-id').value.trim(), clientSecret: $('#ms-secret').value }) })
+    if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
+  }
+  await msLoad()
+  $('#ms-save').addEventListener('click', async () => {
+    msStatus.style.color = 'var(--text3)'; msStatus.textContent = 'Saving…'
+    try { await msSaveCreds(); msStatus.style.color = 'var(--green)'; msStatus.textContent = 'Saved ✓' }
+    catch (e) { msStatus.style.color = 'var(--red)'; msStatus.textContent = e.message }
+  })
+  $('#ms-auth').addEventListener('click', async () => {
+    msStatus.style.color = 'var(--text3)'; msStatus.textContent = 'Saving…'
+    try { if ($('#ms-id').value.trim() && $('#ms-secret').value.trim()) await msSaveCreds() }
+    catch (e) { msStatus.style.color = 'var(--red)'; msStatus.textContent = e.message; return }
+    msStatus.textContent = 'Waiting for Microsoft…'
+    const popup = window.open('/api/oauth/microsoft/start', 'prism-oauth', 'width=520,height=680')
+    let tries = 0
+    const iv = setInterval(async () => {
+      tries++
+      let connected = false
+      try { connected = (await (await fetch('/api/oauth/microsoft/config')).json()).connected } catch {}
+      if (connected) {
+        clearInterval(iv); msLoad(); loadSources()
+        msStatus.style.color = 'var(--green)'; msStatus.textContent = 'Connected ✓'
+      } else if ((popup && popup.closed) || tries > 60) {
+        clearInterval(iv)
+        if (msStatus.textContent === 'Waiting for Microsoft…') { msStatus.style.color = 'var(--text3)'; msStatus.textContent = '' }
+      }
+    }, 2000)
+  })
+  window.addEventListener('message', (e) => {
+    if (!e.data || e.data.type !== 'oauth-done' || e.data.provider !== 'microsoft') return
+    setTimeout(msLoad, 300)
+    if (e.data.ok) { msStatus.style.color = 'var(--green)'; msStatus.textContent = 'Connected ✓' }
+    else { msStatus.style.color = 'var(--red)'; msStatus.textContent = 'Authorization failed' }
+  })
+  $('#ms-disconnect').addEventListener('click', async () => {
+    try {
+      await fetch('/api/oauth/microsoft/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
+      msLoad(); loadSources(); msStatus.style.color = 'var(--text3)'; msStatus.textContent = 'Disconnected'
+    } catch (e) { msStatus.style.color = 'var(--red)'; msStatus.textContent = e.message }
   })
 
   // Todoist task backend
@@ -1580,7 +1650,7 @@ async function renderCalendarTab(container) {
   })
 
   // Open the first connected provider's pane (else CalDAV).
-  selectProv(['caldav', 'google', 'todoist'].find(p => lastAvail[p]) || 'caldav')
+  selectProv(['caldav', 'google', 'microsoft', 'todoist'].find(p => lastAvail[p]) || 'caldav')
 }
 
 async function renderRAGTab(container) {

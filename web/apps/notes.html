@@ -205,7 +205,7 @@ function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<':
 
 function setSourceBadge(src) {
   const el = document.getElementById('src-badge'); if (!el) return;
-  const L = { google: 'Google', caldav: 'CalDAV', todoist: 'Todoist', vault: 'Vault' };
+  const L = { google: 'Google', microsoft: 'Microsoft', caldav: 'CalDAV', todoist: 'Todoist', vault: 'Vault' };
   if (src && L[src]) { el.textContent = '◦ ' + L[src]; el.style.display = 'inline-block'; } else { el.style.display = 'none'; }
 }
 async function load() {
