@@ -260,6 +260,9 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 .eplogo .epi { font-size: 22px; display: block; margin-bottom: 4px; }
 .eplogo:hover { color: var(--text); }
 .eplogo.sel { border-color: var(--accent); color: var(--text); background: var(--bg3); }
+.cal-st { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--border2); vertical-align: middle; }
+.cal-st.on { background: var(--green, #3fb950); }
+.cal-sub { font-size: 10px; color: var(--text3); margin-top: 3px; }
 .efield { margin-bottom: 12px; }
 .efield label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); margin-bottom: 4px; }
 .efield input, .efield select { width: 100%; background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 6px; padding: 7px 9px; font: inherit; }
@@ -1346,33 +1349,35 @@ async function renderCalendarTab(container) {
   wrap.style.cssText = 'max-width:640px'
   wrap.innerHTML = `
     <h2 style="margin:0 0 4px;font-size:16px">Calendar &amp; Tasks</h2>
-    <p style="color:var(--text3);font-size:12.5px;margin:0 0 16px;line-height:1.5">Connect your providers below, then choose which source each app uses. <b>Auto</b> picks the best connected one.</p>
-    <div class="appe-card" style="margin-bottom:24px">
-      <div class="appe-row"><label>Calendar (events)</label>
-        <span style="display:flex;gap:10px;align-items:center;flex:1;max-width:360px"><select id="src-cal" style="flex:1"></select><span id="src-cal-hint" style="font-size:11px;color:var(--text3);white-space:nowrap"></span></span></div>
-      <div class="appe-row"><label>Tasks</label>
-        <span style="display:flex;gap:10px;align-items:center;flex:1;max-width:360px"><select id="src-task" style="flex:1"></select><span id="src-task-hint" style="font-size:11px;color:var(--text3);white-space:nowrap"></span></span></div>
+    <p style="color:var(--text3);font-size:12.5px;margin:0 0 16px;line-height:1.5">Pick a provider to connect. You can connect more than one and choose which the apps use.</p>
+    <div class="eplogos">
+      <div class="eplogo sel" data-prov="caldav"><span class="epi">🗓️</span>CalDAV <span class="cal-st" data-st="caldav"></span><div class="cal-sub">Calendar + Tasks</div></div>
+      <div class="eplogo" data-prov="google"><span class="epi">📅</span>Google <span class="cal-st" data-st="google"></span><div class="cal-sub">Calendar</div></div>
+      <div class="eplogo" data-prov="todoist"><span class="epi">✓</span>Todoist <span class="cal-st" data-st="todoist"></span><div class="cal-sub">Tasks</div></div>
     </div>
-    <h3 style="margin:0 0 4px;font-size:13px">CalDAV <span style="font-weight:400;color:var(--text3)">(Apple iCloud, Nextcloud, Fastmail…)</span></h3>
-    <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">Read/write your real calendar and tasks with an <b>app-specific password</b>.</p>
-    <div class="appe-card">
-      <div class="appe-row"><label>Server URL</label><input id="cd-url" placeholder="https://caldav.icloud.com" spellcheck="false" style="flex:1;max-width:360px"></div>
-      <div class="appe-row"><label>Username</label><input id="cd-user" placeholder="you@icloud.com" spellcheck="false" style="flex:1;max-width:360px"></div>
-      <div class="appe-row"><label>App password</label><input id="cd-pass" type="password" placeholder="••••••••" autocomplete="new-password" style="flex:1;max-width:360px"></div>
+
+    <div class="cal-pane" data-prov="caldav">
+      <p style="color:var(--text3);font-size:12px;margin:0 0 10px;line-height:1.5">CalDAV is the open standard used by most calendar services <b>except</b> Google and Microsoft — including <b>Apple iCloud</b> (the built-in Calendar &amp; Reminders on iPhone/Mac), <b>Nextcloud</b>, <b>Fastmail</b>, <b>mailbox.org</b>, <b>Zoho</b>, <b>Synology</b> and <b>Posteo</b>. If you use your iPhone/Mac calendar, that's iCloud — pick this. Sign in with an <b>app-specific password</b>, not your normal one.</p>
+      <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;color:var(--text3)">Quick fill:</span><button type="button" class="btn cd-preset" data-url="https://caldav.icloud.com" style="padding:2px 9px;font-size:11px">Apple iCloud</button><button type="button" class="btn cd-preset" data-url="https://caldav.fastmail.com" style="padding:2px 9px;font-size:11px">Fastmail</button></div>
+      <div class="appe-card">
+        <div class="appe-row"><label>Server URL</label><input id="cd-url" placeholder="https://caldav.icloud.com" spellcheck="false" style="flex:1;max-width:360px"></div>
+        <div class="appe-row"><label>Username</label><input id="cd-user" placeholder="you@icloud.com" spellcheck="false" style="flex:1;max-width:360px"></div>
+        <div class="appe-row"><label>App password</label><input id="cd-pass" type="password" placeholder="••••••••" autocomplete="new-password" style="flex:1;max-width:360px"></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" id="cd-connect">Connect</button>
+        <button class="btn" id="cd-disconnect" style="display:none;color:var(--red)">Disconnect</button>
+        <span id="cd-status" style="font-size:12px;color:var(--text3)"></span>
+      </div>
+      <div id="cd-cals" class="appe-card" style="display:none;margin-top:16px">
+        <div class="appe-row"><label>Events calendar</label><select id="cd-evpath" style="flex:1;max-width:360px"></select></div>
+        <div class="appe-row"><label>Tasks list</label><select id="cd-taskpath" style="flex:1;max-width:360px"></select></div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn btn-primary" id="cd-savepaths">Save selection</button><span id="cd-status2" style="font-size:12px;color:var(--text3)"></span></div>
+      </div>
     </div>
-    <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
-      <button class="btn btn-primary" id="cd-connect">Connect</button>
-      <button class="btn" id="cd-disconnect" style="display:none;color:var(--red)">Disconnect</button>
-      <span id="cd-status" style="font-size:12px;color:var(--text3)"></span>
-    </div>
-    <div id="cd-cals" class="appe-card" style="display:none;margin-top:16px">
-      <div class="appe-row"><label>Events calendar</label><select id="cd-evpath" style="flex:1;max-width:360px"></select></div>
-      <div class="appe-row"><label>Tasks list</label><select id="cd-taskpath" style="flex:1;max-width:360px"></select></div>
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn btn-primary" id="cd-savepaths">Save selection</button><span id="cd-status2" style="font-size:12px;color:var(--text3)"></span></div>
-    </div>
-    <div style="margin-top:26px;border-top:1px solid var(--border);padding-top:18px">
-      <h3 style="margin:0 0 4px;font-size:13px">Google Calendar <span style="font-weight:400;color:var(--text3)">(your own OAuth app)</span></h3>
-      <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">Create your <b>own</b> Google OAuth app, then paste the credentials here — ask the agent, it has a step-by-step guide. Register the <b>Redirect URI</b> below in your Google app. When connected, the Calendar app uses your Google Calendar (events only — for Google tasks use Todoist).</p>
+
+    <div class="cal-pane" data-prov="google" style="display:none">
+      <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">Create your <b>own</b> Google OAuth app, then paste the credentials here — ask the agent, it has a step-by-step guide. Register the <b>Redirect URI</b> below in your Google app. Connects calendar <b>events</b> only — for Google tasks use Todoist.</p>
       <div class="appe-card">
         <div class="appe-row"><label>Redirect URI</label><input id="gg-redirect" readonly title="Register this exact URI in your Google OAuth client" style="flex:1;max-width:360px;color:var(--text3)"></div>
         <div class="appe-row"><label>Client ID</label><input id="gg-id" spellcheck="false" style="flex:1;max-width:360px"></div>
@@ -1385,9 +1390,9 @@ async function renderCalendarTab(container) {
         <span id="gg-status" style="font-size:12px;color:var(--text3)"></span>
       </div>
     </div>
-    <div style="margin-top:26px;border-top:1px solid var(--border);padding-top:18px">
-      <h3 style="margin:0 0 4px;font-size:13px">Tasks via Todoist <span style="font-weight:400;color:var(--text3)">(optional)</span></h3>
-      <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">Connect Todoist with a personal API token (Todoist → Settings → Integrations → Developer). When connected, the Tasks app uses Todoist <b>instead of</b> CalDAV / Prism.</p>
+
+    <div class="cal-pane" data-prov="todoist" style="display:none">
+      <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">Connect Todoist with a personal API token (Todoist → Settings → Integrations → Developer). When connected, the Tasks app uses Todoist.</p>
       <div class="appe-card">
         <div class="appe-row"><label>API token</label><input id="td-token" type="password" placeholder="••••••••" autocomplete="new-password" style="flex:1;max-width:360px"></div>
       </div>
@@ -1396,12 +1401,30 @@ async function renderCalendarTab(container) {
         <button class="btn" id="td-disconnect" style="display:none;color:var(--red)">Disconnect</button>
         <span id="td-status" style="font-size:12px;color:var(--text3)"></span>
       </div>
+    </div>
+
+    <div id="cal-sources" style="display:none;margin-top:26px;border-top:1px solid var(--border);padding-top:18px">
+      <h3 style="margin:0 0 4px;font-size:13px">Active sources</h3>
+      <p style="color:var(--text3);font-size:12px;margin:0 0 12px;line-height:1.5">You have several providers connected — choose which one each app uses. <b>Auto</b> picks the best connected one.</p>
+      <div class="appe-card">
+        <div class="appe-row"><label>Calendar (events)</label><span style="display:flex;gap:10px;align-items:center;flex:1;max-width:360px"><select id="src-cal" style="flex:1"></select><span id="src-cal-hint" style="font-size:11px;color:var(--text3);white-space:nowrap"></span></span></div>
+        <div class="appe-row"><label>Tasks</label><span style="display:flex;gap:10px;align-items:center;flex:1;max-width:360px"><select id="src-task" style="flex:1"></select><span id="src-task-hint" style="font-size:11px;color:var(--text3);white-space:nowrap"></span></span></div>
+      </div>
     </div>`
   const page = document.createElement('div'); page.className = 'settings-page'; page.appendChild(wrap); container.appendChild(page)
   const $ = s => wrap.querySelector(s)
 
-  // Active sources: let the user pick which connected provider backs each app.
+  // Provider chips → show one config pane at a time.
+  const selectProv = (name) => {
+    wrap.querySelectorAll('.eplogo').forEach(c => c.classList.toggle('sel', c.dataset.prov === name))
+    wrap.querySelectorAll('.cal-pane').forEach(p => { p.style.display = p.dataset.prov === name ? '' : 'none' })
+  }
+  wrap.querySelectorAll('.eplogo').forEach(c => c.addEventListener('click', () => selectProv(c.dataset.prov)))
+  wrap.querySelectorAll('.cd-preset').forEach(b => b.addEventListener('click', () => { $('#cd-url').value = b.dataset.url; $('#cd-user').focus() }))
+
+  // Active sources + chip status dots, driven by /api/pim/sources.
   const SRC_LABEL = { auto: 'Auto', local: 'Local', caldav: 'CalDAV', google: 'Google', todoist: 'Todoist' }
+  let lastAvail = {}
   const fillSrc = (sel, opts, val) => {
     sel.innerHTML = ''
     for (const o of opts) sel.appendChild(new Option(SRC_LABEL[o], o))
@@ -1410,10 +1433,14 @@ async function renderCalendarTab(container) {
   async function loadSources() {
     let d
     try { d = await (await fetch('/api/pim/sources')).json() } catch { return }
-    const calOpts = ['auto', 'local'].concat(d.available.caldav ? ['caldav'] : [], d.available.google ? ['google'] : [])
-    const taskOpts = ['auto', 'local'].concat(d.available.caldav ? ['caldav'] : [], d.available.todoist ? ['todoist'] : [])
-    fillSrc($('#src-cal'), calOpts, d.calendar)
-    fillSrc($('#src-task'), taskOpts, d.tasks)
+    lastAvail = d.available
+    for (const p of ['caldav', 'google', 'todoist']) {
+      const dot = wrap.querySelector(`.cal-st[data-st="${p}"]`); if (dot) dot.classList.toggle('on', !!d.available[p])
+    }
+    // The routing selectors only matter once 2+ providers are connected.
+    $('#cal-sources').style.display = ['caldav', 'google', 'todoist'].filter(p => d.available[p]).length >= 2 ? '' : 'none'
+    fillSrc($('#src-cal'), ['auto', 'local'].concat(d.available.caldav ? ['caldav'] : [], d.available.google ? ['google'] : []), d.calendar)
+    fillSrc($('#src-task'), ['auto', 'local'].concat(d.available.caldav ? ['caldav'] : [], d.available.todoist ? ['todoist'] : []), d.tasks)
     $('#src-cal-hint').textContent = d.calendar === 'auto' ? `→ ${SRC_LABEL[d.resolved.calendar] || d.resolved.calendar}` : ''
     $('#src-task-hint').textContent = d.tasks === 'auto' ? `→ ${SRC_LABEL[d.resolved.tasks] || d.resolved.tasks}` : ''
   }
@@ -1551,6 +1578,9 @@ async function renderCalendarTab(container) {
       st.style.color = 'var(--text3)'; st.textContent = 'Disconnected'; loadSources()
     } catch (e) { st.style.color = 'var(--red)'; st.textContent = e.message }
   })
+
+  // Open the first connected provider's pane (else CalDAV).
+  selectProv(['caldav', 'google', 'todoist'].find(p => lastAvail[p]) || 'caldav')
 }
 
 async function renderRAGTab(container) {
