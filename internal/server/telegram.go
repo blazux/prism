@@ -52,28 +52,15 @@ func (s *Server) telegramAllowedChat() (int64, bool) {
 	return id, true
 }
 
-// startTelegram (re)starts the poller if a bot token is configured.
-func (s *Server) startTelegram() {
-	s.stopTelegram()
-	token := s.telegramToken()
-	if token == "" {
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	s.mu.Lock()
-	s.tgCancel = cancel
-	s.mu.Unlock()
-	go s.telegramLoop(ctx, token)
-	log.Printf("[telegram] bridge started")
-}
+// telegramChannel adapts the Telegram bridge to the Channel interface.
+type telegramChannel struct{ s *Server }
 
-func (s *Server) stopTelegram() {
-	s.mu.Lock()
-	c := s.tgCancel
-	s.tgCancel = nil
-	s.mu.Unlock()
-	if c != nil {
-		c()
+func (c *telegramChannel) Name() string             { return "telegram" }
+func (c *telegramChannel) Configured() bool         { return c.s.telegramToken() != "" }
+func (c *telegramChannel) SendToOwner(t string) error { return c.s.tgSendToOwner(t) }
+func (c *telegramChannel) Run(ctx context.Context) {
+	if token := c.s.telegramToken(); token != "" {
+		c.s.telegramLoop(ctx, token)
 	}
 }
 
@@ -270,7 +257,7 @@ func (s *Server) handleTelegramConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		// New token = new bot → forget the previously linked chat.
 		ms.SetConfig(r.Context(), tgAllowedChatKey, "")
-		s.startTelegram()
+		s.startChannels()
 		writeJSON(w, map[string]interface{}{"ok": true})
 	default:
 		http.Error(w, "method not allowed", 405)

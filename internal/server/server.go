@@ -54,13 +54,14 @@ type Server struct {
 	memStore       *memory.Store
 	mcpMgr         *mcp.Manager
 	socketSessions sync.Map // socket.io sid → targetHost (for WebSocket upgrade routing)
-	tgCancel       context.CancelFunc // cancels the running Telegram poller, if any
+	channels       map[string]Channel // messaging bridges (telegram, slack, …)
+	chanCancel     context.CancelFunc // cancels the running channel receive loops
 	oauthStates    sync.Map // CSRF state → oauthState (pending OAuth authorizations)
 }
 
 func New(cfg Config) *Server {
 	customToolsDir := filepath.Join(cfg.WorkspaceDir, "agent_tools")
-	return &Server{
+	s := &Server{
 		cfg:       cfg,
 		docker:    docker.NewManager(cfg.AgentContainer, cfg.WorkspaceDir, cfg.ServicePortStart, cfg.ServicePortEnd),
 		clients:   make(map[*Client]struct{}),
@@ -72,6 +73,8 @@ func New(cfg Config) *Server {
 			CheckOrigin:     func(r *http.Request) bool { return true },
 		},
 	}
+	s.initChannels()
+	return s
 }
 
 func (s *Server) Start() error {
@@ -94,7 +97,7 @@ func (s *Server) Start() error {
 					s.mu.Unlock()
 					s.mcpMgr.SetStore(ms)
 					log.Printf("[memory] store initialized")
-					s.startTelegram() // launch the Telegram bridge if a token is set
+					s.startChannels() // launch configured messaging bridges (telegram, slack)
 					return
 				}
 				log.Printf("[memory] init failed (attempt %d): %v", attempt, err)
@@ -184,6 +187,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/agent/personality", s.handleAgentPersonality)
 	mux.HandleFunc("/api/telegram/config", s.handleTelegramConfig)
 	mux.HandleFunc("/api/telegram/send", s.handleTelegramSend)
+	mux.HandleFunc("/api/slack/config", s.handleSlackConfig)
 	mux.HandleFunc("/api/skills", s.handleSkills)
 	mux.HandleFunc("/api/email/config", s.handleEmailConfig)
 	mux.HandleFunc("/api/email/unread", s.handleEmailUnread)

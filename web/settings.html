@@ -808,6 +808,8 @@ async function renderChannelsTab(container) {
 
   let tg = { configured: false, linked: false }
   try { tg = await fetch('/api/telegram/config', { cache: 'no-store' }).then(r => r.json()) } catch (_) {}
+  let sl = { configured: false, linked: false }
+  try { sl = await fetch('/api/slack/config', { cache: 'no-store' }).then(r => r.json()) } catch (_) {}
 
   page.innerHTML = `
     <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('send')}</span><span class="config-cat-name">Telegram</span></div>
@@ -820,9 +822,21 @@ async function renderChannelsTab(container) {
       <span id="tg-status" class="ag-status"></span>
     </div>
     <div style="margin-top:22px;padding:11px 13px;background:var(--bg2);border:1px solid var(--border);border-radius:9px;font-size:12px;color:var(--text2);line-height:1.55">
-      <b style="color:var(--text)">📅 Scheduled delivery</b> — once linked, just ask your agent in chat, e.g. <i>“every morning at 8, summarize my unread emails and send it to me on Telegram”</i>. It schedules a cron job that runs and pushes the result to your phone — no need to be at the dashboard.
+      <b style="color:var(--text)">📅 Scheduled delivery</b> — once linked, just ask your agent in chat, e.g. <i>“every morning at 8, summarize my unread emails and send it to me on Telegram”</i> (or Slack). It schedules a cron job that runs and pushes the result to you — no need to be at the dashboard.
     </div>
-    <div style="margin-top:14px;font-size:11.5px;color:var(--text3)">More channels (Discord, Slack…) can be added later — the bridge is generic.</div>`
+
+    <div style="margin-top:26px;border-top:1px solid var(--border);padding-top:18px">
+      <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('send')}</span><span class="config-cat-name">Slack</span></div>
+      <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.55">Chat with your agent from Slack. Create a Slack app with <b>Socket Mode</b> enabled (no public URL needed), give it a <b>Bot token</b> (xoxb-…) and an <b>App-level token</b> (xapp-…, scope <code>connections:write</code>), then DM your bot. <b>The first user to DM the bot is linked</b> — keep the tokens private.</div>
+      <div id="sl-state" style="font-size:12px;margin-bottom:10px"></div>
+      <label class="ag-label">Bot token (xoxb-…)<input id="sl-bot" type="password" placeholder="${sl.configured ? '•••••• (set — paste to replace)' : 'xoxb-…'}"></label>
+      <label class="ag-label">App-level token (xapp-…)<input id="sl-app" type="password" placeholder="${sl.configured ? '•••••• (set — paste to replace)' : 'xapp-…'}"></label>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn btn-primary" id="sl-save">Connect</button>
+        <button class="btn" id="sl-disc" style="${sl.configured ? '' : 'display:none'};color:var(--red)">Disconnect</button>
+        <span id="sl-status" class="ag-status"></span>
+      </div>
+    </div>`
 
   const tgState = page.querySelector('#tg-state')
   tgState.innerHTML = !tg.configured
@@ -845,6 +859,32 @@ async function renderChannelsTab(container) {
   page.querySelector('#tg-unlink').addEventListener('click', async () => {
     const st = page.querySelector('#tg-status'); st.textContent = 'Unlinking…'
     try { await fetch('/api/telegram/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unlink: true }) }); st.textContent = '✓ Unlinked — next /start re-links' }
+    catch (e) { st.textContent = 'Failed' }
+    setTimeout(() => { st.textContent = '' }, 3000)
+  })
+
+  const slState = page.querySelector('#sl-state')
+  slState.innerHTML = !sl.configured
+    ? '<span style="color:var(--text3)">Not configured.</span>'
+    : (sl.linked
+      ? '<span style="color:var(--green)">✓ Linked and active.</span>'
+      : '<span style="color:var(--yellow)">Tokens set — DM your bot to link.</span>')
+  page.querySelector('#sl-save').addEventListener('click', async () => {
+    const st = page.querySelector('#sl-status'), bot = page.querySelector('#sl-bot').value.trim(), app = page.querySelector('#sl-app').value.trim()
+    if (!bot || !app) { st.textContent = 'Enter both tokens.'; return }
+    st.textContent = 'Connecting…'
+    try {
+      const r = await fetch('/api/slack/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botToken: bot, appToken: app }) })
+      if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
+      st.textContent = '✓ Connected — now DM your bot to link'
+      page.querySelector('#sl-bot').value = ''; page.querySelector('#sl-app').value = ''
+      page.querySelector('#sl-disc').style.display = ''
+    } catch (e) { st.textContent = 'Failed: ' + e.message }
+    setTimeout(() => { st.textContent = '' }, 4000)
+  })
+  page.querySelector('#sl-disc').addEventListener('click', async () => {
+    const st = page.querySelector('#sl-status'); st.textContent = 'Disconnecting…'
+    try { await fetch('/api/slack/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) }); st.textContent = '✓ Disconnected'; page.querySelector('#sl-disc').style.display = 'none' }
     catch (e) { st.textContent = 'Failed' }
     setTimeout(() => { st.textContent = '' }, 3000)
   })

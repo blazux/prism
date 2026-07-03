@@ -2,7 +2,7 @@ module prism
 
 go 1.25.0
 
-require github.com/gorilla/websocket v1.5.1
+require github.com/gorilla/websocket v1.5.3
 
 require (
 	github.com/creack/pty v1.1.24
@@ -12,6 +12,7 @@ require (
 	github.com/emersion/go-webdav v0.7.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/pgvector/pgvector-go v0.3.0
+	github.com/slack-go/slack v0.27.0
 	github.com/xuri/excelize/v2 v2.10.1
 	golang.org/x/net v0.50.0
 	golang.org/x/oauth2 v0.36.0

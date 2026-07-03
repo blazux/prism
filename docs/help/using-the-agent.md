@@ -29,5 +29,7 @@ all your tools, not a search box.
 
 ## Channels
 - **Web**: the main dashboard chat.
+- **Slack**: connect a Socket Mode app in Settings → Channels to chat with the
+  agent from Slack; cron jobs can deliver there too (deliver="slack").
 - **Telegram**: link a bot in Settings → Channels to chat with the agent from
   your phone; cron jobs can push messages there too.
