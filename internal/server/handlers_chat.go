@@ -49,10 +49,10 @@ func (s *Server) handleChatFileUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	tmp.Close()
 
+	// Primary path: extract the text and inline it (works well for most docs).
 	text, err := rag.ParseFile(tmp.Name())
 	if err != nil {
-		http.Error(w, fmt.Sprintf("could not parse file: %v", err), http.StatusUnprocessableEntity)
-		return
+		text = ""
 	}
 
 	// Guard against enormous files that would blow out the model context window.
@@ -61,8 +61,61 @@ func (s *Server) handleChatFileUpload(w http.ResponseWriter, r *http.Request) {
 		text = text[:maxChars] + "\n[... truncated at 100 000 characters ...]"
 	}
 
+	// Fallback only: when nothing could be extracted (scanned/image PDF,
+	// unsupported type), persist the file into the workspace so the agent can
+	// read/OCR/parse the real file itself.
+	var savedRel string
+	if strings.TrimSpace(text) == "" {
+		savedRel = s.saveChatUpload(tmp.Name(), header.Filename)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"name": header.Filename, "text": text})
+	json.NewEncoder(w).Encode(map[string]string{"name": header.Filename, "text": text, "path": savedRel})
+}
+
+// saveChatUpload copies a chat upload into the workspace uploads/ dir and returns
+// its workspace-relative path (empty on failure — extraction-only still works).
+func (s *Server) saveChatUpload(srcPath, origName string) string {
+	uploadsDir := filepath.Join(s.cfg.WorkspaceDir, "uploads")
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return ""
+	}
+	dest := uniqueUploadPath(uploadsDir, sanitizeUploadName(origName))
+	if err := os.WriteFile(dest, data, 0644); err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(s.cfg.WorkspaceDir, dest)
+	if err != nil {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
+func sanitizeUploadName(name string) string {
+	name = strings.NewReplacer("/", "-", "\\", "-", "\x00", "").Replace(strings.TrimSpace(filepath.Base(name)))
+	if name == "" || name == "." || name == ".." {
+		name = "file"
+	}
+	return name
+}
+
+func uniqueUploadPath(dir, name string) string {
+	p := filepath.Join(dir, name)
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		return p
+	}
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for i := 2; ; i++ {
+		c := filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
+		if _, err := os.Stat(c); os.IsNotExist(err) {
+			return c
+		}
+	}
 }
 
 // ─── REST API ─────────────────────────────────────────────────────────────────
@@ -88,7 +141,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		Session string `json:"session"`
 		Message string `json:"message"`
 		Model   string `json:"model"`
-		Deliver string `json:"deliver"` // optional: "telegram" to push the reply to the linked chat
+		Deliver string `json:"deliver"` // optional: "telegram" or "slack" to push the reply to that channel's owner
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Message == "" {
 		http.Error(w, "message required", 400)
@@ -111,9 +164,9 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delivered := false
-	if body.Deliver == "telegram" && strings.TrimSpace(resp) != "" {
-		if err := s.tgSendToOwner(resp); err != nil {
-			log.Printf("[chat-http] telegram deliver: %v", err)
+	if body.Deliver != "" && strings.TrimSpace(resp) != "" {
+		if err := s.deliverToChannel(body.Deliver, resp); err != nil {
+			log.Printf("[chat-http] deliver to %s: %v", body.Deliver, err)
 		} else {
 			delivered = true
 		}

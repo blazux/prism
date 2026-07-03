@@ -43,10 +43,12 @@ func (c *Client) cancelActive() {
 
 // ─── WebSocket ───────────────────────────────────────────────────────────────
 
-// ChatFile holds the name and parsed text content of a user-uploaded file.
+// ChatFile holds a user-uploaded file: its name, extracted text, and the
+// workspace-relative path where it was saved (so the agent can read the real file).
 type ChatFile struct {
 	Name string `json:"name"`
 	Text string `json:"text"`
+	Path string `json:"path,omitempty"`
 }
 
 type WSMessage struct {
@@ -462,7 +464,20 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.ag.SetActiveTools(msg.DisabledTools)
 			content := msg.Content
 			for _, f := range msg.Files {
-				content = fmt.Sprintf("=== Attached file: %s ===\n%s\n\n", f.Name, f.Text) + content
+				hdr := "=== Attached file: " + f.Name
+				if f.Path != "" {
+					hdr += fmt.Sprintf(" (saved in the workspace at %s — read it directly if you need more than the text below, e.g. to OCR a scanned PDF or parse a spreadsheet)", f.Path)
+				}
+				hdr += " ==="
+				body := f.Text
+				if strings.TrimSpace(body) == "" {
+					if f.Path != "" {
+						body = "[No text was extracted automatically — read the file at " + f.Path + " to process it yourself.]"
+					} else {
+						body = "[No text could be extracted from this file.]"
+					}
+				}
+				content = hdr + "\n" + body + "\n\n" + content
 			}
 			go s.handleChat(ctx, client, content, msg.Images, msg.Model)
 

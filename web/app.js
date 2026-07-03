@@ -1392,8 +1392,8 @@ async function addFileAttachment(file) {
       alert(`Could not attach "${file.name}": ${msg}`)
       return
     }
-    const { name, text } = await res.json()
-    pendingFiles.push({ name, text })
+    const { name, text, path } = await res.json()
+    pendingFiles.push({ name, text, path })
     renderPreviews()
   } catch (err) {
     alert(`Could not attach "${file.name}": ${err}`)
