@@ -257,7 +257,8 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 /* ── Email tab ─────────────────────────────────────────────────────────────── */
 .eplogos { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
 .eplogo { flex: 1; min-width: 72px; padding: 12px 8px; border: 1px solid var(--border2); border-radius: 10px; background: var(--bg2); cursor: pointer; text-align: center; font-size: 12px; color: var(--text2); transition: border-color .12s, color .12s; }
-.eplogo .epi { font-size: 22px; display: block; margin-bottom: 4px; }
+.eplogo .epi { font-size: 22px; display: block; margin-bottom: 6px; height: 22px; }
+.eplogo .epi svg { display: block; margin: 0 auto; }
 .eplogo:hover { color: var(--text); }
 .eplogo.sel { border-color: var(--accent); color: var(--text); background: var(--bg3); }
 .cal-st { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--border2); vertical-align: middle; }
@@ -410,7 +411,7 @@ function renderTab(tab) {
 function renderAppearanceTab(container) {
   const T = window.PrismTheme
   const pane = document.createElement('div')
-  pane.style.cssText = 'padding:18px;overflow-y:auto;max-width:560px'
+  pane.style.cssText = 'max-width:560px'
   pane.innerHTML = `
     <p class="settings-page-title">Theme</p>
     <div class="appe-card">
@@ -465,7 +466,8 @@ function renderAppearanceTab(container) {
       <div class="appe-row"><label>Snap &amp; align windows</label>
         <label style="display:flex;align-items:center;gap:7px;cursor:pointer;flex:1"><input type="checkbox" id="appe-snap"><span style="font-size:12px;color:var(--text2)">Magnetic edges &amp; matching sizes (hold Alt to bypass)</span></label></div>
     </div>`
-  container.appendChild(pane)
+  const page = document.createElement('div'); page.className = 'settings-page'
+  page.appendChild(pane); container.appendChild(page)
 
   // Active theme picker
   const themeSel = pane.querySelector('#appe-theme')
@@ -801,33 +803,37 @@ async function renderAgentTab(container) {
 
 // ── Channels tab — reach the agent from outside (Telegram) ─────────────────────
 async function renderChannelsTab(container) {
-  const page = document.createElement('div')
-  page.className = 'settings-page'
-  page.style.cssText = 'padding:18px;overflow-y:auto;max-width:560px'
-  container.appendChild(page)
+  const wrap = document.createElement('div')
+  wrap.style.cssText = 'max-width:560px'
 
   let tg = { configured: false, linked: false }
   try { tg = await fetch('/api/telegram/config', { cache: 'no-store' }).then(r => r.json()) } catch (_) {}
   let sl = { configured: false, linked: false }
   try { sl = await fetch('/api/slack/config', { cache: 'no-store' }).then(r => r.json()) } catch (_) {}
 
-  page.innerHTML = `
-    <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('send')}</span><span class="config-cat-name">Telegram</span></div>
-    <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.55">Chat with your agent from your phone. Create a bot with <b>@BotFather</b>, paste its token below, then send <b>/start</b> to your bot to link it. <b>Only the first chat to send /start is allowed</b> — your agent has powerful tools, so keep the token private.</div>
-    <div id="tg-state" style="font-size:12px;margin-bottom:10px"></div>
-    <label class="ag-label">Bot token<input id="tg-token" type="password" placeholder="${tg.configured ? '•••••• (set — paste to replace)' : '123456:ABC-DEF…'}"></label>
-    <div style="display:flex;gap:10px;align-items:center">
-      <button class="btn btn-primary" id="tg-save">Save token</button>
-      <button class="btn" id="tg-unlink" style="${tg.linked ? '' : 'display:none'}">Unlink chat</button>
-      <span id="tg-status" class="ag-status"></span>
-    </div>
-    <div style="margin-top:22px;padding:11px 13px;background:var(--bg2);border:1px solid var(--border);border-radius:9px;font-size:12px;color:var(--text2);line-height:1.55">
-      <b style="color:var(--text)">📅 Scheduled delivery</b> — once linked, just ask your agent in chat, e.g. <i>“every morning at 8, summarize my unread emails and send it to me on Telegram”</i> (or Slack). It schedules a cron job that runs and pushes the result to you — no need to be at the dashboard.
+  const chSub = (c) => c.linked ? 'Linked' : (c.configured ? 'Not linked' : 'Not set up')
+
+  wrap.innerHTML = `
+    <h2 style="margin:0 0 4px;font-size:16px">Channels</h2>
+    <p style="color:var(--text3);font-size:12.5px;margin:0 0 16px;line-height:1.5">Connect a messaging app to chat with your agent from anywhere — and let scheduled cron jobs deliver results to you there.</p>
+    <div class="eplogos">
+      <div class="eplogo sel" data-prov="telegram"><span class="epi">${BRAND.telegram}</span>Telegram <span class="cal-st" data-st="telegram"></span><div class="cal-sub">${chSub(tg)}</div></div>
+      <div class="eplogo" data-prov="slack"><span class="epi">${BRAND.slack}</span>Slack <span class="cal-st" data-st="slack"></span><div class="cal-sub">${chSub(sl)}</div></div>
     </div>
 
-    <div style="margin-top:26px;border-top:1px solid var(--border);padding-top:18px">
-      <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('send')}</span><span class="config-cat-name">Slack</span></div>
-      <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.55">Chat with your agent from Slack. Create a Slack app with <b>Socket Mode</b> enabled (no public URL needed), give it a <b>Bot token</b> (xoxb-…) and an <b>App-level token</b> (xapp-…, scope <code>connections:write</code>), then DM your bot. <b>The first user to DM the bot is linked</b> — keep the tokens private.</div>
+    <div class="ch-pane" data-prov="telegram">
+      <div style="font-size:12px;color:var(--text2);margin:0 0 12px;line-height:1.55">Chat with your agent from your phone. Create a bot with <b>@BotFather</b>, paste its token below, then send <b>/start</b> to your bot to link it. <b>Only the first chat to send /start is allowed</b> — your agent has powerful tools, so keep the token private.</div>
+      <div id="tg-state" style="font-size:12px;margin-bottom:10px"></div>
+      <label class="ag-label">Bot token<input id="tg-token" type="password" placeholder="${tg.configured ? '•••••• (set — paste to replace)' : '123456:ABC-DEF…'}"></label>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn btn-primary" id="tg-save">Save token</button>
+        <button class="btn" id="tg-unlink" style="${tg.linked ? '' : 'display:none'}">Unlink chat</button>
+        <span id="tg-status" class="ag-status"></span>
+      </div>
+    </div>
+
+    <div class="ch-pane" data-prov="slack" style="display:none">
+      <div style="font-size:12px;color:var(--text2);margin:0 0 12px;line-height:1.55">Chat with your agent from Slack. Create a Slack app with <b>Socket Mode</b> enabled (no public URL needed), give it a <b>Bot token</b> (xoxb-…) and an <b>App-level token</b> (xapp-…, scope <code>connections:write</code>), then DM your bot. <b>The first user to DM the bot is linked</b> — keep the tokens private.</div>
       <div id="sl-state" style="font-size:12px;margin-bottom:10px"></div>
       <label class="ag-label">Bot token (xoxb-…)<input id="sl-bot" type="password" placeholder="${sl.configured ? '•••••• (set — paste to replace)' : 'xoxb-…'}"></label>
       <label class="ag-label">App-level token (xapp-…)<input id="sl-app" type="password" placeholder="${sl.configured ? '•••••• (set — paste to replace)' : 'xapp-…'}"></label>
@@ -836,7 +842,21 @@ async function renderChannelsTab(container) {
         <button class="btn" id="sl-disc" style="${sl.configured ? '' : 'display:none'};color:var(--red)">Disconnect</button>
         <span id="sl-status" class="ag-status"></span>
       </div>
+    </div>
+
+    <div style="margin-top:22px;padding:11px 13px;background:var(--bg2);border:1px solid var(--border);border-radius:9px;font-size:12px;color:var(--text2);line-height:1.55">
+      <b style="color:var(--text)">📅 Scheduled delivery</b> — once linked, just ask your agent in chat, e.g. <i>“every morning at 8, summarize my unread emails and send it to me on Telegram”</i> (or Slack). It schedules a cron job that pushes the result to you — no need to be at the dashboard.
     </div>`
+
+  const page = document.createElement('div'); page.className = 'settings-page'; page.appendChild(wrap); container.appendChild(page)
+
+  // Status dots on the cards + card → pane switching (one channel config at a time).
+  wrap.querySelector('.cal-st[data-st="telegram"]').classList.toggle('on', !!tg.linked)
+  wrap.querySelector('.cal-st[data-st="slack"]').classList.toggle('on', !!sl.linked)
+  wrap.querySelectorAll('.eplogo').forEach(c => c.addEventListener('click', () => {
+    wrap.querySelectorAll('.eplogo').forEach(x => x.classList.toggle('sel', x === c))
+    wrap.querySelectorAll('.ch-pane').forEach(p => { p.style.display = p.dataset.prov === c.dataset.prov ? '' : 'none' })
+  }))
 
   const tgState = page.querySelector('#tg-state')
   tgState.innerHTML = !tg.configured
@@ -1253,14 +1273,31 @@ async function renderSecretsTab(container) {
   }
 }
 
+// ── Brand logos ────────────────────────────────────────────────────────────────
+// Real provider/channel marks as inline SVG — self-hosted, no external requests.
+const BRAND = {
+  gmail: '<svg viewBox="0 0 48 48" width="22" height="22" aria-hidden="true"><path fill="#4caf50" d="M45 16.2l-5 2.75-5 4.75L35 40h7a3 3 0 0 0 3-3z"/><path fill="#1e88e5" d="M3 16.2l3.614 1.71L13 23.7V40H6a3 3 0 0 1-3-3z"/><polygon fill="#e53935" points="35,11.2 24,19.45 13,11.2 12,17 13,23.7 24,31.95 35,23.7 36,17"/><path fill="#c62828" d="M3 12.298V16.2l10 7.5V11.2L9.876 8.859A4.298 4.298 0 0 0 7.298 8 4.298 4.298 0 0 0 3 12.298z"/><path fill="#fbc02d" d="M45 12.298V16.2l-10 7.5V11.2l3.124-2.341A4.298 4.298 0 0 1 40.702 8 4.298 4.298 0 0 1 45 12.298z"/></svg>',
+  google: '<svg viewBox="0 0 48 48" width="22" height="22" aria-hidden="true"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.087 5.571l6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>',
+  outlook: '<svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><path fill="#0072C6" d="M14 6h16a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H14z"/><path fill="#fff" d="M17 11h11v2H17zM17 15h11v2H17zM17 19h8v2h-8z"/><path fill="#1490DF" d="M2 6.3 15 4v24L2 25.7z"/><ellipse cx="8.5" cy="16" rx="3.6" ry="4.5" fill="none" stroke="#fff" stroke-width="2.3"/></svg>',
+  microsoft: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#F25022" d="M2 2h9.5v9.5H2z"/><path fill="#7FBA00" d="M12.5 2H22v9.5h-9.5z"/><path fill="#00A4EF" d="M2 12.5h9.5V22H2z"/><path fill="#FFB900" d="M12.5 12.5H22V22h-9.5z"/></svg>',
+  proton: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#6D4AFF" d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path fill="#C6B9FF" d="M3 6.2 12 13l9-6.8V8L12 15 3 8z"/><path fill="#9C86FF" d="M3 6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v1.8L12 14 3 7.8z"/></svg>',
+  icloud: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#3693F3" d="M7 18a4 4 0 0 1-.55-7.96 5 5 0 0 1 9.63-1.37A3.75 3.75 0 0 1 16.25 18z"/></svg>',
+  yahoo: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#5F01D1"/><path fill="#fff" d="M7.2 7.5h2.9l1.95 3.35L14 7.5h2.8l-3.65 6.15V17h-2.35v-3.35z"/></svg>',
+  todoist: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect width="24" height="24" rx="5.5" fill="#E44332"/><path fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M6.3 8.7l2 1.7 3.9-2.3M6.3 12.3l2 1.7 3.9-2.3M6.3 15.9l2 1.7 3.9-2.3"/></svg>',
+  telegram: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#29A9EB"/><path fill="#fff" d="M5.6 11.9l11-4.24c.51-.2.96.12.8.9l-1.87 8.82c-.13.6-.5.75-1 .47l-2.76-2.03-1.33 1.28c-.15.15-.28.28-.56.28l.2-2.85 5.16-4.66c.22-.2-.05-.31-.35-.11l-6.37 4.01-2.75-.86c-.6-.19-.61-.6.13-.89z"/></svg>',
+  slack: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#36C5F0" d="M5.04 15.16a2.52 2.52 0 1 1-2.52-2.52h2.52zM6.31 15.16a2.52 2.52 0 0 1 5.04 0v6.32a2.52 2.52 0 0 1-5.04 0z"/><path fill="#2EB67D" d="M8.83 5.04a2.52 2.52 0 1 1 2.52-2.52v2.52zM8.83 6.31a2.52 2.52 0 0 1 0 5.04H2.52a2.52 2.52 0 0 1 0-5.04z"/><path fill="#ECB22E" d="M18.96 8.83a2.52 2.52 0 1 1 2.52 2.52h-2.52zM17.69 8.83a2.52 2.52 0 0 1-5.04 0V2.52a2.52 2.52 0 0 1 5.04 0z"/><path fill="#E01E5A" d="M15.16 18.96a2.52 2.52 0 1 1-2.52 2.52v-2.52zM15.16 17.69a2.52 2.52 0 0 1 0-5.04h6.32a2.52 2.52 0 0 1 0 5.04z"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5" fill="#EA4C46"/><rect x="3" y="5" width="18" height="5" rx="2.5" fill="#D63A34"/><rect x="5.5" y="12" width="13" height="6.5" rx="1" fill="#fff"/><path d="M8 3.5v3.2M16 3.5v3.2" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5" fill="none" stroke="#8892a6" stroke-width="1.8"/><path d="M3.5 7.5l8.5 5.5 8.5-5.5" fill="none" stroke="#8892a6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+}
+
 // ── Email tab — mailbox configuration ──────────────────────────────────────────
 const EMAIL_PROVIDERS = {
-  gmail:      { label: 'Gmail',      icon: '✉', imap: 'imap.gmail.com',        imapPort: 993, smtp: 'smtp.gmail.com',          smtpPort: 587, hint: 'Gmail needs an <b>App Password</b>, not your normal password. Enable 2-Step Verification, then create one at <b>Google Account → Security → App passwords</b>.' },
-  outlook:    { label: 'Outlook',    icon: '📧', imap: 'outlook.office365.com', imapPort: 993, smtp: 'smtp-mail.outlook.com',    smtpPort: 587, hint: 'Outlook / Hotmail. If you use 2FA, create an <b>App Password</b> at <b>account.microsoft.com → Security</b>.' },
-  protonmail: { label: 'ProtonMail', icon: '🛡', imap: 'protonmail-bridge',     imapPort: 143, smtp: 'protonmail-bridge',       smtpPort: 25, security: 'starttls', insecure: true, hint: 'ProtonMail needs <b>Proton Mail Bridge</b> (paid plan), run as the bundled <b>protonmail-bridge</b> Docker service. Use the <b>username</b> and <b>Bridge password</b> it shows. Host stays <b>protonmail-bridge</b>, IMAP 143 / SMTP 25.' },
-  icloud:     { label: 'iCloud',     icon: '☁', imap: 'imap.mail.me.com',      imapPort: 993, smtp: 'smtp.mail.me.com',        smtpPort: 587, hint: 'iCloud Mail needs an <b>app-specific password</b> from <b>appleid.apple.com → Sign-In and Security</b>.' },
-  yahoo:      { label: 'Yahoo',      icon: '💜', imap: 'imap.mail.yahoo.com',   imapPort: 993, smtp: 'smtp.mail.yahoo.com',     smtpPort: 587, hint: 'Yahoo Mail needs an <b>App Password</b> from <b>Account Security</b>.' },
-  other:      { label: 'Other',      icon: '⚙', imap: '',                      imapPort: 993, smtp: '',                       smtpPort: 587, hint: 'Enter your provider\'s IMAP and SMTP servers below.' },
+  gmail:      { label: 'Gmail',      icon: BRAND.gmail, imap: 'imap.gmail.com',        imapPort: 993, smtp: 'smtp.gmail.com',          smtpPort: 587, hint: 'Gmail needs an <b>App Password</b>, not your normal password. Enable 2-Step Verification, then create one at <b>Google Account → Security → App passwords</b>.' },
+  outlook:    { label: 'Outlook',    icon: BRAND.outlook, imap: 'outlook.office365.com', imapPort: 993, smtp: 'smtp-mail.outlook.com',    smtpPort: 587, hint: 'Outlook / Hotmail. If you use 2FA, create an <b>App Password</b> at <b>account.microsoft.com → Security</b>.' },
+  protonmail: { label: 'ProtonMail', icon: BRAND.proton, imap: 'protonmail-bridge',     imapPort: 143, smtp: 'protonmail-bridge',       smtpPort: 25, security: 'starttls', insecure: true, hint: 'ProtonMail needs <b>Proton Mail Bridge</b> (paid plan), run as the bundled <b>protonmail-bridge</b> Docker service. Use the <b>username</b> and <b>Bridge password</b> it shows. Host stays <b>protonmail-bridge</b>, IMAP 143 / SMTP 25.' },
+  icloud:     { label: 'iCloud',     icon: BRAND.icloud, imap: 'imap.mail.me.com',      imapPort: 993, smtp: 'smtp.mail.me.com',        smtpPort: 587, hint: 'iCloud Mail needs an <b>app-specific password</b> from <b>appleid.apple.com → Sign-In and Security</b>.' },
+  yahoo:      { label: 'Yahoo',      icon: BRAND.yahoo, imap: 'imap.mail.yahoo.com',   imapPort: 993, smtp: 'smtp.mail.yahoo.com',     smtpPort: 587, hint: 'Yahoo Mail needs an <b>App Password</b> from <b>Account Security</b>.' },
+  other:      { label: 'Other',      icon: BRAND.mail, imap: '',                      imapPort: 993, smtp: '',                       smtpPort: 587, hint: 'Enter your provider\'s IMAP and SMTP servers below.' },
 }
 
 async function renderEmailTab(container) {
@@ -1391,10 +1428,10 @@ async function renderCalendarTab(container) {
     <h2 style="margin:0 0 4px;font-size:16px">Calendar &amp; Tasks</h2>
     <p style="color:var(--text3);font-size:12.5px;margin:0 0 16px;line-height:1.5">Pick a provider to connect. You can connect more than one and choose which the apps use.</p>
     <div class="eplogos">
-      <div class="eplogo sel" data-prov="caldav"><span class="epi">🗓️</span>CalDAV <span class="cal-st" data-st="caldav"></span><div class="cal-sub">Calendar + Tasks</div></div>
-      <div class="eplogo" data-prov="google"><span class="epi">📅</span>Google <span class="cal-st" data-st="google"></span><div class="cal-sub">Calendar</div></div>
-      <div class="eplogo" data-prov="microsoft"><span class="epi">Ⓜ️</span>Microsoft <span class="cal-st" data-st="microsoft"></span><div class="cal-sub">Calendar</div></div>
-      <div class="eplogo" data-prov="todoist"><span class="epi">✓</span>Todoist <span class="cal-st" data-st="todoist"></span><div class="cal-sub">Tasks</div></div>
+      <div class="eplogo sel" data-prov="caldav"><span class="epi">${BRAND.calendar}</span>CalDAV <span class="cal-st" data-st="caldav"></span><div class="cal-sub">Calendar + Tasks</div></div>
+      <div class="eplogo" data-prov="google"><span class="epi">${BRAND.google}</span>Google <span class="cal-st" data-st="google"></span><div class="cal-sub">Calendar</div></div>
+      <div class="eplogo" data-prov="microsoft"><span class="epi">${BRAND.microsoft}</span>Microsoft <span class="cal-st" data-st="microsoft"></span><div class="cal-sub">Calendar</div></div>
+      <div class="eplogo" data-prov="todoist"><span class="epi">${BRAND.todoist}</span>Todoist <span class="cal-st" data-st="todoist"></span><div class="cal-sub">Tasks</div></div>
     </div>
 
     <div class="cal-pane" data-prov="caldav">
