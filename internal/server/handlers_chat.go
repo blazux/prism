@@ -193,7 +193,7 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	os.MkdirAll(sessionPluginDir, 0755)
 
-	ollamaClient := s.newChatBackend()
+	ollamaClient := s.chatBackendFor(model)
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
 	executor.SetLLM(ollamaClient, model)
 

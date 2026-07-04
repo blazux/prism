@@ -69,7 +69,11 @@ Two-part: editable `personality` (stored in DB per session, modifiable via `upda
 
 See `.env.example`. Key ones: `OLLAMA_URL`, `OLLAMA_MODEL`, `EMBED_MODEL`, `POSTGRES_URL`, `SEARXNG_URL`, `AGENT_CONTAINER` (default: `prism-workspace`), `WORKSPACE_DIR`, `PLUGIN_DIR`.
 
-`LLM_BACKEND` selects the provider: `ollama` (default) or `openai` for any OpenAI-compatible server (SGLang, vLLM, …). When `openai`, set `OPENAI_BASE_URL` (the `/v1` root), optionally `OPENAI_API_KEY`, and `OPENAI_MODEL` (overrides `OLLAMA_MODEL`; must match the server's `--served-model-name`). The same base URL serves chat, embeddings (`/v1/embeddings`) and RAG vision captioning.
+`LLM_BACKEND` selects the provider: `ollama` (default) or `openai` for any OpenAI-compatible server (SGLang, vLLM, …). When `openai`, set `OPENAI_BASE_URL` (the `/v1` root), optionally `OPENAI_API_KEY`, and `OPENAI_MODEL` (overrides `OLLAMA_MODEL`; must match the server's `--served-model-name`). By default that base URL serves chat, embeddings (`/v1/embeddings`) and RAG vision captioning.
+
+`EMBED_BACKEND` decouples RAG embeddings + vision captioning from the chat backend (empty = follow `LLM_BACKEND`). Set `EMBED_BACKEND=ollama` to keep RAG on Ollama (`OLLAMA_URL` + `EMBED_MODEL`) while chat runs on a chat-only OpenAI-compatible server that has no `/v1/embeddings` — e.g. Qwen3.5-122B + DFlash on a DGX Spark. `VISION_MODEL` overrides the captioning model (needed when captioning runs on Ollama but the chat model name isn't an Ollama tag). The backend factory is `internal/server/backend.go` (`newChatBackend`/`newEmbedder`/`newCaptioner` + `embedBackend`).
+
+**Dual-backend model picker:** when `LLM_BACKEND=openai` and `OLLAMA_URL` is set (dual-backend mode), the model menu (`/api/models`) merges the vLLM models with the Ollama models, and `set_model` routes each pick to the server that serves it — `chatModels`/`chatBackendFor` in `backend.go`. So one picker offers e.g. `qwen` (vLLM/DFlash, the `OPENAI_MODEL` default) plus `AcidBurn:latest` and the rest of Ollama, each hitting its own backend.
 
 Changing `EMBED_MODEL` requires resetting the RAG database (vector dimension is fixed per table).
 

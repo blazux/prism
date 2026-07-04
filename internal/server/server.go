@@ -30,6 +30,8 @@ type Config struct {
 	LLMBackend       string // "ollama" (default) or "openai" (SGLang/vLLM/…)
 	OpenAIBaseURL    string // /v1 root, used when LLMBackend == "openai"
 	OpenAIAPIKey     string // optional bearer token for the openai backend
+	EmbedBackend     string // "" (follow LLMBackend), "ollama" or "openai": backend for RAG embeddings + captioning
+	VisionModel      string // optional override model for RAG vision captioning (needed when captioning ≠ chat backend)
 	AgentContainer   string
 	SearxngURL       string
 	ServicePortStart int

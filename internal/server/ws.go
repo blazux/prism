@@ -626,7 +626,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					curPersonality = p
 				}
 			}
-			client.ag = agent.New(s.newChatBackend(), executor, model, curMS, curPersonality)
+			// Route the picked model to the backend that serves it (vLLM or Ollama).
+			chatBE := s.chatBackendFor(model)
+			executor.SetLLM(chatBE, model)
+			client.ag = agent.New(chatBE, executor, model, curMS, curPersonality)
 			client.ag.SetSession(client.sessionID, curPersonality)
 			if ragContextFn != nil {
 				client.ag.SetRAGContextFn(ragContextFn)

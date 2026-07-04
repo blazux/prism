@@ -148,6 +148,7 @@ type streamChunk struct {
 		Delta struct {
 			Content          string         `json:"content"`
 			ReasoningContent string         `json:"reasoning_content"`
+			Reasoning        string         `json:"reasoning"` // some vLLM builds (Qwen3.5+DFlash) emit "reasoning" instead
 			ToolCalls        []respToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
@@ -267,8 +268,10 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 			continue
 		}
 		ch := chunk.Choices[0]
-		if ch.Delta.ReasoningContent != "" {
-			out <- ollama.StreamEvent{Thinking: ch.Delta.ReasoningContent}
+		if think := ch.Delta.ReasoningContent; think != "" {
+			out <- ollama.StreamEvent{Thinking: think}
+		} else if ch.Delta.Reasoning != "" {
+			out <- ollama.StreamEvent{Thinking: ch.Delta.Reasoning}
 		}
 		if ch.Delta.Content != "" {
 			out <- ollama.StreamEvent{Content: ch.Delta.Content}

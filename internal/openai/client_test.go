@@ -67,6 +67,34 @@ func TestChat_ContentAndReasoning(t *testing.T) {
 	}
 }
 
+// Some vLLM builds (e.g. Qwen3.5 + DFlash on the DGX Spark) stream the thinking
+// tokens in a "reasoning" field rather than "reasoning_content".
+func TestChat_ReasoningFieldVariant(t *testing.T) {
+	srv := sseServer(t, []string{
+		`data: {"choices":[{"delta":{"reasoning":"think "}}]}`,
+		`data: {"choices":[{"delta":{"reasoning":"hard"}}]}`,
+		`data: {"choices":[{"delta":{"content":"42"}}]}`,
+		`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+	})
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "")
+	ch := make(chan ollama.StreamEvent, 50)
+	go func() { c.Chat(context.Background(), ollama.ChatRequest{Model: "m"}, ch); close(ch) }()
+
+	content, thinking, _, err := drain(ch)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if content != "42" {
+		t.Errorf("content = %q, want %q", content, "42")
+	}
+	if thinking != "think hard" {
+		t.Errorf("thinking = %q, want %q", thinking, "think hard")
+	}
+}
+
 func TestChat_FragmentedToolCall(t *testing.T) {
 	// A single tool call whose name and JSON arguments are split across deltas.
 	srv := sseServer(t, []string{

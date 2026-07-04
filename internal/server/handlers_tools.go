@@ -20,8 +20,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	client := s.newChatBackend()
-	models, err := client.ListModels(ctx)
+	models, err := s.chatModels(ctx)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{"models": []string{}, "error": err.Error()})
 		return
