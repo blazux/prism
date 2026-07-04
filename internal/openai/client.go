@@ -202,6 +202,61 @@ func (t *toolAccumulator) result() []ollama.ToolCall {
 	return calls
 }
 
+// postChatWithRetry issues the streaming chat POST, retrying transient failures
+// (connection errors like "no route to host"/refused/reset, or 502/503/504)
+// with exponential backoff. It only retries the initial request — before any
+// token is read — so nothing is ever streamed twice. This keeps a momentary
+// network blip to the backend (common on a flaky link to a DGX Spark) from
+// aborting a long agent turn. Non-transient statuses (4xx) and success are
+// returned to the caller as-is; context cancellation stops retrying.
+// retryBaseBackoff is the first retry delay (doubled each attempt); a package
+// var so tests can shrink it.
+var retryBaseBackoff = time.Second
+
+func (c *Client) postChatWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
+	const maxAttempts = 4
+	backoff := retryBaseBackoff
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		c.auth(req)
+
+		resp, err := c.httpClient.Do(req)
+		if err == nil {
+			switch resp.StatusCode {
+			case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+				// Backend up but not ready — treat as transient.
+				b, _ := bufio.NewReader(resp.Body).ReadString('\x00')
+				resp.Body.Close()
+				lastErr = fmt.Errorf("openai backend returned %d: %s", resp.StatusCode, strings.TrimSpace(b))
+			default:
+				return resp, nil // success (200) or a non-transient status the caller handles
+			}
+		} else {
+			lastErr = err // dial/connection failure
+		}
+
+		if attempt == maxAttempts || ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+
+	if lastErr == nil {
+		lastErr = ctx.Err()
+	}
+	return nil, lastErr
+}
+
 func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
 	payload := chatRequest{
 		Model:       req.Model,
@@ -219,14 +274,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		return
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		out <- ollama.StreamEvent{Err: fmt.Errorf("request: %w", err)}
-		return
-	}
-	c.auth(httpReq)
-
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.postChatWithRetry(ctx, body)
 	if err != nil {
 		out <- ollama.StreamEvent{Err: fmt.Errorf("http: %w", err)}
 		return

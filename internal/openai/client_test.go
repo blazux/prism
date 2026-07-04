@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"prism/internal/ollama"
 )
@@ -92,6 +94,49 @@ func TestChat_ReasoningFieldVariant(t *testing.T) {
 	}
 	if thinking != "think hard" {
 		t.Errorf("thinking = %q, want %q", thinking, "think hard")
+	}
+}
+
+// A transient failure at the start of a turn (503 / connection blip) must be
+// retried before any token is streamed — a flaky link to the backend shouldn't
+// abort the request.
+func TestChat_RetriesTransientThenSucceeds(t *testing.T) {
+	old := retryBaseBackoff
+	retryBaseBackoff = time.Millisecond
+	defer func() { retryBaseBackoff = old }()
+
+	var mu sync.Mutex
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n := calls
+		calls++
+		mu.Unlock()
+		if n < 2 { // fail the first two attempts
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte(`data: {"choices":[{"delta":{"content":"ok"}}]}` + "\n"))
+		w.Write([]byte("data: [DONE]\n"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "")
+	ch := make(chan ollama.StreamEvent, 50)
+	go func() { c.Chat(context.Background(), ollama.ChatRequest{Model: "m"}, ch); close(ch) }()
+
+	content, _, _, err := drain(ch)
+	if err != nil {
+		t.Fatalf("expected success after retries, got err: %v", err)
+	}
+	if content != "ok" {
+		t.Errorf("content = %q, want %q", content, "ok")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 3 {
+		t.Errorf("server calls = %d, want 3 (2 transient + 1 success)", calls)
 	}
 }
 
