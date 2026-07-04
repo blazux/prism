@@ -2319,3 +2319,35 @@ html.density-compact  .widget-header { height: 18px; }
 html.density-spacious #chat-messages { padding: 22px 20px; gap: 24px; }
 html.density-spacious .chat-msg-content { font-size: 14.5px; line-height: 1.7; }
 html.density-spacious .rail-item { height: 46px; }
+
+/* ── Themed confirmation dialog (prismConfirm) ─────────────────────────────── */
+.pc-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .5); backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none; transition: opacity .18s ease;
+}
+.pc-overlay.visible { opacity: 1; pointer-events: auto; }
+.pc-card {
+  background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: calc(var(--radius) + 2px); padding: 20px;
+  width: min(420px, calc(100vw - 40px)); box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+  transform: translateY(6px) scale(.98); transition: transform .18s ease;
+}
+.pc-overlay.visible .pc-card { transform: none; }
+.pc-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.pc-msg { font-size: 13px; color: var(--text2); line-height: 1.5; margin-bottom: 18px; }
+.pc-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.pc-btn {
+  padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border2);
+  font-size: 13px; cursor: pointer; background: var(--bg3); color: var(--text);
+  transition: background .12s, border-color .12s, color .12s, filter .12s;
+}
+.pc-btn:hover { background: var(--bg4); }
+.pc-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pc-btn-cancel { background: transparent; color: var(--text2); }
+.pc-btn-cancel:hover { background: var(--bg3); color: var(--text); }
+.pc-btn-confirm { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pc-btn-confirm:hover { background: var(--accent); filter: brightness(1.08); }
+.pc-btn-danger { background: #e5484d; border-color: #e5484d; color: #fff; }
+.pc-btn-danger:hover { background: #e5484d; filter: brightness(1.08); }

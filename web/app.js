@@ -256,11 +256,17 @@ function restoreWidget(id) {
 }
 
 // Permanently delete a widget (removes the files server-side, after confirm).
-function deleteWidget(id) {
+async function deleteWidget(id) {
   const rec = widgets.get(id)
   if (rec?.locked) { showToast({ title: 'Widget locked', message: 'Unlock it before deleting.', level: 'warning' }); return }
   const title = rec?.title || id
-  if (!confirm(`Delete widget “${title}” permanently? This cannot be undone.`)) return
+  const ok = await prismConfirm({
+    title: 'Delete widget',
+    message: `Delete “${title}” permanently? This cannot be undone.`,
+    confirmText: 'Delete',
+    danger: true,
+  })
+  if (!ok) return
   send({ type: 'remove_plugin', id })
 }
 
@@ -812,6 +818,43 @@ window.toggleNotifPanel = function() {
 }
 
 // Toast notification
+// Themed confirmation dialog — replaces the browser's confirm() so destructive
+// actions get a Prism-styled, theme-aware modal. Returns a Promise resolving
+// true on confirm, false on cancel / Escape / backdrop click.
+function prismConfirm({ title = 'Confirm', message = '', confirmText = 'Confirm', cancelText = 'Cancel', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div')
+    overlay.className = 'pc-overlay'
+    const confirmClass = danger ? 'pc-btn-danger' : 'pc-btn-confirm'
+    overlay.innerHTML = `
+      <div class="pc-card" role="dialog" aria-modal="true">
+        <div class="pc-title">${escHtml(title)}</div>
+        ${message ? `<div class="pc-msg">${escHtml(message)}</div>` : ''}
+        <div class="pc-actions">
+          <button class="pc-btn pc-btn-cancel">${escHtml(cancelText)}</button>
+          <button class="pc-btn ${confirmClass}">${escHtml(confirmText)}</button>
+        </div>
+      </div>`
+    const done = (val) => {
+      overlay.classList.remove('visible')
+      window.removeEventListener('keydown', onKey)
+      setTimeout(() => overlay.remove(), 180)
+      resolve(val)
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); done(false) }
+      else if (e.key === 'Enter') { e.preventDefault(); done(true) }
+    }
+    overlay.querySelector('.pc-btn-cancel').onclick = () => done(false)
+    overlay.querySelector('.' + confirmClass).onclick = () => done(true)
+    overlay.onclick = (e) => { if (e.target === overlay) done(false) }
+    window.addEventListener('keydown', onKey)
+    document.body.appendChild(overlay)
+    requestAnimationFrame(() => overlay.classList.add('visible'))
+    setTimeout(() => overlay.querySelector('.' + confirmClass).focus(), 20)
+  })
+}
+
 function showToast(notif) {
   const toast = document.createElement('div')
   toast.className = 'notif-toast notif-toast-' + (notif.level || 'info')
@@ -1285,7 +1328,13 @@ function renderBoardList(sessions) {
       del.textContent = '×'
       del.onclick = async (e) => {
         e.stopPropagation()
-        if (!confirm(`Delete workspace "${sess.name}" and all its history?`)) return
+        const ok = await prismConfirm({
+          title: 'Delete workspace',
+          message: `Delete “${sess.name}” and all its history? This cannot be undone.`,
+          confirmText: 'Delete',
+          danger: true,
+        })
+        if (!ok) return
         await fetch(`/api/sessions/${sess.id}`, { method: 'DELETE' })
         loadSessions()
       }
