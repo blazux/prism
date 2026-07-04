@@ -35,7 +35,7 @@ Is this a great idea? Probably. Does it make you slightly nervous? It should. Th
 | Layer | Tech |
 |---|---|
 | Backend | Go |
-| Frontend | Vanilla JS, GridStack |
+| Frontend | Vanilla JS, custom free-floating window manager |
 | LLM | Ollama — or any OpenAI-compatible server (vLLM, SGLang, TGI, …) |
 | Embeddings | Ollama (any embedding model) |
 | Vector store | PostgreSQL + pgvector |
