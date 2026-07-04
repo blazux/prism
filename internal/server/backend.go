@@ -18,24 +18,29 @@ func (s *Server) newChatBackend() ollama.Backend {
 	return ollama.NewClient(s.cfg.OllamaURL)
 }
 
-// dualBackend reports whether both a primary openai server AND an Ollama server
-// are wired, so the model picker can span both (e.g. DFlash `qwen` on vLLM +
-// AcidBurn on Ollama). Ollama is reachable in this mode because it already
-// serves RAG embeddings (EMBED_BACKEND=ollama).
+// dualBackend reports whether both an OpenAI-compatible server AND an Ollama
+// server are wired, so the model picker can span both regardless of which one is
+// the default — e.g. AcidBurn on Ollama (default) + DFlash `qwen` on vLLM.
 func (s *Server) dualBackend() bool {
-	return s.cfg.LLMBackend == "openai" && s.cfg.OllamaURL != ""
+	return s.cfg.OpenAIBaseURL != "" && s.cfg.OllamaURL != ""
 }
 
 // chatModels returns the union of selectable chat models. In dual-backend mode
-// it merges the primary (openai/vLLM) models with the Ollama models so one
-// picker offers both — like the original single-Ollama menu, plus the vLLM model.
+// it merges the primary backend's models with the other server's, so one picker
+// offers both — the full Ollama menu plus the vLLM model (in either direction).
 func (s *Server) chatModels(ctx context.Context) ([]string, error) {
 	models, err := s.newChatBackend().ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if s.dualBackend() {
-		if extra, e := ollama.NewClient(s.cfg.OllamaURL).ListModels(ctx); e == nil {
+		var secondary ollama.Backend
+		if s.cfg.LLMBackend == "openai" {
+			secondary = ollama.NewClient(s.cfg.OllamaURL)
+		} else {
+			secondary = openai.NewClient(s.cfg.OpenAIBaseURL, s.cfg.OpenAIAPIKey)
+		}
+		if extra, e := secondary.ListModels(ctx); e == nil {
 			seen := make(map[string]bool, len(models))
 			for _, m := range models {
 				seen[m] = true
@@ -51,8 +56,10 @@ func (s *Server) chatModels(ctx context.Context) ([]string, error) {
 }
 
 // chatBackendFor returns the backend that serves the given model, letting a
-// single picker route each choice to the right server. Outside dual-backend
-// mode (or for an empty model) it falls back to the configured chat backend.
+// single picker route each choice to the right server: a model the vLLM/openai
+// server lists goes there, anything else goes to Ollama. Outside dual-backend
+// mode (or for an empty model, or if the openai server can't be reached) it
+// falls back to the configured primary chat backend.
 func (s *Server) chatBackendFor(model string) ollama.Backend {
 	if model == "" || !s.dualBackend() {
 		return s.newChatBackend()
@@ -60,20 +67,15 @@ func (s *Server) chatBackendFor(model string) ollama.Backend {
 	oai := openai.NewClient(s.cfg.OpenAIBaseURL, s.cfg.OpenAIAPIKey)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	if primary, err := oai.ListModels(ctx); err == nil {
-		for _, m := range primary {
+	if served, err := oai.ListModels(ctx); err == nil {
+		for _, m := range served {
 			if m == model {
-				return oai // served by the primary vLLM server
+				return oai // served by the vLLM/openai server
 			}
 		}
 		return ollama.NewClient(s.cfg.OllamaURL) // otherwise it's an Ollama model
 	}
-	// Primary list unreachable: keep the default model on openai, route the rest
-	// (an explicitly-picked non-default) to Ollama.
-	if model != s.cfg.Model {
-		return ollama.NewClient(s.cfg.OllamaURL)
-	}
-	return oai
+	return s.newChatBackend() // openai server unreachable: use the primary backend
 }
 
 // embedBackend selects the backend for RAG embeddings + vision captioning.
