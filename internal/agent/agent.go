@@ -54,6 +54,7 @@ type Agent struct {
 	mcpCtxFn        func() string                                  // returns MCP servers context block for system prompt
 	userProfileFn   func() string                                  // returns full user profile for system prompt injection
 	skillsCtxFn     func() string                                  // returns saved-skills index for system prompt
+	servicesCtxFn   func() string                                  // returns the live index of agent-deployed docker services
 	viewCtxFn       func() string                                  // returns what the user is currently looking at
 	globalCtxFn     func() string                                  // global assistant: overview of all workspaces
 	learningsCtxFn  func(ctx context.Context, query string) string // searches agent-learnings RAG for relevant past lessons
@@ -80,6 +81,12 @@ func (a *Agent) SetUserProfileFn(fn func() string) { a.userProfileFn = fn }
 // SetSkillsContextFn registers a callback that returns the saved-skills index
 // to inject into the system prompt on every chat turn.
 func (a *Agent) SetSkillsContextFn(fn func() string) { a.skillsCtxFn = fn }
+
+// SetServicesContextFn registers a callback that returns a live index of the
+// docker services the agent has deployed (name, status, purpose), injected into
+// the system prompt so the agent always knows what it is running rather than
+// guessing.
+func (a *Agent) SetServicesContextFn(fn func() string) { a.servicesCtxFn = fn }
 
 // SetViewContextFn registers a callback that returns a description of what the
 // user is currently looking at (which app/workspace, the open email/note…), so
@@ -340,6 +347,14 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	// Inject saved-skills index
 	if a.skillsCtxFn != nil {
 		if extra := a.skillsCtxFn(); extra != "" {
+			sb.WriteString("\n\n")
+			sb.WriteString(extra)
+		}
+	}
+
+	// Inject the live index of services the agent has deployed.
+	if a.servicesCtxFn != nil {
+		if extra := a.servicesCtxFn(); extra != "" {
 			sb.WriteString("\n\n")
 			sb.WriteString(extra)
 		}

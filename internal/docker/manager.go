@@ -15,10 +15,11 @@ const servicePrefix = "prism-svc-"
 
 // ServiceInfo describes a running or stopped service container.
 type ServiceInfo struct {
-	Name   string `json:"name"`
-	Image  string `json:"image"`
-	Status string `json:"status"`
-	Port   int    `json:"port"`
+	Name    string `json:"name"`
+	Image   string `json:"image"`
+	Status  string `json:"status"`
+	Port    int    `json:"port"`
+	Purpose string `json:"purpose"` // what the agent deployed it for (from the prism.purpose label)
 }
 
 type Manager struct {
@@ -209,7 +210,7 @@ func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string
 // workspace. The container is named prism-svc-<name>, restarts automatically,
 // and is exposed on an auto-allocated host port from the configured range.
 // Returns the allocated host port.
-func (m *Manager) RunService(ctx context.Context, name, image string, ports []int, command string, env map[string]string, volumes []string, gpu bool) ([]int, error) {
+func (m *Manager) RunService(ctx context.Context, name, image string, ports []int, command string, env map[string]string, volumes []string, gpu bool, purpose string) ([]int, error) {
 	if len(ports) == 0 {
 		return nil, fmt.Errorf("at least one port is required")
 	}
@@ -246,6 +247,9 @@ func (m *Manager) RunService(ctx context.Context, name, image string, ports []in
 		"--label", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.localhost`)", name, name),
 		"--label", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", name, ports[0]),
 		"--label", fmt.Sprintf("traefik.http.routers.%s.middlewares=strip-frames@docker", name),
+		// Self-description: what the agent deployed this for, surfaced back to it
+		// in the running-services index.
+		"--label", "prism.purpose=" + purpose,
 	}
 	for i, hp := range hostPorts {
 		args = append(args, "-p", fmt.Sprintf("%d:%d", hp, ports[i]))
@@ -294,7 +298,7 @@ func (m *Manager) ExecService(ctx context.Context, name, command string, timeout
 func (m *Manager) ListServices(ctx context.Context) ([]ServiceInfo, error) {
 	out, err := m.run(ctx, "docker", "ps", "-a",
 		"--filter", "name="+servicePrefix,
-		"--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}")
+		"--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Label \"prism.purpose\"}}")
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +307,7 @@ func (m *Manager) ListServices(ctx context.Context) ([]ServiceInfo, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 4)
+		parts := strings.SplitN(line, "\t", 5)
 		if len(parts) < 3 {
 			continue
 		}
@@ -312,12 +316,36 @@ func (m *Manager) ListServices(ctx context.Context) ([]ServiceInfo, error) {
 			Image:  parts[1],
 			Status: parts[2],
 		}
-		if len(parts) == 4 {
+		if len(parts) >= 4 {
 			svc.Port = parseFirstPort(parts[3])
+		}
+		if len(parts) == 5 {
+			svc.Purpose = strings.TrimSpace(parts[4])
 		}
 		services = append(services, svc)
 	}
 	return services, nil
+}
+
+// ServicesContext renders the running agent-deployed services for the system
+// prompt, so the agent always knows what it has running (name, status, purpose,
+// URLs) instead of guessing. Returns "" when there are none.
+func (m *Manager) ServicesContext(ctx context.Context) string {
+	svcs, err := m.ListServices(ctx)
+	if err != nil || len(svcs) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Services you have running\n")
+	sb.WriteString("Containers you started with docker_run. Reach them from a widget at `http://<name>.localhost/`, and from scripts/cron at `http://prism-svc-<name>:<port>/`. Manage them with docker_manage (inspect/logs/stop/restart) — don't redeploy one that already exists here.\n")
+	for _, s := range svcs {
+		line := "- **" + s.Name + "** (" + s.Image + ") — " + s.Status
+		if s.Purpose != "" {
+			line += " — " + s.Purpose
+		}
+		sb.WriteString(line + "\n")
+	}
+	return sb.String()
 }
 
 // ListAllContainers returns all prism-* containers (docker ps -a filtered by name).

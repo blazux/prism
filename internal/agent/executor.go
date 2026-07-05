@@ -159,7 +159,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 				}
 			}
 		}
-		return wrap(e.dockerRun(ctx, str("image"), str("name"), int(portFloat), extraPorts, str("command"), envMap, volumes, gpu))
+		return wrap(e.dockerRun(ctx, str("image"), str("name"), int(portFloat), extraPorts, str("command"), envMap, volumes, gpu, str("purpose")))
 	case "docker_manage":
 		switch str("action") {
 		case "ps":

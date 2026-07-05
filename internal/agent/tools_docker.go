@@ -8,12 +8,12 @@ import (
 	"time"
 )
 
-func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port int, extraPorts []int, command string, env map[string]string, volumes []string, gpu bool) (string, error) {
+func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port int, extraPorts []int, command string, env map[string]string, volumes []string, gpu bool, purpose string) (string, error) {
 	if image == "" || name == "" || port == 0 {
 		return "", fmt.Errorf("image, name and port are required")
 	}
 	allPorts := append([]int{port}, extraPorts...)
-	hostPorts, err := e.docker.RunService(ctx, name, image, allPorts, command, env, volumes, gpu)
+	hostPorts, err := e.docker.RunService(ctx, name, image, allPorts, command, env, volumes, gpu, purpose)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}

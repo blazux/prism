@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // assistantSession is the reserved session for the global "Assistant" — the
@@ -16,6 +17,14 @@ const assistantSession = "assistant"
 
 // workspacesOverview builds a markdown list of every (non-assistant) workspace
 // and the widgets on its dashboard, injected into the global assistant's prompt.
+// servicesContext returns the live index of agent-deployed docker services for
+// injection into the system prompt, so the agent always knows what it is running.
+func (s *Server) servicesContext() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return s.docker.ServicesContext(ctx)
+}
+
 func (s *Server) workspacesOverview() string {
 	if s.memStore == nil {
 		return ""

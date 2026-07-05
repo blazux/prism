@@ -14,8 +14,26 @@ import (
 type Tool struct {
 	Name        string                `json:"name"`
 	Description string                `json:"description"`
+	// WhenToUse / Usage are optional richer metadata folded into the description
+	// the model sees, so it picks the tool by intent (when + how) rather than by
+	// guessing from the name. Both are backward-compatible (empty = old behavior).
+	WhenToUse   string                `json:"when_to_use"`
+	Usage       string                `json:"usage"`
 	Parameters  ollama.ToolParameters `json:"parameters"`
 	Filename    string                `json:"filename"`
+}
+
+// llmDescription composes the description sent to the model from the base
+// description plus the optional when-to-use and usage hints.
+func (t Tool) llmDescription() string {
+	d := t.Description
+	if t.WhenToUse != "" {
+		d += "\n\nWhen to use: " + t.WhenToUse
+	}
+	if t.Usage != "" {
+		d += "\n\nUsage: " + t.Usage
+	}
+	return d
 }
 
 type Manager struct {
@@ -69,7 +87,7 @@ func (m *Manager) ToOllamaTools() []ollama.Tool {
 			Type: "function",
 			Function: ollama.ToolFunction{
 				Name:        t.Name,
-				Description: t.Description,
+				Description: t.llmDescription(),
 				Parameters:  t.Parameters,
 			},
 		})
@@ -113,6 +131,8 @@ func parseToolMeta(path, filename string) (Tool, bool) {
 		var meta struct {
 			Name        string                `json:"name"`
 			Description string                `json:"description"`
+			WhenToUse   string                `json:"when_to_use"`
+			Usage       string                `json:"usage"`
 			Parameters  ollama.ToolParameters `json:"parameters"`
 		}
 		if err := json.Unmarshal([]byte(raw), &meta); err != nil || meta.Name == "" {
@@ -121,6 +141,8 @@ func parseToolMeta(path, filename string) (Tool, bool) {
 		return Tool{
 			Name:        meta.Name,
 			Description: meta.Description,
+			WhenToUse:   meta.WhenToUse,
+			Usage:       meta.Usage,
 			Parameters:  meta.Parameters,
 			Filename:    filename,
 		}, true

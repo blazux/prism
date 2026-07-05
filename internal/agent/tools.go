@@ -21,6 +21,7 @@ var ToolDefinitions = []ollama.Tool{
 					"command":     {Type: "string", Description: "Optional command to override the image's default entrypoint (e.g. 'tail -f /dev/null' to keep a CLI image alive, or 'nginx -g daemon off;'). Leave empty to use the image default."},
 					"volumes":     {Type: "array", Description: "Ignored — the workspace (/workspace) is automatically available inside every service container via --volumes-from."},
 					"gpu":         {Type: "boolean", Description: "Set to true to give the container access to all GPUs (requires nvidia-container-toolkit on the host)"},
+					"purpose":     {Type: "string", Description: "One short line: what this service is for and when to use it. Always set it — it's shown back to you in your running-services index so you (later) know what you deployed instead of guessing. E.g. 'Uptime Kuma — status monitoring for the user's self-hosted services'."},
 				},
 				Required: []string{"image", "name", "port"},
 			},
@@ -497,7 +498,8 @@ var ToolDefinitions = []ollama.Tool{
 			Name: "register_tool",
 			Description: "Write a Python script that becomes a callable tool. " +
 				"The script must start with exactly this comment (one line, valid JSON): " +
-				"# TOOL: {\"name\":\"...\",\"description\":\"...\",\"parameters\":{\"type\":\"object\",\"properties\":{\"arg\":{\"type\":\"string\",\"description\":\"...\"}},\"required\":[\"arg\"]}}. " +
+				"# TOOL: {\"name\":\"...\",\"description\":\"...\",\"when_to_use\":\"...\",\"usage\":\"...\",\"parameters\":{\"type\":\"object\",\"properties\":{\"arg\":{\"type\":\"string\",\"description\":\"...\"}},\"required\":[\"arg\"]}}. " +
+				"Always fill \"when_to_use\" (the situations this tool is for — this is how you'll recognise it later, don't rely on the name) and \"usage\" (how to call it, gotchas, an example); both are optional but strongly recommended. " +
 				"Arguments arrive as a JSON string in sys.argv[1]. Print the result to stdout. " +
 				"The tool is immediately callable after registration.",
 			Parameters: ollama.ToolParameters{

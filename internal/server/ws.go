@@ -158,6 +158,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return executor.GetUserProfile(context.Background())
 	})
 	client.ag.SetSkillsContextFn(executor.SkillsIndex)
+	client.ag.SetServicesContextFn(s.servicesContext)
 	client.ag.SetViewContextFn(func() string {
 		client.mu.Lock()
 		defer client.mu.Unlock()
@@ -635,6 +636,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				client.ag.SetRAGContextFn(ragContextFn)
 			}
 			client.ag.SetSkillsContextFn(executor.SkillsIndex)
+			client.ag.SetServicesContextFn(s.servicesContext)
 			client.ag.SetViewContextFn(func() string {
 				client.mu.Lock()
 				defer client.mu.Unlock()
