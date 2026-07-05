@@ -63,8 +63,12 @@ type ToolFunction struct {
 
 type ToolParameters struct {
 	Type       string                  `json:"type"`
-	Properties map[string]ToolProperty `json:"properties"`
-	Required   []string                `json:"required"`
+	// omitempty so a no-parameter tool serializes as {"type":"object"} rather than
+	// {"properties":null,"required":null} — strict OpenAI-compatible validators
+	// (e.g. Mistral's mistral-common) reject the nulls with "None is not of type
+	// 'array'/'object'". Lenient backends (Ollama, qwen parser) accept both.
+	Properties map[string]ToolProperty `json:"properties,omitempty"`
+	Required   []string                `json:"required,omitempty"`
 }
 
 type ToolProperty struct {

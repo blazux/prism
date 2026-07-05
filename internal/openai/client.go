@@ -92,7 +92,10 @@ func buildMessages(in []ollama.Message) []chatMsg {
 			}
 			for _, tc := range m.ToolCalls {
 				seq++
-				id := fmt.Sprintf("call_%d", seq)
+				// Mistral (mistral-common) requires tool_call ids to match
+				// [a-zA-Z0-9] with an exact length of 9 — "call_1" is rejected.
+				// 9 zero-padded digits satisfies every backend's format.
+				id := fmt.Sprintf("%09d", seq)
 				pending = append(pending, id)
 				cm.ToolCalls = append(cm.ToolCalls, respToolCall{
 					ID:   id,
@@ -105,11 +108,17 @@ func buildMessages(in []ollama.Message) []chatMsg {
 			}
 			out = append(out, cm)
 		case "tool":
-			id := ""
-			if len(pending) > 0 {
-				id = pending[0]
-				pending = pending[1:]
+			if len(pending) == 0 {
+				// Orphaned tool result — its originating assistant tool_call was
+				// summarized or truncated out of the replayed history. A tool
+				// message with no matching tool_call id is rejected outright by
+				// strict servers (mistral-common: "tool_call_id must be provided
+				// for tool messages"), so drop it rather than emit a dangling one.
+				// The summary already carries that older context.
+				continue
 			}
+			id := pending[0]
+			pending = pending[1:]
 			out = append(out, chatMsg{Role: "tool", Content: m.Content, ToolCallID: id})
 		default: // system, user
 			if len(m.Images) > 0 {
