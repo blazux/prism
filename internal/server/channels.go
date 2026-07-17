@@ -20,8 +20,9 @@ type Channel interface {
 
 func (s *Server) initChannels() {
 	s.channels = map[string]Channel{
-		"telegram": &telegramChannel{s: s},
+		"telegram": &telegramManager{s: s},
 		"slack":    &slackChannel{s: s},
+		"webex":    &webexManager{s: s},
 	}
 }
 
@@ -60,4 +61,16 @@ func (s *Server) deliverToChannel(name, text string) error {
 		return fmt.Errorf("unknown channel %q", name)
 	}
 	return ch.SendToOwner(text)
+}
+
+// deliverToChannelSession routes a delivery to the owner of a namespaced
+// session ("u<id>-…") on channels that support per-user delivery (Telegram);
+// otherwise falls back to the channel's single-owner path.
+func (s *Server) deliverToChannelSession(name, sessionID, text string) error {
+	if uid := userIDFromSession(sessionID); uid > 0 {
+		if m, ok := s.channels[name].(*telegramManager); ok {
+			return m.SendToUser(uid, text)
+		}
+	}
+	return s.deliverToChannel(name, text)
 }

@@ -58,6 +58,11 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", 405)
 		return
 	}
+	// Same capability as /api/terminal by another door — one shell command in the
+	// tools container. Gating one without the other would be theatre.
+	if !s.requireAdminUser(w, r) {
+		return
+	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "application/json")
 

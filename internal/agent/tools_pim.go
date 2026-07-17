@@ -12,10 +12,20 @@ import (
 	"prism/internal/tasks"
 )
 
-// pimScope is the shared scope for personal data (notes, tasks, calendar). These
-// apps are global ("soft partition"): every workspace's agent sees the same set,
-// while dashboard widgets stay per-workspace.
+// pimScope is the fallback scope for personal data (notes, tasks, calendar) when
+// the session has no user prefix (legacy single-owner / no-DB). With multi-user
+// auth each user's PIM is scoped to "u<id>" — see pimSessionScope.
 const pimScope = "global"
+
+// pimSessionScope returns the caller's personal PIM scope ("u<id>"), matching the
+// server's pimScopeFor so the agent and the Notes app see the same data. Shared
+// agents (no user prefix) fall back to the group scope, then the global default.
+func (e *ToolExecutor) pimSessionScope() string {
+	if s := e.personalScope(); s != "" {
+		return s
+	}
+	return pimScope
+}
 
 // parseTime accepts a few human-friendly layouts (local time) and RFC3339.
 func parseTime(s string) (time.Time, error) {
@@ -47,7 +57,7 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body,
 	if e.memStore == nil {
 		return "", fmt.Errorf("notes unavailable: no database")
 	}
-	prov := notes.ProviderFor(ctx, e.memStore, pimScope)
+	prov := notes.ProviderFor(ctx, e.userStore(), e.pimSessionScope())
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
 		id, err := prov.Save(ctx, "", title, body, tags)
@@ -60,10 +70,37 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body,
 		if err != nil {
 			return "", err
 		}
-		if len(items) == 0 {
+		// Group members also see the notes shared to their group (read-only): the
+		// Notes app shows them, so the agent should know them too. They live under
+		// the group scope ("g<id>") in the local store, whatever the personal
+		// notes provider is.
+		type sharedNote struct {
+			ID     string `json:"id"`
+			Title  string `json:"title"`
+			Body   string `json:"body"`
+			Tags   string `json:"tags"`
+			Shared bool   `json:"shared"`
+			Note   string `json:"note,omitempty"`
+		}
+		var shared []sharedNote
+		if gscope := e.ragScope; gscope != "" && gscope != e.pimSessionScope() && strings.HasPrefix(gscope, "g") {
+			if gnotes, err := e.memStore.ListNotes(ctx, gscope); err == nil {
+				for _, n := range gnotes {
+					shared = append(shared, sharedNote{
+						ID: fmt.Sprintf("%d", n.ID), Title: n.Title, Body: n.Body, Tags: n.Tags,
+						Shared: true, Note: "shared with the group — read-only for you",
+					})
+				}
+			}
+		}
+		if len(items) == 0 && len(shared) == 0 {
 			return "No notes.", nil
 		}
-		return jsonResult(items), nil
+		out := jsonResult(items)
+		if len(shared) > 0 {
+			out += "\n\nGroup-shared notes (read-only):\n" + jsonResult(shared)
+		}
+		return out, nil
 	case "update", "edit":
 		if strings.TrimSpace(idStr) == "" {
 			return "", fmt.Errorf("update requires an id")
@@ -91,7 +128,7 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 	if e.memStore == nil {
 		return "", fmt.Errorf("tasks unavailable: no database")
 	}
-	prov := tasks.ProviderFor(ctx, e.memStore, pimScope)
+	prov := tasks.ProviderFor(ctx, e.userStore(), e.pimSessionScope())
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
 		id, err := prov.Add(ctx, title, priority, parseTimePtr(due))
@@ -143,7 +180,7 @@ func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, d
 	if e.memStore == nil {
 		return "", fmt.Errorf("calendar unavailable: no database")
 	}
-	prov := calendar.ProviderFor(ctx, e.memStore, pimScope)
+	prov := calendar.ProviderFor(ctx, e.userStore(), e.pimSessionScope())
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
 		st, err := parseTime(start)

@@ -20,13 +20,18 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		names, err := ms.ListSecretNames(r.Context())
+		all, err := ms.ListSecretNames(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		if names == nil {
-			names = []string{}
+		// Hide feature-internal scoped secrets ("u<id>:email_password", …) — the
+		// Secrets tab manages the team-shared, user-created ones only.
+		names := []string{}
+		for _, n := range all {
+			if !strings.Contains(n, ":") {
+				names = append(names, n)
+			}
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"secrets": names})
 

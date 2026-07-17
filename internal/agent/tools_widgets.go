@@ -10,10 +10,10 @@ import (
 )
 
 type pluginMeta struct {
-	Title  string `json:"title"`
-	Cols   int    `json:"cols"`
-	Height int    `json:"height"`
-	Locked bool   `json:"locked,omitempty"`
+	Title  string  `json:"title"`
+	Cols   int     `json:"cols"`
+	Height int     `json:"height"`
+	Locked bool    `json:"locked,omitempty"`
 	// Open is the window lifecycle flag. nil/absent means "open" (the default
 	// for freshly created widgets). false means the user minimized the window
 	// but kept the widget — it lives in the dock and can be reopened.
@@ -74,19 +74,46 @@ func (e *ToolExecutor) previewWidget(ctx context.Context, id string) (string, []
 	if sessionID == "" {
 		sessionID = "default"
 	}
-	// Same in-network URL the system prompt documents for widget previews.
+	// Same in-network URL the system prompt documents for widget previews. Pass
+	// the Prism service token so the preview browser authenticates (multi-user
+	// Prism now gates /plugins behind login) instead of screenshotting /login.
 	widgetURL := fmt.Sprintf("http://prism-server:8080/plugins/%s/%s.html", sessionID, id)
-	res, err := e.browserAct(ctx, widgetURL, []interface{}{
+	res, err := e.browserActAuth(ctx, widgetURL, []interface{}{
 		map[string]interface{}{"type": "wait_ms", "ms": 1500},
 		map[string]interface{}{"type": "screenshot"},
-	})
+	}, e.prismToken)
 	if err != nil || strings.HasPrefix(res, "browser_act failed") {
 		return "(auto-preview unavailable — verify the widget manually with browser_act)", nil
 	}
+	consoleErrs := extractConsoleIssues(res)
+
+	// Vision bridge: a text-only chat model can't see the screenshot. Have the
+	// vision captioner (e.g. AcidBurn) describe it as text instead, and never
+	// attach the image (it would only confuse a blind model into flailing).
+	if e.chatBlind {
+		if e.ragCaptioner != nil {
+			for _, p := range extractScreenshotPaths(res, e.workspaceDir) {
+				if d, err := e.ragCaptioner.DescribeWidget(ctx, p); err == nil && strings.TrimSpace(d) != "" {
+					report := "Auto-preview (you have no vision — a vision model inspected the rendered widget for you):\n" + strings.TrimSpace(d) +
+						"\n\nIf that description shows broken layout, missing images/icons, blank areas or errors, fix the widget before telling the user it is ready."
+					if consoleErrs != "" {
+						report += "\nConsole issues:\n" + consoleErrs
+					}
+					return report, nil
+				}
+			}
+		}
+		report := "Auto-preview: a screenshot was captured but you have no vision to inspect it. Verify the widget via the console issues below and by reviewing your HTML/JS — do not attempt to open the screenshot file."
+		if consoleErrs != "" {
+			report += "\nConsole issues:\n" + consoleErrs
+		}
+		return report, nil
+	}
+
 	images := extractScreenshotImages(res, e.workspaceDir)
 	report := "Auto-preview: screenshot of the rendered widget attached. Inspect it — broken layout, missing icons/images or console errors mean the widget is NOT done; fix it before telling the user it is ready."
-	if errs := extractConsoleIssues(res); errs != "" {
-		report += "\nConsole issues:\n" + errs
+	if consoleErrs != "" {
+		report += "\nConsole issues:\n" + consoleErrs
 	}
 	return report, images
 }
@@ -131,6 +158,12 @@ func extractConsoleIssues(result string) string {
 }
 
 func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content string, cols, height int) (string, []string, error) {
+	// Headless conversations (group room, Webex, Telegram, cron) have no
+	// dashboard: a widget written here would silently go nowhere. Refuse with a
+	// clear explanation so the model answers in text instead of claiming success.
+	if e.headless {
+		return "", nil, fmt.Errorf("widgets are unavailable here: this conversation has no dashboard (group room / messaging channel). Present the information as a text or markdown reply instead")
+	}
 	if id == "" || title == "" || content == "" {
 		return "", nil, fmt.Errorf("id, title and content are required")
 	}
@@ -159,6 +192,9 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 }
 
 func (e *ToolExecutor) updateUIPlugin(ctx context.Context, id, title, content string, cols, height int) (string, []string, error) {
+	if e.headless {
+		return "", nil, fmt.Errorf("widgets are unavailable here: this conversation has no dashboard (group room / messaging channel). Present the information as a text or markdown reply instead")
+	}
 	if id == "" {
 		return "", nil, fmt.Errorf("id is required")
 	}

@@ -67,6 +67,12 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 	if e.memStore != nil {
 		if secrets, err := e.memStore.GetAllSecrets(ctx); err == nil {
 			for name, value := range secrets {
+				// Skip user-scoped credentials ("u<id>:email_password", …): they are
+				// personal (email, OAuth, Telegram) and must not leak into the shared
+				// workspace env. Only team-shared, user-created secrets are exported.
+				if strings.Contains(name, ":") {
+					continue
+				}
 				env[toEnvVarName(name)] = value
 			}
 		}

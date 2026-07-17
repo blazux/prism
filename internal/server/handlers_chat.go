@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"prism/internal/agent"
-	"prism/internal/rag"
 )
 
 // handleChatFileUpload parses an uploaded file and returns its text content so
@@ -35,42 +35,18 @@ func (s *Server) handleChatFileUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	tmp, err := os.CreateTemp("", "prism-chat-upload-*"+ext)
+	data, err := io.ReadAll(file)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := io.Copy(tmp, file); err != nil {
-		tmp.Close()
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	tmp.Close()
 
-	// Primary path: extract the text and inline it (works well for most docs).
-	text, err := rag.ParseFile(tmp.Name())
-	if err != nil {
-		text = ""
-	}
-
-	// Guard against enormous files that would blow out the model context window.
-	const maxChars = 100_000
-	if len(text) > maxChars {
-		text = text[:maxChars] + "\n[... truncated at 100 000 characters ...]"
-	}
-
-	// Fallback only: when nothing could be extracted (scanned/image PDF,
-	// unsupported type), persist the file into the workspace so the agent can
-	// read/OCR/parse the real file itself.
-	var savedRel string
-	if strings.TrimSpace(text) == "" {
-		savedRel = s.saveChatUpload(tmp.Name(), header.Filename)
-	}
+	// Extract text if we can, blank it for files the agent must open itself, and
+	// save the bytes to the workspace — shared with the chat channels.
+	a := s.ingestAttachment(data, header.Filename)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"name": header.Filename, "text": text, "path": savedRel})
+	json.NewEncoder(w).Encode(map[string]string{"name": a.Name, "text": a.Text, "path": a.Path})
 }
 
 // saveChatUpload copies a chat upload into the workspace uploads/ dir and returns
@@ -151,21 +127,29 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		body.Session = "default"
 	}
 
-	sessionID := sanitizeSessionID(body.Session)
-	if sessionID == "" {
-		sessionID = "default"
+	sessionID, ok := s.sessionFor(r, body.Session)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "forbidden session")
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
-	resp, err := s.runHeadlessChat(ctx, sessionID, body.Message, body.Model)
+	// RBAC: gate tool calls by the caller's permissions and reject a model the
+	// caller isn't allowed to use.
+	user := currentUser(r)
+	if body.Model != "" && !s.userCanUseModel(ctx, user, body.Model) {
+		writeErr(w, http.StatusForbidden, "you are not allowed to use model "+body.Model)
+		return
+	}
+	resp, err := s.runHeadlessChat(ctx, sessionID, body.Message, body.Model, s.buildUserGuard(ctx, user), s.ragScopeFor(ctx, user))
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 	delivered := false
 	if body.Deliver != "" && strings.TrimSpace(resp) != "" {
-		if err := s.deliverToChannel(body.Deliver, resp); err != nil {
+		if err := s.deliverToChannelSession(body.Deliver, sessionID, resp); err != nil {
 			log.Printf("[chat-http] deliver to %s: %v", body.Deliver, err)
 		} else {
 			delivered = true
@@ -181,7 +165,18 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 // runHeadlessChat runs a single agent turn for a session outside the WebSocket
 // (used by /api/chat and the Telegram bridge). sessionID must already be
 // sanitized. Returns the assistant's final text (thinking blocks stripped).
-func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model string) (string, error) {
+//
+// guard, if non-nil, authorizes each tool call before it runs — the Webex
+// channel passes a per-sender guard so untrusted space members can only reach
+// the tools they've been granted. Trusted callers (browser, Telegram, /api/chat)
+// pass nil to allow every tool.
+func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model string, guard agent.ToolGuard, ragScope string) (string, error) {
+	return s.runHeadlessChatTap(ctx, sessionID, message, model, guard, ragScope, nil)
+}
+
+// runHeadlessChatTap is runHeadlessChat with an optional event tap, so callers
+// (the group room) can surface tool activity live while the turn runs.
+func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, guard agent.ToolGuard, ragScope string, tap func(agent.Event)) (string, error) {
 	s.mu.RLock()
 	ms := s.memStore
 	s.mu.RUnlock()
@@ -196,14 +191,25 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 	ollamaClient := s.chatBackendFor(model)
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
 	executor.SetLLM(ollamaClient, model)
+	executor.SetChatBlind(!s.cfg.ChatVision)
+	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 
 	if s.ragStore != nil {
-		executor.SetRAG(s.ragStore, s.ragEmbedder)
+		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
 	}
+	executor.SetRAGScope(ragScope)
 	executor.SetSessionID(sessionID)
+	executor.SetHeadless(true) // no dashboard: widget tools refuse cleanly
+	executor.SetHiddenTools(s.hiddenToolsFor(ctx, sessionID, ragScope))
 	if ms != nil {
 		executor.SetMemoryStore(ms)
 	}
+	// MCP tools must be available in headless mode too (the Webex channel relies
+	// on them). The WS path wires this the same way.
+	executor.SetMCPManager(s.mcpMgr, func() { s.broadcastMCP(sessionID) })
+	// Per-caller authorization gate (Webex per-sender permissions). nil for
+	// trusted callers, which leaves every tool available.
+	executor.SetToolGuard(guard)
 	executor.SetCustomTools(s.customMgr, func() {
 		s.customMgr.Reload()
 		s.broadcastTools()
@@ -240,17 +246,18 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 	if s.ragStore != nil {
 		ragStore := s.ragStore
 		ag.SetRAGContextFn(func() string {
-			cols, err := ragStore.ListCollections(context.Background(), sessionID)
+			cols, err := ragStore.ListCollections(context.Background(), ragScope)
 			if err != nil || len(cols) == 0 {
 				return ""
 			}
 			var sb strings.Builder
 			sb.WriteString("## Knowledge Base (RAG)\n\nYou have access to document collections via `rag_search`.\n\n")
 			for _, c := range cols {
+				name := unscopeCollection(ragScope, c.Name)
 				if c.Description != "" {
-					fmt.Fprintf(&sb, "- **%s** — %s (%d docs)\n", c.Name, c.Description, c.DocCount)
+					fmt.Fprintf(&sb, "- **%s** — %s (%d docs)\n", name, c.Description, c.DocCount)
 				} else {
-					fmt.Fprintf(&sb, "- **%s** (%d docs, %d chunks)\n", c.Name, c.DocCount, c.ChunkCount)
+					fmt.Fprintf(&sb, "- **%s** (%d docs, %d chunks)\n", name, c.DocCount, c.ChunkCount)
 				}
 			}
 			return sb.String()
@@ -277,6 +284,9 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 	var response strings.Builder
 	inThink := false
 	for ev := range events {
+		if tap != nil {
+			tap(ev)
+		}
 		switch ev.Type {
 		case "tool_use":
 			response.Reset()
@@ -296,5 +306,31 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 	}
 
 	log.Printf("[chat-headless] session=%q response=%d chars", sessionID, response.Len())
+	// Usage: one chat turn, tokens estimated (chars/4 in+out) until backend
+	// counters are wired.
+	if ms != nil {
+		ms.AddUsage(context.Background(), 0, sessionID, "chat_turn", model,
+			int64((len(message)+response.Len())/4), map[string]interface{}{"origin": "headless"})
+	}
 	return strings.TrimSpace(response.String()), nil
+}
+
+// looksBinary reports whether extracted "text" is really raw bytes. rag.ParseFile
+// falls back to reading a file whole for any extension it doesn't handle, so a
+// pcap, a zip or an executable arrives here as a string of noise.
+//
+// A NUL byte is the giveaway — no text format we accept contains one — and
+// invalid UTF-8 catches the rest. Only the head is examined: a 100 MB capture
+// should not be scanned to learn what its first bytes already say.
+func looksBinary(text string) bool {
+	head := text
+	if len(head) > 8192 {
+		head = head[:8192]
+	}
+	if strings.ContainsRune(head, 0) {
+		return true
+	}
+	// A multi-byte rune can straddle the cut, so only trust invalid UTF-8 when the
+	// text is short enough to be read whole.
+	return len(text) <= 8192 && !utf8.ValidString(text)
 }

@@ -16,11 +16,11 @@ type CalDAVProvider struct{ cfg caldav.Config }
 func (p *CalDAVProvider) Kind() string { return "caldav" }
 
 const (
-	statusDone = "COMPLETED"
-	statusOpen = "NEEDS-ACTION"
-	prioHigh   = "1"
-	prioNormal = "5"
-	prioLow    = "9"
+	statusDone   = "COMPLETED"
+	statusOpen   = "NEEDS-ACTION"
+	prioHigh     = "1"
+	prioNormal   = "5"
+	prioLow      = "9"
 )
 
 func (p *CalDAVProvider) List(ctx context.Context, includeDone bool) ([]Item, error) {

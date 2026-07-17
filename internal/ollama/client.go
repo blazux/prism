@@ -19,17 +19,16 @@ type Backend interface {
 	ListModels(ctx context.Context) ([]string, error)
 }
 
-// DefaultNumPredict caps the tokens generated for one turn when the caller asks
-// for no specific ceiling. Ollama's own default is -1: generate until the context
-// is full. A model that loops instead of emitting a stop token then streams for as
-// long as that takes, with the caller blocked and nothing to log — which is exactly
-// how a chat ends up never answering. The cap has to clear the longest legitimate
-// answer (a whole widget, a long note), so it is deliberately generous; hitting it
-// truncates the turn instead of hanging it.
+// DefaultNumPredict caps the tokens generated for one turn when the caller asks for
+// no specific ceiling. Ollama's own default is -1: generate until the context is
+// full. A model that loops instead of emitting a stop token then streams for as long
+// as that takes, with the caller blocked and nothing to log — which is exactly how a
+// chat ends up never answering. Generous enough for a whole widget or a long note;
+// hitting it truncates the turn instead of hanging it.
 const DefaultNumPredict = 16384
 
-// responseHeaderTimeout bounds the wait for the response head only, never the body
-// — a streamed answer may take as long as it likes. It covers the window where the
+// responseHeaderTimeout bounds the wait for the response head only, never the body —
+// a streamed answer may take as long as it likes. It covers the window where the
 // prompt is queued and prefilled, so a server that accepts the connection and then
 // goes quiet fails loudly instead of hanging forever.
 const responseHeaderTimeout = 3 * time.Minute
@@ -101,16 +100,24 @@ type ChatRequest struct {
 	Tools    []Tool    `json:"tools,omitempty"`
 	Stream   bool      `json:"stream"`
 	Options  Options   `json:"options,omitempty"`
+	// NoThinking asks the model to skip extended reasoning for this turn. Set on
+	// the voice channel, where a caller waits in silence while the model thinks.
+	// Wire-neutral (each backend translates it); not sent to Ollama as-is.
+	NoThinking bool `json:"-"`
 }
 
 type Options struct {
 	Temperature float64 `json:"temperature,omitempty"`
 	NumCtx      int     `json:"num_ctx,omitempty"`
 	// NumPredict caps the tokens generated for one turn. Left at 0 each backend
-	// applies its own ceiling — Ollama generates until the context is full, and for
-	// vLLM it is max_model_len minus the prompt — so a model that loops instead of
-	// emitting a stop token keeps generating with the caller blocked on the stream.
+	// applies its own ceiling — for vLLM that is max_model_len minus the prompt,
+	// so a model that loops instead of emitting a stop token keeps generating for
+	// the better part of an hour with the caller blocked on the stream.
 	NumPredict int `json:"num_predict,omitempty"`
+	// PresencePenalty nudges the model away from tokens it has already emitted
+	// this turn, which is what keeps a long conversation from collapsing into a
+	// loop. It applies to the generated text only, never the prompt.
+	PresencePenalty float64 `json:"presence_penalty,omitempty"`
 }
 
 type ChatChunk struct {

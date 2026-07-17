@@ -20,6 +20,18 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - EMBED_BACKEND=${EMBED_BACKEND:-}
+      - VISION_MODEL=${VISION_MODEL:-}
+      - CHAT_VISION=${CHAT_VISION:-}
+      # Off by default: a personal Prism has one user and PRISM_TOKEN is its whole
+      # authentication. Set to 1 for a shared deployment (accounts, groups, rooms).
+      # Not a toggle — turning it on migrates this deployment's config keys to the
+      # first admin's scope, and single-user would no longer find them.
+      - MULTI_USER=${MULTI_USER:-}
+      # Set VOX_URL to a PrismConnect instance and the agent gains the phone: it can
+      # place, list and cancel calls. Empty = no telephony.
+      - VOX_URL=${VOX_URL:-}
+      - VOX_USER=${VOX_USER:-}
+      - VOX_PASSWORD=${VOX_PASSWORD:-}
       - POSTGRES_URL=${POSTGRES_URL}
       - SEARXNG_URL=${SEARXNG_URL}
       - PRISM_TOKEN=${PRISM_TOKEN:-}

@@ -20,7 +20,11 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
+	sessionID, sessOK := s.sessionFor(r, r.URL.Query().Get("session"))
+	if !sessOK {
+		http.Error(w, "forbidden", 403)
+		return
+	}
 	if sessionID == "" {
 		sessionID = "default"
 	}
@@ -49,7 +53,14 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if body.Session != "" {
-			sessionID = sanitizeSessionID(body.Session)
+			// Route through sessionFor so a client cannot smuggle a foreign
+			// namespace (another user's session or a group scope) in the body.
+			mapped, ok := s.sessionFor(r, body.Session)
+			if !ok {
+				http.Error(w, "forbidden", 403)
+				return
+			}
+			sessionID = mapped
 		}
 		tools, err := s.mcpMgr.Connect(r.Context(), sessionID, body.Name, body.URL, body.AuthSecret)
 		if err != nil {
@@ -78,7 +89,11 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing server id", 400)
 		return
 	}
-	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
+	sessionID, sessOK := s.sessionFor(r, r.URL.Query().Get("session"))
+	if !sessOK {
+		http.Error(w, "forbidden", 403)
+		return
+	}
 	if sessionID == "" {
 		sessionID = "default"
 	}

@@ -17,16 +17,66 @@ let pendingFiles  = [] // {name, text} parsed file attachments waiting to be sen
 let lastWorkspace = localStorage.getItem('active-workspace') || localStorage.getItem('active-session') || 'default'
 let currentSessionID = lastWorkspace
 
+// Identity for chat avatars: the current user + their personal agent.
+let ME = { uid: '', name: 'You', isAdmin: false }
+let AGENT_NAME = 'Agent'
+// Apps disabled platform-wide by the global admin (Admin → Platform).
+let DISABLED_APPS = new Set()
+async function loadIdentity() {
+  try { const p = await fetch('/api/profile').then(r => r.json()); ME.uid = p.userId || ''; ME.name = p.displayName || p.email || 'You' } catch (_) {}
+  // Global admin, or admin of any group. This only decides what the UI offers:
+  // /api/terminal and /api/exec check the role themselves.
+  try { ME.isAdmin = !!(await fetch('/api/me').then(r => r.json())).isAdmin } catch (_) {}
+  try { AGENT_NAME = (await fetch('/api/agent/name', { cache: 'no-store' }).then(r => r.json())).name || 'Agent' } catch (_) {}
+  try { DISABLED_APPS = new Set((await fetch('/api/platform').then(r => r.json())).disabledApps || []) } catch (_) {}
+}
+function applyDisabledApps() {
+  for (const a of DISABLED_APPS) {
+    const el = document.querySelector(`.rail-item[data-app="${a}"]`)
+    if (el) el.style.display = 'none'
+  }
+}
+
+// Dock label for global pages: the agent's configured name (Settings → Agent),
+// so what users configure is what the dock says. Refreshes async in case the
+// name was just changed in Settings.
+function agentDockLabel() { return '🌐 ' + AGENT_NAME }
+function refreshAgentDockLabel() {
+  fetch('/api/agent/name', { cache: 'no-store' }).then(r => r.json()).then(d => {
+    AGENT_NAME = d.name || 'Agent'
+    if (currentView.type !== 'board') setChatAgentLabel(agentDockLabel())
+  }).catch(() => {})
+}
+function avatarInitials(name) { return (name || '?').trim().split(/\s+/).map(w => w[0] || '').slice(0, 2).join('').toUpperCase() || '?' }
+// Small round avatar (initials + image overlay that self-removes on 404).
+function avatarChip(scope, name, size) {
+  const px = size || 24, fs = Math.round(px * 0.42)
+  return `<span class="chat-avatar" style="position:relative;display:inline-flex;width:${px}px;height:${px}px;border-radius:50%;overflow:hidden;background:var(--accent);color:#fff;align-items:center;justify-content:center;font-weight:600;font-size:${fs}px;flex:0 0 auto;vertical-align:middle">${escHtml(avatarInitials(name))}<img src="/api/avatar?scope=${encodeURIComponent(scope)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover" onerror="this.remove()"></span>`
+}
+const userChip = () => ME.uid ? avatarChip('u' + ME.uid, ME.name, 22) : ''
+const agentChip = () => ME.uid ? avatarChip('agent-u' + ME.uid, AGENT_NAME, 22) : ''
+
 function updateSettingsLink() {
   const link = document.getElementById('settings-link')
   if (!link) return
-  link.href = `/settings.html?session=${encodeURIComponent(currentSessionID)}#tools`
+  link.href = `/settings.html?session=${encodeURIComponent(currentSessionID)}#profile`
   // Open Settings inside the shell (so the chat dock stays available) on a plain
   // click; let ctrl/cmd/middle-click open the full page in a new tab.
   link.onclick = (e) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return
     e.preventDefault()
     setView({ type: 'settings' })
+  }
+}
+function updateAdminLink() {
+  const link = document.getElementById('admin-link')
+  if (!link) return
+  // Open the Admin console inside the shell (logo, theme, chat dock stay) on a
+  // plain click, exactly like Settings; ctrl/cmd/middle-click opens the tab.
+  link.onclick = (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return
+    e.preventDefault()
+    setView({ type: 'admin' })
   }
 }
 let batchLoading = false
@@ -445,6 +495,7 @@ function sendChat() {
 window.sendChat = sendChat
 
 window.handleChatKey = function(e) {
+  // Ctrl/⌘+Enter belongs to the terminal toggle, not to sending the message.
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault()
     sendChat()
@@ -500,7 +551,7 @@ function appendUserMessage(text, images, files) {
       '</div>'
   }
   const timeStr = fmtTime(new Date())
-  div.innerHTML = `<div class="chat-msg-role">You <span class="chat-msg-time">${timeStr}</span></div>${imagesHtml}${filesHtml}<div class="chat-msg-content">${escHtml(text)}</div>`
+  div.innerHTML = `<div class="chat-msg-role">${userChip()} You <span class="chat-msg-time">${timeStr}</span></div>${imagesHtml}${filesHtml}<div class="chat-msg-content">${escHtml(text)}</div>`
   msgs.appendChild(div)
   scrollChat(true) // the user just sent this — always jump to it
 }
@@ -511,7 +562,7 @@ function appendStream(content) {
     const div = document.createElement('div')
     div.className = 'chat-msg assistant'
     const timeStr = fmtTime(new Date())
-    div.innerHTML = `<div class="chat-msg-role">AI <span class="chat-msg-time">${timeStr}</span></div><div class="chat-msg-content cursor"></div>`
+    div.innerHTML = `<div class="chat-msg-role">${agentChip()} ${escHtml(AGENT_NAME)} <span class="chat-msg-time">${timeStr}</span></div><div class="chat-msg-content cursor"></div>`
     msgs.appendChild(div)
     currentAssistantEl = div.querySelector('.chat-msg-content')
     currentAssistantContent = ''
@@ -647,12 +698,12 @@ function restoreChatHistory(messages) {
     if (m.role === 'user') {
       const div = document.createElement('div')
       div.className = 'chat-msg user'
-      div.innerHTML = `<div class="chat-msg-role">You${timeBadge}</div><div class="chat-msg-content">${escHtml(m.content)}</div>`
+      div.innerHTML = `<div class="chat-msg-role">${userChip()} You${timeBadge}</div><div class="chat-msg-content">${escHtml(m.content)}</div>`
       msgs.appendChild(div)
     } else if (m.role === 'assistant' && m.content) {
       const div = document.createElement('div')
       div.className = 'chat-msg assistant'
-      div.innerHTML = `<div class="chat-msg-role">AI${timeBadge}</div><div class="chat-msg-content">${renderMarkdown(m.content)}</div>`
+      div.innerHTML = `<div class="chat-msg-role">${agentChip()} ${escHtml(AGENT_NAME)}${timeBadge}</div><div class="chat-msg-content">${renderMarkdown(m.content)}</div>`
       msgs.appendChild(div)
     } else if (m.role === 'tool') {
       let inputStr = ''
@@ -681,7 +732,8 @@ function restoreChatHistory(messages) {
   scrollChat(true) // history just loaded: land at the bottom, on "— now —"
 }
 
-// Follow the conversation only while the user is already at the bottom. Auto-
+// Follow the conversation only while the user is already parked at the bottom.
+// Streaming calls this on every token — and constantly during a long "Thinking…" — so
 // scrolling unconditionally pinned the view down and made it impossible to scroll up
 // and read while the agent worked. Scrolling up now means "leave me alone"; coming back
 // within SCROLL_SLACK of the bottom resumes the follow. force=true only for things the
@@ -946,7 +998,7 @@ window.handleSecretKey = function(e) {
 
 // ─── View router (rail: apps + boards) ─────────────────────────────────────────
 
-const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar' }
+const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar', room: 'Room' }
 const ASSISTANT = 'assistant'            // reserved session: the global super-agent
 let currentView = { type: 'board' }      // { type:'board', workspace } | { type:'app', name }
 let allSessions = []
@@ -996,22 +1048,42 @@ function setView(view) {
 
   if (view.type === 'settings') {
     // Settings in the app-frame so the chat dock stays — the agent helps with
-    // configuration (connecting accounts, OAuth). Chat stays on the current
-    // workspace's agent.
-    frame.src = `/settings.html?session=${encodeURIComponent(currentSessionID)}#${view.tab || 'tools'}`
+    // configuration (connecting accounts, OAuth). Settings is a global page, so
+    // the chat follows the same rule as the other global apps: the assistant.
+    // The page itself keeps the workspace session for its per-workspace panels.
+    const pageSession = currentSessionID
+    gotoSession(ASSISTANT)
+    frame.src = `/settings.html?session=${encodeURIComponent(pageSession)}#${view.tab || 'profile'}`
     frame.style.display = ''
     dash.style.display = 'none'
     dock.style.display = 'none'
     if (title) title.textContent = 'Settings'
+    setChatAgentLabel(agentDockLabel()); refreshAgentDockLabel()
     setContext('Viewing the Settings page. The user may be configuring email, a Notes vault, CalDAV, Todoist, or Google Calendar (OAuth). Help them set it up step by step using the Prism help docs (search the prism-help collection).')
     setSuggestions([
-      { label: '🔗 Connect Google Calendar', prompt: 'Walk me through connecting my Google Calendar, step by step.' },
-      { label: '🗂 Connect my notes vault', prompt: 'Help me connect my Obsidian/Logseq vault to Notes.' },
+      ...(DISABLED_APPS.has('calendar') ? [] : [{ label: '🔗 Connect Google Calendar', prompt: 'Walk me through connecting my Google Calendar, step by step.' }]),
+      ...(DISABLED_APPS.has('notes') ? [] : [{ label: '🗂 Connect my notes vault', prompt: 'Help me connect my Obsidian/Logseq vault to Notes.' }]),
       { label: '❓ What can you do?', prompt: 'What can you do in Prism?' },
     ])
     return
   }
+  if (view.type === 'admin') {
+    // Admin console in the app-frame so the Prism shell (logo, theme selector,
+    // chat dock) stays around it — exactly like Settings. The /admin page is
+    // themed via /style.css + /theme.js. Global page → global assistant.
+    gotoSession(ASSISTANT)
+    frame.src = '/admin'
+    frame.style.display = ''
+    dash.style.display = 'none'
+    dock.style.display = 'none'
+    if (title) title.textContent = 'Administration'
+    setChatAgentLabel(agentDockLabel()); refreshAgentDockLabel()
+    setContext('Viewing the Administration console (users, groups, tool policy, shared agent).')
+    setSuggestions([])
+    return
+  }
   if (view.type === 'app') {
+    if (DISABLED_APPS.has(view.name)) { setView({ type: 'board', workspace: lastWorkspace }); return }
     // Global apps → chat is the global assistant.
     gotoSession(ASSISTANT)
     frame.src = `/apps/${view.name}.html?session=${encodeURIComponent(ASSISTANT)}`
@@ -1020,7 +1092,7 @@ function setView(view) {
     dock.style.display = 'none'
     if (title) title.textContent = APP_TITLES[view.name] || view.name
     document.querySelector(`.rail-item[data-app="${view.name}"]`)?.classList.add('active')
-    setChatAgentLabel('🌐 Global assistant')
+    setChatAgentLabel(agentDockLabel()); refreshAgentDockLabel()
     setContext(`Viewing the ${APP_TITLES[view.name] || view.name} app`)
     setSuggestions([]) // the app posts its own context-specific suggestions
   } else {
@@ -1196,9 +1268,9 @@ function openCmdK() {
   ov.appendChild(box); document.body.appendChild(ov)
   const input = box.querySelector('#cmdk-input'), list = box.querySelector('#cmdk-list')
   const all = [
-    { kind: 'action', label: 'Terminal (Ctrl+Enter)', icon: '▸', run: () => toggleTerm(true) },
+    ...(ME.isAdmin ? [{ kind: 'action', label: 'Terminal (Ctrl+Enter)', icon: '▸', run: () => toggleTerm(true) }] : []),
     ...(currentView.type === 'board' ? [{ kind: 'action', label: 'Tidy up windows', icon: '▦', run: tidyWindows }] : []),
-    ...Object.keys(APP_TITLES).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
+    ...Object.keys(APP_TITLES).filter(n => !DISABLED_APPS.has(n)).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
     ...allSessions.filter(s => s.id !== ASSISTANT).map(s => {
       const ic = getWorkspaceIcon(s.id)
       const icon = (ic && WS_ICONS[ic]) ? wsIconSvg(ic).replace('viewBox', 'width="16" height="16" viewBox') : (ic || '▣')
@@ -1235,8 +1307,7 @@ document.addEventListener('keydown', e => {
   // Ctrl+Enter (or ⌘+Enter) toggles the workspace terminal. It replaced Ctrl+`,
   // which costs AltGr+7 then space on an AZERTY keyboard. Every other Enter handler
   // — chat, dialogs, command palette — now ignores the key while Ctrl/⌘ is held, so
-  // the shortcut can never fire an action *and* open the terminal. (Ctrl+T is reserved
-  // by the browser.)
+  // the shortcut can never fire an action *and* open the terminal.
   else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); toggleTerm() }
 })
 
@@ -1248,7 +1319,7 @@ function termPanel() {
   let p = document.getElementById('term-panel')
   if (p) return p
   p = document.createElement('div'); p.id = 'term-panel'
-  p.innerHTML = `<div id="term-head"><span>Terminal — agent workspace</span><span style="flex:1"></span><span id="term-hint">Ctrl+\` to toggle</span><button id="term-close" title="Close">✕</button></div><div id="term-body"></div>`
+  p.innerHTML = `<div id="term-head"><span>Terminal — agent workspace</span><span style="flex:1"></span><span id="term-hint">Ctrl+Enter to toggle</span><button id="term-close" title="Close">✕</button></div><div id="term-body"></div>`
   document.body.appendChild(p)
   p.querySelector('#term-close').onclick = () => toggleTerm(false)
   return p
@@ -1282,6 +1353,9 @@ function termConnect() {
   }
 }
 function toggleTerm(force) {
+  // A shell in the tools container is reserved for admins. The server enforces it;
+  // this stops the shortcut from opening a panel that would only show a 403.
+  if (!ME.isAdmin) return
   const show = force == null ? !termVisible : force
   const p = termPanel(); termVisible = show; p.classList.toggle('open', show)
   if (show) { termConnect(); setTimeout(() => { try { termFit.fit() } catch (_) {} ; term.focus(); termSendResize() }, 60) }
@@ -1292,6 +1366,7 @@ window.toggleTerm = toggleTerm
 
 // ─── Unread mail badge on the rail Email icon ────────────────────────────────────
 async function refreshMailBadge() {
+  if (DISABLED_APPS.has('email')) return
   try {
     const { count } = await (await fetch('/api/email/unread')).json()
     const iconEl = document.querySelector('.rail-item[data-app="email"] .rail-icon')
@@ -1452,14 +1527,14 @@ async function addFileAttachment(file) {
     const res = await fetch('/api/chat/upload', { method: 'POST', body: form })
     if (!res.ok) {
       const msg = await res.text()
-      alert(`Could not attach "${file.name}": ${msg}`)
+      PrismModal.alert(`Could not attach "${file.name}": ${msg}`, { title: "Attachment" })
       return
     }
     const { name, text, path } = await res.json()
     pendingFiles.push({ name, text, path })
     renderPreviews()
   } catch (err) {
-    alert(`Could not attach "${file.name}": ${err}`)
+    PrismModal.alert(`Could not attach "${file.name}": ${err}`, { title: "Attachment" })
   }
 }
 
@@ -1933,9 +2008,12 @@ async function initApp() {
     return
   }
 
+  await loadIdentity()
+  applyDisabledApps()
   window.PrismTheme.populateSelect(document.getElementById('theme-select'))
   renderDock()
   updateSettingsLink()
+  updateAdminLink()
   loadSessions()
   setView({ type: 'board', workspace: lastWorkspace })
   connect()

@@ -200,11 +200,14 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name: "cron",
+			Name:        "cron",
 			Description: "Manage scheduled cron jobs running inside the workspace container. Actions: list, add (name+schedule+command, plus a description), remove (name).\n" +
-				"To deliver a result to the user on a messaging channel on a schedule, make the command POST a prompt to yourself with delivery enabled. Set \"deliver\" to \"telegram\" or \"slack\", e.g.:\n" +
+				"To deliver a result to the user on a messaging channel on a schedule, make the command POST a prompt to yourself with delivery enabled. Set \"deliver\" to \"telegram\", \"slack\" or \"webex\" (Webex posts to the announcement room the group admin picked in the Webex config), e.g.:\n" +
 				"curl -s -X POST $PRISM_URL/api/chat -H \"Authorization: Bearer $PRISM_TOKEN\" -H 'Content-Type: application/json' -d '{\"message\":\"Summarize my unread emails in 5 bullet points\",\"session\":\"telegram\",\"deliver\":\"telegram\"}'\n" +
-				"You can also push a raw Telegram line with: curl -s -X POST $PRISM_URL/api/telegram/send -H \"Authorization: Bearer $PRISM_TOKEN\" -d '{\"text\":\"Backup finished ✅\"}'. ($PRISM_URL/$PRISM_TOKEN are substituted automatically.)",
+				"Use \"deliver\" only when you want the model's ANSWER delivered. To post an exact text, push a raw line instead:\n" +
+				"  Telegram: curl -s -X POST $PRISM_URL/api/telegram/send -H \"Authorization: Bearer $PRISM_TOKEN\" -d '{\"text\":\"Backup finished ✅\"}'\n" +
+				"  Webex:    curl -s -X POST $PRISM_URL/api/webex/send -H \"Authorization: Bearer $PRISM_TOKEN\" -d '{\"text\":\"Bonjour à tous !\"}'  (posts to the group's announcement room)\n" +
+				"($PRISM_URL/$PRISM_TOKEN are substituted automatically.)",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -252,7 +255,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "deep_research",
+			Name: "deep_research",
 			Description: "Run multi-round, in-depth web research on a question. Iteratively plans, searches the web, reads pages, and synthesizes an evolving report until comprehensive, then returns a long Markdown report with sources. Use for open-ended questions needing many sources (comparisons, surveys, 'everything about X'); not for a single quick lookup (use web_search for that). Slow — runs several search+read+LLM rounds.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -267,7 +270,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "skill",
+			Name: "skill",
 			Description: "Reusable skills library. Save a procedure you worked out (action=add) so you can recall it later; an index of saved skills (name + when-to-use) is always in your system prompt. action=get loads a skill's full steps; action=list / delete also available. Save a skill after solving something non-trivial you may need again.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -285,7 +288,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "note",
+			Name: "note",
 			Description: "Personal notes, shared across the dashboard. action=add|list|update|delete. Notes have a title, body (Markdown) and comma-separated tags. Use to remember free-form information the user wants kept — and proactively offer to save substantial outputs (deep_research reports, summaries, drafts) as a note so they persist in the Notes app.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -303,7 +306,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "task",
+			Name: "task",
 			Description: "To-do tasks (per board). action=add|list|done|reopen|delete. Tasks have a title, priority (low|normal|high) and optional due date. list hides completed tasks unless include_done=true.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -322,7 +325,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "email",
+			Name: "email",
 			Description: "Email over IMAP/SMTP. action=config sets up the account (imap_host, smtp_host, user, password, optional ports/from — password is stored encrypted). Then: list (recent inbox), read (uid → full body), search (query), send (to, subject, body), reply (uid, body — threads to the original). Summarize/triage/draft using the LLM yourself from list/read output.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -349,7 +352,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "calendar",
+			Name: "calendar",
 			Description: "Calendar events (per board). action=add|list|delete. Events have a title, start (required), optional end, description and location. For list, optionally pass from/to to bound the range.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -512,11 +515,11 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "browser_get",
-			Description: "Fetch a URL using a headless Chromium browser (Playwright). Use for JS-heavy pages, SPAs, or sites that block plain HTTP. Optionally evaluate a JavaScript expression to extract specific data.",
+			Description: "Fetch a URL using a headless Chromium browser (Playwright) and return the page as a reader sees it. Use for JS-heavy pages, SPAs, sites that block plain HTTP, and for any local HTML file — a page whose content is drawn by scripts has no readable source. Optionally evaluate a JavaScript expression to extract specific data.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"url":    {Type: "string", Description: "URL to navigate to"},
+					"url":    {Type: "string", Description: "URL to navigate to: http://, https://, or file:///workspace/... for a local HTML file (e.g. a chat attachment saved under file:///workspace/uploads/)"},
 					"script": {Type: "string", Description: "Optional JS expression evaluated in the page context (e.g. 'document.title' or 'Array.from(document.querySelectorAll(\"h2\")).map(e=>e.textContent)'). If omitted, returns the full readable page text."},
 				},
 				Required: []string{"url"},

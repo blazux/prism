@@ -6,6 +6,7 @@
 <title>Tasks</title>
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
+<script src="/modal.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -487,7 +488,7 @@ async function toggleJob(name, enabled) {
   loadJobs();
 }
 async function removeJob(name) {
-  if (!confirm(`Delete scheduled task "${name}"?`)) return;
+  if (!await PrismModal.confirm(`Delete scheduled task "${name}"?`, { danger: true })) return;
   await fetch('/api/cron?name=' + encodeURIComponent(name), { method: 'DELETE' });
   loadJobs();
 }

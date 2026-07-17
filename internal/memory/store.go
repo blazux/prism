@@ -35,15 +35,15 @@ type Store struct {
 	encKey []byte // AES-256 key for encrypting secret values
 	// cfgScope, when set ("u<id>:"), prefixes config keys and secret names so
 	// external integrations (email, calendar, vault, OAuth…) are per-user instead
-	// of deployment-global. Obtained via ConfigScope; zero value = global, which
-	// is what single-user Prism always uses.
+	// of deployment-global. Obtained via ConfigScope; zero value = legacy global.
 	cfgScope string
 }
 
-// ConfigScope returns a view of the store whose config keys and secret names are
-// prefixed with scope. "global" (or empty) returns the store unchanged — so the
-// single-user build reads and writes exactly the keys it always has. The seam is
-// here for the multi-user build, which hands out a "u<id>" scope per user.
+// ConfigScope returns a view of the store whose GetConfig/SetConfig and
+// GetSecret/SetSecret/DeleteSecret operate under "<scope>:" — per-user (or
+// per-group) isolation of integration settings with no changes to provider
+// code, which simply receives the scoped view. Empty or "global" scope returns
+// the store unchanged (legacy single-user behaviour).
 func (s *Store) ConfigScope(scope string) *Store {
 	if s == nil || scope == "" || scope == "global" {
 		return s
@@ -53,7 +53,15 @@ func (s *Store) ConfigScope(scope string) *Store {
 	return &c
 }
 
-func NewStore(ctx context.Context, connStr string, encKey []byte) (*Store, error) {
+// NewStore opens the pool, applies the schema and runs the one-off migrations.
+//
+// multiUser gates migrateUserScopedConfig, and that gate matters: the migration
+// RENAMES this deployment's config keys and secrets to "u<id>:…" the moment a
+// global admin exists. A personal Prism must never run it — its own guard (no
+// admin ⇒ no-op) would hold today, but one MULTI_USER=1 boot and one signup would
+// be enough to move email_password out from under the single-user build, which
+// reads unprefixed keys and would silently see nothing.
+func NewStore(ctx context.Context, connStr string, encKey []byte, multiUser bool) (*Store, error) {
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
 		return nil, fmt.Errorf("pgxpool: %w", err)
@@ -68,7 +76,53 @@ func NewStore(ctx context.Context, connStr string, encKey []byte) (*Store, error
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
 	s.migratePersonalityBase(ctx)
+	if multiUser {
+		s.migrateUserScopedConfig(ctx)
+	}
 	return s, nil
+}
+
+// migrateUserScopedConfig moves legacy single-user integration settings (email,
+// calendar providers, OAuth, notes vault, agent identity) under the first global
+// admin's scope ("u<id>:key"), matching the per-user ConfigScope reads that
+// replaced the global ones. Runs until an admin exists, then never again; each
+// move is guarded so it never overwrites an already-scoped value.
+func (s *Store) migrateUserScopedConfig(ctx context.Context) {
+	if _, ok, _ := s.GetConfig(ctx, "user_scoped_config_migrated_v2"); ok {
+		return
+	}
+	var adminID int64
+	err := s.pool.QueryRow(ctx, `SELECT MIN(id) FROM users WHERE role = 'global_admin'`).Scan(&adminID)
+	if err != nil || adminID == 0 {
+		return // no admin yet (fresh install / no-DB mode) — retry next boot
+	}
+	prefix := fmt.Sprintf("u%d:", adminID)
+	cfgKeys := []string{
+		"email_config", "notes_provider", "notes_vault_path",
+		"caldav_config", "tasks_provider", "calendar_provider",
+		"agent_name", KeyPersonalityBase,
+		"oauth_google_client_id", "oauth_microsoft_client_id",
+		"telegram_allowed_chat",
+	}
+	for _, k := range cfgKeys {
+		s.pool.Exec(ctx, `
+			UPDATE agent_config SET key = $1 WHERE key = $2
+			AND NOT EXISTS (SELECT 1 FROM agent_config WHERE key = $1)
+		`, prefix+k, k)
+	}
+	secretNames := []string{
+		"email_password", "todoist_token", "caldav_password",
+		"oauth_google_client_secret", "oauth_google_token",
+		"oauth_microsoft_client_secret", "oauth_microsoft_token",
+		"telegram_bot_token",
+	}
+	for _, n := range secretNames {
+		s.pool.Exec(ctx, `
+			UPDATE secrets SET name = $1 WHERE name = $2
+			AND NOT EXISTS (SELECT 1 FROM secrets WHERE name = $1)
+		`, prefix+n, n)
+	}
+	s.SetConfig(ctx, "user_scoped_config_migrated_v2", "1")
 }
 
 // migratePersonalityBase moves the old "default = base" personality into the
@@ -139,6 +193,10 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`INSERT INTO sessions (id, name) VALUES ('default', 'Main') ON CONFLICT DO NOTHING`,
+		// Multi-user (Phase 3): each session belongs to a user. NULL owner =
+		// legacy/shared session (pre-migration, or the single-user default).
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS owner_id BIGINT`,
+		`CREATE INDEX IF NOT EXISTS sessions_owner_idx ON sessions(owner_id)`,
 		`CREATE TABLE IF NOT EXISTS agent_config (
 			key        TEXT PRIMARY KEY,
 			value      TEXT NOT NULL,
@@ -193,6 +251,11 @@ func (s *Store) initSchema(ctx context.Context) error {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS notes_session_idx ON notes(session_id, updated_at DESC)`,
+		// Group-shared notes (Spectrum): a note shared to a group is a copy stored
+		// under the group scope ("g<id>"). owner_id is the sharer (edit/delete rights),
+		// origin_id links back to the author's personal note so re-sharing updates it.
+		`ALTER TABLE notes ADD COLUMN IF NOT EXISTS owner_id BIGINT`,
+		`ALTER TABLE notes ADD COLUMN IF NOT EXISTS origin_id BIGINT`,
 		`CREATE TABLE IF NOT EXISTS tasks (
 			id         BIGSERIAL PRIMARY KEY,
 			session_id TEXT NOT NULL DEFAULT 'default',
@@ -214,12 +277,10 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS calendar_session_idx ON calendar_events(session_id, start_at)`,
-
-		// ─── Multi-user tables ───────────────────────────────────────────────
-		// Created unconditionally and left empty by the single-user build: an empty
-		// table costs nothing, and having the schema present means the MULTI_USER
-		// switch is a config change rather than a migration. Order matters — the
-		// membership tables carry foreign keys onto users and groups.
+		// ─── Multi-user identity (Prism heavy) ──────────────────────────────────
+		// Users authenticate with email + bcrypt password. The first user to sign
+		// up becomes the global admin (auto-approved); everyone after is 'pending'
+		// until an admin approves them.
 		`CREATE TABLE IF NOT EXISTS users (
 			id            BIGSERIAL PRIMARY KEY,
 			email         TEXT UNIQUE NOT NULL,
@@ -240,6 +301,8 @@ func (s *Store) initSchema(ctx context.Context) error {
 			group_role TEXT NOT NULL DEFAULT 'member',       -- 'admin' | 'member'
 			PRIMARY KEY (group_id, user_id)
 		)`,
+		// Server-side sessions: the cookie holds an opaque random token that maps
+		// to a user here, so logout / disable revokes access immediately.
 		`CREATE TABLE IF NOT EXISTS user_sessions (
 			token      TEXT PRIMARY KEY,
 			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -247,15 +310,24 @@ func (s *Store) initSchema(ctx context.Context) error {
 			expires_at TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions(user_id)`,
+		// ─── RBAC (Prism heavy, Phase 2) ────────────────────────────────────────
+		// Global per-tool policy. A row overrides the code default; tools with no
+		// row use the built-in default (dangerous tools admin-only, rest open).
 		`CREATE TABLE IF NOT EXISTS tool_policy (
 			tool   TEXT PRIMARY KEY,
 			access TEXT NOT NULL           -- 'open' | 'admin_only'
 		)`,
+		// Per-group model grants. A group with zero rows = all models allowed;
+		// adding rows restricts that group to the listed models.
 		`CREATE TABLE IF NOT EXISTS group_models (
 			group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
 			model    TEXT NOT NULL,
 			PRIMARY KEY (group_id, model)
 		)`,
+		// ─── Shared chat rooms (Prism heavy, Phase 4) ───────────────────────────
+		// One shared room per group: members chat with each other and with a
+		// shared agent that responds when @mentioned. The agent's prompt/model are
+		// configured per group (Phase 5).
 		`CREATE TABLE IF NOT EXISTS room_config (
 			group_id     BIGINT PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
 			agent_name   TEXT NOT NULL DEFAULT 'Assistant',
@@ -272,21 +344,31 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS room_messages_group_idx ON room_messages(group_id, id)`,
+		// Per-group tool restrictions (Phase 5). A group admin may only *tighten*
+		// within the global ceiling, so rows here always mean 'admin_only' for that
+		// group's members; removing a row reverts to the global policy.
 		`CREATE TABLE IF NOT EXISTS group_tool_policy (
 			group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
 			tool     TEXT NOT NULL,
 			access   TEXT NOT NULL,   -- 'admin_only' (restrict)
 			PRIMARY KEY (group_id, tool)
 		)`,
+		// ─── Profiles, avatars & richer room chat (Spectrum) ───────────────────
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT NOT NULL DEFAULT ''`,
+		// Avatars for users and agents, keyed by scope: "u<id>" (user),
+		// "agent-u<id>" (a user's personal agent), "agent-g<id>" (a group's shared
+		// agent). Stored as bytes + mime; served via /api/avatar, versioned by updated_at.
 		`CREATE TABLE IF NOT EXISTS avatars (
 			scope      TEXT PRIMARY KEY,
 			mime       TEXT NOT NULL DEFAULT 'image/png',
 			data       BYTEA NOT NULL,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		// Usage tracking + audit trail (Spectrum): one narrow event stream.
+		// kind: chat_turn | tool_call | rag_upload | channel_msg | login | audit | error_log
+		// item: model / tool name / channel / action. qty: count or est. tokens.
 		`CREATE TABLE IF NOT EXISTS usage_events (
 			id      BIGSERIAL PRIMARY KEY,
 			ts      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -299,6 +381,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS usage_events_ts_idx ON usage_events(ts DESC)`,
 		`CREATE INDEX IF NOT EXISTS usage_events_kind_idx ON usage_events(kind, ts DESC)`,
+		// Reply/quote + emoji reactions for room messages.
 		`ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`,
 		`CREATE TABLE IF NOT EXISTS room_reactions (
 			message_id BIGINT NOT NULL REFERENCES room_messages(id) ON DELETE CASCADE,
@@ -406,8 +489,15 @@ type Session struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-func (s *Store) ListSessions(ctx context.Context) ([]Session, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, created_at FROM sessions ORDER BY created_at ASC`)
+// ListSessions returns sessions owned by ownerID; pass nil to list every session
+// (admin / internal use). Multi-user callers pass the current user's id so each
+// user only ever sees their own sessions.
+func (s *Store) ListSessions(ctx context.Context, ownerID *int64) ([]Session, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, name, created_at FROM sessions
+		WHERE ($1::bigint IS NULL OR owner_id = $1)
+		ORDER BY created_at ASC
+	`, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -423,21 +513,41 @@ func (s *Store) ListSessions(ctx context.Context) ([]Session, error) {
 	return sessions, rows.Err()
 }
 
-// EnsureSession creates the session row if it doesn't exist, without touching the name if it does.
-func (s *Store) EnsureSession(ctx context.Context, id string) error {
+// EnsureSession creates the session row (with owner + name) if it doesn't exist,
+// leaving an existing row untouched. ownerID may be nil (legacy/shared).
+func (s *Store) EnsureSession(ctx context.Context, id, name string, ownerID *int64) error {
+	if name == "" {
+		name = id
+	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO sessions (id, name) VALUES ($1, $1)
-		ON CONFLICT DO NOTHING
-	`, id)
+		INSERT INTO sessions (id, name, owner_id) VALUES ($1, $2, $3)
+		ON CONFLICT (id) DO NOTHING
+	`, id, name, ownerID)
 	return err
 }
 
-func (s *Store) UpsertSession(ctx context.Context, id, name string) error {
+// UpsertSession creates or renames a session; owner is set on create and left
+// unchanged on rename.
+func (s *Store) UpsertSession(ctx context.Context, id, name string, ownerID *int64) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO sessions (id, name) VALUES ($1, $2)
+		INSERT INTO sessions (id, name, owner_id) VALUES ($1, $2, $3)
 		ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
-	`, id, name)
+	`, id, name, ownerID)
 	return err
+}
+
+// SessionOwner returns the owner of a session (nil if none/legacy), and whether
+// the session exists.
+func (s *Store) SessionOwner(ctx context.Context, id string) (ownerID *int64, exists bool, err error) {
+	var owner *int64
+	err = s.pool.QueryRow(ctx, `SELECT owner_id FROM sessions WHERE id = $1`, id).Scan(&owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return owner, true, nil
 }
 
 func (s *Store) DeleteSession(ctx context.Context, id string) error {

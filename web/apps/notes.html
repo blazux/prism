@@ -6,6 +6,7 @@
 <title>Notes</title>
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
+<script src="/modal.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <script>
   addEventListener('message', e => {
@@ -131,9 +132,10 @@
             <button id="tab-split" onclick="setMode('split')">Split</button>
             <button id="tab-preview" onclick="setMode('preview')">Preview</button>
           </div>
-          <button class="btn" id="kn-btn" onclick="addToKnowledge()" title="Add this note to the agent's knowledge base (RAG)">🧠</button>
-          <button class="btn" onclick="saveNote()">Save</button>
-          <button class="btn" onclick="deleteNote()" title="Delete" style="color:var(--red)">🗑</button>
+          <button class="btn" id="share-btn" onclick="toggleShare()" title="Share this note with your group" style="display:none">📤 Share</button>
+          <button class="btn" id="kn-btn" onclick="addToKnowledge()" title="Add this note to the agent's knowledge base (RAG)" style="display:none">🧠</button>
+          <button class="btn" id="save-btn" onclick="saveNote()">Save</button>
+          <button class="btn" id="del-btn" onclick="deleteNote()" title="Delete" style="color:var(--red)">🗑</button>
         </div>
         <input class="tags-in" id="e-tags" placeholder="tags, comma, separated">
         <div class="ai-bar">
@@ -194,6 +196,24 @@ const api = (path, opts) => fetch(`/api/notes${path}`, opts).then(r => r.json())
 const $ = id => document.getElementById(id);
 let notes = [], selectedId = null, filter = '', tagFilter = '', mode = 'edit', lastTarget = null;
 
+// Capabilities, resolved once at startup:
+//  - hasGroup      → the user belongs to a group (can Share notes to it)
+//  - canManageRag  → may upsert a note into a RAG base (personal scope, group
+//                    admin, or global admin). Plain group members cannot.
+let CAPS = { hasGroup: false, canManageRag: true };
+async function loadCaps() {
+  try {
+    const me = await fetch('/api/me').then(r => r.json());
+    if (!me.authenticated) { CAPS = { hasGroup: false, canManageRag: true }; return; }
+    const globalAdmin = me.user && me.user.role === 'global_admin';
+    const groups = ((await fetch('/api/my/groups').then(r => r.json())).groups) || [];
+    const hasGroup = groups.length > 0;
+    const isGroupAdmin = hasGroup && groups[0].role === 'admin';
+    CAPS = { hasGroup, canManageRag: globalAdmin || !hasGroup || isGroupAdmin };
+  } catch { CAPS = { hasGroup: false, canManageRag: true }; }
+}
+const currentNote = () => notes.find(x => x.id === selectedId);
+
 // Pins (client-side, by note id).
 const PIN_KEY = 'prism-pinned-notes';
 function pins() { try { return new Set(JSON.parse(localStorage.getItem(PIN_KEY) || '[]')); } catch { return new Set(); } }
@@ -208,6 +228,10 @@ function setSourceBadge(src) {
   const L = { google: 'Google', microsoft: 'Microsoft', caldav: 'CalDAV', todoist: 'Todoist', vault: 'Vault' };
   if (src && L[src]) { el.textContent = '◦ ' + L[src]; el.style.display = 'inline-block'; } else { el.style.display = 'none'; }
 }
+// syncEditor=true re-fills the open editor from the server copy. Only the agent-driven
+// refresh (data-changed) passes it: render() alone rebuilds the LIST, so without this the
+// note you have open keeps showing the pre-agent text until a reload. Routine loads leave
+// the editor alone so a background refresh can't yank the field you're typing in.
 async function load(syncEditor = false) {
   const data = await api(`?session=${encodeURIComponent(session)}`);
   notes = data.notes || [];
@@ -226,6 +250,7 @@ function syncEditorFromServer() {
   $('e-title').value = n.title || '';
   $('e-tags').value = n.tags || '';
   $('e-body').value = n.body || '';
+  applyNoteChrome(n);
   if (mode !== 'edit') updatePreview();
 }
 
@@ -254,9 +279,12 @@ function render() {
     row.className = 'note-row' + (n.id === selectedId ? ' active' : '');
     row.onclick = () => select(n.id);
     const tags = noteTags(n).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+    const shared = n.scope === 'group'
+      ? `<span class="tag" title="Shared with your group${n.canEdit ? '' : ' · read-only'}" style="background:rgba(107,138,253,0.16);color:var(--accent)">📤 shared${n.canEdit ? '' : ' · read-only'}</span>`
+      : '';
     row.innerHTML = `<div class="nt-row"><span class="nt">${esc(n.title) || '(untitled)'}</span><button class="note-pin ${isPinned(n.id) ? 'pinned' : ''}" title="Pin">📌</button></div>
       <div class="ns">${esc((n.body || '').replace(/\n/g, ' ')) || '—'}</div>
-      ${tags ? `<div class="ntags">${tags}</div>` : ''}`;
+      ${shared || tags ? `<div class="ntags">${shared}${tags}</div>` : ''}`;
     row.querySelector('.note-pin').onclick = (e) => { e.stopPropagation(); togglePin(n.id); };
     host.appendChild(row);
   }
@@ -290,7 +318,7 @@ async function openWikiLink(title) {
   if (selectedId) await saveNote();
   const n = notes.find(x => (x.title || '').toLowerCase() === title.toLowerCase());
   if (n) { select(n.id); return; }
-  if (confirm(`Note "${title}" doesn't exist yet. Create it?`)) {
+  if (await PrismModal.confirm(`Note "${title}" doesn't exist yet. Create it?`, { okLabel: 'Create' })) {
     const { id } = await api(`?session=${encodeURIComponent(session)}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, body: '', tags: '' })
     });
@@ -366,8 +394,55 @@ function select(id) {
   $('e-body').value = n.body || '';
   closeResult();
   setMode('edit');
+  applyNoteChrome(n);
   $('app').classList.add('editing');
   render();
+}
+
+// Configure the editor toolbar + read-only state for the selected note.
+function applyNoteChrome(n) {
+  const isGroup = n.scope === 'group';
+  const readOnly = isGroup && !n.canEdit;
+  // Read-only shared notes: lock the fields and hide the mutating controls.
+  for (const id of ['e-title', 'e-tags', 'e-body']) $(id).readOnly = readOnly;
+  $('save-btn').style.display = readOnly ? 'none' : '';
+  $('del-btn').style.display = readOnly ? 'none' : '';
+  $('del-btn').title = isGroup ? 'Remove from group' : 'Delete';
+  document.querySelector('.ai-bar').style.display = readOnly ? 'none' : '';
+  // RAG upsert — group admins / personal scope / global admin only.
+  $('kn-btn').style.display = CAPS.canManageRag ? '' : 'none';
+  // Share — only on a personal note, when the user has a group. On a group note,
+  // "unshare" is the 🗑 button (owner/admin). Toggle label if already shared.
+  const shareBtn = $('share-btn');
+  if (CAPS.hasGroup && n.scope === 'personal') {
+    const already = notes.find(x => x.scope === 'group' && String(x.originId) === String(n.id));
+    shareBtn.style.display = '';
+    shareBtn.textContent = already ? '📤 Shared ✓' : '📤 Share';
+    shareBtn.title = already
+      ? 'Update the shared copy (to unshare, open the shared note and remove it)'
+      : 'Share this note with your group';
+  } else {
+    shareBtn.style.display = 'none';
+  }
+}
+
+// Publish (or update) the current personal note to the group. Idempotent: it
+// creates the group copy the first time and refreshes it on subsequent clicks.
+// Unsharing is done by removing the shared copy (🗑 on the shared note).
+async function toggleShare() {
+  const n = currentNote();
+  if (!n || n.scope !== 'personal') return;
+  const btn = $('share-btn');
+  await saveNote(); // push latest edits before sharing
+  try {
+    const r = await fetch(`/api/notes/share?id=${encodeURIComponent(n.id)}`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    await load();
+    if (currentNote()) applyNoteChrome(currentNote());
+    btn.title = 'Shared with your group ✓';
+  } catch (e) {
+    btn.title = 'Share failed: ' + e.message;
+  }
 }
 
 async function newNote() {
@@ -382,16 +457,23 @@ async function newNote() {
 
 async function saveNote() {
   if (!selectedId) return;
+  const n = currentNote();
+  if (n && n.scope === 'group' && !n.canEdit) return; // read-only shared note
+  const body = { id: selectedId, title: $('e-title').value, body: $('e-body').value, tags: $('e-tags').value };
+  if (n && n.scope === 'group') body.scope = 'group';
   await api(`?session=${encodeURIComponent(session)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: selectedId, title: $('e-title').value, body: $('e-body').value, tags: $('e-tags').value })
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
   await load();
 }
 
 async function deleteNote() {
-  if (!selectedId || !confirm('Delete this note?')) return;
-  await fetch(`/api/notes?session=${encodeURIComponent(session)}&id=${selectedId}`, { method: 'DELETE' });
+  if (!selectedId) return;
+  const n = currentNote();
+  const isGroup = n && n.scope === 'group';
+  if (!await PrismModal.confirm(isGroup ? 'Remove this note from the group?' : 'Delete this note?', { danger: true, okLabel: isGroup ? 'Remove' : 'Delete' })) return;
+  const q = isGroup ? '&scope=group' : '';
+  await fetch(`/api/notes?session=${encodeURIComponent(session)}&id=${selectedId}${q}`, { method: 'DELETE' });
   selectedId = null;
   closeEditor();
   await load();
@@ -452,7 +534,7 @@ $('search').addEventListener('input', e => { filter = e.target.value; render(); 
 // Reload when the agent changes notes via chat.
 addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') load(true); });
 
-load();
+loadCaps().then(load);
 </script>
 </body>
 </html>

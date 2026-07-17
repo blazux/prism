@@ -25,6 +25,20 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{"models": []string{}, "error": err.Error()})
 		return
 	}
+	// Platform allow-list applies to everyone — the admin pane manages the full
+	// list via /api/admin/platform (unfiltered), so the picker can honestly show
+	// what the platform offers. Per-group grants then tighten further.
+	u := currentUser(r)
+	if set, unrestricted := s.platformAllowedModels(ctx); !unrestricted {
+		kept := models[:0]
+		for _, m := range models {
+			if set[m] {
+				kept = append(kept, m)
+			}
+		}
+		models = kept
+	}
+	models = s.filterModelsForUser(ctx, u, models)
 	json.NewEncoder(w).Encode(map[string]interface{}{"models": models})
 }
 
@@ -57,6 +71,14 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RBAC: custom tools obey the same policy as in chat.
+	if guard := s.buildUserGuard(r.Context(), currentUser(r)); guard != nil {
+		if err := guard(name, nil); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil || len(body) == 0 {
 		body = []byte("{}")
@@ -66,7 +88,11 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
+	sessionID, sessOK := s.sessionFor(r, r.URL.Query().Get("session"))
+	if !sessOK {
+		http.Error(w, "forbidden", 403)
+		return
+	}
 	if sessionID == "" {
 		sessionID = "default"
 	}
@@ -144,7 +170,11 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
+	sessionID, sessOK := s.sessionFor(r, r.URL.Query().Get("session"))
+	if !sessOK {
+		http.Error(w, "forbidden", 403)
+		return
+	}
 	if sessionID == "" {
 		sessionID = "default"
 	}
@@ -156,12 +186,23 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
 	executor.SetLLM(s.newChatBackend(), s.cfg.Model)
+	executor.SetChatBlind(!s.cfg.ChatVision)
+	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 	if s.ragStore != nil {
-		executor.SetRAG(s.ragStore, s.ragEmbedder)
+		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
 	}
 	executor.SetSessionID(sessionID)
 	if ms != nil {
 		executor.SetMemoryStore(ms)
+	}
+	// RBAC + tenant scoping: this endpoint runs tools with the caller's
+	// permissions and RAG scope, exactly like the WebSocket chat path.
+	{
+		u := currentUser(r)
+		executor.SetToolGuard(s.buildUserGuard(r.Context(), u))
+		scope := s.ragScopeFor(r.Context(), u)
+		executor.SetRAGScope(scope)
+		executor.SetHiddenTools(s.hiddenToolsFor(r.Context(), sessionID, scope))
 	}
 	executor.SetCustomTools(s.customMgr, func() {
 		s.customMgr.Reload()

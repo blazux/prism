@@ -22,15 +22,41 @@ import (
 )
 
 const cronJobMarker = "# agent-job: "
+const cronOwnerMarker = "# agent-owner: "
 const cronDescMarker = "# agent-desc: "
 const cronDisabledPrefix = "#DISABLED# "
 
 type CronJob struct {
 	Name        string `json:"name"`
+	Owner       string `json:"owner,omitempty"` // "u<id>" — who scheduled it
 	Description string `json:"description"`
 	Schedule    string `json:"schedule"`
 	Command     string `json:"command"`
 	Enabled     bool   `json:"enabled"`
+}
+
+// scanJobBlock reads the comment lines following a job marker (owner and
+// description in any order, blanks allowed) and returns them plus the index of
+// the job line, or -1 if the block is truncated.
+func scanJobBlock(lines []string, start int) (owner, desc string, jobIdx int) {
+	j := start
+	for j < len(lines) {
+		l := strings.TrimRight(lines[j], "\r")
+		t := strings.TrimSpace(l)
+		switch {
+		case t == "":
+			j++
+		case strings.HasPrefix(l, cronOwnerMarker):
+			owner = strings.TrimSpace(strings.TrimPrefix(l, cronOwnerMarker))
+			j++
+		case strings.HasPrefix(l, cronDescMarker):
+			desc = strings.TrimSpace(strings.TrimPrefix(l, cronDescMarker))
+			j++
+		default:
+			return owner, desc, j
+		}
+	}
+	return owner, desc, -1
 }
 
 func (s *Server) readCrontab() string {
@@ -79,20 +105,8 @@ func parseCronJobs(raw string) []CronJob {
 			continue
 		}
 		name := strings.TrimSpace(strings.TrimPrefix(l, cronJobMarker))
-		// Find the following non-empty line, capturing an optional description line.
-		j := i + 1
-		desc := ""
-		for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
-			j++
-		}
-		if j < len(lines) && strings.HasPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker) {
-			desc = strings.TrimSpace(strings.TrimPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker))
-			j++
-			for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
-				j++
-			}
-		}
-		if j >= len(lines) {
+		owner, desc, j := scanJobBlock(lines, i+1)
+		if j < 0 {
 			break
 		}
 		jobLine := strings.TrimRight(lines[j], "\r")
@@ -102,7 +116,7 @@ func parseCronJobs(raw string) []CronJob {
 			jobLine = strings.TrimPrefix(jobLine, cronDisabledPrefix)
 		}
 		schedule, command := splitSchedule(jobLine)
-		jobs = append(jobs, CronJob{Name: name, Description: desc, Schedule: schedule, Command: command, Enabled: enabled})
+		jobs = append(jobs, CronJob{Name: name, Owner: owner, Description: desc, Schedule: schedule, Command: command, Enabled: enabled})
 		i = j
 	}
 	return jobs
@@ -119,31 +133,31 @@ func (s *Server) mutateJob(name string, fn func(line string) string) error {
 		l := strings.TrimRight(lines[i], "\r")
 		if strings.HasPrefix(l, cronJobMarker) &&
 			strings.TrimSpace(strings.TrimPrefix(l, cronJobMarker)) == name {
-			// Locate an optional description line, then the job line.
+			// Preserve the block's comment lines (owner, description) verbatim.
+			var meta []string
 			j := i + 1
-			descLine := ""
-			for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
-				j++
-			}
-			if j < len(lines) && strings.HasPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker) {
-				descLine = strings.TrimRight(lines[j], "\r")
-				j++
-				for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
+			for j < len(lines) {
+				cl := strings.TrimRight(lines[j], "\r")
+				t := strings.TrimSpace(cl)
+				if t == "" || strings.HasPrefix(cl, cronOwnerMarker) || strings.HasPrefix(cl, cronDescMarker) {
+					if t != "" {
+						meta = append(meta, cl)
+					}
 					j++
+					continue
 				}
+				break
 			}
 			if j < len(lines) {
 				cur := strings.TrimRight(lines[j], "\r")
 				bare := strings.TrimPrefix(cur, cronDisabledPrefix)
 				repl := fn(bare)
 				if repl == "" {
-					i = j // drop marker + desc + job line
+					i = j // drop marker + meta + job line
 					continue
 				}
 				out = append(out, l)
-				if descLine != "" {
-					out = append(out, descLine)
-				}
+				out = append(out, meta...)
 				out = append(out, repl)
 				i = j
 				continue
@@ -170,24 +184,16 @@ func (s *Server) editJobBlock(name, schedule, command, desc string) error {
 		l := strings.TrimRight(lines[i], "\r")
 		if strings.HasPrefix(l, cronJobMarker) &&
 			strings.TrimSpace(strings.TrimPrefix(l, cronJobMarker)) == name {
-			j := i + 1
-			oldDesc := ""
-			for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
-				j++
-			}
-			if j < len(lines) && strings.HasPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker) {
-				oldDesc = strings.TrimSpace(strings.TrimPrefix(strings.TrimRight(lines[j], "\r"), cronDescMarker))
-				j++
-				for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
-					j++
-				}
-			}
-			if j < len(lines) {
+			oldOwner, oldDesc, j := scanJobBlock(lines, i+1)
+			if j >= 0 {
 				d := desc
 				if d == "" {
 					d = oldDesc
 				}
 				out = append(out, l)
+				if oldOwner != "" {
+					out = append(out, cronOwnerMarker+oldOwner)
+				}
 				if d != "" {
 					out = append(out, cronDescMarker+d)
 				}
@@ -202,9 +208,10 @@ func (s *Server) editJobBlock(name, schedule, command, desc string) error {
 	return s.applyCrontab(content)
 }
 
-// upsertCronJob creates a job or, if a job with that name exists, replaces its
-// schedule + command + description (re-enabling it).
-func (s *Server) upsertCronJob(name, schedule, command, desc string) error {
+// upsertCronJob creates a job (stamped with owner) or, if a job with that name
+// exists, replaces its schedule + command + description (re-enabling it, keeping
+// the original owner).
+func (s *Server) upsertCronJob(name, schedule, command, desc, owner string) error {
 	name = strings.TrimSpace(name)
 	schedule = strings.TrimSpace(schedule)
 	command = strings.TrimSpace(command)
@@ -212,7 +219,7 @@ func (s *Server) upsertCronJob(name, schedule, command, desc string) error {
 	if name == "" || schedule == "" || command == "" {
 		return fmt.Errorf("name, schedule and command are required")
 	}
-	if strings.ContainsAny(name+schedule+command+desc, "\n\r") {
+	if strings.ContainsAny(name+schedule+command+desc+owner, "\n\r") {
 		return fmt.Errorf("fields must not contain newlines")
 	}
 	raw := s.readCrontab()
@@ -226,6 +233,9 @@ func (s *Server) upsertCronJob(name, schedule, command, desc string) error {
 		content += "\n"
 	}
 	content += cronJobMarker + name + "\n"
+	if owner != "" {
+		content += cronOwnerMarker + owner + "\n"
+	}
 	if desc != "" {
 		content += cronDescMarker + desc + "\n"
 	}
@@ -233,15 +243,37 @@ func (s *Server) upsertCronJob(name, schedule, command, desc string) error {
 	return s.applyCrontab(content)
 }
 
-// GET /api/cron, POST {name,enabled}, DELETE ?name=
+// GET /api/cron, POST {name,enabled}, DELETE ?name= — owner-scoped: each user
+// sees and manages only their own jobs (owner tag "u<id>", same as the agent's
+// cron tools). A global admin sees everything, including legacy unowned jobs.
 func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	u := currentUser(r)
+	admin := u == nil || u.IsGlobalAdmin() // nil = service identity / legacy no-auth
+	mine := ""
+	if u != nil && u.ID > 0 {
+		mine = fmt.Sprintf("u%d", u.ID)
+	}
+	canTouch := func(owner string) bool { return admin || (mine != "" && owner == mine) }
+	findJob := func(name string) (CronJob, bool) {
+		for _, j := range parseCronJobs(s.readCrontab()) {
+			if j.Name == name {
+				return j, true
+			}
+		}
+		return CronJob{}, false
+	}
+
 	switch r.Method {
 	case "GET":
-		jobs := parseCronJobs(s.readCrontab())
-		if jobs == nil {
-			jobs = []CronJob{}
+		all := parseCronJobs(s.readCrontab())
+		jobs := []CronJob{}
+		for _, j := range all {
+			if admin || (mine != "" && j.Owner == mine) {
+				jobs = append(jobs, j)
+			}
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"jobs": jobs})
 	case "POST":
@@ -256,9 +288,13 @@ func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad body", 400)
 			return
 		}
+		if existing, ok := findJob(b.Name); ok && !canTouch(existing.Owner) {
+			http.Error(w, "this job belongs to another user", 403)
+			return
+		}
 		// schedule present → create/edit a job; otherwise → enable/disable toggle.
 		if b.Schedule != "" {
-			if err := s.upsertCronJob(b.Name, b.Schedule, b.Command, b.Description); err != nil {
+			if err := s.upsertCronJob(b.Name, b.Schedule, b.Command, b.Description, mine); err != nil {
 				http.Error(w, err.Error(), 400)
 				return
 			}
@@ -279,6 +315,10 @@ func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("name")
 		if name == "" {
 			http.Error(w, "name required", 400)
+			return
+		}
+		if existing, ok := findJob(name); ok && !canTouch(existing.Owner) {
+			http.Error(w, "this job belongs to another user", 403)
 			return
 		}
 		if err := s.mutateJob(name, func(string) string { return "" }); err != nil {

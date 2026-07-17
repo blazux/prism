@@ -3,8 +3,9 @@ package server
 // Interactive terminal: a WebSocket that attaches a PTY to `docker exec -it` in
 // the agent's workspace container and streams it both ways (for xterm.js in the
 // browser). Binary WS messages are raw keystrokes; text messages are control
-// JSON (currently just {type:"resize",cols,rows}). Auth is enforced by the
-// global middleware since the path is under /api/.
+// JSON (currently just {type:"resize",cols,rows}). The global middleware only
+// proves the caller is signed in; a shell in the tools container is an admin
+// capability, so this handler checks the role itself.
 
 import (
 	"encoding/json"
@@ -17,6 +18,11 @@ import (
 )
 
 func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
+	// Refuse before upgrading: once the socket is open the browser only sees it
+	// close, with no status code to explain why.
+	if !s.requireAdminUser(w, r) {
+		return
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
