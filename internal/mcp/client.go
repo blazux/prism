@@ -139,6 +139,10 @@ func (c *Client) notify(ctx context.Context, method string, params interface{}) 
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Streamable HTTP requires Accept on every POST, notifications included: a
+	// strict server answers 406 and never marks the session initialized. FastMCP
+	// does exactly that (observed on RTClient).
+	req.Header.Set("Accept", "application/json, text/event-stream")
 	if c.authHeader != "" {
 		req.Header.Set("Authorization", c.authHeader)
 	}

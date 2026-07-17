@@ -19,16 +19,35 @@ type Backend interface {
 	ListModels(ctx context.Context) ([]string, error)
 }
 
+// DefaultNumPredict caps the tokens generated for one turn when the caller asks
+// for no specific ceiling. Ollama's own default is -1: generate until the context
+// is full. A model that loops instead of emitting a stop token then streams for as
+// long as that takes, with the caller blocked and nothing to log — which is exactly
+// how a chat ends up never answering. The cap has to clear the longest legitimate
+// answer (a whole widget, a long note), so it is deliberately generous; hitting it
+// truncates the turn instead of hanging it.
+const DefaultNumPredict = 16384
+
+// responseHeaderTimeout bounds the wait for the response head only, never the body
+// — a streamed answer may take as long as it likes. It covers the window where the
+// prompt is queued and prefilled, so a server that accepts the connection and then
+// goes quiet fails loudly instead of hanging forever.
+const responseHeaderTimeout = 3 * time.Minute
+
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
 }
 
 func NewClient(baseURL string) *Client {
+	// Cloned from the default transport to keep ProxyFromEnvironment.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = responseHeaderTimeout
 	return &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 0, // no timeout for streaming
+			Timeout:   0, // no client-wide timeout: it would also cap the streamed body
+			Transport: tr,
 		},
 	}
 }
@@ -62,7 +81,7 @@ type ToolFunction struct {
 }
 
 type ToolParameters struct {
-	Type       string                  `json:"type"`
+	Type string `json:"type"`
 	// omitempty so a no-parameter tool serializes as {"type":"object"} rather than
 	// {"properties":null,"required":null} — strict OpenAI-compatible validators
 	// (e.g. Mistral's mistral-common) reject the nulls with "None is not of type
@@ -87,6 +106,11 @@ type ChatRequest struct {
 type Options struct {
 	Temperature float64 `json:"temperature,omitempty"`
 	NumCtx      int     `json:"num_ctx,omitempty"`
+	// NumPredict caps the tokens generated for one turn. Left at 0 each backend
+	// applies its own ceiling — Ollama generates until the context is full, and for
+	// vLLM it is max_model_len minus the prompt — so a model that loops instead of
+	// emitting a stop token keeps generating with the caller blocked on the stream.
+	NumPredict int `json:"num_predict,omitempty"`
 }
 
 type ChatChunk struct {
@@ -105,6 +129,9 @@ type StreamEvent struct {
 
 func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEvent) {
 	req.Stream = true
+	if req.Options.NumPredict == 0 {
+		req.Options.NumPredict = DefaultNumPredict
+	}
 
 	body, err := json.Marshal(req)
 	if err != nil {

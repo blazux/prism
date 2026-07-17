@@ -11,12 +11,33 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"prism/internal/ollama"
 )
+
+// defaultMaxTokens caps generation for one turn when the caller asks for no
+// specific ceiling. vLLM's own default is max_model_len minus the prompt — on a
+// 262k-context server that is hours of streaming before the request ends by
+// itself. Hitting this cap instead ends the turn with finish_reason "length",
+// which surfaces as a truncated answer rather than a dead chat. It has to clear
+// the longest legitimate answer (a whole widget, a long note), so it is generous.
+//
+// Note for anyone tempted to add an anti-repetition penalty here: presence_penalty
+// 0.3 was tried against vLLM on a GB10 (2026-07-16) and killed the engine on the
+// first request carrying it — apply_penalties hit a device-side assert and the
+// server died. The penalty kernel is only reached when a penalty is non-zero. Test
+// on the box that will serve it before wiring one in; this cap is the safe guard.
+const defaultMaxTokens = 16384
+
+// responseHeaderTimeout bounds the wait for the response head only, never the
+// body — an SSE stream may then run as long as it likes. It covers the window
+// where the prompt is queued and prefilled, so an upstream that accepts the
+// connection and goes quiet fails loudly instead of hanging forever.
+const responseHeaderTimeout = 3 * time.Minute
 
 type Client struct {
 	baseURL    string // includes the /v1 suffix, e.g. http://host:30000/v1
@@ -27,10 +48,15 @@ type Client struct {
 // NewClient builds an OpenAI-compatible client. baseURL should point at the /v1
 // root (a trailing slash is tolerated). apiKey may be empty.
 func NewClient(baseURL, apiKey string) *Client {
+	// Cloned from the default transport to keep ProxyFromEnvironment: deployments
+	// behind a corporate proxy reach the gateway through it.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = responseHeaderTimeout
 	return &Client{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: 0}, // no timeout for streaming
+		baseURL: strings.TrimRight(baseURL, "/"),
+		apiKey:  apiKey,
+		// No client-wide timeout: it would also cap the streamed body.
+		httpClient: &http.Client{Timeout: 0, Transport: tr},
 	}
 }
 
@@ -49,6 +75,7 @@ type chatRequest struct {
 	Tools       []chatTool `json:"tools,omitempty"`
 	Stream      bool       `json:"stream"`
 	Temperature float64    `json:"temperature,omitempty"`
+	MaxTokens   int        `json:"max_tokens,omitempty"`
 }
 
 type chatMsg struct {
@@ -272,6 +299,10 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		Messages:    buildMessages(req.Messages),
 		Stream:      true,
 		Temperature: req.Options.Temperature,
+		MaxTokens:   req.Options.NumPredict,
+	}
+	if payload.MaxTokens <= 0 {
+		payload.MaxTokens = defaultMaxTokens
 	}
 	for _, t := range req.Tools {
 		payload.Tools = append(payload.Tools, chatTool{Type: "function", Function: t.Function})
@@ -299,6 +330,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	tools := newToolAccumulator()
+	finish := ""
 
 	for scanner.Scan() {
 		select {
@@ -336,11 +368,20 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		if len(ch.Delta.ToolCalls) > 0 {
 			tools.add(ch.Delta.ToolCalls)
 		}
+		if ch.FinishReason != nil {
+			finish = *ch.FinishReason
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		out <- ollama.StreamEvent{Err: fmt.Errorf("scan: %w", err)}
 		return
+	}
+	// "length" means the model was still going when it hit the cap: either a
+	// genuinely huge answer, or a model looping instead of stopping. Both leave a
+	// truncated turn behind, so say so rather than let it look like a clean stop.
+	if finish == "length" {
+		log.Printf("openai: generation hit the %d-token cap (truncated turn) — model %q", payload.MaxTokens, req.Model)
 	}
 
 	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true}
