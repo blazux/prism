@@ -214,6 +214,99 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS calendar_session_idx ON calendar_events(session_id, start_at)`,
+
+		// ─── Multi-user tables ───────────────────────────────────────────────
+		// Created unconditionally and left empty by the single-user build: an empty
+		// table costs nothing, and having the schema present means the MULTI_USER
+		// switch is a config change rather than a migration. Order matters — the
+		// membership tables carry foreign keys onto users and groups.
+		`CREATE TABLE IF NOT EXISTS users (
+			id            BIGSERIAL PRIMARY KEY,
+			email         TEXT UNIQUE NOT NULL,
+			password_hash TEXT NOT NULL,
+			display_name  TEXT NOT NULL DEFAULT '',
+			role          TEXT NOT NULL DEFAULT 'member',   -- 'global_admin' | 'member'
+			status        TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'approved' | 'disabled'
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS groups (
+			id         BIGSERIAL PRIMARY KEY,
+			name       TEXT UNIQUE NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS group_members (
+			group_id   BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			group_role TEXT NOT NULL DEFAULT 'member',       -- 'admin' | 'member'
+			PRIMARY KEY (group_id, user_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS user_sessions (
+			token      TEXT PRIMARY KEY,
+			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			expires_at TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions(user_id)`,
+		`CREATE TABLE IF NOT EXISTS tool_policy (
+			tool   TEXT PRIMARY KEY,
+			access TEXT NOT NULL           -- 'open' | 'admin_only'
+		)`,
+		`CREATE TABLE IF NOT EXISTS group_models (
+			group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			model    TEXT NOT NULL,
+			PRIMARY KEY (group_id, model)
+		)`,
+		`CREATE TABLE IF NOT EXISTS room_config (
+			group_id     BIGINT PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+			agent_name   TEXT NOT NULL DEFAULT 'Assistant',
+			agent_prompt TEXT NOT NULL DEFAULT '',
+			agent_model  TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS room_messages (
+			id          BIGSERIAL PRIMARY KEY,
+			group_id    BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			author_id   BIGINT,        -- NULL for the agent
+			author_name TEXT NOT NULL,
+			content     TEXT NOT NULL,
+			is_agent    BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS room_messages_group_idx ON room_messages(group_id, id)`,
+		`CREATE TABLE IF NOT EXISTS group_tool_policy (
+			group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			tool     TEXT NOT NULL,
+			access   TEXT NOT NULL,   -- 'admin_only' (restrict)
+			PRIMARY KEY (group_id, tool)
+		)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE IF NOT EXISTS avatars (
+			scope      TEXT PRIMARY KEY,
+			mime       TEXT NOT NULL DEFAULT 'image/png',
+			data       BYTEA NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS usage_events (
+			id      BIGSERIAL PRIMARY KEY,
+			ts      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			user_id BIGINT NOT NULL DEFAULT 0,
+			session TEXT NOT NULL DEFAULT '',
+			kind    TEXT NOT NULL,
+			item    TEXT NOT NULL DEFAULT '',
+			qty     BIGINT NOT NULL DEFAULT 1,
+			meta    JSONB NOT NULL DEFAULT '{}'
+		)`,
+		`CREATE INDEX IF NOT EXISTS usage_events_ts_idx ON usage_events(ts DESC)`,
+		`CREATE INDEX IF NOT EXISTS usage_events_kind_idx ON usage_events(kind, ts DESC)`,
+		`ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`,
+		`CREATE TABLE IF NOT EXISTS room_reactions (
+			message_id BIGINT NOT NULL REFERENCES room_messages(id) ON DELETE CASCADE,
+			user_id    BIGINT NOT NULL,
+			emoji      TEXT NOT NULL,
+			PRIMARY KEY (message_id, user_id, emoji)
+		)`,
+		`CREATE INDEX IF NOT EXISTS room_reactions_msg_idx ON room_reactions(message_id)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.pool.Exec(ctx, stmt); err != nil {
