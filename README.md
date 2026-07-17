@@ -37,12 +37,14 @@ Is this a great idea? Probably. Does it make you slightly nervous? It should. Th
 | Backend | Go |
 | Frontend | Vanilla JS, custom free-floating window manager |
 | LLM | Ollama — or any OpenAI-compatible server (vLLM, SGLang, TGI, …) |
-| Embeddings | Ollama (any embedding model) |
+| Embeddings | Ollama, or the same OpenAI-compatible server |
 | Vector store | PostgreSQL + pgvector |
 | Web search | SearXNG |
 | Service routing | Traefik |
-| Messaging | Telegram / Slack bridge |
+| Messaging | Telegram / Slack / Webex bridge |
 | Integrations | Email (IMAP/SMTP), CalDAV, Todoist, Google, Microsoft, Obsidian/Logseq |
+| Voice | Optional phone line via [PrismConnect](https://github.com/blazux/PrismConnect) — the agent answers and places calls |
+| Modes | Personal (single user) or shared (accounts, groups, rooms) — one flag |
 | Runtime | Docker / Docker Compose |
 
 ---
@@ -96,9 +98,25 @@ An assistant that can't see your actual life is just a fancy autocomplete. So Pr
 - **Calendar & Tasks** — events and to-dos in Prism's own database out of the box; connect **CalDAV** (Apple iCloud, Nextcloud, Fastmail) or **Todoist** for tasks, and **Google** or **Microsoft** for your calendar. "Add lunch with Sam Friday at noon" does what you'd hope.
 - **Notes** — Markdown with `[[wikilinks]]`, a split editor with an AI toolbar, and an "Add to knowledge" button that shoves a note straight into a RAG collection. Lives in Prism's database, or in your existing **Obsidian / Logseq vault** (just a folder of `.md` files).
 - **Terminal** — a real, full TTY into the agent's workspace container. Toggle with **Ctrl+Enter**. `vim`, `htop`, colours, package installs — all work. For when you trust the agent right up until you don't.
-- **Reach it from anywhere** — a **Telegram** (and **Slack**) bridge, so you can bother the agent from your phone while pretending to work.
+- **Reach it from anywhere** — **Telegram**, **Slack** and **Webex** bridges, so you can bother the agent from your phone while pretending to work.
 
 Connecting an account is a one-time OAuth click or an app password in **Settings**. Prism never hosts a shared OAuth app — you create your own, because your calendar is nobody's business but yours.
+
+---
+
+## Personal, or shared
+
+Prism is a personal dashboard by default: one user, and `PRISM_TOKEN` is the whole of authentication. But the same binary runs a shared deployment — set `MULTI_USER=1` and it grows accounts, a login and signup page, groups, per-user scoping for every integration, an admin console, and **Rooms** (shared chat spaces where several people talk to the same agent). The first person to sign up becomes the global admin.
+
+It's the same codebase either way; the mode is decided in one place. At home you never see any of it.
+
+> **Heads up:** turning `MULTI_USER` on is a one-way door. It migrates this deployment's config keys and secrets into the first admin's scope, and single-user mode would no longer find them. Decide before you flip it, not after.
+
+---
+
+## Give it a phone
+
+Point `VOX_URL` at a [PrismConnect](https://github.com/blazux/PrismConnect) instance and the agent gains a phone line. It can **answer** incoming calls with its full toolset — RAG, memory, personality, the lot — and **place**, **list** and **cancel** outgoing calls itself, as ordinary agent tools (`place_call`, `list_calls`, `cancel_call`). The call queue shows up in Tasks. Leave `VOX_URL` empty and none of this exists.
 
 ---
 
@@ -126,12 +144,19 @@ All configuration is done via environment variables (set in `docker-compose.yml`
 | `LLM_BACKEND` | `ollama` (default) or `openai` for any OpenAI-compatible server | `openai` |
 | `OPENAI_BASE_URL` | The `/v1` root, when `LLM_BACKEND=openai` | `http://host:8000/v1` |
 | `OPENAI_MODEL` | Chat model name for the openai backend (its `--served-model-name`) | `qwen` |
+| `OPENAI_API_KEY` | Key for the openai backend, if it needs one (local servers usually don't) | `sk-…` |
 | `EMBED_BACKEND` | Set to `ollama` to keep RAG on Ollama while chat runs on an openai server with no `/v1/embeddings` | `ollama` |
-| `PRISM_TOKEN` | Optional login token — protects the dashboard (omit to disable auth) | `change-me` |
+| `PRISM_TOKEN` | Login token — protects the dashboard (omit to disable auth) | `change-me` |
+| `MULTI_USER` | `1` to turn on accounts, groups, rooms and the admin console (default: personal, single-user) | `1` |
+| `VOX_URL` | A [PrismConnect](https://github.com/blazux/PrismConnect) instance — gives the agent a phone (empty = no telephony) | `http://prismconnect:7860` |
+| `VOX_USER` / `VOX_PASSWORD` | Credentials for the PrismConnect instance, if it's protected | `agent` / `…` |
 | `POSTGRES_URL` | PostgreSQL connection string | `postgres://rag:rag@postgres:5432/rag` |
 | `SEARXNG_URL` | SearXNG instance URL (optional) | `http://searxng:8080` |
+| `AGENT_CONTAINER` | Name of the workspace container the agent runs code in | `prism-workspace` |
 | `WORKSPACE_DIR` | Agent workspace directory | `/workspace` |
 | `PLUGIN_DIR` | Widget storage directory | `/workspace/.plugins` |
+| `CHAT_VISION` | `false` if the chat model is text-only (e.g. MiniMax) — widget previews are captioned to text instead of shown | `false` |
+| `VISION_MODEL` | Override the model used to caption widget previews (defaults to the chat model) | `qwen3-vl` |
 | `TZ` | Timezone for the agent and cron jobs | `America/New_York`, `Europe/Paris` |
 | `SERVICE_PORT_START` | First host port in the auto-allocation range | `20000` |
 | `SERVICE_PORT_END` | Last host port in the auto-allocation range | `20999` |
