@@ -445,7 +445,7 @@ function sendChat() {
 window.sendChat = sendChat
 
 window.handleChatKey = function(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault()
     sendChat()
   }
@@ -502,7 +502,7 @@ function appendUserMessage(text, images, files) {
   const timeStr = fmtTime(new Date())
   div.innerHTML = `<div class="chat-msg-role">You <span class="chat-msg-time">${timeStr}</span></div>${imagesHtml}${filesHtml}<div class="chat-msg-content">${escHtml(text)}</div>`
   msgs.appendChild(div)
-  scrollChat()
+  scrollChat(true) // the user just sent this — always jump to it
 }
 
 function appendStream(content) {
@@ -556,7 +556,7 @@ function appendProgress(text) {
   div.className = 'chat-progress'
   div.textContent = text || ''
   msgs.appendChild(div)
-  msgs.scrollTop = msgs.scrollHeight
+  scrollChat() // live tool progress: follow only if the user hasn't scrolled up
 }
 
 function appendToolUse(msg) {
@@ -678,12 +678,22 @@ function restoreChatHistory(messages) {
   sep2.className = 'chat-history-sep'
   sep2.textContent = '— now —'
   msgs.appendChild(sep2)
-  scrollChat()
+  scrollChat(true) // history just loaded: land at the bottom, on "— now —"
 }
 
-function scrollChat() {
+// Follow the conversation only while the user is already at the bottom. Auto-
+// scrolling unconditionally pinned the view down and made it impossible to scroll up
+// and read while the agent worked. Scrolling up now means "leave me alone"; coming back
+// within SCROLL_SLACK of the bottom resumes the follow. force=true only for things the
+// user just caused (their own message, restoring history).
+const SCROLL_SLACK = 80 // px — close enough to the bottom to keep following
+function chatAtBottom(msgs) {
+  return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight <= SCROLL_SLACK
+}
+function scrollChat(force = false) {
   const msgs = document.getElementById('chat-messages')
-  msgs.scrollTop = msgs.scrollHeight
+  if (!msgs) return
+  if (force || chatAtBottom(msgs)) msgs.scrollTop = msgs.scrollHeight
 }
 
 function formatToolInput(tool, inp) {
@@ -843,7 +853,7 @@ function prismConfirm({ title = 'Confirm', message = '', confirmText = 'Confirm'
     }
     const onKey = (e) => {
       if (e.key === 'Escape') { e.preventDefault(); done(false) }
-      else if (e.key === 'Enter') { e.preventDefault(); done(true) }
+      else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); done(true) }
     }
     overlay.querySelector('.pc-btn-cancel').onclick = () => done(false)
     overlay.querySelector('.' + confirmClass).onclick = () => done(true)
@@ -928,7 +938,7 @@ window.submitSecretDialog = function() {
 }
 
 window.handleSecretKey = function(e) {
-  if (e.key === 'Enter') { e.preventDefault(); submitSecretDialog() }
+  if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); submitSecretDialog() }
   if (e.key === 'Escape') { e.preventDefault(); cancelSecretDialog() }
 }
 
@@ -1186,7 +1196,7 @@ function openCmdK() {
   ov.appendChild(box); document.body.appendChild(ov)
   const input = box.querySelector('#cmdk-input'), list = box.querySelector('#cmdk-list')
   const all = [
-    { kind: 'action', label: 'Terminal (Ctrl+`)', icon: '▸', run: () => toggleTerm(true) },
+    { kind: 'action', label: 'Terminal (Ctrl+Enter)', icon: '▸', run: () => toggleTerm(true) },
     ...(currentView.type === 'board' ? [{ kind: 'action', label: 'Tidy up windows', icon: '▦', run: tidyWindows }] : []),
     ...Object.keys(APP_TITLES).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
     ...allSessions.filter(s => s.id !== ASSISTANT).map(s => {
@@ -1213,7 +1223,7 @@ function openCmdK() {
     if (e.key === 'Escape') { e.preventDefault(); close() }
     else if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(sel + 1, filtered.length - 1); render() }
     else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(sel - 1, 0); render() }
-    else if (e.key === 'Enter') { e.preventDefault(); choose(sel) }
+    else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); choose(sel) }
   }
   input.addEventListener('input', () => { const q = input.value.toLowerCase(); filtered = all.filter(it => it.label.toLowerCase().includes(q)); sel = 0; render() })
   document.addEventListener('keydown', onKey, true)
@@ -1222,12 +1232,16 @@ function openCmdK() {
 }
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openCmdK() }
-  // Ctrl+` (or ⌘+`) toggles the workspace terminal. (Ctrl+T is reserved by the browser.)
-  else if ((e.metaKey || e.ctrlKey) && e.key === '`') { e.preventDefault(); toggleTerm() }
+  // Ctrl+Enter (or ⌘+Enter) toggles the workspace terminal. It replaced Ctrl+`,
+  // which costs AltGr+7 then space on an AZERTY keyboard. Every other Enter handler
+  // — chat, dialogs, command palette — now ignores the key while Ctrl/⌘ is held, so
+  // the shortcut can never fire an action *and* open the terminal. (Ctrl+T is reserved
+  // by the browser.)
+  else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); toggleTerm() }
 })
 
 // ─── Workspace terminal (interactive PTY via xterm.js over WebSocket) ────────────
-// Hidden bottom panel toggled with Ctrl+`. A real shell in the agent's workspace
+// Hidden bottom panel toggled with Ctrl+Enter. A real shell in the agent's workspace
 // container; the session persists while the page stays open.
 let termVisible = false, term = null, termFit = null, termWs = null
 function termPanel() {
