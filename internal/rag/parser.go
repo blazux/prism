@@ -50,33 +50,6 @@ func parseByExt(path string) (string, error) {
 	}
 }
 
-// hyphenBreak matches a word split across two lines by the typesetter: a letter,
-// the typographic hyphen U+2010 that poppler emits, then the line break. Only
-// this shape is a hyphenation — "real‐time" or "user‐defined" keep their hyphen
-// because no newline follows. Half the chunks of a 183-page manual carried a
-// broken word ("refer‐\nence"), which no search can ever match.
-var hyphenBreak = regexp.MustCompile(`(\p{L})\x{2010}[ \t]*\r?\n[ \t]*(\p{Ll})`)
-
-// typographic maps the characters poppler carries over from the PDF to their
-// plain-text equivalents, so a query typed on a keyboard can match the text.
-var typographic = strings.NewReplacer(
-	"\u2010", "-", // remaining hyphens (compound words)
-	"\u00ad", "", // soft hyphen: invisible, never wanted
-	"\u2018", "'", "\u2019", "'",
-	"\u201c", `"`, "\u201d", `"`,
-	"\u00a0", " ", // non-breaking space
-	"\ufb01", "fi", "\ufb02", "fl", "\ufb00", "ff", "\ufb03", "ffi", "\ufb04", "ffl",
-)
-
-// NormalizeExtractedText repairs text coming out of pdftotext: it rejoins words
-// broken by end-of-line hyphenation, then normalises typographic characters.
-// Order matters — the hyphenation pass must run before U+2010 is rewritten to a
-// plain hyphen, otherwise a line break would be all that distinguishes the two.
-func NormalizeExtractedText(s string) string {
-	s = hyphenBreak.ReplaceAllString(s, "$1$2")
-	return typographic.Replace(s)
-}
-
 // ConvertToPDF converts a file to PDF using LibreOffice headless mode.
 // The resulting PDF is written to outDir and its path is returned.
 func ConvertToPDF(path, outDir string) (string, error) {
@@ -179,6 +152,33 @@ func extractPPTXText(data []byte) string {
 	return strings.TrimSpace(sb.String())
 }
 
+// hyphenBreak matches a word split across two lines by the typesetter: a letter,
+// the typographic hyphen U+2010 that poppler emits, then the line break. Only
+// this shape is a hyphenation — "real‐time" or "user‐defined" keep their hyphen
+// because no newline follows. Half the chunks of a 183-page manual carried a
+// broken word ("refer‐\nence"), which no search can ever match.
+var hyphenBreak = regexp.MustCompile(`(\p{L})\x{2010}[ \t]*\r?\n[ \t]*(\p{Ll})`)
+
+// typographic maps the characters poppler carries over from the PDF to their
+// plain-text equivalents, so a query typed on a keyboard can match the text.
+var typographic = strings.NewReplacer(
+	"\u2010", "-", // remaining hyphens (compound words)
+	"\u00ad", "", // soft hyphen: invisible, never wanted
+	"\u2018", "'", "\u2019", "'",
+	"\u201c", `"`, "\u201d", `"`,
+	"\u00a0", " ", // non-breaking space
+	"\ufb01", "fi", "\ufb02", "fl", "\ufb00", "ff", "\ufb03", "ffi", "\ufb04", "ffl",
+)
+
+// NormalizeExtractedText repairs text coming out of pdftotext: it rejoins words
+// broken by end-of-line hyphenation, then normalises typographic characters.
+// Order matters — the hyphenation pass must run before U+2010 is rewritten to a
+// plain hyphen, otherwise a line break would be all that distinguishes the two.
+func NormalizeExtractedText(s string) string {
+	s = hyphenBreak.ReplaceAllString(s, "$1$2")
+	return typographic.Replace(s)
+}
+
 func parsePDF(path string) (string, error) {
 	out, err := exec.Command("pdftotext", path, "-").Output()
 	if err != nil {
@@ -199,12 +199,6 @@ func ParsePDFPages(path string) ([]string, error) {
 		pages = pages[:len(pages)-1]
 	}
 	return pages, nil
-}
-
-// execCommandOutput runs a command and returns its stdout as a string.
-func execCommandOutput(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).Output()
-	return string(out), err
 }
 
 // parseDOCX reads a .docx file (ZIP archive) and extracts text from
