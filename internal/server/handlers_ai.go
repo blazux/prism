@@ -25,14 +25,14 @@ func stripThink(s string) string {
 // assistPrompts maps a task to a system instruction. The user message is the
 // caller's text, optionally prefixed with a free-form instruction.
 var assistPrompts = map[string]string{
-	"summarize":     "Summarize the following text concisely. Output only the summary, no preamble.",
-	"email_summary": "Summarize this email in 2-4 short bullet points: who sent it, what they want, and any deadline or action needed. Be terse. Output only the bullets.",
-	"email_reply":   "Write a clear, polite, concise reply to the email below, from the recipient's point of view. Match a professional but friendly tone unless told otherwise. Output ONLY the reply body — no subject line, no greeting placeholders like [Name], no commentary.",
-	"email_triage":  "You are an email triage assistant. The input is a JSON array of emails (index, from, subject, snippet). Classify each one. Reply with ONLY a JSON array of objects {\"i\": <index>, \"category\": <one of: Action, FYI, Newsletter, Personal, Promo, Spam>, \"tags\": [up to 2 short lowercase tags]}. No prose, no code fences.",
-	"doc_rewrite":   "Rewrite the text below to improve clarity and flow while preserving meaning. Output ONLY the rewritten text, no commentary.",
-	"doc_continue":  "Continue writing naturally from where the text ends, in the same voice and style. Output ONLY the continuation (do not repeat the existing text).",
-	"doc_grammar":   "Fix spelling, grammar and punctuation in the text below. Preserve the meaning, tone and Markdown formatting. Output ONLY the corrected text.",
-	"doc_shorten":   "Make the text below more concise without losing key information. Output ONLY the shortened text.",
+	"summarize":      "Summarize the following text concisely. Output only the summary, no preamble.",
+	"email_summary":  "Summarize this email in 2-4 short bullet points: who sent it, what they want, and any deadline or action needed. Be terse. Output only the bullets.",
+	"email_reply":    "Write a clear, polite, concise reply to the email below, from the recipient's point of view. Match a professional but friendly tone unless told otherwise. Output ONLY the reply body — no subject line, no greeting placeholders like [Name], no commentary.",
+	"email_triage":   "You are an email triage assistant. The input is a JSON array of emails (index, from, subject, snippet). Classify each one. Reply with ONLY a JSON array of objects {\"i\": <index>, \"category\": <one of: Action, FYI, Newsletter, Personal, Promo, Spam>, \"tags\": [up to 2 short lowercase tags]}. No prose, no code fences.",
+	"doc_rewrite":    "Rewrite the text below to improve clarity and flow while preserving meaning. Output ONLY the rewritten text, no commentary.",
+	"doc_continue":   "Continue writing naturally from where the text ends, in the same voice and style. Output ONLY the continuation (do not repeat the existing text).",
+	"doc_grammar":    "Fix spelling, grammar and punctuation in the text below. Preserve the meaning, tone and Markdown formatting. Output ONLY the corrected text.",
+	"doc_shorten":    "Make the text below more concise without losing key information. Output ONLY the shortened text.",
 	"doc_summarize":  "Summarize the text below into a short paragraph. Output only the summary.",
 	"task_breakdown": "Break the user's objective into a short ordered list of concrete, actionable sub-tasks (aim for 3-8). Each should start with a verb and be self-contained. Reply with ONLY a JSON array of short task-title strings. No prose, no numbering, no code fences.",
 }

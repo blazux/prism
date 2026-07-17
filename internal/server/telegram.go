@@ -55,8 +55,8 @@ func (s *Server) telegramAllowedChat() (int64, bool) {
 // telegramChannel adapts the Telegram bridge to the Channel interface.
 type telegramChannel struct{ s *Server }
 
-func (c *telegramChannel) Name() string             { return "telegram" }
-func (c *telegramChannel) Configured() bool         { return c.s.telegramToken() != "" }
+func (c *telegramChannel) Name() string               { return "telegram" }
+func (c *telegramChannel) Configured() bool           { return c.s.telegramToken() != "" }
 func (c *telegramChannel) SendToOwner(t string) error { return c.s.tgSendToOwner(t) }
 func (c *telegramChannel) Run(ctx context.Context) {
 	if token := c.s.telegramToken(); token != "" {

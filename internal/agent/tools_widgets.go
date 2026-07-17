@@ -10,10 +10,10 @@ import (
 )
 
 type pluginMeta struct {
-	Title  string  `json:"title"`
-	Cols   int     `json:"cols"`
-	Height int     `json:"height"`
-	Locked bool    `json:"locked,omitempty"`
+	Title  string `json:"title"`
+	Cols   int    `json:"cols"`
+	Height int    `json:"height"`
+	Locked bool   `json:"locked,omitempty"`
 	// Open is the window lifecycle flag. nil/absent means "open" (the default
 	// for freshly created widgets). false means the user minimized the window
 	// but kept the widget — it lives in the dock and can be reopened.

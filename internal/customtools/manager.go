@@ -12,15 +12,15 @@ import (
 )
 
 type Tool struct {
-	Name        string                `json:"name"`
-	Description string                `json:"description"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 	// WhenToUse / Usage are optional richer metadata folded into the description
 	// the model sees, so it picks the tool by intent (when + how) rather than by
 	// guessing from the name. Both are backward-compatible (empty = old behavior).
-	WhenToUse   string                `json:"when_to_use"`
-	Usage       string                `json:"usage"`
-	Parameters  ollama.ToolParameters `json:"parameters"`
-	Filename    string                `json:"filename"`
+	WhenToUse  string                `json:"when_to_use"`
+	Usage      string                `json:"usage"`
+	Parameters ollama.ToolParameters `json:"parameters"`
+	Filename   string                `json:"filename"`
 }
 
 // llmDescription composes the description sent to the model from the base

@@ -22,10 +22,10 @@ const emailConfigKey = "email_config"
 const emailPasswordSecret = "email_password"
 
 type emailStoredConfig struct {
-	IMAPHost string `json:"imap_host"`
-	IMAPPort int    `json:"imap_port"`
-	SMTPHost string `json:"smtp_host"`
-	SMTPPort int    `json:"smtp_port"`
+	IMAPHost  string `json:"imap_host"`
+	IMAPPort  int    `json:"imap_port"`
+	SMTPHost  string `json:"smtp_host"`
+	SMTPPort  int    `json:"smtp_port"`
 	User      string `json:"user"`
 	From      string `json:"from"`
 	Security  string `json:"security,omitempty"`
