@@ -18,7 +18,7 @@ func (s *Server) handleTodoistConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case "GET":
-		tok, _, _ := s.memStore.GetSecret(r.Context(), tasks.TodoistTokenSecret)
+		tok, _, _ := s.userStore(r).GetSecret(r.Context(), tasks.TodoistTokenSecret)
 		writeJSON(w, map[string]interface{}{"configured": tok != ""})
 	case "POST":
 		var b struct {
@@ -30,7 +30,7 @@ func (s *Server) handleTodoistConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if b.Disconnect {
-			s.memStore.SetSecret(r.Context(), tasks.TodoistTokenSecret, "")
+			s.userStore(r).SetSecret(r.Context(), tasks.TodoistTokenSecret, "")
 			writeJSON(w, map[string]interface{}{"ok": true, "configured": false})
 			return
 		}
@@ -44,7 +44,7 @@ func (s *Server) handleTodoistConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 400)
 			return
 		}
-		if err := s.memStore.SetSecret(r.Context(), tasks.TodoistTokenSecret, b.Token); err != nil {
+		if err := s.userStore(r).SetSecret(r.Context(), tasks.TodoistTokenSecret, b.Token); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}

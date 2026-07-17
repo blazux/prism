@@ -67,7 +67,7 @@ func (s *Server) handleOAuth(w http.ResponseWriter, r *http.Request) {
 		s.oauthConfig(w, r, provider, redirect)
 	case "start":
 		state := randState()
-		url, err := oauthx.AuthCodeURL(r.Context(), s.memStore, provider, redirect, state)
+		url, err := oauthx.AuthCodeURL(r.Context(), s.userStore(r), provider, redirect, state)
 		if err != nil {
 			http.Error(w, err.Error(), 400)
 			return
@@ -85,8 +85,8 @@ func (s *Server) oauthConfig(w http.ResponseWriter, r *http.Request, provider, r
 	switch r.Method {
 	case "GET":
 		writeJSON(w, map[string]interface{}{
-			"connected":   oauthx.Connected(r.Context(), s.memStore, provider),
-			"clientId":    oauthx.ClientID(r.Context(), s.memStore, provider),
+			"connected":   oauthx.Connected(r.Context(), s.userStore(r), provider),
+			"clientId":    oauthx.ClientID(r.Context(), s.userStore(r), provider),
 			"redirectUri": redirect,
 		})
 	case "POST":
@@ -100,7 +100,7 @@ func (s *Server) oauthConfig(w http.ResponseWriter, r *http.Request, provider, r
 			return
 		}
 		if b.Disconnect {
-			oauthx.Disconnect(r.Context(), s.memStore, provider)
+			oauthx.Disconnect(r.Context(), s.userStore(r), provider)
 			writeJSON(w, map[string]interface{}{"ok": true, "connected": false})
 			return
 		}
@@ -108,7 +108,7 @@ func (s *Server) oauthConfig(w http.ResponseWriter, r *http.Request, provider, r
 			http.Error(w, "client id and secret required", 400)
 			return
 		}
-		if err := oauthx.SaveClient(r.Context(), s.memStore, provider, strings.TrimSpace(b.ClientID), strings.TrimSpace(b.ClientSecret)); err != nil {
+		if err := oauthx.SaveClient(r.Context(), s.userStore(r), provider, strings.TrimSpace(b.ClientID), strings.TrimSpace(b.ClientSecret)); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -135,7 +135,7 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request, provider 
 		oauthDonePage(w, provider, "Authorization expired. Please try again.")
 		return
 	}
-	if err := oauthx.Exchange(r.Context(), s.memStore, provider, st.redirect, q.Get("code")); err != nil {
+	if err := oauthx.Exchange(r.Context(), s.userStore(r), provider, st.redirect, q.Get("code")); err != nil {
 		oauthDonePage(w, provider, "Could not complete sign-in: "+err.Error())
 		return
 	}

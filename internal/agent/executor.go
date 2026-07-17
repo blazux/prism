@@ -94,6 +94,12 @@ func (e *ToolExecutor) SetPluginDir(dir string) { e.pluginDir = dir }
 
 func (e *ToolExecutor) SetSessionID(id string) { e.sessionID = id }
 
+// userStore returns the store holding the current user's data. Prism is
+// single-user, so this is the store itself. The seam mirrors the server's
+// userStore(r): the multi-user build returns a config-scoped view here, so tools
+// are written once and scope correctly in both.
+func (e *ToolExecutor) userStore() *memory.Store { return e.memStore }
+
 func (e *ToolExecutor) WorkspaceDir() string { return e.workspaceDir }
 
 func (e *ToolExecutor) SetMemoryStore(ms *memory.Store) { e.memStore = ms }

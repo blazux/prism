@@ -20,29 +20,29 @@ func (s *Server) handlePimSources(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	switch r.Method {
 	case "GET":
-		cal, _, _ := s.memStore.GetConfig(ctx, calendar.KeyProvider)
-		tsk, _, _ := s.memStore.GetConfig(ctx, tasks.KeyProvider)
+		cal, _, _ := s.userStore(r).GetConfig(ctx, calendar.KeyProvider)
+		tsk, _, _ := s.userStore(r).GetConfig(ctx, tasks.KeyProvider)
 		if cal == "" {
 			cal = "auto"
 		}
 		if tsk == "" {
 			tsk = "auto"
 		}
-		_, caldavOK := caldav.Load(ctx, s.memStore)
-		todoTok, _, _ := s.memStore.GetSecret(ctx, tasks.TodoistTokenSecret)
+		_, caldavOK := caldav.Load(ctx, s.userStore(r))
+		todoTok, _, _ := s.userStore(r).GetSecret(ctx, tasks.TodoistTokenSecret)
 		writeJSON(w, map[string]interface{}{
 			"calendar": cal,
 			"tasks":    tsk,
 			"available": map[string]bool{
 				"caldav":    caldavOK,
-				"google":    oauthx.Connected(ctx, s.memStore, "google"),
-				"microsoft": oauthx.Connected(ctx, s.memStore, "microsoft"),
+				"google":    oauthx.Connected(ctx, s.userStore(r), "google"),
+				"microsoft": oauthx.Connected(ctx, s.userStore(r), "microsoft"),
 				"todoist":   todoTok != "",
 			},
 			// What each choice resolves to right now (so the UI can show "Auto → Google").
 			"resolved": map[string]string{
-				"calendar": calendar.ProviderFor(ctx, s.memStore, pimScope).Kind(),
-				"tasks":    tasks.ProviderFor(ctx, s.memStore, pimScope).Kind(),
+				"calendar": calendar.ProviderFor(ctx, s.userStore(r), pimScope).Kind(),
+				"tasks":    tasks.ProviderFor(ctx, s.userStore(r), pimScope).Kind(),
 			},
 		})
 	case "POST":
@@ -55,10 +55,10 @@ func (s *Server) handlePimSources(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if validSource(b.Calendar, "google", "microsoft") {
-			s.memStore.SetConfig(ctx, calendar.KeyProvider, b.Calendar)
+			s.userStore(r).SetConfig(ctx, calendar.KeyProvider, b.Calendar)
 		}
 		if validSource(b.Tasks, "todoist") {
-			s.memStore.SetConfig(ctx, tasks.KeyProvider, b.Tasks)
+			s.userStore(r).SetConfig(ctx, tasks.KeyProvider, b.Tasks)
 		}
 		writeJSON(w, map[string]interface{}{"ok": true})
 	default:

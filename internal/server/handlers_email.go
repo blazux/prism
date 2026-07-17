@@ -34,10 +34,10 @@ type emailStoredConfig struct {
 }
 
 func (s *Server) loadEmailCfg(r *http.Request) (email.Config, bool) {
-	if s.memStore == nil {
+	if s.userStore(r) == nil {
 		return email.Config{}, false
 	}
-	raw, ok, _ := s.memStore.GetConfig(r.Context(), emailConfigKey)
+	raw, ok, _ := s.userStore(r).GetConfig(r.Context(), emailConfigKey)
 	if !ok || raw == "" {
 		return email.Config{}, false
 	}
@@ -45,7 +45,7 @@ func (s *Server) loadEmailCfg(r *http.Request) (email.Config, bool) {
 	if json.Unmarshal([]byte(raw), &sc) != nil {
 		return email.Config{}, false
 	}
-	pass, _, _ := s.memStore.GetSecret(r.Context(), emailPasswordSecret)
+	pass, _, _ := s.userStore(r).GetSecret(r.Context(), emailPasswordSecret)
 	return email.Config{
 		IMAPHost: sc.IMAPHost, IMAPPort: sc.IMAPPort,
 		SMTPHost: sc.SMTPHost, SMTPPort: sc.SMTPPort,
@@ -62,10 +62,10 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		var sc emailStoredConfig
-		if raw, ok, _ := s.memStore.GetConfig(r.Context(), emailConfigKey); ok {
+		if raw, ok, _ := s.userStore(r).GetConfig(r.Context(), emailConfigKey); ok {
 			json.Unmarshal([]byte(raw), &sc)
 		}
-		pass, hasPass, _ := s.memStore.GetSecret(r.Context(), emailPasswordSecret)
+		pass, hasPass, _ := s.userStore(r).GetSecret(r.Context(), emailPasswordSecret)
 		writeJSON(w, map[string]interface{}{
 			"configured":   sc.IMAPHost != "" && sc.User != "",
 			"imap_host":    sc.IMAPHost,
@@ -85,7 +85,7 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 			Password string `json:"password"`
 		}
 		// Merge over existing so partial updates keep prior values.
-		if raw, ok, _ := s.memStore.GetConfig(r.Context(), emailConfigKey); ok {
+		if raw, ok, _ := s.userStore(r).GetConfig(r.Context(), emailConfigKey); ok {
 			json.Unmarshal([]byte(raw), &b.emailStoredConfig)
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
@@ -93,12 +93,12 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out, _ := json.Marshal(b.emailStoredConfig)
-		if err := s.memStore.SetConfig(r.Context(), emailConfigKey, string(out)); err != nil {
+		if err := s.userStore(r).SetConfig(r.Context(), emailConfigKey, string(out)); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		if b.Password != "" {
-			if err := s.memStore.SetSecret(r.Context(), emailPasswordSecret, b.Password); err != nil {
+			if err := s.userStore(r).SetSecret(r.Context(), emailPasswordSecret, b.Password); err != nil {
 				http.Error(w, err.Error(), 500)
 				return
 			}
@@ -119,7 +119,7 @@ func (s *Server) handleEmailTags(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case "GET":
-		raw, _, _ := s.memStore.GetConfig(r.Context(), emailTagsKey)
+		raw, _, _ := s.userStore(r).GetConfig(r.Context(), emailTagsKey)
 		if raw == "" {
 			raw = "{}"
 		}
@@ -132,7 +132,7 @@ func (s *Server) handleEmailTags(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cur := map[string]json.RawMessage{}
-		if raw, ok, _ := s.memStore.GetConfig(r.Context(), emailTagsKey); ok && raw != "" {
+		if raw, ok, _ := s.userStore(r).GetConfig(r.Context(), emailTagsKey); ok && raw != "" {
 			json.Unmarshal([]byte(raw), &cur)
 		}
 		for k, v := range incoming {
@@ -143,7 +143,7 @@ func (s *Server) handleEmailTags(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		out, _ := json.Marshal(cur)
-		if err := s.memStore.SetConfig(r.Context(), emailTagsKey, string(out)); err != nil {
+		if err := s.userStore(r).SetConfig(r.Context(), emailTagsKey, string(out)); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}

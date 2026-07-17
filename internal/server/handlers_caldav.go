@@ -17,7 +17,7 @@ func (s *Server) handleCalDAVConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case "GET":
-		cfg, ok := caldav.Load(r.Context(), s.memStore)
+		cfg, ok := caldav.Load(r.Context(), s.userStore(r))
 		writeJSON(w, map[string]interface{}{
 			"configured": ok, "url": cfg.URL, "user": cfg.User,
 			"eventPath": cfg.EventPath, "taskPath": cfg.TaskPath,
@@ -36,8 +36,8 @@ func (s *Server) handleCalDAVConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if b.Disconnect {
-			s.memStore.SetConfig(r.Context(), caldav.KeyConfig, "")
-			s.memStore.SetSecret(r.Context(), caldav.PasswordSecret, "")
+			s.userStore(r).SetConfig(r.Context(), caldav.KeyConfig, "")
+			s.userStore(r).SetSecret(r.Context(), caldav.PasswordSecret, "")
 			writeJSON(w, map[string]interface{}{"ok": true, "configured": false})
 			return
 		}
@@ -53,7 +53,7 @@ func (s *Server) handleCalDAVConfig(w http.ResponseWriter, r *http.Request) {
 		// Keep the existing password when the field is left blank (e.g. when only
 		// re-pinning calendars).
 		if cfg.Pass == "" {
-			if old, ok := caldav.Load(r.Context(), s.memStore); ok {
+			if old, ok := caldav.Load(r.Context(), s.userStore(r)); ok {
 				cfg.Pass = old.Pass
 			}
 		}
@@ -80,9 +80,9 @@ func (s *Server) handleCalDAVConfig(w http.ResponseWriter, r *http.Request) {
 		stored := cfg
 		stored.Pass = ""
 		raw, _ := json.Marshal(stored)
-		s.memStore.SetConfig(r.Context(), caldav.KeyConfig, string(raw))
+		s.userStore(r).SetConfig(r.Context(), caldav.KeyConfig, string(raw))
 		if b.Password != "" {
-			s.memStore.SetSecret(r.Context(), caldav.PasswordSecret, b.Password)
+			s.userStore(r).SetSecret(r.Context(), caldav.PasswordSecret, b.Password)
 		}
 		out := make([]map[string]interface{}, 0, len(cals))
 		for _, c := range cals {

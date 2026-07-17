@@ -5,7 +5,33 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"prism/internal/memory"
 )
+
+// store returns the memory store. It is written asynchronously once RAG/Postgres
+// comes up (see Start), so reads go through the lock rather than touching the
+// field directly.
+func (s *Server) store() *memory.Store {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.memStore
+}
+
+// userStore returns the store holding the calling user's data.
+//
+// Prism is single-user: there is one store, and every request sees the same one —
+// so this is store(), and r is ignored. The seam exists anyway, because the
+// multi-user build returns a config-scoped view of the same store here ("u<id>").
+// Handlers that call userStore(r) instead of touching s.memStore are then written
+// once and behave correctly in both, which is the whole point: the mode is decided
+// in this function, not in every handler.
+func (s *Server) userStore(r *http.Request) *memory.Store { return s.store() }
+
+// pimScopeFor returns the scope for the caller's personal data (notes, tasks,
+// calendar). Single-user: always the shared scope. Same seam as userStore — the
+// multi-user build answers "u<id>" here.
+func (s *Server) pimScopeFor(r *http.Request) string { return pimScope }
 
 func (s *Server) isAuthenticated(r *http.Request) bool {
 	if cookie, err := r.Cookie("prism_session"); err == nil && cookie.Value == s.cfg.AuthToken {
