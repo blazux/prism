@@ -290,15 +290,18 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		}
 		persona += a.personality
 	}
-	if strings.TrimSpace(persona) == "" {
-		persona = systemPromptPersonalityDefault
-	}
 	if a.agentName != "" {
 		sb.WriteString("Your name is ")
 		sb.WriteString(a.agentName)
 		sb.WriteString(".\n\n")
 	}
-	sb.WriteString(persona)
+	// The role always comes first, whatever the persona says — see systemPromptRole.
+	// A persona describes how the agent talks; it must not be able to remove what it is.
+	sb.WriteString(systemPromptRole)
+	if strings.TrimSpace(persona) != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(persona)
+	}
 	sb.WriteString(systemPromptCore)
 
 	// Channel guidance: the "telegram" session is the user texting from their phone.
@@ -391,6 +394,13 @@ const maxIterations = 75
 // Chat processes a user message (with optional images) and streams events.
 // images is a slice of base64-encoded image strings (raw base64, no data-URL prefix).
 func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, events chan<- Event) {
+	// Re-read the agent's name and base persona once per turn. They live in the DB and
+	// are edited in Settings while this agent is connected, so loading them only at
+	// construction made an edit invisible until the page was reloaded — and "new chat"
+	// doesn't help: it clears the history but keeps the same Agent. Two small SELECTs
+	// against an LLM call is free.
+	a.loadProfile()
+
 	// Load history from DB on first call in this session
 	a.loadHistoryFromDB(ctx)
 

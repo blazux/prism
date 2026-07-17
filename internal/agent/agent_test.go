@@ -1,6 +1,10 @@
 package agent
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
 
 func TestStripThinkingBlocks_NoTag(t *testing.T) {
 	input := "Hello, world! This is a normal response."
@@ -114,4 +118,34 @@ func containsString(s, sub string) bool {
 			}
 			return false
 		}())
+}
+
+// A persona is a voice, not a job description. It used to *replace* the default
+// personality, which was the only line telling the agent it is an assistant with a
+// workspace — so a roleplay persona silently cost the agent its tools (measured on
+// qwen3.6-35b-a3b: 0/3 tool calls with the persona alone, 3/3 with the role line
+// restored). The role must survive any persona, including one that denies it.
+func TestBuildSystemPrompt_RoleSurvivesAPersona(t *testing.T) {
+	const persona = "INSTRUCTION ABSOLUE : Tu ES Kate Libby. Tu n'es pas un assistant générique."
+	a := &Agent{basePersonality: persona}
+
+	prompt := a.buildSystemPrompt(context.Background(), "")
+
+	if !strings.Contains(prompt, "You are a general-purpose AI assistant") {
+		t.Error("the role line is missing: a custom persona must not be able to remove what the agent is")
+	}
+	if !strings.Contains(prompt, "Kate Libby") {
+		t.Error("the persona is missing: the role must not replace the user's voice either")
+	}
+	if strings.Index(prompt, "You are a general-purpose AI assistant") > strings.Index(prompt, "Kate Libby") {
+		t.Error("the role must come before the persona")
+	}
+}
+
+// With no persona at all, the role still stands on its own.
+func TestBuildSystemPrompt_RoleWithoutPersona(t *testing.T) {
+	a := &Agent{}
+	if !strings.Contains(a.buildSystemPrompt(context.Background(), ""), "You are a general-purpose AI assistant") {
+		t.Error("the role line must be emitted even when no personality is set")
+	}
 }

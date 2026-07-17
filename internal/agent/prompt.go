@@ -1,8 +1,20 @@
 package agent
 
-// systemPromptPersonalityDefault is the editable section shown before the core prompt.
-// Users can replace this by asking the agent to call update_system_prompt.
-const systemPromptPersonalityDefault = `You are a general-purpose AI assistant powering a personal dashboard. You have full access to a Docker workspace container and the web.`
+// systemPromptRole states what the agent *is*. It is emitted for every session,
+// before the personality, and is deliberately NOT part of the editable section.
+//
+// It used to be the default personality — which meant any custom persona replaced
+// it, and the agent quietly lost the sentence that makes it act. Measured on
+// qwen3.6-35b-a3b with a roleplay persona (a character sheet that opens with "you
+// are NOT a generic assistant"): 0/3 requests needing a tool produced a tool call;
+// the model answered in character instead. With this line restored: 3/3.
+//
+// The identity claim is what does the work, in any language. Describing the
+// capabilities alone does not: appending "You have full access to a Docker
+// workspace container and the web" to the same persona still scored 0/3, while
+// "Tu es un assistant IA généraliste…" scored 3/3. So keep "You are a … assistant"
+// in this sentence — a persona is a voice, not a job description.
+const systemPromptRole = `You are a general-purpose AI assistant powering a personal dashboard. You have full access to a Docker workspace container and the web.`
 
 // systemPromptCore contains the protected technical instructions that cannot be modified.
 const systemPromptCore = `
