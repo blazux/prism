@@ -3,11 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Settings — PRISM</title>
+<title>Settings — SPECTRUM</title>
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link rel="stylesheet" href="/style.css">
 <!-- Applies the saved theme (sets CSS vars on :root) before the page renders -->
 <script src="/theme.js"></script>
+<script src="/modal.js"></script>
 <style>
 html, body { height: 100%; overflow: hidden; margin: 0; }
 #settings-app { display: flex; flex-direction: column; zoom: var(--ui-scale, 1); height: calc(100vh / var(--ui-scale, 1)); }
@@ -243,7 +244,47 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
   transition: border-color 0.15s;
 }
 #modal input:focus { border-color: var(--accent); }
+#modal textarea {
+  background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius);
+  color: var(--text); font-size: 13px; font-family: var(--sans);
+  padding: 8px 12px; outline: none; width: 100%; box-sizing: border-box;
+  resize: vertical; min-height: 62px; line-height: 1.45;
+  transition: border-color 0.15s;
+}
+#modal textarea:focus { border-color: var(--accent); }
+#modal label {
+  font-size: 11.5px; color: var(--text3); display: block; margin-bottom: 5px;
+}
 #modal-hint { font-size: 11.5px; color: var(--text3); margin-top: -6px; }
+
+/* Une collection sans description est invisible pour l'agent : le bloc
+   « ## Knowledge Base (RAG) » du prompt système ne peut alors afficher que
+   « (12 docs, 340 chunks) », ce qui ne lui dit jamais QUAND chercher dedans. */
+#desc-input.missing { border-bottom-color: var(--yellow, #d9a441); }
+#desc-warn {
+  font-size: 11px; color: var(--yellow, #d9a441);
+  display: flex; align-items: center; gap: 5px; margin-top: 2px;
+}
+
+/* Cible de l'upload : la collection se choisit ici, plus besoin de passer par la sidebar. */
+#upload-target {
+  display: flex; align-items: center; gap: 8px;
+  margin: 16px 24px 0; font-size: 12px; color: var(--text3);
+}
+#upload-target select {
+  flex: 1; min-width: 0;
+  background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius);
+  color: var(--text); font-size: 12.5px; font-family: var(--sans);
+  padding: 6px 10px; outline: none; cursor: pointer;
+}
+#upload-target select:focus { border-color: var(--accent); }
+#upload-target button {
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--text2);
+  font-size: 12px; font-family: var(--sans); padding: 6px 12px;
+  border-radius: var(--radius); cursor: pointer; white-space: nowrap;
+  transition: color 0.1s, border-color 0.1s;
+}
+#upload-target button:hover { color: var(--accent); border-color: var(--accent); }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .btn {
   background: var(--bg3); border: 1px solid var(--border2); color: var(--text2);
@@ -293,7 +334,7 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
     <div class="header-left">
       <a id="back-link" href="/" style="display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--text3);font-size:12.5px;transition:color .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-        PRISM
+        SPECTRUM
       </a>
       <span style="color:var(--text3);font-size:12px">›</span>
       <span class="logo" style="color:var(--text2);font-size:13px;font-weight:600">Settings</span>
@@ -307,7 +348,10 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
   <div id="settings-main">
 
     <nav id="settings-nav">
-      <div class="nav-item active" data-tab="tools">
+      <div class="nav-item active" data-tab="profile">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Profile
+      </div>
+      <div class="nav-item" data-tab="tools">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span> Tools
       </div>
       <div class="nav-item" data-tab="agent">
@@ -350,9 +394,18 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 <div id="modal-overlay" onclick="closeModal(event)">
   <div id="modal">
     <h3>New collection</h3>
-    <input id="modal-input" type="text" placeholder="e.g. my-docs" maxlength="60"
-           onkeydown="if(event.key==='Enter')createCollection()">
-    <div id="modal-hint">Letters, numbers, hyphens. Will be lowercased.</div>
+    <div>
+      <label for="modal-input">Name</label>
+      <input id="modal-input" type="text" placeholder="e.g. my-docs" maxlength="60"
+             onkeydown="if(event.key==='Enter')document.getElementById('modal-desc').focus()">
+      <div id="modal-hint">Letters, numbers, hyphens. Will be lowercased.</div>
+    </div>
+    <div>
+      <label for="modal-desc">Description — tells the agent when to search this collection</label>
+      <textarea id="modal-desc" maxlength="300" rows="3"
+                placeholder="e.g. Internal API documentation: endpoints, authentication, error codes."
+                onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))createCollection()"></textarea>
+    </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" onclick="createCollection()">Create</button>
@@ -365,7 +418,7 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 <script>
 const SESSION = new URLSearchParams(window.location.search).get('session') || 'default'
 const CONFIG_KEY = 'agent-config'
-let currentTab = window.location.hash.replace('#', '') || 'tools'
+let currentTab = window.location.hash.replace('#', '') || 'profile'
 let customTools = []
 let mcpServers = []
 
@@ -378,6 +431,26 @@ document.querySelectorAll('.nav-item').forEach(el => {
   el.classList.toggle('active', el.dataset.tab === currentTab)
   el.addEventListener('click', () => switchTab(el.dataset.tab))
 })
+
+// Hide settings tabs for apps the global admin disabled (Admin → Platform).
+fetch('/api/platform').then(r => r.json()).then(d => {
+  const disabled = new Set(d.disabledApps || [])
+  const tabFor = { email: 'email', notes: 'notes', calendar: 'calendar' }
+  for (const [app, tab] of Object.entries(tabFor)) {
+    if (!disabled.has(app)) continue
+    const el = document.querySelector(`.nav-item[data-tab="${tab}"]`)
+    if (el) el.style.display = 'none'
+    if (currentTab === tab) switchTab('profile')
+  }
+}).catch(() => {})
+
+// Telegram is per-user (everyone connects their own bot to their own agent);
+// Slack is still a deployment-wide single bot, so its card is admin-only —
+// see renderChannelsTab.
+let IS_GLOBAL_ADMIN = false
+fetch('/api/me').then(r => r.json()).then(me => {
+  IS_GLOBAL_ADMIN = !!(me.authenticated && me.user.role === 'global_admin')
+}).catch(() => {})
 
 requestAnimationFrame(() => renderTab(currentTab))
 
@@ -395,7 +468,8 @@ function switchTab(tab) {
 function renderTab(tab) {
   const content = document.getElementById('settings-content')
   content.innerHTML = ''
-  if (tab === 'tools')   renderToolsTab(content)
+  if (tab === 'profile') renderProfileTab(content)
+  else if (tab === 'tools')   renderToolsTab(content)
   else if (tab === 'agent') renderAgentTab(content)
   else if (tab === 'channels') renderChannelsTab(content)
   else if (tab === 'mcp')     renderMCPTab(content)
@@ -532,7 +606,7 @@ function renderAppearanceTab(container) {
       row.innerHTML = `<span style="flex:1;color:var(--text);font-size:13px">${escHtml(t.label)} <span style="color:var(--accent)">✦</span></span>
         <button class="btn appe-apply">Apply</button><button class="btn appe-del" style="color:var(--red)">Delete</button>`
       row.querySelector('.appe-apply').addEventListener('click', () => { T.applyTheme(id); T.populateSelect(themeSel) })
-      row.querySelector('.appe-del').addEventListener('click', () => { if (confirm(`Delete theme "${t.label}"?`)) { T.deleteCustomTheme(id); T.populateSelect(themeSel); renderCustomList() } })
+      row.querySelector('.appe-del').addEventListener('click', async () => { if (await PrismModal.confirm(`Delete theme "${t.label}"?`, { danger: true })) { T.deleteCustomTheme(id); T.populateSelect(themeSel); renderCustomList() } })
       customList.appendChild(row)
     }
   }
@@ -654,7 +728,7 @@ async function renderSkillsPanel(container) {
       } else body.style.display = 'none'
     })
     card.querySelector('.sk-del').addEventListener('click', async () => {
-      if (!confirm(`Delete skill "${sk.name}"?`)) return
+      if (!await PrismModal.confirm(`Delete skill "${sk.name}"?`, { danger: true })) return
       await fetch('/api/skills?name=' + encodeURIComponent(sk.name), { method: 'DELETE' })
       renderTab('knowledge')
     })
@@ -712,6 +786,7 @@ function makeSectionHeader(icon, color, label) {
 
 // ── Theme-consistent line icons (Feather/Lucide style, inherit currentColor) ──
 const ICON_PATHS = {
+  'alert-triangle': '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   dashboard: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
   files: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
   system: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
@@ -735,20 +810,35 @@ function icon(name, size = 16) {
 
 // ── Agent tab — name, default personality, per-workspace adaptations ────────────
 async function renderAgentTab(container) {
+  // The .settings-page is the full-width scroller (scrollbar at the window
+  // edge); the inner wrap constrains the content width.
   const page = document.createElement('div')
   page.className = 'settings-page'
-  page.style.cssText = 'padding:18px;overflow-y:auto;max-width:620px'
+  page.style.cssText = 'padding:18px'
+  const agWrap = document.createElement('div')
+  agWrap.style.cssText = 'max-width:620px'
+  page.appendChild(agWrap)
   container.appendChild(page)
 
-  let name = '', base = '', sessions = []
+  let name = '', base = '', sessions = [], uid = ''
   const NO_CACHE = { cache: 'no-store' }
   try { name = (await fetch('/api/agent/name', NO_CACHE).then(r => r.json())).name || '' } catch (_) {}
   try { base = (await fetch('/api/agent/personality', NO_CACHE).then(r => r.json())).personality || '' } catch (_) {}
   try { sessions = (await fetch('/api/sessions', NO_CACHE).then(r => r.json())).sessions || [] } catch (_) {}
+  try { uid = (await fetch('/api/profile').then(r => r.json())).userId || '' } catch (_) {}
+  const agScope = 'agent-u' + uid
 
-  page.innerHTML = `
+  agWrap.innerHTML = `
     <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('agent')}</span><span class="config-cat-name">Agent identity</span></div>
     <div style="font-size:12px;color:var(--text2);margin:6px 0 14px;line-height:1.5">The name and base personality apply to your agent everywhere. Each workspace can layer its own tweaks on top.</div>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+      <div id="ag-avatar">${avatarMarkup(agScope, 0, name || 'AI', 56)}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;gap:8px"><button class="btn" id="ag-av-btn">Agent avatar</button><button class="btn" id="ag-av-rm" style="color:var(--red)">Remove</button></div>
+        <span style="color:var(--text3);font-size:11.5px">Shown next to your agent's replies in chat.</span>
+        <input type="file" id="ag-av-file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none">
+      </div>
+    </div>
     <label class="ag-label">Name<input id="ag-name" type="text" placeholder="e.g. Prism, Jarvis…" value="${escHtml(name)}"></label>
     <label class="ag-label">Default personality
       <textarea id="ag-base" rows="9" placeholder="The base persona applied everywhere — tone, style, rules, what it should focus on.">${escHtml(base)}</textarea></label>
@@ -760,6 +850,19 @@ async function renderAgentTab(container) {
     <div class="config-cat-header" style="margin-top:26px"><span class="config-cat-icon" style="color:var(--accent)">${icon('layers')}</span><span class="config-cat-name">Per-workspace adaptations</span></div>
     <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.5">Extra instructions layered on top of the default for one workspace. Leave blank to use the default as-is.</div>
     <div id="ag-workspaces"></div>`
+
+  page.querySelector('#ag-av-btn').onclick = () => page.querySelector('#ag-av-file').click()
+  page.querySelector('#ag-av-file').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return
+    try {
+      const ver = await uploadAvatar(agScope, f)
+      page.querySelector('#ag-avatar').innerHTML = avatarMarkup(agScope, ver, page.querySelector('#ag-name').value || 'AI', 56)
+    } catch (err) { page.querySelector('#ag-status').textContent = 'Avatar error: ' + err.message }
+  }
+  page.querySelector('#ag-av-rm').onclick = async () => {
+    await removeAvatar(agScope)
+    page.querySelector('#ag-avatar').innerHTML = avatarMarkup(agScope, Date.now(), page.querySelector('#ag-name').value || 'AI', 56)
+  }
 
   page.querySelector('#ag-save').addEventListener('click', async () => {
     const st = page.querySelector('#ag-status'); st.textContent = 'Saving…'
@@ -818,11 +921,11 @@ async function renderChannelsTab(container) {
     <p style="color:var(--text3);font-size:12.5px;margin:0 0 16px;line-height:1.5">Connect a messaging app to chat with your agent from anywhere — and let scheduled cron jobs deliver results to you there.</p>
     <div class="eplogos">
       <div class="eplogo sel" data-prov="telegram"><span class="epi">${BRAND.telegram}</span>Telegram <span class="cal-st" data-st="telegram"></span><div class="cal-sub">${chSub(tg)}</div></div>
-      <div class="eplogo" data-prov="slack"><span class="epi">${BRAND.slack}</span>Slack <span class="cal-st" data-st="slack"></span><div class="cal-sub">${chSub(sl)}</div></div>
+      ${IS_GLOBAL_ADMIN ? `<div class="eplogo" data-prov="slack"><span class="epi">${BRAND.slack}</span>Slack <span class="cal-st" data-st="slack"></span><div class="cal-sub">${chSub(sl)}</div></div>` : ''}
     </div>
 
     <div class="ch-pane" data-prov="telegram">
-      <div style="font-size:12px;color:var(--text2);margin:0 0 12px;line-height:1.55">Chat with your agent from your phone. Create a bot with <b>@BotFather</b>, paste its token below, then send <b>/start</b> to your bot to link it. <b>Only the first chat to send /start is allowed</b> — your agent has powerful tools, so keep the token private.</div>
+      <div style="font-size:12px;color:var(--text2);margin:0 0 12px;line-height:1.55">Chat with <b>your personal agent</b> from your phone — your workspaces, your knowledge, your permissions. Create <b>your own bot</b> with <b>@BotFather</b>, paste its token below, then send <b>/start</b> to your bot to link it. <b>Only the first chat to send /start is allowed</b> — your agent acts as you, so keep the token private.</div>
       <div id="tg-state" style="font-size:12px;margin-bottom:10px"></div>
       <label class="ag-label">Bot token<input id="tg-token" type="password" placeholder="${tg.configured ? '•••••• (set — paste to replace)' : '123456:ABC-DEF…'}"></label>
       <div style="display:flex;gap:10px;align-items:center">
@@ -1036,11 +1139,56 @@ async function renderToolsTab(container) {
     }
     page.appendChild(section)
   }
+
+  // Group MCP tools: connected by the group admin, shared with everyone. Same
+  // card grid as the other tool sections; the toggle is the user's own opt-out
+  // (admin-locked tools show a badge instead of a toggle).
+  try {
+    const d = await fetch('/api/my/tool-prefs').then(r => r.json())
+    const tools = d.tools || []
+    if (tools.length) {
+      const section = document.createElement('div')
+      section.className = 'config-section'
+      section.appendChild(makeSectionHeader(icon('mcp'), 'var(--accent)', 'Group MCP Tools'))
+      const grid = document.createElement('div')
+      grid.className = 'config-tools-grid'
+      for (const t of tools) {
+        const locked = t.access !== 'open'
+        const off = locked || t.hidden
+        const card = document.createElement('div')
+        card.className = 'config-tool-card' + (off ? ' disabled' : '')
+        const right = t.access === 'disabled'
+          ? '<span style="font-size:10.5px;color:var(--text3);white-space:nowrap;flex-shrink:0">🚫 disabled by admin</span>'
+          : t.access === 'admin_only'
+            ? '<span style="font-size:10.5px;color:var(--text3);white-space:nowrap;flex-shrink:0">🔒 admins only</span>'
+            : `<label class="toggle-switch" title="${t.hidden ? 'Enable for my agent' : 'Disable for my agent'}">
+                 <input type="checkbox" ${t.hidden ? '' : 'checked'} data-gt="${escHtml(t.name)}">
+                 <span class="toggle-track"></span>
+               </label>`
+        card.innerHTML = `
+          <div class="config-tool-info">
+            <div class="config-tool-name">${escHtml(t.name)}</div>
+            <div class="config-tool-desc">${escHtml(t.description || '')}</div>
+            <span class="config-tool-id">${escHtml(t.server)} · group MCP</span>
+          </div>
+          ${right}`
+        const cb = card.querySelector('input[data-gt]')
+        if (cb) cb.addEventListener('change', async function () {
+          card.classList.toggle('disabled', !this.checked)
+          await fetch('/api/my/tool-prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: this.dataset.gt, hidden: !this.checked }) })
+        })
+        grid.appendChild(card)
+      }
+      section.appendChild(grid)
+      page.appendChild(section)
+    }
+  } catch (_) {}
 }
 
 // ── MCP tab ───────────────────────────────────────────────────────────────────
 
 async function renderMCPTab(container) {
+  await computeRagManage() // same predicate as RAG: group members get read-only
   const page = document.createElement('div')
   page.className = 'settings-page'
   container.appendChild(page)
@@ -1054,27 +1202,59 @@ async function renderMCPTab(container) {
 
   renderMCPServerList(page)
 
-  // Add server form
-  const secretOptions = secretNames.length > 0
-    ? secretNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('')
-    : '<option value="" disabled>Aucun secret disponible</option>'
+  // Add server form — only for users who manage their own scope (personal scope,
+  // or group admins). Plain group members configure MCP via their group admin and
+  // see the group servers read-only below (mirrors RAG_MANAGE in the RAG tab).
+  if (RAG_MANAGE) {
+    const secretOptions = secretNames.length > 0
+      ? secretNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('')
+      : '<option value="" disabled>No secret available</option>'
 
-  const addForm = document.createElement('div')
-  addForm.className = 'mcp-add-form'
-  addForm.innerHTML = `
-    <div class="mcp-add-title">Ajouter un serveur MCP</div>
-    <div class="mcp-add-fields">
-      <input id="mcp-add-name" class="mcp-input" type="text" placeholder="Nom (ex: filesystem)" autocomplete="off">
-      <input id="mcp-add-url" class="mcp-input" type="url" placeholder="URL (ex: http://localhost:3000)" autocomplete="off">
-      <select id="mcp-add-secret" class="mcp-input">
-        <option value="">— Sans authentification —</option>
-        ${secretOptions}
-      </select>
-    </div>
-    <button id="mcp-add-btn" class="mcp-add-submit">Connecter</button>
-    <div id="mcp-add-status" class="mcp-add-status"></div>`
-  page.appendChild(addForm)
-  document.getElementById('mcp-add-btn').addEventListener('click', addMCPServer)
+    const addForm = document.createElement('div')
+    addForm.className = 'mcp-add-form'
+    addForm.innerHTML = `
+      <div class="mcp-add-title">Add an MCP server</div>
+      <div class="mcp-add-fields">
+        <input id="mcp-add-name" class="mcp-input" type="text" placeholder="Name (e.g. filesystem)" autocomplete="off">
+        <input id="mcp-add-url" class="mcp-input" type="url" placeholder="URL (e.g. http://localhost:3000)" autocomplete="off">
+        <select id="mcp-add-secret" class="mcp-input">
+          <option value="">— No authentication —</option>
+          ${secretOptions}
+        </select>
+      </div>
+      <button id="mcp-add-btn" class="mcp-add-submit">Connect</button>
+      <div id="mcp-add-status" class="mcp-add-status"></div>
+      <div style="margin-top:8px;font-size:11.5px;color:var(--text3);line-height:1.5">Transport (Streamable HTTP / legacy SSE) is auto-detected from the URL. To authenticate, pick a stored secret — it is sent as a <code>Bearer</code> token. Create your API keys in the <b>Secrets</b> tab first.</div>`
+    page.appendChild(addForm)
+    document.getElementById('mcp-add-btn').addEventListener('click', addMCPServer)
+  }
+
+  // Group-shared MCP servers (managed by the group admin) — read-only view.
+  try {
+    const my = await fetch('/api/my/groups').then(r => r.json())
+    for (const g of (my.groups || [])) {
+      const gid = g.id || g.groupId
+      const gname = g.name || g.groupName
+      const d = await fetch(`/api/group/mcp?group=${gid}`).then(r => r.ok ? r.json() : { servers: [] })
+      const servers = d.servers || []
+      if (!servers.length) continue
+      const sec = document.createElement('div')
+      sec.className = 'mcp-add-form'
+      sec.innerHTML = `<div class="mcp-add-title">“${escHtml(gname)}” group MCP servers</div>
+        <div style="color:var(--text3);font-size:12px;margin-bottom:8px">Managed by the group admin — available to your agent and the shared agent (read-only).</div>`
+      for (const srv of servers) {
+        const toolCount = srv.tools ? srv.tools.length : 0
+        const row = document.createElement('div')
+        row.className = 'mcp-server-card'
+        row.innerHTML = `<div class="mcp-server-header"><div class="mcp-server-info">
+          <span class="mcp-server-name">${escHtml(srv.name)}</span>
+          <span class="mcp-server-url">${escHtml(srv.url)}</span></div>
+          <div class="mcp-server-actions"><span class="mcp-tool-count">${toolCount} tool${toolCount !== 1 ? 's' : ''} · group</span></div></div>`
+        sec.appendChild(row)
+      }
+      page.appendChild(sec)
+    }
+  } catch (_) {}
 }
 
 function renderMCPServerList(page) {
@@ -1087,7 +1267,7 @@ function renderMCPServerList(page) {
   listEl.innerHTML = ''
 
   if (mcpServers.length === 0) {
-    listEl.innerHTML = '<div class="mcp-empty">Aucun serveur MCP configuré.</div>'
+    listEl.innerHTML = '<div class="mcp-empty">No MCP server configured.</div>'
     return
   }
   for (const srv of mcpServers) {
@@ -1101,12 +1281,12 @@ function renderMCPServerList(page) {
           <span class="mcp-server-url">${escHtml(srv.url)}</span>
         </div>
         <div class="mcp-server-actions">
-          <span class="mcp-tool-count">${toolCount} outil${toolCount !== 1 ? 's' : ''}</span>
+          <span class="mcp-tool-count">${toolCount} tool${toolCount !== 1 ? 's' : ''}</span>
           <label class="toggle-switch" title="${srv.enabled ? 'Désactiver' : 'Activer'}">
             <input type="checkbox" ${srv.enabled ? 'checked' : ''} data-srv-id="${escHtml(srv.id)}">
             <span class="toggle-track"></span>
           </label>
-          <button class="mcp-server-del" title="Supprimer" data-srv-id="${escHtml(srv.id)}">✕</button>
+          <button class="mcp-server-del" title="Delete" data-srv-id="${escHtml(srv.id)}">✕</button>
         </div>
       </div>`
 
@@ -1139,9 +1319,9 @@ async function addMCPServer() {
   const secret = document.getElementById('mcp-add-secret').value.trim()
   const status = document.getElementById('mcp-add-status')
   const btn    = document.getElementById('mcp-add-btn')
-  if (!name || !url) { status.textContent = 'Nom et URL requis.'; status.className = 'mcp-add-status error'; return }
+  if (!name || !url) { status.textContent = 'Name and URL required.'; status.className = 'mcp-add-status error'; return }
   btn.disabled = true
-  status.textContent = 'Connexion…'; status.className = 'mcp-add-status'
+  status.textContent = 'Connecting…'; status.className = 'mcp-add-status'
   try {
     const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`, {
       method: 'POST',
@@ -1150,7 +1330,7 @@ async function addMCPServer() {
     })
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
-    status.textContent = `✓ ${data.count} outil(s) chargé(s)`; status.className = 'mcp-add-status ok'
+    status.textContent = `✓ ${data.count} tool(s) loaded`; status.className = 'mcp-add-status ok'
     document.getElementById('mcp-add-name').value = ''
     document.getElementById('mcp-add-url').value = ''
     document.getElementById('mcp-add-secret').value = ''
@@ -1159,7 +1339,7 @@ async function addMCPServer() {
     mcpServers = (await r2.json()).servers || []
     renderMCPServerList(document.querySelector('.settings-page'))
   } catch(e) {
-    status.textContent = 'Erreur : ' + e.message; status.className = 'mcp-add-status error'
+    status.textContent = 'Error: ' + e.message; status.className = 'mcp-add-status error'
   } finally { btn.disabled = false }
 }
 
@@ -1174,7 +1354,7 @@ async function patchMCPServer(id, enabled) {
 }
 
 async function deleteMCPServer(id) {
-  if (!confirm('Supprimer ce serveur MCP ?')) return
+  if (!await PrismModal.confirm('Delete this MCP server?', { danger: true })) return
   await fetch(`/api/mcp/servers/${encodeURIComponent(id)}?session=${encodeURIComponent(SESSION)}`, { method: 'DELETE' }).catch(console.error)
   const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
   mcpServers = (await res.json()).servers || []
@@ -1196,10 +1376,11 @@ async function renderSecretsTab(container) {
       <span class="config-cat-name">Secrets</span>
     </div>
     <div id="secrets-list" class="config-secrets-list">
-      <span style="color:var(--text3);font-size:12px">Chargement…</span>
+      <span style="color:var(--text3);font-size:12px">Loading…</span>
     </div>
     <div style="margin-top:10px;font-size:11.5px;color:var(--text3);line-height:1.6">
       Secrets are stored encrypted and never exposed in plain text. The agent can also add them via <code style="background:var(--bg2);padding:1px 6px;border-radius:3px;font-size:11px">request_secret</code>.
+      <b>Secrets here are shared with the whole team</b> — every member's agent can use them (API keys for shared services, MCP auth). Personal credentials (email password, calendar tokens) are stored separately per user.
     </div>`
   page.appendChild(section)
 
@@ -1245,7 +1426,7 @@ async function renderSecretsTab(container) {
     const names = data.secrets || []
     const list = document.getElementById('secrets-list')
     if (names.length === 0) {
-      list.innerHTML = '<span style="color:var(--text3);font-size:12px">Aucun secret stocké.</span>'
+      list.innerHTML = '<span style="color:var(--text3);font-size:12px">No secret stored.</span>'
     } else {
       list.innerHTML = ''
       for (const name of names) {
@@ -1257,10 +1438,10 @@ async function renderSecretsTab(container) {
             <span class="config-secret-name">${escHtml(name)}</span>
             <span class="config-secret-env">$${escHtml(name.toUpperCase().replace(/[^A-Z0-9]/g,'_'))}</span>
           </div>
-          <button class="config-secret-del" title="Supprimer" data-name="${escHtml(name)}">✕</button>`
+          <button class="config-secret-del" title="Delete" data-name="${escHtml(name)}">✕</button>`
         row.querySelector('button').addEventListener('click', async function() {
           const n = this.dataset.name
-          if (!confirm(`Supprimer le secret "${n}" ?`)) return
+          if (!await PrismModal.confirm(`Delete secret "${n}"?`, { danger: true })) return
           await fetch(`/api/secrets/${encodeURIComponent(n)}`, { method: 'DELETE' })
           document.getElementById(`secret-row-${CSS.escape(n)}`)?.remove()
         })
@@ -1301,9 +1482,13 @@ const EMAIL_PROVIDERS = {
 }
 
 async function renderEmailTab(container) {
+  // Full-width scroller + inner width-constrained wrap (scrollbar at the edge).
   const page = document.createElement('div')
   page.className = 'settings-page'
-  page.style.cssText = 'padding:18px;overflow-y:auto;max-width:560px'
+  page.style.cssText = 'padding:18px'
+  const emWrap = document.createElement('div')
+  emWrap.style.cssText = 'max-width:560px'
+  page.appendChild(emWrap)
   container.appendChild(page)
 
   let cfg = {}
@@ -1317,7 +1502,7 @@ async function renderEmailTab(container) {
   const logos = Object.entries(EMAIL_PROVIDERS).map(([k, p]) =>
     `<div class="eplogo${k === sel ? ' sel' : ''}" data-prov="${k}"><span class="epi">${p.icon}</span>${p.label}</div>`).join('')
 
-  page.innerHTML = `
+  emWrap.innerHTML = `
     <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('mail')}</span><span class="config-cat-name">Mailbox</span></div>
     <div style="font-size:12px;color:var(--text2);margin:6px 0 16px;line-height:1.5">Pick your provider, then enter your email and password. Credentials are stored <b>encrypted</b> on your server.</div>
     <div class="eplogos">${logos}</div>
@@ -1586,7 +1771,7 @@ async function renderCalendarTab(container) {
     } catch (e) { st.style.color = 'var(--red)'; st.textContent = e.message }
   })
   $('#cd-disconnect').addEventListener('click', async () => {
-    if (!confirm('Disconnect CalDAV? Calendar and Tasks will fall back to the Prism database.')) return
+    if (!await PrismModal.confirm('Disconnect CalDAV? Calendar and Tasks will fall back to the Prism database.', { okLabel: 'Disconnect', danger: true })) return
     try {
       await post({ disconnect: true })
       $('#cd-disconnect').style.display = 'none'; $('#cd-cals').style.display = 'none'; $('#cd-pass').value = ''
@@ -1730,7 +1915,120 @@ async function renderCalendarTab(container) {
   selectProv(['caldav', 'google', 'microsoft', 'todoist'].find(p => lastAvail[p]) || 'caldav')
 }
 
+// ── Avatars (shared helpers) ───────────────────────────────────────────────────
+function initialsOf(name) {
+  return (name || '?').trim().split(/\s+/).map(w => w[0] || '').slice(0, 2).join('').toUpperCase() || '?'
+}
+// Initials with the avatar image overlaid; the <img> removes itself on 404/error,
+// so callers never need to know whether an avatar exists. Pass ver to bust cache.
+function avatarMarkup(scope, ver, name, size) {
+  const px = size || 72, fs = Math.round(px * 0.42)
+  const src = `/api/avatar?scope=${encodeURIComponent(scope)}${ver ? '&v=' + ver : ''}`
+  return `<span style="position:relative;display:inline-flex;width:${px}px;height:${px}px;border-radius:50%;overflow:hidden;background:var(--accent);color:#fff;align-items:center;justify-content:center;font-weight:600;font-size:${fs}px;flex:0 0 auto">${escHtml(initialsOf(name))}<img src="${src}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover" onerror="this.remove()"></span>`
+}
+// Downscale to a max edge (default 256px) and return a small PNG blob.
+async function downscaleImage(file, max) {
+  const cap = max || 256
+  const img = await createImageBitmap(file)
+  const scale = Math.min(1, cap / Math.max(img.width, img.height))
+  const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale))
+  const c = document.createElement('canvas'); c.width = w; c.height = h
+  c.getContext('2d').drawImage(img, 0, 0, w, h)
+  return await new Promise(res => c.toBlob(res, 'image/png'))
+}
+async function uploadAvatar(scope, file) {
+  const blob = await downscaleImage(file)
+  const fd = new FormData(); fd.append('file', blob, 'avatar.png')
+  const r = await fetch(`/api/avatar?scope=${encodeURIComponent(scope)}`, { method: 'POST', body: fd })
+  if (!r.ok) throw new Error(await r.text())
+  return (await r.json()).avatarVer
+}
+async function removeAvatar(scope) {
+  await fetch(`/api/avatar?scope=${encodeURIComponent(scope)}`, { method: 'DELETE' })
+}
+
+// ── Profile tab ────────────────────────────────────────────────────────────────
+async function renderProfileTab(container) {
+  const $ = id => document.getElementById(id)
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  container.appendChild(page)
+  let p = {}
+  try { p = await fetch('/api/profile').then(r => r.json()) } catch (_) {}
+  const nameFor = () => ($('pf-display') ? $('pf-display').value : '') || p.displayName || p.email || '?'
+  page.innerHTML = `
+    <h2 style="margin:0 0 4px;font-size:17px">Profile</h2>
+    <p style="color:var(--text3);font-size:12.5px;margin:0 0 20px">Your identity across Prism — shown in group chat and next to your messages.</p>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:22px">
+      <div id="pf-avatar">${avatarMarkup('u' + (p.userId || ''), p.avatarVer, p.displayName || p.email, 72)}</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="pf-av-btn">Upload photo</button>
+          <button class="btn" id="pf-av-rm" style="${p.avatarVer ? '' : 'display:none'};color:var(--red)">Remove</button>
+        </div>
+        <span style="color:var(--text3);font-size:11.5px">PNG/JPG/WebP, square looks best — auto-resized.</span>
+        <input type="file" id="pf-av-file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:520px">
+      <label style="grid-column:1/3;font-size:12px;color:var(--text2)">Display name
+        <input id="pf-display" class="mcp-input" type="text" value="${escHtml(p.displayName || '')}" placeholder="How you appear in chat" style="width:100%;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--text2)">First name
+        <input id="pf-first" class="mcp-input" type="text" value="${escHtml(p.firstName || '')}" style="width:100%;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--text2)">Last name
+        <input id="pf-last" class="mcp-input" type="text" value="${escHtml(p.lastName || '')}" style="width:100%;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--text2)">Email (login)
+        <input class="mcp-input" type="email" value="${escHtml(p.email || '')}" readonly style="width:100%;margin-top:4px;opacity:.6"></label>
+      <label style="font-size:12px;color:var(--text2)">Phone
+        <input id="pf-phone" class="mcp-input" type="tel" value="${escHtml(p.phone || '')}" placeholder="+33…" style="width:100%;margin-top:4px"></label>
+    </div>
+    <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
+      <button class="btn btn-primary" id="pf-save">Save</button>
+      <span id="pf-status" style="font-size:12.5px;color:var(--text3)"></span>
+    </div>`
+
+  const uScope = 'u' + (p.userId || '')
+  $('pf-av-btn').onclick = () => $('pf-av-file').click()
+  $('pf-av-file').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return
+    try {
+      const ver = await uploadAvatar(uScope, f)
+      $('pf-avatar').innerHTML = avatarMarkup(uScope, ver, nameFor(), 72)
+      $('pf-av-rm').style.display = ''
+      p.avatarVer = ver
+    } catch (err) { $('pf-status').textContent = 'Avatar error: ' + err.message }
+  }
+  $('pf-av-rm').onclick = async () => {
+    await removeAvatar(uScope)
+    $('pf-avatar').innerHTML = avatarMarkup(uScope, 0, nameFor(), 72)
+    $('pf-av-rm').style.display = 'none'; p.avatarVer = 0
+  }
+  $('pf-save').onclick = async () => {
+    $('pf-status').textContent = 'Saving…'
+    try {
+      const body = { displayName: $('pf-display').value, firstName: $('pf-first').value, lastName: $('pf-last').value, phone: $('pf-phone').value }
+      const r = await fetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!r.ok) throw new Error(await r.text())
+      $('pf-status').textContent = '✓ Saved'
+    } catch (err) { $('pf-status').textContent = 'Error: ' + err.message }
+  }
+}
+
+let RAG_MANAGE = true // false whenever the scope is a group (managed in Admin console)
+async function computeRagManage() {
+  // Settings manages only a PERSONAL scope (user in no group). Any group scope —
+  // member OR admin, including the global admin — is read-only here; group RAG/MCP
+  // is configured in the Admin console, so there is a single place to manage it.
+  try {
+    const me = await fetch('/api/me').then(r => r.json())
+    if (!me.authenticated) { RAG_MANAGE = false; return }
+    const my = await fetch('/api/my/groups').then(r => r.json())
+    RAG_MANAGE = (my.groups || []).length === 0
+  } catch { RAG_MANAGE = false }
+}
+
 async function renderRAGTab(container) {
+  await computeRagManage()
   // Check RAG status first
   try {
     const res = await fetch('/api/rag/status')
@@ -1755,9 +2053,10 @@ async function renderRAGTab(container) {
   sidebar.innerHTML = `
     <div id="rag-sidebar-header">
       <span id="rag-sidebar-title">Collections</span>
-      <button id="new-collection-btn" title="New collection" onclick="openModal()">+</button>
+      ${RAG_MANAGE ? '<button id="new-collection-btn" title="New collection" onclick="openModal()">+</button>' : ''}
     </div>
-    <div id="collections-list"></div>`
+    <div id="collections-list"></div>
+    ${RAG_MANAGE ? '' : '<div style="padding:10px 12px;color:var(--text3);font-size:11.5px">Group knowledge base — managed by your group admin (read-only).</div>'}`
   tab.appendChild(sidebar)
 
   // Content
@@ -1792,9 +2091,9 @@ function renderCollections() {
     item.innerHTML = `
       <span class="collection-name">${escHtml(c.name)}</span>
       <span class="collection-count">${c.doc_count} doc${c.doc_count !== 1 ? 's' : ''}</span>
-      <button class="collection-del" title="Delete">✕</button>`
+      ${RAG_MANAGE ? '<button class="collection-del" title="Delete">✕</button>' : ''}`
     item.addEventListener('click', () => selectCollection(c.name))
-    item.querySelector('.collection-del').addEventListener('click', e => {
+    item.querySelector('.collection-del')?.addEventListener('click', e => {
       e.stopPropagation(); deleteCollection(c.name)
     })
     el.appendChild(item)
@@ -1809,7 +2108,7 @@ function selectCollection(name) {
 }
 
 async function deleteCollection(name) {
-  if (!confirm(`Delete collection "${name}" and all its documents?`)) return
+  if (!await PrismModal.confirm(`Delete collection "${name}" and all its documents?`, { danger: true })) return
   await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
   if (currentCollection === name) {
     currentCollection = null
@@ -1817,6 +2116,23 @@ async function deleteCollection(name) {
     if (content) content.innerHTML = `<div id="no-collection-msg"><div class="icon">${icon('knowledge',40)}</div><div>Select a collection or create a new one</div></div>`
   }
   await loadCollections()
+}
+
+// Le <select> de la zone d'upload reflète la collection courante ; le choisir ici
+// revient à la sélectionner dans la sidebar (une seule source de vérité :
+// currentCollection). L'option « + New collection… » ouvre notre modale, pas une
+// boîte de dialogue du navigateur.
+function syncUploadTarget() {
+  const sel = document.getElementById('upload-collection')
+  if (!sel) return
+  sel.innerHTML = collections
+    .map(c => `<option value="${escHtml(c.name)}"${c.name === currentCollection ? ' selected' : ''}>${escHtml(c.name)}</option>`)
+    .join('') + '<option value="__new__">+ New collection…</option>'
+}
+
+function onUploadTargetChange(value) {
+  if (value === '__new__') { openModal(); return }
+  if (value && value !== currentCollection) selectCollection(value)
 }
 
 function renderRAGContent() {
@@ -1828,12 +2144,20 @@ function renderRAGContent() {
     <div id="rag-content-header">
       <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
         <span style="font-size:14px;font-weight:600;color:var(--text)">${icon('files',15)} ${escHtml(currentCollection)}</span>
-        <input id="desc-input" type="text" value="${escHtml(desc)}"
+        ${RAG_MANAGE ? `<input id="desc-input" type="text" value="${escHtml(desc)}"
+               class="${desc ? '' : 'missing'}"
                placeholder="Description for the agent (e.g. internal API docs…)"
                style="background:transparent;border:none;border-bottom:1px dashed var(--border2);
                       color:var(--text3);font-size:11.5px;font-family:var(--sans);
                       outline:none;padding:2px 0;width:100%">
+             ${desc ? '' : `<div id="desc-warn">${icon('alert-triangle',11)} No description — the agent won't know when to search this collection.</div>`}`
+          : `<span style="color:var(--text3);font-size:11.5px">${escHtml(desc || 'No description')}</span>`}
       </div>
+    </div>
+    ${RAG_MANAGE ? `<div id="upload-target">
+      <span>Add to</span>
+      <select id="upload-collection" onchange="onUploadTargetChange(this.value)"></select>
+      <button type="button" onclick="openModal()">+ New collection</button>
     </div>
     <div id="upload-zone">
       <div id="upload-icon">${icon('upload',26)}</div>
@@ -1841,18 +2165,21 @@ function renderRAGContent() {
       <div id="upload-hint">PDF, DOCX, TXT, CSV, MD, JSON — max 50 MB</div>
       <input id="upload-input" type="file" multiple accept=".pdf,.docx,.txt,.csv,.md,.json,.tsv"
              onchange="uploadFiles(this.files)">
-    </div>
+    </div>` : ''}
     <div id="upload-progress"></div>
     <div id="docs-area"><div style="padding:20px;color:var(--text3);font-size:13px">Loading…</div></div>`
 
-  document.getElementById('upload-zone').addEventListener('click', () => document.getElementById('upload-input').click())
-  const zone = document.getElementById('upload-zone')
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over') })
-  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'))
-  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); uploadFiles(e.dataTransfer.files) })
-  const di = document.getElementById('desc-input')
-  di.addEventListener('blur', () => saveDescription(di.value.trim()))
-  di.addEventListener('keydown', e => { if (e.key === 'Enter') di.blur() })
+  if (RAG_MANAGE) {
+    syncUploadTarget()
+    document.getElementById('upload-zone').addEventListener('click', () => document.getElementById('upload-input').click())
+    const zone = document.getElementById('upload-zone')
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over') })
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'))
+    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); uploadFiles(e.dataTransfer.files) })
+    const di = document.getElementById('desc-input')
+    di.addEventListener('blur', () => saveDescription(di.value.trim()))
+    di.addEventListener('keydown', e => { if (e.key === 'Enter') di.blur() })
+  }
 }
 
 async function saveDescription(value) {
@@ -1890,7 +2217,7 @@ function renderDocuments(docs) {
           <td>${fmtSize(d.size_bytes)}</td>
           <td>${d.chunk_count}</td>
           <td>${fmtDate(d.updated_at)}</td>
-          <td><button class="doc-del-btn" title="Delete" data-id="${d.id}">✕</button></td>
+          <td>${RAG_MANAGE ? `<button class="doc-del-btn" title="Delete" data-id="${d.id}">✕</button>` : ''}</td>
         </tr>`).join('')}
       </tbody>
     </table>`
@@ -1904,8 +2231,40 @@ async function deleteDocument(id) {
   loadDocuments(); loadCollections()
 }
 
+// L'upload est un POST synchrone qui parse, embedde et écrit avant de répondre —
+// des minutes sur un gros manuel. On interroge /api/rag/upload/progress pendant
+// que le POST est en vol pour dire où on en est.
+function fmtETA(s) { if (!s || s < 1) return ''; if (s < 60) return `~${s}s restantes`
+  const m = Math.floor(s / 60); return `~${m}m${s % 60 ? ' ' + (s % 60) + 's' : ''} restantes` }
+
+async function pollIngestProgress(collection, filename, progress, stop) {
+  while (!stop.done) {
+    await new Promise(r => setTimeout(r, 700))
+    if (stop.done) return
+    let d
+    try {
+      const res = await fetch(`/api/rag/upload/progress?session=${encodeURIComponent(SESSION)}`
+        + `&collection=${encodeURIComponent(collection)}&filename=${encodeURIComponent(filename)}`)
+      d = await res.json()
+    } catch (_) { continue }
+    if (!d || !d.found) continue
+    if (d.stage === 'parsing') progress.textContent = `Analyse de ${filename}…`
+    else if (d.stage === 'embedding') {
+      progress.textContent = d.done
+        ? `Indexation ${d.done}/${d.total} passages (${Math.round(d.rate)}/s) ${fmtETA(d.etaSecs)}`
+        : `Indexation de ${d.total} passages…`
+    } else if (d.stage === 'storing') progress.textContent = `Enregistrement de ${d.total} passages…`
+    else if (d.stage === 'failed') { progress.textContent = `Échec : ${d.error || 'erreur inconnue'}`; return }
+    else if (d.stage === 'done') { progress.textContent = `${d.total} passages indexés ✓`; return }
+  }
+}
+
 async function uploadFiles(files) {
   if (!files || files.length === 0) return
+  const sel = document.getElementById('upload-collection')
+  if (sel && sel.value && sel.value !== '__new__' && sel.value !== currentCollection) {
+    selectCollection(sel.value)   // l'utilisateur a changé de cible sans quitter la zone
+  }
   if (!currentCollection) { showToast('Select a collection first', true); return }
   const zone = document.getElementById('upload-zone')
   const progress = document.getElementById('upload-progress')
@@ -1916,7 +2275,11 @@ async function uploadFiles(files) {
     try {
       const form = new FormData()
       form.append('file', file); form.append('collection', currentCollection); form.append('session', SESSION)
-      const res = await fetch('/api/rag/upload', { method: 'POST', body: form })
+      const stop = { done: false }
+      pollIngestProgress(currentCollection, file.name, progress, stop)
+      let res
+      try { res = await fetch('/api/rag/upload', { method: 'POST', body: form }) }
+      finally { stop.done = true }
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || res.statusText)
       showToast(`✓ ${file.name} — ${data.chunks} chunks indexed`)
@@ -1937,22 +2300,30 @@ function closeModal(e) {
   if (e && e.target !== document.getElementById('modal-overlay')) return
   document.getElementById('modal-overlay').classList.remove('visible')
   document.getElementById('modal-input').value = ''
+  document.getElementById('modal-desc').value = ''
+  syncUploadTarget()   // le <select> avait pu basculer sur « + New collection… »
 }
 async function createCollection() {
   const input = document.getElementById('modal-input')
+  const descEl = document.getElementById('modal-desc')
   const name = input.value.trim().toLowerCase().replace(/[^a-z0-9\-_]/g,'-').replace(/-+/g,'-')
   if (!name) { input.focus(); return }
+  const description = descEl.value.trim()
+
   document.getElementById('modal-overlay').classList.remove('visible')
-  input.value = ''
-  // Persist an empty collection so it survives with zero documents.
+  input.value = ''; descEl.value = ''
+
+  // Persist the collection (and its description) so it survives with zero documents.
+  // The description is what the agent reads to decide when to search here — see the
+  // "## Knowledge Base (RAG)" block built in internal/server/ws.go.
   try {
     await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description: '' }),
+      body: JSON.stringify({ name, description }),
     })
   } catch (_) {}
   if (!collections.find(c => c.name === name)) {
-    collections.push({ name, doc_count: 0, chunk_count: 0 })
+    collections.push({ name, description, doc_count: 0, chunk_count: 0 })
     renderCollections()
   }
   selectCollection(name)

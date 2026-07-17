@@ -6,6 +6,7 @@
 <title>Calendar</title>
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
+<script src="/modal.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -455,7 +456,8 @@ async function saveForm() {
   closeForm(); load();
 }
 async function deleteEvent() {
-  if (!editing || !confirm(`Delete "${editing.title}"?`)) return;
+  if (!editing) return;
+  if (!await PrismModal.confirm(`Delete "${editing.title}"?`, { danger: true })) return;
   await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${encodeURIComponent(editing.id)}`, { method: 'DELETE' });
   closeForm(); load();
 }

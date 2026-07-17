@@ -29,7 +29,7 @@ func (s *Server) workspacesOverview() string {
 	if s.memStore == nil {
 		return ""
 	}
-	sessions, err := s.memStore.ListSessions(context.Background())
+	sessions, err := s.memStore.ListSessions(context.Background(), nil)
 	if err != nil {
 		return ""
 	}

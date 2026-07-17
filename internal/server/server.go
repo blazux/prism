@@ -31,6 +31,8 @@ type Config struct {
 	OpenAIBaseURL    string // /v1 root, used when LLMBackend == "openai"
 	OpenAIAPIKey     string // optional bearer token for the openai backend
 	EmbedBackend     string // "" (follow LLMBackend), "ollama" or "openai": backend for RAG embeddings + captioning
+	VisionModel      string // optional override model for RAG vision captioning (needed when captioning ≠ chat backend)
+	ChatVision       bool   // chat model can see images (default true); false → caption widget previews as text for a text-only model
 	AgentContainer   string
 	SearxngURL       string
 	ServicePortStart int
@@ -38,8 +40,23 @@ type Config struct {
 	PostgresURL      string
 	EmbedModel       string
 	AuthToken        string
-	WebFS            embed.FS
-	HelpFS           embed.FS
+	// MultiUser turns Prism from a personal dashboard into a shared one: accounts,
+	// groups, rooms, per-user scoping and a login page. Off by default — at home
+	// there is one user, and AuthToken is the whole of authentication. It is read
+	// in exactly one place, withAuth; everything downstream reads the identity that
+	// puts in the request, and the service identity already means "global".
+	MultiUser bool
+	// VoxURL, when set, means this Cortex is docked with a Vox telephony stack
+	// (megazord = Vortex). It flips the UI into Vortex mode: the Téléphonie app
+	// appears, and /api/vox/* proxies Vox's API (call logs, outbound calls, SIP,
+	// directory). Empty = standalone Cortex, no telephony surface.
+	// VoxUser/VoxPassword are Vox's HTTP Basic credentials, used by that proxy.
+	VoxURL      string
+	VoxUser     string
+	VoxPassword string
+	WebFS       embed.FS
+	HelpFS      embed.FS
+	ToolsFS     embed.FS
 }
 
 type Server struct {
@@ -50,6 +67,8 @@ type Server struct {
 	mu             sync.RWMutex
 	ragStore       *rag.Store
 	ragEmbedder    *rag.Embedder
+	ragCaptioner   *rag.Captioner
+	ingest         *ingestTracker // live progress of synchronous RAG ingestions
 	customMgr      *customtools.Manager
 	memStore       *memory.Store
 	mcpMgr         *mcp.Manager
@@ -57,6 +76,7 @@ type Server struct {
 	channels       map[string]Channel // messaging bridges (telegram, slack, …)
 	chanCancel     context.CancelFunc // cancels the running channel receive loops
 	oauthStates    sync.Map           // CSRF state → oauthState (pending OAuth authorizations)
+	rooms          *roomHub           // shared group chat rooms (Phase 4)
 }
 
 func New(cfg Config) *Server {
@@ -67,6 +87,8 @@ func New(cfg Config) *Server {
 		clients:   make(map[*Client]struct{}),
 		customMgr: customtools.NewManager(customToolsDir),
 		mcpMgr:    mcp.NewManager(nil),
+		rooms:     newRoomHub(),
+		ingest:    newIngestTracker(),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
@@ -78,6 +100,12 @@ func New(cfg Config) *Server {
 }
 
 func (s *Server) Start() error {
+	// Route the standard logger through the in-memory ring (Admin → Logs) while
+	// keeping stderr for docker logs. Error lines are persisted once the store
+	// is up (installLogRing).
+	log.SetOutput(ring)
+	s.installLogRing()
+
 	// Load or generate the AES-256 encryption key for secrets.
 	encKey, err := memory.LoadOrGenerateKey(filepath.Join(s.cfg.WorkspaceDir, ".secret_key"))
 	if err != nil {
@@ -89,7 +117,7 @@ func (s *Server) Start() error {
 		go func() {
 			for attempt := 1; ; attempt++ {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				ms, err := memory.NewStore(ctx, s.cfg.PostgresURL, encKey)
+				ms, err := memory.NewStore(ctx, s.cfg.PostgresURL, encKey, s.cfg.MultiUser)
 				cancel()
 				if err == nil {
 					s.mu.Lock()
@@ -110,6 +138,10 @@ func (s *Server) Start() error {
 	// when RAG is unavailable. (RAG indexing happens in initRAG once ready.)
 	helpDocs, _ := s.loadHelpDocs()
 	s.materializeHelpDocs(helpDocs)
+
+	// Seed the bundled agent tools (pcap decoder, …) into the workspace so every
+	// deployment has them, and register their OS deps in .apt-packages.
+	s.materializeAgentTools()
 
 	// Initialize RAG in background (embedding probe can take a moment)
 	go s.initRAG(context.Background())
@@ -168,7 +200,16 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/sessions/", s.handleSessionByID)
 	mux.HandleFunc("/api/chat/upload", s.handleChatFileUpload)
 	mux.HandleFunc("/api/notify", s.handleExternalNotify)
+	mux.HandleFunc("/api/profile", s.handleProfile)
+	mux.HandleFunc("/api/avatar", s.handleAvatar)
+	mux.HandleFunc("/api/voice", s.handleVoiceConfig)
+	mux.HandleFunc(voxProxyPrefix, s.handleVoxProxy) // /api/vox/* → Vox's API
+	mux.HandleFunc("/api/platform", s.handlePlatform)
+	mux.HandleFunc("/api/admin/platform", s.handleAdminPlatform)
+	mux.HandleFunc("/api/admin/usage", s.handleAdminUsage)
+	mux.HandleFunc("/api/admin/logs", s.handleAdminLogs)
 	mux.HandleFunc("/api/notes", s.handleNotes)
+	mux.HandleFunc("/api/notes/share", s.handleNoteShare)
 	mux.HandleFunc("/api/notes/source", s.handleNotesSource)
 	mux.HandleFunc("/api/caldav/config", s.handleCalDAVConfig)
 	mux.HandleFunc("/api/todoist/config", s.handleTodoistConfig)
@@ -183,6 +224,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/telegram/config", s.handleTelegramConfig)
 	mux.HandleFunc("/api/telegram/send", s.handleTelegramSend)
 	mux.HandleFunc("/api/slack/config", s.handleSlackConfig)
+	mux.HandleFunc("/api/webex/config", s.handleWebexConfig)
+	mux.HandleFunc("/api/webex/rooms", s.handleWebexRooms)
+	mux.HandleFunc("/api/webex/send", s.handleWebexSend)
+	mux.HandleFunc("/webex", s.handleWebexPage)
 	mux.HandleFunc("/api/skills", s.handleSkills)
 	mux.HandleFunc("/api/email/config", s.handleEmailConfig)
 	mux.HandleFunc("/api/email/unread", s.handleEmailUnread)
@@ -200,6 +245,29 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/mcp/servers", s.handleMCPServers)
 	mux.HandleFunc("/api/mcp/servers/", s.handleMCPServerByID)
 	mux.HandleFunc("/api/auth", s.handleAuth)
+	// Multi-user identity (Prism heavy)
+	mux.HandleFunc("/api/signup", s.handleSignup)
+	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/logout", s.handleLogout)
+	mux.HandleFunc("/api/me", s.handleMe)
+	mux.HandleFunc("/api/admin/users", s.handleAdminUsers)
+	mux.HandleFunc("/api/admin/groups", s.handleAdminGroups)
+	mux.HandleFunc("/api/admin/tool-policy", s.handleAdminToolPolicy)
+	mux.HandleFunc("/api/admin/group-models", s.handleAdminGroupModels)
+	mux.HandleFunc("/login", s.handleLoginPage)
+	mux.HandleFunc("/signup", s.handleSignupPage)
+	mux.HandleFunc("/admin", s.handleAdminConsolePage)
+	// Shared group chat rooms (Phase 4)
+	mux.HandleFunc("/wsroom", s.handleRoomWS)
+	mux.HandleFunc("/api/my/groups", s.handleMyGroups)
+	mux.HandleFunc("/api/my/tool-prefs", s.handleMyToolPrefs)
+	mux.HandleFunc("/api/group/members", s.handleGroupMembers)
+	mux.HandleFunc("/api/room/config", s.handleRoomConfig)
+	mux.HandleFunc("/api/group/tool-policy", s.handleGroupToolPolicy)
+	mux.HandleFunc("/api/group/mcp", s.handleGroupMCP)
+	mux.HandleFunc("/room", s.handleRoomPage)
+	mux.HandleFunc("/group", s.handleAdminConsolePage) // group admins land on the same console (role-filtered)
+	mux.HandleFunc("/home", s.handleHomePage)
 	s.registerRAGRoutes(mux)
 
 	// Reverse proxy to services running inside the workspace container

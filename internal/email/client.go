@@ -50,13 +50,13 @@ func (c Config) from() string {
 }
 
 type Message struct {
-	UID         uint32       `json:"uid"`
-	Subject     string       `json:"subject"`
-	From        string       `json:"from"`
-	To          string       `json:"to,omitempty"` // comma-joined recipients (for reply-all)
-	Cc          string       `json:"cc,omitempty"`
-	Date        time.Time    `json:"date"`
-	Seen        bool         `json:"seen"`
+	UID       uint32    `json:"uid"`
+	Subject   string    `json:"subject"`
+	From      string    `json:"from"`
+	To        string    `json:"to,omitempty"`  // comma-joined recipients (for reply-all)
+	Cc        string    `json:"cc,omitempty"`
+	Date      time.Time `json:"date"`
+	Seen      bool      `json:"seen"`
 	MessageID   string       `json:"messageId,omitempty"`
 	Body        string       `json:"body,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`

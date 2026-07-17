@@ -94,18 +94,49 @@ func (c *slackChannel) Run(ctx context.Context) {
 				continue
 			}
 			if msg, ok := ev.InnerEvent.Data.(*slackevents.MessageEvent); ok {
-				c.handleMessage(ctx, api, msg)
+				// The typed MessageEvent drops `files`, so pull them from the raw
+				// payload the socket already handed us.
+				c.handleMessage(ctx, api, msg, slackFilesFromPayload(evt.Request))
 			}
 		}
 	}
 }
 
-func (c *slackChannel) handleMessage(ctx context.Context, api *slack.Client, ev *slackevents.MessageEvent) {
+// slackFileRef is one attachment on a Slack message.
+type slackFileRef struct {
+	Name               string `json:"name"`
+	URLPrivate         string `json:"url_private"`
+	URLPrivateDownload string `json:"url_private_download"`
+}
+
+// slackFilesFromPayload digs the files array out of the raw events-API envelope,
+// since slackevents.MessageEvent doesn't expose it.
+func slackFilesFromPayload(req *socketmode.Request) []slackFileRef {
+	if req == nil {
+		return nil
+	}
+	var env struct {
+		Event struct {
+			Files []slackFileRef `json:"files"`
+		} `json:"event"`
+	}
+	if json.Unmarshal(req.Payload, &env) != nil {
+		return nil
+	}
+	return env.Event.Files
+}
+
+func (c *slackChannel) handleMessage(ctx context.Context, api *slack.Client, ev *slackevents.MessageEvent, files []slackFileRef) {
 	// Only real user direct messages (ignore bots, edits, joins, channel posts).
-	if ev.ChannelType != "im" || ev.BotID != "" || ev.SubType != "" || ev.User == "" {
+	// A message that carries a file has SubType "file_share" — allow that one.
+	if ev.ChannelType != "im" || ev.BotID != "" || ev.User == "" ||
+		(ev.SubType != "" && ev.SubType != "file_share") {
 		return
 	}
 	text := strings.TrimSpace(ev.Text)
+	if len(files) > 0 {
+		text = c.s.attachSlackFiles(ctx, c.secret(slackBotTokenSecret), files, text)
+	}
 	if text == "" {
 		return
 	}
@@ -120,7 +151,7 @@ func (c *slackChannel) handleMessage(ctx context.Context, api *slack.Client, ev 
 
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	resp, err := c.s.runHeadlessChat(runCtx, "slack", text, "")
+	resp, err := c.s.runHeadlessChat(runCtx, "slack", text, "", nil, "")
 	if err != nil {
 		log.Printf("[slack] chat: %v", err)
 		api.PostMessage(ev.Channel, slack.MsgOptionText("⚠️ Sorry, something went wrong.", false))
@@ -165,6 +196,14 @@ func (s *Server) handleSlackConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "memory store not available", http.StatusServiceUnavailable)
 		return
 	}
+	// Slack is still a deployment-wide single bot (unlike per-user Telegram):
+	// only a global admin may change it.
+	if r.Method == "POST" {
+		if u := currentUser(r); u != nil && !u.IsGlobalAdmin() {
+			writeErr(w, http.StatusForbidden, "global admin only")
+			return
+		}
+	}
 	sc := &slackChannel{s: s}
 	switch r.Method {
 	case "GET":
@@ -206,4 +245,26 @@ func (s *Server) handleSlackConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", 405)
 	}
+}
+
+// attachSlackFiles downloads each file on a message (Slack serves them behind the
+// bot token), ingests them into the workspace, and prepends their preambles.
+func (s *Server) attachSlackFiles(ctx context.Context, token string, files []slackFileRef, text string) string {
+	var atts []attachment
+	for _, f := range files {
+		url := f.URLPrivateDownload
+		if url == "" {
+			url = f.URLPrivate
+		}
+		if url == "" {
+			continue
+		}
+		data, name, err := downloadAttachment(ctx, url, token, f.Name)
+		if err != nil {
+			log.Printf("[slack] attachment %s: %v", f.Name, err)
+			continue
+		}
+		atts = append(atts, s.ingestAttachment(data, name))
+	}
+	return prependAttachments(text, atts)
 }

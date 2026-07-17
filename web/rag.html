@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Knowledge Base — Dashboard</title>
 <link rel="stylesheet" href="/style.css">
+<script src="/modal.js"></script>
 <style>
 /* ── Page layout ─────────────────────────────────────────────────────────── */
 #rag-app {
@@ -394,6 +395,32 @@ const SESSION = new URLSearchParams(window.location.search).get('session') || 'd
 
 document.getElementById('session-badge').textContent = SESSION
 
+// Same rule as Settings: any group scope is read-only here — group knowledge is
+// curated in the Admin console, one place to manage it. Personal-scope users
+// (no group) manage their own base. (The server enforces with 403s anyway.)
+let CAN_MANAGE = true
+;(async () => {
+  try {
+    const me = await fetch('/api/me').then(r => r.json())
+    if (!me.authenticated) return
+    const my = await fetch('/api/my/groups').then(r => r.json())
+    const groups = my.groups || []
+    if (groups.length) {
+      CAN_MANAGE = false
+      document.getElementById('new-collection-btn')?.remove()
+      const uz = document.getElementById('upload-zone')
+      if (uz) {
+        uz.style.display = 'none'
+        const note = document.createElement('div')
+        note.style.cssText = 'color:var(--text3);font-size:12px;padding:10px 12px'
+        note.textContent = 'Group knowledge base — managed in the Admin console (read-only here).'
+        uz.parentElement?.appendChild(note)
+      }
+      document.querySelectorAll('.collection-del').forEach(b => b.remove())
+    }
+  } catch (_) {}
+})()
+
 checkStatus()
 
 async function checkStatus() {
@@ -458,8 +485,8 @@ function renderCollections() {
          onclick="selectCollection('${escHtml(c.name)}')">
       <span class="collection-name">${escHtml(c.name)}</span>
       <span class="collection-count">${c.doc_count} doc${c.doc_count !== 1 ? 's' : ''}</span>
-      <button class="collection-del" title="Delete collection"
-              onclick="event.stopPropagation();deleteCollection('${escHtml(c.name)}')">✕</button>
+      ${CAN_MANAGE ? `<button class="collection-del" title="Delete collection"
+              onclick="event.stopPropagation();deleteCollection('${escHtml(c.name)}')">✕</button>` : ''}
     </div>
   `).join('')
 }
@@ -472,7 +499,7 @@ function selectCollection(name) {
 }
 
 async function deleteCollection(name) {
-  if (!confirm(`Delete collection "${name}" and all its documents?`)) return
+  if (!await PrismModal.confirm(`Delete collection "${name}" and all its documents?`, { danger: true })) return
   await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
   if (currentCollection === name) {
     currentCollection = null

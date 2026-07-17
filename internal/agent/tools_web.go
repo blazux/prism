@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -146,7 +147,14 @@ with sync_playwright() as p:
 
     if js_expr:
         result = page.evaluate(js_expr)
-        print(json.dumps(result, default=str))
+        if result is None:
+            # Playwright turns undefined into None, so a typo in a global name or a
+            # function body without a return both come back as a silent "null".
+            print("[script returned null/undefined. If you expected data: check the "
+                  "global exists (evaluate 'Object.keys(window)') and that an arrow "
+                  "function body returns a value.]")
+        else:
+            print(json.dumps(result, default=str))
     else:
         page.evaluate(
             "() => document.querySelectorAll('script,style,nav,footer,header,aside,noscript').forEach(e=>e.remove())"
@@ -161,10 +169,37 @@ with sync_playwright() as p:
     browser.close()
 `
 
-func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (string, error) {
+// validateBrowserURL accepts http/https, plus file:// URLs that stay inside the
+// workspace. A chat attachment is saved there, and rendering it in the headless
+// browser is the only way the agent gets to *see* a page rather than read its
+// markup — an HTML export whose content is built by scripts has no readable text
+// until it runs.
+//
+// file:// grants nothing new: the same container already runs arbitrary shell
+// commands for the agent. The workspace prefix keeps a stray model from turning
+// the browser into a reader for /etc anyway.
+func validateBrowserURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return "", fmt.Errorf("invalid URL: must start with http:// or https://")
+	if err != nil {
+		return fmt.Errorf("invalid URL: must start with http://, https:// or file:///workspace/")
+	}
+	switch u.Scheme {
+	case "http", "https":
+		return nil
+	case "file":
+		// Reject a host component ("file://evil/…") and any traversal out of /workspace.
+		if u.Host != "" || !strings.HasPrefix(path.Clean(u.Path)+"/", "/workspace/") {
+			return fmt.Errorf("invalid file URL: must be under file:///workspace/")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid URL: must start with http://, https:// or file:///workspace/")
+	}
+}
+
+func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (string, error) {
+	if err := validateBrowserURL(rawURL); err != nil {
+		return "", err
 	}
 
 	scriptPath := filepath.Join(e.workspaceDir, ".browser_exec.py")
@@ -212,6 +247,14 @@ with sync_playwright() as p:
     if os.path.exists(SESSION_FILE):
         ctx_opts['storage_state'] = SESSION_FILE
     context = browser.new_context(**ctx_opts)
+    # Authenticated widget preview: attach the Prism service cookie, scoped to the
+    # start URL's origin only (never sent to other sites).
+    auth_cookie = config.get('auth_cookie')
+    if auth_cookie and start_url:
+        try:
+            context.add_cookies([{'name': 'prism_session', 'value': auth_cookie, 'url': start_url}])
+        except Exception:
+            pass
     page = context.new_page()
     console_msgs = []
     page.on('console', lambda msg: console_msgs.append({'level': msg.type, 'text': msg.text}))
@@ -292,10 +335,17 @@ print(json.dumps(results, default=str, indent=2))
 `
 
 func (e *ToolExecutor) browserAct(ctx context.Context, rawURL string, rawActions interface{}) (string, error) {
+	return e.browserActAuth(ctx, rawURL, rawActions, "")
+}
+
+// browserActAuth is browserAct with an optional Prism service token. When set,
+// the preview browser adds a `prism_session` cookie scoped to the start URL's
+// origin only — used for authenticated widget previews on multi-user Prism,
+// without ever sending the token to any other site the agent browses.
+func (e *ToolExecutor) browserActAuth(ctx context.Context, rawURL string, rawActions interface{}, authToken string) (string, error) {
 	if rawURL != "" {
-		u, err := url.Parse(rawURL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-			return "", fmt.Errorf("invalid URL: must start with http:// or https://")
+		if err := validateBrowserURL(rawURL); err != nil {
+			return "", err
 		}
 	}
 
@@ -305,10 +355,11 @@ func (e *ToolExecutor) browserAct(ctx context.Context, rawURL string, rawActions
 	}
 
 	type actInput struct {
-		URL     string      `json:"url,omitempty"`
-		Actions interface{} `json:"actions"`
+		URL        string      `json:"url,omitempty"`
+		Actions    interface{} `json:"actions"`
+		AuthCookie string      `json:"auth_cookie,omitempty"`
 	}
-	inputJSON, err := json.Marshal(actInput{URL: rawURL, Actions: rawActions})
+	inputJSON, err := json.Marshal(actInput{URL: rawURL, Actions: rawActions, AuthCookie: authToken})
 	if err != nil {
 		return "", fmt.Errorf("marshal actions: %w", err)
 	}

@@ -26,9 +26,10 @@ type Client struct {
 	cancelFn        context.CancelFunc
 	mu              sync.Mutex
 	sessionID       string
-	lastNotifID     int64       // last notification ID pushed to this client
-	pendingSecretCh chan string // non-nil while agent is waiting for secret input
-	viewContext     string      // what the user is currently looking at (UI -> agent)
+	user            *memory.User // authenticated user for this connection (nil in legacy/no-DB mode)
+	lastNotifID     int64        // last notification ID pushed to this client
+	pendingSecretCh chan string  // non-nil while agent is waiting for secret input
+	viewContext     string       // what the user is currently looking at (UI -> agent)
 }
 
 // cancelActive cancels the in-flight agent turn (if any) under the client mutex.
@@ -52,7 +53,11 @@ type ChatFile struct {
 }
 
 type WSMessage struct {
-	Type          string          `json:"type"`
+	Type string `json:"type"`
+	// Channel names the surface the message comes from. Empty = the browser
+	// dashboard; "voice" = a phone call docked from Vox (Vortex megazord), which
+	// makes the agent answer in spoken form and skip extended reasoning.
+	Channel       string          `json:"channel,omitempty"`
 	Content       string          `json:"content,omitempty"`
 	Path          string          `json:"path,omitempty"`
 	ID            string          `json:"id,omitempty"`
@@ -78,18 +83,22 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine session from query param (default: "default")
-	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
-	if sessionID == "" {
-		sessionID = "default"
+	// Determine session from query param, scoped to the connected user so each
+	// user gets their own isolated sessions (Phase 3).
+	clientSession := r.URL.Query().Get("session")
+	sessionID, ok := s.sessionFor(r, clientSession)
+	if !ok {
+		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","content":"forbidden session"}`))
+		conn.Close()
+		return
 	}
 
-	// Ensure session exists in DB
+	// Ensure session exists in DB (owned by the connecting user)
 	s.mu.RLock()
 	ms := s.memStore
 	s.mu.RUnlock()
 	if ms != nil {
-		if err := ms.EnsureSession(r.Context(), sessionID); err != nil {
+		if err := ms.EnsureSession(r.Context(), sessionID, sessionDisplayName(clientSession), ownerPtr(currentUser(r))); err != nil {
 			log.Printf("[session] ensure %q: %v", sessionID, err)
 		}
 	}
@@ -101,26 +110,83 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
 	executor.SetLLM(ollamaClient, s.cfg.Model)
+	executor.SetChatBlind(!s.cfg.ChatVision)
+	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 	if s.ragStore != nil {
-		executor.SetRAG(s.ragStore, s.ragEmbedder)
+		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
 	}
 	executor.SetSessionID(sessionID)
 	if ms != nil {
 		executor.SetMemoryStore(ms)
 	}
-	executor.SetCustomTools(s.customMgr, func() {
-		s.customMgr.Reload()
-		s.broadcastTools()
-	})
-	executor.SetMCPManager(s.mcpMgr, func() {
-		s.broadcastMCP(sessionID)
-	})
+	wsUser := currentUser(r)
+
+	// Vortex (megazord): a phone call docks through Vox with the service token,
+	// which auth.go resolves to a GLOBAL ADMIN. Re-identify it, or a stranger who
+	// dials the number gets an admin agent — exec_command, docker, mail, secrets,
+	// and the owner's whole knowledge base. Until the caller is identified, a call
+	// is a guest. See voice.go.
+	voiceCall := r.URL.Query().Get("channel") == voiceChannelName && isServiceIdentity(wsUser)
+
+	// A known caller (their number is on their profile) is identified: they get
+	// THEIR memory and knowledge — inter-channel continuity — but still only the
+	// voice-safe tools. An unknown caller stays a public switchboard guest.
+	var voiceUser *memory.User
+	var voiceDir []memory.DirEntry // the phone directory = Cortex user profiles
+	if voiceCall {
+		voiceUser = s.resolveVoiceCaller(r.Context(), r.URL.Query().Get("caller"))
+		voiceDir = s.voiceDirectory(r.Context())
+	}
+
+	var ragScope string
+	if voiceCall && voiceUser != nil {
+		ragScope = s.ragScopeFor(r.Context(), voiceUser)
+		log.Printf("[voice] caller %q identified as user %d (%s) → own scope %q, voice-safe tools",
+			r.URL.Query().Get("caller"), voiceUser.ID, voiceUser.DisplayName, ragScope)
+		executor.SetToolGuard(voiceGuard(voiceKnownAllowedTools))
+		executor.SetRAGScope(ragScope)
+		executor.SetPersonalScope(fmt.Sprintf("u%d", voiceUser.ID)) // their memory/profile
+		executor.SetHiddenTools(voiceHiddenTools(voiceKnownAllowedTools))
+	} else if voiceCall {
+		ragScope = s.voiceRAGScope(r.Context())
+		log.Printf("[voice] inbound call from %q → guest identity (tools deny-by-default, rag scope %q)",
+			r.URL.Query().Get("caller"), ragScope)
+		executor.SetToolGuard(voiceGuard(voiceGuestAllowedTools))
+		executor.SetRAGScope(ragScope)
+		// Pin an isolated personal scope: without it personalScope() falls back to
+		// the rag scope and a caller could read the owner's profile / learnings.
+		executor.SetPersonalScope(voiceGuestScope)
+		executor.SetHiddenTools(voiceHiddenTools(voiceGuestAllowedTools))
+		// Deliberately no custom tools and no MCP for a guest: built-ins only, and
+		// only the allow-listed ones survive.
+	} else {
+		executor.SetCustomTools(s.customMgr, func() {
+			s.customMgr.Reload()
+			s.broadcastTools()
+		})
+		executor.SetMCPManager(s.mcpMgr, func() {
+			s.broadcastMCP(sessionID)
+		})
+		// RBAC: gate this personal agent's tool calls by the connected user's
+		// permissions (nil user / admin → unrestricted). Resolved once at connect;
+		// the guard closure captures the policy snapshot.
+		executor.SetToolGuard(s.buildUserGuard(r.Context(), wsUser))
+		ragScope = s.ragScopeFor(r.Context(), wsUser)
+		executor.SetRAGScope(ragScope)
+		// Personal knowledge (profile, learnings) is per-user, not per-group: the
+		// browser session id doesn't carry "u<id>-", so pin it explicitly or a grouped
+		// user reads their profile under the group scope and finds nothing.
+		if wsUser != nil && wsUser.ID > 0 {
+			executor.SetPersonalScope(fmt.Sprintf("u%d", wsUser.ID))
+		}
+		executor.SetHiddenTools(s.hiddenToolsFor(r.Context(), sessionID, ragScope))
+	}
 
 	var ragContextFn func() string
 	if s.ragStore != nil {
 		ragStore := s.ragStore
 		ragContextFn = func() string {
-			cols, err := ragStore.ListCollections(context.Background(), sessionID)
+			cols, err := ragStore.ListCollections(context.Background(), ragScope)
 			if err != nil || len(cols) == 0 {
 				return ""
 			}
@@ -128,10 +194,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			sb.WriteString("## Knowledge Base (RAG)\n\n")
 			sb.WriteString("You have access to document collections via `rag_search`. Call it whenever the user's question might be answered by these documents — don't guess, search first.\n\n")
 			for _, c := range cols {
+				name := unscopeCollection(ragScope, c.Name)
 				if c.Description != "" {
-					fmt.Fprintf(&sb, "- **%s** — %s (%d docs)\n", c.Name, c.Description, c.DocCount)
+					fmt.Fprintf(&sb, "- **%s** — %s (%d docs)\n", name, c.Description, c.DocCount)
 				} else {
-					fmt.Fprintf(&sb, "- **%s** (%d docs, %d chunks)\n", c.Name, c.DocCount, c.ChunkCount)
+					fmt.Fprintf(&sb, "- **%s** (%d docs, %d chunks)\n", name, c.DocCount, c.ChunkCount)
 				}
 			}
 			return sb.String()
@@ -141,12 +208,29 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		conn: conn,
 		send: make(chan []byte, 256),
+		user: wsUser,
 	}
 
 	model := s.cfg.Model
 
-	// Load personality for this session (falls back to default session, then hardcoded).
+	// Personality per identity:
+	//  - voice guest → the switchboard persona (never the owner's assistant, which
+	//    would introduce itself to a stranger as managing their mail/servers);
+	//  - identified voice caller → THEIR own personality + a note to greet them by
+	//    name and resume the conversation (continuity);
+	//  - dashboard → this session's personality.
 	personality := loadPersonality(r.Context(), ms, sessionID)
+	if voiceCall && voiceUser != nil {
+		personality = voiceKnownPersonaNote(voiceUser.DisplayName) +
+			loadPersonality(r.Context(), ms, fmt.Sprintf("u%d-default", voiceUser.ID))
+	} else if voiceCall {
+		personality = s.voicePersonality(r.Context())
+	}
+	if voiceCall {
+		// Give the agent the live directory (Cortex profiles) so it only offers to
+		// transfer to real people; the relay resolves the chosen name to a number.
+		personality += voiceDirectoryText(voiceDir)
+	}
 
 	client.ag = agent.New(ollamaClient, executor, model, ms, personality)
 	client.ag.SetSession(sessionID, personality)
@@ -154,38 +238,49 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if ragContextFn != nil {
 		client.ag.SetRAGContextFn(ragContextFn)
 	}
-	client.ag.SetUserProfileFn(func() string {
-		return executor.GetUserProfile(context.Background())
-	})
-	client.ag.SetSkillsContextFn(executor.SkillsIndex)
-	client.ag.SetServicesContextFn(s.servicesContext)
 	client.ag.SetViewContextFn(func() string {
 		client.mu.Lock()
 		defer client.mu.Unlock()
 		return client.viewContext
 	})
-	if sessionID == assistantSession {
-		client.ag.SetGlobalContextFn(s.workspacesOverview)
-	}
-	client.ag.SetLearningsCtxFn(func(ctx context.Context, query string) string {
-		return executor.SearchLearnings(ctx, query)
-	})
 	mcpMgr := s.mcpMgr
-	client.ag.SetMCPContextFn(func() string {
-		servers, err := mcpMgr.List(context.Background(), sessionID)
-		if err != nil || len(servers) == 0 {
-			return ""
+
+	// An identified caller gets their own profile + past learnings (that IS the
+	// continuity), scoped to them by the personal scope set above. A guest gets
+	// none. The dashboard gets everything.
+	if !voiceCall || voiceUser != nil {
+		client.ag.SetUserProfileFn(func() string {
+			return executor.GetUserProfile(context.Background())
+		})
+		client.ag.SetLearningsCtxFn(func(ctx context.Context, query string) string {
+			return executor.SearchLearnings(ctx, query)
+		})
+	}
+
+	// The rest is owner infrastructure (skills, running services, workspaces, MCP
+	// servers) — irrelevant and unsafe to expose on a phone call. Dashboard only.
+	if !voiceCall {
+		client.ag.SetSkillsContextFn(executor.SkillsIndex)
+		client.ag.SetServicesContextFn(s.servicesContext)
+		if sessionID == assistantSession {
+			client.ag.SetGlobalContextFn(s.workspacesOverview)
 		}
-		var sb strings.Builder
-		sb.WriteString("## MCP Servers\n\nYou have access to external tools via MCP servers. Use mcp_list_servers to see current configuration.\n\n")
-		for _, srv := range servers {
-			if !srv.Enabled || len(srv.Tools) == 0 {
-				continue
+		client.ag.SetMCPContextFn(func() string {
+			servers, err := mcpMgr.List(context.Background(), sessionID)
+			if err != nil || len(servers) == 0 {
+				return ""
 			}
-			fmt.Fprintf(&sb, "- **%s** (%d tools)\n", srv.Name, len(srv.Tools))
-		}
-		return sb.String()
-	})
+			var sb strings.Builder
+			sb.WriteString("## MCP Servers\n\nYou have access to external tools via MCP servers. Use mcp_list_servers to see current configuration.\n\n")
+			for _, srv := range servers {
+				if !srv.Enabled || len(srv.Tools) == 0 {
+					continue
+				}
+				fmt.Fprintf(&sb, "- **%s** (%d tools)\n", srv.Name, len(srv.Tools))
+			}
+			return sb.String()
+		})
+	}
 
 	// Wire notification callback: inserts into DB and pushes to this client immediately
 	if ms != nil {
@@ -257,6 +352,38 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	executor.SetProgressFn(func(text string) {
 		client.sendJSON(map[string]interface{}{"type": "progress", "content": text})
 	})
+
+	// Vortex: on a voice call, expose the telephony tools and relay their calls to
+	// Vox over this WS. Vox performs the transfer/message/hang-up with its ARI/SIP
+	// machinery, exactly as it does for its own agent.
+	if voiceCall {
+		executor.SetTelephony(agent.TelephonyTools, func(name string, args map[string]interface{}) (string, error) {
+			// transfer_call resolves against the Cortex directory (user profiles), not
+			// a separate contacts table. Resolve here, pass Vox a pre-resolved number.
+			if name == "transfer_call" {
+				dest, _ := args["destination"].(string)
+				cname, phone, ok := resolveTransferName(voiceDir, dest)
+				if !ok {
+					// Not in the directory → don't dial; let the agent offer a near
+					// match from the list or take a message.
+					return fmt.Sprintf("Échec : %q ne figure pas dans l'annuaire, le transfert n'a pas eu lieu. Ne réessaie pas sans l'accord de l'appelant : propose un nom proche de la liste, ou de prendre un message.", dest), nil
+				}
+				args["destination"] = cname
+				args["dial_number"] = phone // pre-resolved for Vox
+			}
+			client.sendJSON(map[string]interface{}{"type": "telephony", "tool": name, "args": args})
+			log.Printf("[voice] relaying telephony tool %q to Vox: %v", name, args)
+			switch name {
+			case "transfer_call":
+				return "Le transfert est en cours.", nil
+			case "take_message":
+				return "Le message est bien noté.", nil
+			case "end_call":
+				return "L'appel va se terminer.", nil
+			}
+			return "OK", nil
+		})
+	}
 	executor.SetCallbacks(
 		func(id, title, content string, cols, height int) {
 			client.sendJSON(map[string]interface{}{
@@ -463,22 +590,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.mu.Unlock()
 
 			client.ag.SetActiveTools(msg.DisabledTools)
+			client.ag.SetChannel(msg.Channel)
 			content := msg.Content
 			for _, f := range msg.Files {
-				hdr := "=== Attached file: " + f.Name
-				if f.Path != "" {
-					hdr += fmt.Sprintf(" (saved in the workspace at %s — read it directly if you need more than the text below, e.g. to OCR a scanned PDF or parse a spreadsheet)", f.Path)
-				}
-				hdr += " ==="
-				body := f.Text
-				if strings.TrimSpace(body) == "" {
-					if f.Path != "" {
-						body = "[No text was extracted automatically — read the file at " + f.Path + " to process it yourself.]"
-					} else {
-						body = "[No text could be extracted from this file.]"
-					}
-				}
-				content = hdr + "\n" + body + "\n\n" + content
+				// The browser already ran ingestAttachment via /api/chat/upload and
+				// sent back {Text, Path}; here we only build the preamble.
+				content = attachmentPreamble(attachment{Name: f.Name, Text: f.Text, Path: f.Path}) + "\n\n" + content
 			}
 			go s.handleChat(ctx, client, content, msg.Images, msg.Model)
 
@@ -617,6 +734,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.sendJSON(map[string]interface{}{"type": "notification_deleted", "id": msg.ID})
 
 		case "set_model":
+			// RBAC: refuse a model this user isn't allowed to use.
+			if !s.userCanUseModel(context.Background(), client.user, msg.Model) {
+				client.sendJSON(map[string]interface{}{"type": "error", "content": "You are not allowed to use model " + msg.Model})
+				continue
+			}
 			model = msg.Model
 			var curPersonality string
 			s.mu.RLock()
@@ -674,14 +796,33 @@ func (s *Server) handleChat(ctx context.Context, client *Client, content string,
 		close(events)
 	}()
 
+	outChars := 0
 	for ev := range events {
 		client.sendJSON(ev)
+		if ev.Type == "stream" {
+			outChars += len(ev.Content)
+		}
 
 		// After file changes, refresh tree
 		if ev.Type == "file_changed" {
 			tree := s.buildFileTree(s.cfg.WorkspaceDir)
 			client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
 		}
+	}
+
+	// Deterministic end-of-turn marker for non-browser clients (the Vortex voice
+	// dock reads this to know Cortex's reply is complete). The browser ignores it.
+	client.sendJSON(map[string]interface{}{"type": "turn_complete"})
+
+	// Usage: one chat turn, tokens estimated (chars/4 in+out) until backend
+	// counters are wired.
+	if ms := s.store(); ms != nil {
+		model := modelOverride
+		if model == "" && client.ag != nil {
+			model = client.ag.Model()
+		}
+		ms.AddUsage(context.Background(), 0, client.sessionID, "chat_turn", model,
+			int64((len(content)+outChars)/4), map[string]interface{}{"origin": "ws"})
 	}
 }
 

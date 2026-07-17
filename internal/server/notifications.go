@@ -2,7 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"prism/internal/agent"
@@ -29,9 +31,12 @@ func (s *Server) handleExternalNotify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "title required", 400)
 		return
 	}
-	if body.Session == "" {
-		body.Session = "default"
+	sessionID, ok := s.sessionFor(r, body.Session)
+	if !ok {
+		http.Error(w, "forbidden", 403)
+		return
 	}
+	body.Session = sessionID
 	if body.Level == "" {
 		body.Level = "info"
 	}
@@ -54,13 +59,29 @@ func (s *Server) handleExternalNotify(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"id": id})
 }
 
+// pushJSONToSession sends an arbitrary JSON payload to all live WS clients for a session.
+func (s *Server) pushJSONToSession(sessionID string, payload map[string]interface{}) {
+	data, _ := json.Marshal(payload)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for c := range s.clients {
+		if c.sessionID == sessionID {
+			select {
+			case c.send <- data:
+			default:
+			}
+		}
+	}
+}
+
 // injectAgentNote drops a one-line event into the live agent's conversation for a
 // session, so it learns about something the user just did in the UI.
 //
 // Why this is needed: the PIM tools read the DB live, so the agent CAN see fresh data —
 // but only if it calls the tool again. Left alone it answers from the stale `note list`
 // sitting in its history, and only notices after a page reload (which builds a new agent
-// with an empty history). Use it sparingly — every call appends to the persisted history.
+// with an empty history). This is the same mechanism the dashboard uses when a widget is
+// removed (see ws.go). Use it sparingly — every call appends to the persisted history.
 //
 // Agents are collected before injecting: InjectNote writes to the DB, and holding the
 // server lock across that would stall every other client.
@@ -81,21 +102,6 @@ func (s *Server) injectAgentNote(sessionID, content string) {
 	}
 }
 
-// pushJSONToSession sends an arbitrary JSON payload to all live WS clients for a session.
-func (s *Server) pushJSONToSession(sessionID string, payload map[string]interface{}) {
-	data, _ := json.Marshal(payload)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for c := range s.clients {
-		if c.sessionID == sessionID {
-			select {
-			case c.send <- data:
-			default:
-			}
-		}
-	}
-}
-
 // pushNotificationToSession delivers a notification to all live WS clients for a session.
 func (s *Server) pushNotificationToSession(sessionID string, id int64, title, message, level string) {
 	msg, _ := json.Marshal(map[string]interface{}{
@@ -111,6 +117,32 @@ func (s *Server) pushNotificationToSession(sessionID string, id int64, title, me
 	defer s.mu.RUnlock()
 	for c := range s.clients {
 		if c.sessionID == sessionID {
+			select {
+			case c.send <- msg:
+			default:
+			}
+		}
+	}
+}
+
+// pushNotificationToUser delivers a live notification to every WS client of a
+// user, whatever workspace they're viewing (sessions are namespaced "u<id>-…").
+// The DB row still lives on one session; this is just the real-time toast.
+func (s *Server) pushNotificationToUser(userID, id int64, title, message, level string) {
+	msg, _ := json.Marshal(map[string]interface{}{
+		"type":      "notification",
+		"id":        id,
+		"title":     title,
+		"message":   message,
+		"level":     level,
+		"read":      false,
+		"createdAt": time.Now().Format(time.RFC3339),
+	})
+	prefix := fmt.Sprintf("u%d-", userID)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for c := range s.clients {
+		if strings.HasPrefix(c.sessionID, prefix) {
 			select {
 			case c.send <- msg:
 			default:

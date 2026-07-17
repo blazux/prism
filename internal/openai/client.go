@@ -20,18 +20,26 @@ import (
 )
 
 // defaultMaxTokens caps generation for one turn when the caller asks for no
-// specific ceiling. vLLM's own default is max_model_len minus the prompt — on a
-// 262k-context server that is hours of streaming before the request ends by
-// itself. Hitting this cap instead ends the turn with finish_reason "length",
-// which surfaces as a truncated answer rather than a dead chat. It has to clear
-// the longest legitimate answer (a whole widget, a long note), so it is generous.
-//
-// Note for anyone tempted to add an anti-repetition penalty here: presence_penalty
-// 0.3 was tried against vLLM on a GB10 (2026-07-16) and killed the engine on the
-// first request carrying it — apply_penalties hit a device-side assert and the
-// server died. The penalty kernel is only reached when a penalty is non-zero. Test
-// on the box that will serve it before wiring one in; this cap is the safe guard.
+// specific ceiling. It has to clear the longest legitimate answer — a whole
+// widget, a long note — while still cutting off a model that has stopped
+// converging. vLLM's own default is max_model_len minus the prompt (~242k on
+// fleet-qwen35b), i.e. over an hour of streaming before the request ends by
+// itself; hitting this cap instead ends the turn with finish_reason "length",
+// which surfaces as a truncated answer rather than a dead chat.
 const defaultMaxTokens = 16384
+
+// No penalty is applied by default, and this is not an oversight.
+//
+// A presence_penalty of 0.3 was tried against fleet-qwen35b (vLLM, GB10/sm_121)
+// on 2026-07-16 and killed the engine on the first request carrying it:
+// apply_penalties → "CUDA error: device-side assert triggered" → EngineDeadError,
+// taking the whole server down. The penalty kernel is only reached when a penalty
+// is non-zero, which is why that box served for 20h without touching it. Sending
+// one by default would therefore kill the model on every chat turn.
+//
+// Options.PresencePenalty still exists for callers on a backend known to handle
+// it (Ollama does). Do not wire a default here without re-testing on the box that
+// will actually serve it. The max-token cap is the loop backstop instead.
 
 // responseHeaderTimeout bounds the wait for the response head only, never the
 // body — an SSE stream may then run as long as it likes. It covers the window
@@ -76,6 +84,12 @@ type chatRequest struct {
 	Stream      bool       `json:"stream"`
 	Temperature float64    `json:"temperature,omitempty"`
 	MaxTokens   int        `json:"max_tokens,omitempty"`
+	// Pointer so an explicit 0 (penalty off) still reaches the backend instead of
+	// being dropped by omitempty and silently replaced by the default.
+	PresencePenalty *float64 `json:"presence_penalty,omitempty"`
+	// Qwen/SGLang convention for turning extended reasoning off. Passes through
+	// LiteLLM unharmed; ignored by backends that don't know it.
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
 }
 
 type chatMsg struct {
@@ -303,6 +317,13 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	}
 	if payload.MaxTokens <= 0 {
 		payload.MaxTokens = defaultMaxTokens
+	}
+	// Only ever sent when a caller explicitly asks for it — see the note above.
+	if pp := req.Options.PresencePenalty; pp != 0 {
+		payload.PresencePenalty = &pp
+	}
+	if req.NoThinking {
+		payload.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
 	}
 	for _, t := range req.Tools {
 		payload.Tools = append(payload.Tools, chatTool{Type: "function", Function: t.Function})

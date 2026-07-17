@@ -38,14 +38,26 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	owner := ownerPtr(currentUser(r))
 	switch r.Method {
 	case "GET":
-		sessions, err := ms.ListSessions(r.Context())
+		sessions, err := ms.ListSessions(r.Context(), owner)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"sessions": sessions})
+		// Hide the reserved sessions: "assistant" (the global apps' agent) and
+		// "telegram" (the per-user Telegram bridge). They are not user workspaces
+		// and must not look selectable/editable; chat reaches them by id.
+		visible := sessions[:0]
+		for _, sess := range sessions {
+			switch userPrefixRe.ReplaceAllString(sess.ID, "") {
+			case "assistant", "telegram":
+				continue
+			}
+			visible = append(visible, sess)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"sessions": visible})
 
 	case "POST":
 		var body struct {
@@ -55,13 +67,13 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "name required", 400)
 			return
 		}
-		id := sanitizeSessionID(body.Name)
-		if id == "" {
+		id, ok := s.sessionFor(r, body.Name)
+		if !ok || id == "" {
 			http.Error(w, "invalid name", 400)
 			return
 		}
-		// Ensure uniqueness by appending suffix if needed
-		existing, _ := ms.ListSessions(r.Context())
+		// Ensure uniqueness within this user's sessions by appending a suffix.
+		existing, _ := ms.ListSessions(r.Context(), owner)
 		taken := make(map[string]bool)
 		for _, s := range existing {
 			taken[s.ID] = true
@@ -70,7 +82,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		for i := 2; taken[id]; i++ {
 			id = fmt.Sprintf("%s-%d", base, i)
 		}
-		if err := ms.UpsertSession(r.Context(), id, body.Name); err != nil {
+		if err := ms.UpsertSession(r.Context(), id, body.Name, owner); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -84,9 +96,15 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
-	if id == "" {
+	rawID := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if rawID == "" {
 		http.Error(w, "missing id", 400)
+		return
+	}
+	// Scope to the caller: rejects another user's session id (Phase 3).
+	id, ok := s.sessionFor(r, rawID)
+	if !ok {
+		http.Error(w, "forbidden", 403)
 		return
 	}
 
@@ -116,7 +134,7 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "name required", 400)
 			return
 		}
-		if err := ms.UpsertSession(r.Context(), id, body.Name); err != nil {
+		if err := ms.UpsertSession(r.Context(), id, body.Name, ownerPtr(currentUser(r))); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -153,9 +171,10 @@ func (s *Server) handlePersonality(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "memory store not available", http.StatusServiceUnavailable)
 		return
 	}
-	sessionID := sanitizeSessionID(r.URL.Query().Get("session"))
-	if sessionID == "" {
-		sessionID = "default"
+	sessionID, ok := s.sessionFor(r, r.URL.Query().Get("session"))
+	if !ok {
+		http.Error(w, "forbidden", 403)
+		return
 	}
 	key := memory.KeyPersonality + "_" + sessionID
 	switch r.Method {
@@ -180,13 +199,11 @@ func (s *Server) handlePersonality(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAgentPersonality reads/writes the global base personality (layered under
-// every session). GET -> {personality}; POST {personality}.
+// handleAgentPersonality reads/writes the caller's base personality (layered
+// under every one of their sessions). GET -> {personality}; POST {personality}.
 func (s *Server) handleAgentPersonality(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	s.mu.RLock()
-	ms := s.memStore
-	s.mu.RUnlock()
+	ms := s.userStore(r)
 	if ms == nil {
 		http.Error(w, "memory store not available", http.StatusServiceUnavailable)
 		return
@@ -213,12 +230,10 @@ func (s *Server) handleAgentPersonality(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// handleAgentName reads/writes the global agent name. GET -> {name}; POST {name}.
+// handleAgentName reads/writes the caller's agent name. GET -> {name}; POST {name}.
 func (s *Server) handleAgentName(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	s.mu.RLock()
-	ms := s.memStore
-	s.mu.RUnlock()
+	ms := s.userStore(r)
 	if ms == nil {
 		http.Error(w, "memory store not available", http.StatusServiceUnavailable)
 		return

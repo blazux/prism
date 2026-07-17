@@ -165,7 +165,12 @@ body {
   background: var(--bg1);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  z-index: 10;
+  /* Above the widget-window band (20..200, see windows.js) so header dropdowns —
+     the notification panel especially — are never covered by a widget. Matches the
+     rail (220); stays below the modal/panel layer (250+). Was z-index:10, which
+     trapped the notif-panel (z-index:300 but scoped to this header's context)
+     underneath any focused widget. */
+  z-index: 230;
 }
 
 .header-left {
@@ -617,7 +622,7 @@ body {
 
 /* ── Window resize handle ─────────────────────────────────────────────────── */
 
-/* Workspace terminal (Ctrl+Enter) — hidden bottom panel */
+/* Workspace terminal (Ctrl+`) — hidden bottom panel */
 #term-panel { position: fixed; left: 0; right: 0; bottom: 0; height: 42vh; background: var(--bg); border-top: 1px solid var(--border2); z-index: 300; display: flex; flex-direction: column; transform: translateY(100%); transition: transform .18s ease; box-shadow: 0 -10px 36px rgba(0,0,0,.45); }
 #term-panel.open { transform: translateY(0); }
 #term-head { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 11px; color: var(--text2); border-bottom: 1px solid var(--border); background: var(--bg2); }

@@ -64,7 +64,18 @@ type Agent struct {
 	basePersonality string // default personality prepended for non-default sessions (layered model)
 	agentName       string // optional global agent name injected into the prompt
 	historyLoaded   bool   // true after first DB load
+	// channel is the surface this turn arrives from ("" = dashboard/browser,
+	// "voice" = a phone call docked from Vox). It changes the *form* of the reply
+	// (spoken, short, no markup) and disables extended reasoning — never the
+	// agent's identity, which stays the same across channels.
+	channel string
 }
+
+// SetChannel declares the surface the next turn comes from. See Agent.channel.
+func (a *Agent) SetChannel(ch string) { a.channel = ch }
+
+// voiceChannel is the phone surface (Vortex megazord: Vox → Cortex).
+const voiceChannel = "voice"
 
 // SetRAGContextFn registers a callback that returns the RAG collections section
 // to inject into the system prompt on every chat turn.
@@ -158,20 +169,26 @@ func New(ollamaClient ollama.Backend, executor *ToolExecutor, model string, memS
 	return a
 }
 
-// loadProfile loads the global agent name and, for non-default sessions, the
-// base (default) personality that the session's own text is layered on top of.
+// loadProfile loads the agent name and base personality for this session's
+// owner. Sessions are user-namespaced ("u<id>-…"), so the identity keys live in
+// that user's config scope — each user names and shapes their own agent.
+// Un-prefixed sessions (legacy single-user, shared agents) read the global keys.
 func (a *Agent) loadProfile() {
 	a.basePersonality = ""
 	a.agentName = ""
 	if a.memStore == nil {
 		return
 	}
+	store := a.memStore
+	if m := userSessionPrefixRe.FindString(a.sessionID); m != "" && strings.HasPrefix(a.sessionID, m+"-") {
+		store = store.ConfigScope(m)
+	}
 	ctx := context.Background()
-	if name, ok, err := a.memStore.GetConfig(ctx, memory.KeyAgentName); err == nil && ok {
+	if name, ok, err := store.GetConfig(ctx, memory.KeyAgentName); err == nil && ok {
 		a.agentName = name
 	}
 	// The base persona is layered under every session (including the default one).
-	if base, ok, err := a.memStore.GetConfig(ctx, memory.KeyPersonalityBase); err == nil && ok {
+	if base, ok, err := store.GetConfig(ctx, memory.KeyPersonalityBase); err == nil && ok {
 		a.basePersonality = base
 	}
 }
@@ -191,6 +208,9 @@ func (a *Agent) ResetHistory() {
 }
 
 // SetSession switches the agent to a different session, resetting in-memory state.
+// Model returns the currently selected chat model (telemetry).
+func (a *Agent) Model() string { return a.model }
+
 func (a *Agent) SetSession(sessionID, personality string) {
 	a.sessionID = sessionID
 	a.personality = personality
@@ -290,6 +310,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		}
 		persona += a.personality
 	}
+
 	if a.agentName != "" {
 		sb.WriteString("Your name is ")
 		sb.WriteString(a.agentName)
@@ -385,6 +406,29 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	// Inject current date/time so the model can reason about time.
 	// Explicit instruction: never output the date/time in responses.
 	fmt.Fprintf(&sb, "\n\nCurrent date and time: %s. Current session ID: `%s`. Use these only as internal context — never write them in your responses. When generating widget code that calls /api/tool/ or /api/notify, always append ?session=%s to the URL.", time.Now().In(agentLocation).Format("2006-01-02 15:04"), a.sessionID, a.sessionID)
+
+	// Channel layer (Vortex): the phone constrains the *form* of the answer, not
+	// who the agent is. Kept last so it wins over anything the personality says
+	// about formatting. Everything here is read aloud by a TTS.
+	if a.channel == voiceChannel {
+		sb.WriteString(`
+
+## You are on a phone call — speak, don't write
+Your reply is read aloud by a speech synthesiser to someone holding a phone. Therefore:
+- Answer in spoken French, in SHORT sentences. Be brief: a caller cannot skim.
+- NO markdown, NO emoji, NO bullet lists, NO headings, NO code blocks, NO URLs.
+- Never write symbols meant to be seen (*, #, backticks, arrows) — they get spoken.
+- Give at most one or two key points, then stop. Ask one question at a time.
+- Spell out nothing and never dictate long identifiers or links; offer to send them instead.
+- If you need to think, do it briefly — the caller is waiting in silence.
+
+You control the call through tools — the words alone do nothing:
+- To hang up: when the caller has clearly finished (says goodbye, "c'est tout merci", "au revoir"), say a short farewell AND call end_call in the same turn. Saying goodbye without calling end_call leaves the line open.
+- To transfer: when the caller asks to reach a person, call transfer_call (never just say you are transferring).
+- To take a message: when the caller wants to leave one, or the person is unavailable, call take_message.
+
+For ANY factual question (opening hours, prices, services, procedures, addresses…), you MUST call rag_search FIRST and answer only from what it returns — never from memory, never invent. If it returns nothing relevant, say plainly that you don't have that information and offer to take a message.`)
+	}
 
 	return sb.String()
 }
@@ -595,6 +639,29 @@ func extractScreenshotImages(result, workspaceDir string) []string {
 	return images
 }
 
+// extractScreenshotPaths returns the on-disk paths of the screenshots referenced
+// in a browser_act result, so a vision captioner can describe them for a
+// text-only chat model.
+func extractScreenshotPaths(result, workspaceDir string) []string {
+	var actions []struct {
+		Action string `json:"action"`
+		Status string `json:"status"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(result), &actions); err != nil {
+		return nil
+	}
+	var paths []string
+	for _, a := range actions {
+		if a.Action != "screenshot" || a.Status != "ok" || a.URL == "" {
+			continue
+		}
+		fname := strings.TrimPrefix(a.URL, "/screenshots/")
+		paths = append(paths, filepath.Join(workspaceDir, ".screenshots", fname))
+	}
+	return paths
+}
+
 // handleUpdateSystemPrompt processes the update_system_prompt tool call.
 func (a *Agent) handleUpdateSystemPrompt(ctx context.Context, rawArgs json.RawMessage) string {
 	var args struct {
@@ -627,6 +694,9 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 		Model:    a.model,
 		Messages: messages,
 		Tools:    tools,
+		// On the phone the caller waits in silence while the model reasons, so the
+		// thinking budget is pure dead air. Turn it off for voice turns.
+		NoThinking: a.channel == voiceChannel,
 	}
 
 	log.Printf("[agent] → ollama: %d messages, %d tools, prompt_len=%d", len(messages), len(tools), len(prompt))

@@ -19,6 +19,11 @@ type Note struct {
 	Tags      string    `json:"tags"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// Group-shared notes only (0 for personal notes): OwnerID is the user who
+	// shared the note (edit/delete rights); OriginID links back to their personal
+	// note so re-sharing updates the same group copy.
+	OwnerID  int64 `json:"ownerId,omitempty"`
+	OriginID int64 `json:"originId,omitempty"`
 }
 
 type Task struct {
@@ -55,7 +60,8 @@ func (s *Store) AddNote(ctx context.Context, session, title, body, tags string) 
 
 func (s *Store) ListNotes(ctx context.Context, session string) ([]Note, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, session_id, title, body, tags, created_at, updated_at
+		SELECT id, session_id, title, body, tags, created_at, updated_at,
+		       COALESCE(owner_id, 0), COALESCE(origin_id, 0)
 		FROM notes WHERE session_id = $1 ORDER BY updated_at DESC
 	`, session)
 	if err != nil {
@@ -65,12 +71,47 @@ func (s *Store) ListNotes(ctx context.Context, session string) ([]Note, error) {
 	var out []Note
 	for rows.Next() {
 		var n Note
-		if err := rows.Scan(&n.ID, &n.SessionID, &n.Title, &n.Body, &n.Tags, &n.CreatedAt, &n.UpdatedAt); err != nil {
+		if err := rows.Scan(&n.ID, &n.SessionID, &n.Title, &n.Body, &n.Tags, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.OriginID); err != nil {
 			return nil, err
 		}
 		out = append(out, n)
 	}
 	return out, rows.Err()
+}
+
+// GetNote fetches a single note within a scope (returns pgx.ErrNoRows if absent).
+func (s *Store) GetNote(ctx context.Context, session string, id int64) (Note, error) {
+	var n Note
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, session_id, title, body, tags, created_at, updated_at,
+		       COALESCE(owner_id, 0), COALESCE(origin_id, 0)
+		FROM notes WHERE id = $1 AND session_id = $2
+	`, id, session).Scan(&n.ID, &n.SessionID, &n.Title, &n.Body, &n.Tags, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.OriginID)
+	return n, err
+}
+
+// ShareNote publishes a note into a group scope. It is idempotent per author:
+// re-sharing the same personal note (same origin) updates the existing group copy
+// rather than creating a duplicate. Returns the group note's id.
+func (s *Store) ShareNote(ctx context.Context, session string, ownerID, originID int64, title, body, tags string) (int64, error) {
+	if originID > 0 {
+		var id int64
+		err := s.pool.QueryRow(ctx, `
+			UPDATE notes SET title = $1, body = $2, tags = $3, updated_at = NOW()
+			WHERE session_id = $4 AND origin_id = $5 AND owner_id = $6
+			RETURNING id
+		`, title, body, tags, session, originID, ownerID).Scan(&id)
+		if err == nil {
+			return id, nil // updated the existing shared copy
+		}
+		// no existing copy (ErrNoRows) → fall through and insert a new one
+	}
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO notes (session_id, owner_id, origin_id, title, body, tags)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+	`, session, ownerID, originID, title, body, tags).Scan(&id)
+	return id, err
 }
 
 func (s *Store) UpdateNote(ctx context.Context, session string, id int64, title, body, tags string) error {

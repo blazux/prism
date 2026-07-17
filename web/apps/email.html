@@ -20,7 +20,9 @@
   .app { height: 100%; display: flex; flex-direction: column; }
 
   /* config */
-  .config { max-width: 460px; margin: 0 auto; padding: 28px 20px; overflow-y: auto; width: 100%; }
+  /* Full-width scroller (scrollbar at the window edge); children stay centered. */
+  .config { padding: 28px 20px; overflow-y: auto; width: 100%; box-sizing: border-box; }
+  .config > * { max-width: 460px; margin-left: auto; margin-right: auto; }
   .config h1 { color: var(--text); font-size: 18px; margin-bottom: 4px; }
   .config .hint { font-size: 12px; color: var(--text2); margin-bottom: 18px; line-height: 1.5; }
   .field { margin-bottom: 12px; }

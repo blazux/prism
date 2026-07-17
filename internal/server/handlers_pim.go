@@ -18,10 +18,45 @@ import (
 	"prism/internal/tasks"
 )
 
-// pimScope is the shared scope for personal data — notes, tasks and calendar are
-// global ("soft partition"), shared across all workspaces. Keep in sync with the
-// agent's pimScope constant.
+// pimScope is the fallback scope for personal data when there is no authenticated
+// user (no-DB / service identity). With multi-user auth, notes/tasks/calendar are
+// scoped per user ("u<id>") — see pimScopeFor. Keep the constant in sync with the
+// agent's default PIM scope.
 const pimScope = "global"
+
+// pimScopeFor returns the caller's personal PIM scope ("u<id>"), or the global
+// fallback for the service identity / legacy no-DB mode.
+func (s *Server) pimScopeFor(r *http.Request) string {
+	if u := currentUser(r); u != nil && u.ID > 0 {
+		return fmt.Sprintf("u%d", u.ID)
+	}
+	return pimScope
+}
+
+// pimGroupScopeFor returns the caller's group note scope ("g<id>", their primary
+// group) plus the group id. ok is false when the user belongs to no group.
+func (s *Server) pimGroupScopeFor(r *http.Request) (scope string, gid int64, ok bool) {
+	u := currentUser(r)
+	if u == nil || u.ID == 0 {
+		return "", 0, false
+	}
+	if ms := s.store(); ms != nil {
+		if groups, err := ms.UserGroups(r.Context(), u.ID); err == nil && len(groups) > 0 {
+			return fmt.Sprintf("g%d", groups[0].GroupID), groups[0].GroupID, true
+		}
+	}
+	return "", 0, false
+}
+
+// noteJSON is the wire shape for a note in the app: the base fields plus which
+// scope it lives in ("personal" | "group") and whether the caller may edit it.
+func noteJSON(id, title, body, tags string, createdAt, updatedAt time.Time, scope string, canEdit bool, ownerID, originID int64) map[string]interface{} {
+	return map[string]interface{}{
+		"id": id, "title": title, "body": body, "tags": tags,
+		"createdAt": createdAt, "updatedAt": updatedAt,
+		"scope": scope, "canEdit": canEdit, "ownerId": ownerID, "originId": originID,
+	}
+}
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -62,7 +97,7 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
-	prov := notes.ProviderFor(r.Context(), s.memStore, pimScope)
+	prov := notes.ProviderFor(r.Context(), s.userStore(r), s.pimScopeFor(r))
 	switch r.Method {
 	case "GET":
 		items, err := prov.List(r.Context())
@@ -70,16 +105,58 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		writeJSON(w, map[string]interface{}{"notes": items, "source": prov.Kind()})
+		out := make([]map[string]interface{}, 0, len(items))
+		for _, n := range items {
+			out = append(out, noteJSON(n.ID, n.Title, n.Body, n.Tags, n.CreatedAt, n.UpdatedAt, "personal", true, 0, 0))
+		}
+		// Append the group's shared notes (read-only unless the caller shared them,
+		// or is a group admin). These live under the group scope "g<id>".
+		if gscope, gid, ok := s.pimGroupScopeFor(r); ok {
+			u := currentUser(r)
+			admin := s.isGroupAdminOf(r.Context(), u, gid)
+			if gnotes, err := s.store().ListNotes(r.Context(), gscope); err == nil {
+				for _, n := range gnotes {
+					canEdit := admin || (u != nil && n.OwnerID == u.ID)
+					out = append(out, noteJSON(strconv.FormatInt(n.ID, 10), n.Title, n.Body, n.Tags, n.CreatedAt, n.UpdatedAt, "group", canEdit, n.OwnerID, n.OriginID))
+				}
+			}
+		}
+		writeJSON(w, map[string]interface{}{"notes": out, "source": prov.Kind()})
 	case "POST":
 		var b struct {
 			ID    string `json:"id"`
 			Title string `json:"title"`
 			Body  string `json:"body"`
 			Tags  string `json:"tags"`
+			Scope string `json:"scope"`
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
+			return
+		}
+		// Editing a shared group note: allowed for its owner or a group admin only.
+		if b.Scope == "group" {
+			gscope, gid, ok := s.pimGroupScopeFor(r)
+			if !ok {
+				http.Error(w, "not in a group", 400)
+				return
+			}
+			id, _ := strconv.ParseInt(b.ID, 10, 64)
+			n, err := s.store().GetNote(r.Context(), gscope, id)
+			if err != nil {
+				http.Error(w, "note not found", 404)
+				return
+			}
+			u := currentUser(r)
+			if !s.isGroupAdminOf(r.Context(), u, gid) && !(u != nil && n.OwnerID == u.ID) {
+				http.Error(w, "read-only: only the author or a group admin can edit this shared note", 403)
+				return
+			}
+			if err := s.store().UpdateNote(r.Context(), gscope, id, b.Title, b.Body, b.Tags); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			writeJSON(w, map[string]interface{}{"id": b.ID})
 			return
 		}
 		isNew := strings.TrimSpace(b.ID) == ""
@@ -102,6 +179,30 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]interface{}{"id": id})
 	case "DELETE":
+		if r.URL.Query().Get("scope") == "group" {
+			gscope, gid, ok := s.pimGroupScopeFor(r)
+			if !ok {
+				http.Error(w, "not in a group", 400)
+				return
+			}
+			id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+			n, err := s.store().GetNote(r.Context(), gscope, id)
+			if err != nil {
+				http.Error(w, "note not found", 404)
+				return
+			}
+			u := currentUser(r)
+			if !s.isGroupAdminOf(r.Context(), u, gid) && !(u != nil && n.OwnerID == u.ID) {
+				http.Error(w, "read-only: only the author or a group admin can remove this shared note", 403)
+				return
+			}
+			if err := s.store().DeleteNote(r.Context(), gscope, id); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			writeJSON(w, map[string]interface{}{"ok": true})
+			return
+		}
 		delID := r.URL.Query().Get("id")
 		if err := prov.Delete(r.Context(), delID); err != nil {
 			http.Error(w, err.Error(), 500)
@@ -109,6 +210,60 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 		}
 		s.injectAgentNote(r.URL.Query().Get("session"), fmt.Sprintf(
 			"[Notes] The user just deleted note id=%s in the Notes app. It no longer exists — re-read with the note tool before answering about notes.", delID))
+		writeJSON(w, map[string]interface{}{"ok": true})
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// ─── /api/notes/share — publish a personal note to the caller's group ───────────
+
+// POST /api/notes/share?id=<personalNoteId> shares (or re-shares) a personal note
+// to the group, read-only for everyone but the author and group admins.
+// DELETE /api/notes/share?id=<groupNoteId> unshares it (author or admin only).
+func (s *Server) handleNoteShare(w http.ResponseWriter, r *http.Request) {
+	if !s.pimStore(w) {
+		return
+	}
+	gscope, gid, ok := s.pimGroupScopeFor(r)
+	if !ok {
+		http.Error(w, "not in a group", 400)
+		return
+	}
+	u := currentUser(r)
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if id == 0 {
+		http.Error(w, "id required", 400)
+		return
+	}
+	switch r.Method {
+	case "POST":
+		// The source must be one of the caller's own personal notes.
+		src, err := s.store().GetNote(r.Context(), s.pimScopeFor(r), id)
+		if err != nil {
+			http.Error(w, "note not found", 404)
+			return
+		}
+		newID, err := s.store().ShareNote(r.Context(), gscope, u.ID, src.ID, src.Title, src.Body, src.Tags)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]interface{}{"id": strconv.FormatInt(newID, 10), "shared": true})
+	case "DELETE":
+		n, err := s.store().GetNote(r.Context(), gscope, id)
+		if err != nil {
+			http.Error(w, "note not found", 404)
+			return
+		}
+		if !s.isGroupAdminOf(r.Context(), u, gid) && n.OwnerID != u.ID {
+			http.Error(w, "only the author or a group admin can unshare", 403)
+			return
+		}
+		if err := s.store().DeleteNote(r.Context(), gscope, id); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
 		writeJSON(w, map[string]interface{}{"ok": true})
 	default:
 		http.Error(w, "method not allowed", 405)
@@ -123,8 +278,8 @@ func (s *Server) handleNotesSource(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case "GET":
-		prov, _, _ := s.memStore.GetConfig(r.Context(), notes.KeyProvider)
-		path, _, _ := s.memStore.GetConfig(r.Context(), notes.KeyVaultPath)
+		prov, _, _ := s.userStore(r).GetConfig(r.Context(), notes.KeyProvider)
+		path, _, _ := s.userStore(r).GetConfig(r.Context(), notes.KeyVaultPath)
 		if prov == "" {
 			prov = "local"
 		}
@@ -149,10 +304,10 @@ func (s *Server) handleNotesSource(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "vault path is not a readable directory (is it mounted into the server container?)", 400)
 				return
 			}
-			s.memStore.SetConfig(r.Context(), notes.KeyVaultPath, b.Path)
-			s.memStore.SetConfig(r.Context(), notes.KeyProvider, "vault")
+			s.userStore(r).SetConfig(r.Context(), notes.KeyVaultPath, b.Path)
+			s.userStore(r).SetConfig(r.Context(), notes.KeyProvider, "vault")
 		} else {
-			s.memStore.SetConfig(r.Context(), notes.KeyProvider, "local")
+			s.userStore(r).SetConfig(r.Context(), notes.KeyProvider, "local")
 		}
 		writeJSON(w, map[string]interface{}{"ok": true})
 	default:
@@ -166,13 +321,23 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
-	prov := tasks.ProviderFor(r.Context(), s.memStore, pimScope)
+	prov := tasks.ProviderFor(r.Context(), s.userStore(r), s.pimScopeFor(r))
 	switch r.Method {
 	case "GET":
 		items, err := prov.List(r.Context(), r.URL.Query().Get("include_done") == "true")
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
+		}
+		// Vortex: outbound calls the agent still has to place are tasks too — show them
+		// in the same list (read-only; the agent places and cancels them).
+		//
+		// Admins only. Tasks are scoped per user (session_id = "u<id>"), but Vox's call
+		// queue has no owner column: every row would otherwise land in *everyone's* list,
+		// leaking who is being called and why. That matches the tools, which are
+		// admin-only by default (see defaultAdminOnly).
+		if u := currentUser(r); u != nil && s.isAdminUser(r.Context(), u) {
+			items = append(s.voxPendingCallTasks(r.Context()), items...)
 		}
 		writeJSON(w, map[string]interface{}{"tasks": items, "source": prov.Kind()})
 	case "POST":
@@ -185,6 +350,10 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
+			return
+		}
+		if isCallTaskID(b.ID) {
+			writeErr(w, http.StatusBadRequest, callTaskReadOnlyMsg)
 			return
 		}
 		if b.ID != "" && b.Done != nil {
@@ -202,6 +371,10 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]interface{}{"id": id})
 	case "DELETE":
+		if id := r.URL.Query().Get("id"); isCallTaskID(id) {
+			writeErr(w, http.StatusBadRequest, callTaskReadOnlyMsg)
+			return
+		}
 		if err := prov.Delete(r.Context(), r.URL.Query().Get("id")); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -218,7 +391,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
-	prov := calendar.ProviderFor(r.Context(), s.memStore, pimScope)
+	prov := calendar.ProviderFor(r.Context(), s.userStore(r), s.pimScopeFor(r))
 	switch r.Method {
 	case "GET":
 		items, err := prov.List(r.Context(),

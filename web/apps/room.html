@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Room</title>
+<link rel="stylesheet" href="/widget-base.css">
+<script src="/theme.js"></script>
+<script>
+  addEventListener('message', e => {
+    if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
+      const r = document.documentElement.style
+      for (const k in e.data.vars) r.setProperty(k, e.data.vars[k])
+    }
+  })
+</script>
+<style>
+  html, body { height: 100%; }
+  body { padding: 0; overflow: hidden; background: var(--bg); color: var(--text); }
+  .room { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+  .room-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .room-head .rh-title { font-size: 14px; font-weight: 600; }
+  .room-head select {
+    background: var(--bg2); color: var(--text); border: 1px solid var(--border2);
+    border-radius: 6px; padding: 5px 9px; font: inherit; font-size: 12.5px;
+  }
+  .presence { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .presence .pcount { color: var(--text3); font-size: 11.5px; }
+  .pdots { display: flex; }
+  .pdots .av { margin-left: -6px; box-shadow: 0 0 0 2px var(--bg); }
+  .pdots .av:first-child { margin-left: 0; }
+
+  #log { flex: 1; overflow-y: auto; padding: 10px 16px 4px; display: flex; flex-direction: column; min-height: 0; }
+  .daysep { text-align: center; color: var(--text3); font-size: 11px; margin: 12px 0 6px; position: relative; }
+
+  .row { display: flex; gap: 10px; padding: 2px 6px; border-radius: 8px; position: relative; }
+  .row:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+  .row.cont { margin-top: 1px; }
+  .row.first { margin-top: 10px; }
+  .row.mention-me { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .row .gutter { width: 34px; flex: 0 0 34px; display: flex; justify-content: center; }
+  .row .body { flex: 1; min-width: 0; }
+  .row .head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 1px; }
+  .row .who { font-weight: 600; font-size: 13px; }
+  .row .who.agent { color: var(--accent); }
+  .row .time { color: var(--text3); font-size: 10.5px; }
+  .row.cont .time { visibility: hidden; font-size: 10px; }
+  .row.cont:hover .time { visibility: visible; }
+  .content { font-size: 13.5px; line-height: 1.5; word-wrap: break-word; overflow-wrap: anywhere; }
+  .content div { min-height: 1px; }
+  .content code { background: var(--bg2); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .content a { color: var(--accent); }
+  .content ul { margin: 2px 0 2px 2px; padding-left: 18px; }
+  .content .mention { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 4px; padding: 0 3px; }
+  .content .mention.me { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+  .av { width: 30px; height: 30px; border-radius: 50%; overflow: hidden; position: relative;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: var(--accent); color: #fff; font-weight: 600; font-size: 12px; flex: 0 0 auto; }
+  .av img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .av.sm { width: 22px; height: 22px; font-size: 10px; }
+
+  .quoted { border-left: 2px solid var(--accent); padding: 1px 8px; margin-bottom: 3px;
+            color: var(--text2); font-size: 12px; opacity: .85; cursor: pointer; }
+  .quoted .qn { font-weight: 600; color: var(--accent); }
+
+  .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .react { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 7px;
+           border: 1px solid var(--border2); border-radius: 11px; background: var(--bg2); cursor: pointer; }
+  .react.mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--bg2)); }
+  .react .rc { color: var(--text3); font-size: 11px; }
+
+  .row-actions { position: absolute; top: -10px; right: 8px; display: none; gap: 2px;
+                 background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+  .row:hover .row-actions { display: flex; }
+  .row-actions button { border: none; background: none; cursor: pointer; font-size: 14px; padding: 2px 5px; border-radius: 6px; line-height: 1; }
+  .row-actions button:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+
+  .typing-row { color: var(--text3); font-style: italic; font-size: 12.5px; padding: 3px 12px; min-height: 18px; }
+  .room-empty { color: var(--text3); font-size: 13px; padding: 24px; text-align: center; }
+
+  .composer { border-top: 1px solid var(--border); flex-shrink: 0; position: relative; }
+  .reply-bar { display: none; align-items: center; gap: 8px; padding: 6px 88px 0 16px; font-size: 12px; color: var(--text2); }
+  .reply-bar.on { display: flex; }
+  .reply-bar .x { margin-left: auto; cursor: pointer; color: var(--text3); }
+  /* The composer leaves the bottom-right corner clear: the shell's floating
+     agent-chat button (52px FAB at 24px/24px) overlays this iframe there. The
+     send affordance lives INSIDE the field (Teams/Slack style). */
+  form { display: flex; padding: 10px 88px 12px 16px; }
+  .inputwrap { position: relative; flex: 1; display: flex; }
+  #box { flex: 1; padding: 9px 44px 9px 12px; border: 1px solid var(--border2); border-radius: 10px;
+         background: var(--bg2); color: var(--text); font: inherit; font-size: 13.5px; resize: none; max-height: 120px; }
+  #box:focus { outline: none; border-color: var(--accent); }
+  #send-ic { position: absolute; right: 6px; bottom: 5px; width: 28px; height: 28px;
+             border: none; border-radius: 50%; background: var(--accent); color: #fff;
+             display: flex; align-items: center; justify-content: center; cursor: pointer;
+             opacity: .45; transition: opacity .15s, transform .12s; }
+  #send-ic.ready { opacity: 1; }
+  #send-ic:hover { transform: scale(1.08); }
+  #send-ic svg { width: 14px; height: 14px; }
+
+  /* @mention autocomplete */
+  #mention-pop { position: absolute; z-index: 40; bottom: 58px; left: 16px; min-width: 220px; max-height: 220px;
+                 overflow-y: auto; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+                 box-shadow: 0 8px 30px rgba(0,0,0,.28); padding: 4px; display: none; }
+  #mention-pop.on { display: block; }
+  .mi { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+  .mi.active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .mi .nm { font-size: 13px; }
+  .mi .rl { margin-left: auto; font-size: 10.5px; color: var(--text3); }
+
+  /* emoji picker */
+  #emoji-pop { position: absolute; z-index: 45; display: none; gap: 2px;
+               background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 4px;
+               box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+  #emoji-pop.on { display: flex; }
+  #emoji-pop button { border: none; background: none; font-size: 18px; cursor: pointer; padding: 3px 5px; border-radius: 6px; }
+  #emoji-pop button:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+</style>
+</head>
+<body>
+<div class="room">
+  <div class="room-head">
+    <span class="rh-title">Room</span>
+    <select id="group"></select>
+    <div class="presence" id="presence"></div>
+  </div>
+  <div id="log"></div>
+  <div class="typing-row" id="typing"></div>
+  <div class="composer">
+    <div class="reply-bar" id="reply-bar"><span id="reply-txt"></span><span class="x" id="reply-x">✕</span></div>
+    <form id="f"><div class="inputwrap">
+      <textarea id="box" rows="1" placeholder="Message the room…  @ to mention  ·  @agent to ask the shared agent" autocomplete="off"></textarea>
+      <button id="send-ic" type="submit" title="Send (Enter)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+    </div></form>
+    <div id="mention-pop"></div>
+  </div>
+</div>
+<div id="emoji-pop"></div>
+<script>
+const $ = i => document.getElementById(i)
+const EMOJIS = ['👍','❤️','😄','🎉','🙏','👀','🔥','✅']
+let ws = null, gid = null
+let ME = { uid: 0, name: '' }
+let agentName = 'Assistant'
+let members = []          // [{userId,name,avatarVer,role}]
+let msgs = []             // ordered message objects
+const msgById = new Map()
+let replyTo = null
+const typingUsers = new Map() // userId -> timeout
+let agentTyping = false
+let agentTools = [] // tools used during the current agent turn (live indicator + chips)
+
+function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])) }
+function initials(n){ return (n||'?').trim().split(/\s+/).map(w=>w[0]||'').slice(0,2).join('').toUpperCase() || '?' }
+function avatar(scope, name, sm){
+  return `<span class="av${sm?' sm':''}">${esc(initials(name))}<img src="/api/avatar?scope=${encodeURIComponent(scope)}" alt="" onerror="this.remove()"></span>`
+}
+const handleOf = n => (n||'').toLowerCase().replace(/\s+/g,'')
+
+// Is "@h" a known mention? returns 'me' | true | false.
+function isMention(h){
+  const k = h.toLowerCase()
+  if (k === 'agent' || k === handleOf(agentName)) return true
+  for (const m of members) {
+    if (handleOf(m.name) === k) return m.userId === ME.uid ? 'me' : true
+  }
+  return false
+}
+
+// ── content rendering (safe: escape first, then light markdown) ────────────────
+function inlineMd(s){
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>')
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>')
+  s = s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+  s = s.replace(/@([\w.\-]+)/g, (m,h) => { const k = isMention(h); return k ? `<span class="mention${k==='me'?' me':''}">@${h}</span>` : m })
+  return s
+}
+function renderContent(raw){
+  const lines = esc(raw).split('\n')
+  let html = '', inList = false
+  for (const ln of lines){
+    if (/^\s*[-*]\s+/.test(ln)){
+      if (!inList){ html += '<ul>'; inList = true }
+      html += '<li>' + inlineMd(ln.replace(/^\s*[-*]\s+/,'')) + '</li>'
+    } else {
+      if (inList){ html += '</ul>'; inList = false }
+      html += ln.trim() === '' ? '' : '<div>' + inlineMd(ln) + '</div>'
+    }
+  }
+  if (inList) html += '</ul>'
+  return html || '<div></div>'
+}
+function mentionsMe(raw){
+  const re = /@([\w.\-]+)/g; let m
+  while ((m = re.exec(raw))) { if (isMention(m[1]) === 'me') return true }
+  return false
+}
+
+// ── reactions ──────────────────────────────────────────────────────────────────
+function reactionsHTML(m){
+  const list = m.reactions || []
+  if (!list.length) return ''
+  const byEmoji = {}
+  for (const r of list){ (byEmoji[r.emoji] = byEmoji[r.emoji] || []).push(r.userId) }
+  return '<div class="reactions">' + Object.entries(byEmoji).map(([e, users]) => {
+    const mine = users.includes(ME.uid)
+    return `<span class="react${mine?' mine':''}" data-emoji="${esc(e)}" data-mid="${m.id}">${e}<span class="rc">${users.length}</span></span>`
+  }).join('') + '</div>'
+}
+
+// ── render ─────────────────────────────────────────────────────────────────────
+function scopeForAuthor(m){ return m.isAgent ? ('agent-g' + gid) : ('u' + (m.authorId || 0)) }
+function fmtTime(iso){ const d = new Date(iso); return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) }
+function fmtDay(iso){ const d = new Date(iso); return d.toLocaleDateString([], {weekday:'long', day:'numeric', month:'long'}) }
+
+function rowHTML(m, prev){
+  const cont = prev && prev.isAgent === m.isAgent && prev.authorName === m.authorName &&
+               (new Date(m.createdAt) - new Date(prev.createdAt)) < 5*60*1000
+  const mine = mentionsMe(m.content)
+  let quoted = ''
+  if (m.replyTo){
+    const src = msgById.get(m.replyTo)
+    const snip = src ? (src.content.replace(/\n/g,' ').slice(0,80)) : 'a message'
+    quoted = `<div class="quoted" data-goto="${m.replyTo}"><span class="qn">${esc(src?src.authorName:'')}</span> ${esc(snip)}</div>`
+  }
+  const head = cont ? '' :
+    `<div class="head"><span class="who${m.isAgent?' agent':''}">${esc(m.authorName)}</span><span class="time">${fmtTime(m.createdAt)}</span></div>`
+  const gutter = cont ? `<span class="time" style="font-size:9px">${fmtTime(m.createdAt)}</span>` : avatar(scopeForAuthor(m), m.authorName)
+  const tools = (m._tools && m._tools.length)
+    ? `<div style="margin-top:3px;font-size:11px;color:var(--text3)" title="Tools the agent used for this reply">🛠 ${m._tools.map(esc).join(' · ')}</div>`
+    : ''
+  return `<div class="row ${cont?'cont':'first'}${mine?' mention-me':''}" data-id="${m.id}">
+    <div class="gutter">${gutter}</div>
+    <div class="body">${quoted}${head}<div class="content">${renderContent(m.content)}</div>${tools}${reactionsHTML(m)}</div>
+    <div class="row-actions">
+      <button title="React" data-act="react">😊</button>
+      <button title="Reply" data-act="reply">↩</button>
+    </div>
+  </div>`
+}
+
+function renderAll(){
+  const log = $('log'); log.innerHTML = ''
+  let prev = null, lastDay = ''
+  for (const m of msgs){
+    const day = fmtDay(m.createdAt)
+    if (day !== lastDay){ const s = document.createElement('div'); s.className = 'daysep'; s.textContent = day; log.appendChild(s); lastDay = day; prev = null }
+    const wrap = document.createElement('div'); wrap.innerHTML = rowHTML(m, prev); log.appendChild(wrap.firstElementChild)
+    prev = m
+  }
+  scrollDown()
+}
+function scrollDown(){ const l = $('log'); l.scrollTop = l.scrollHeight }
+function nearBottom(){ const l = $('log'); return l.scrollHeight - l.scrollTop - l.clientHeight < 120 }
+
+function addMessage(m){
+  const wasBottom = nearBottom()
+  msgs.push(m); msgById.set(m.id, m)
+  // Re-render is cheap at room scale and keeps grouping/day-separators correct.
+  renderAll()
+  if (wasBottom) scrollDown()
+}
+function patchReactions(mid, reactions){
+  const m = msgById.get(mid); if (!m) return
+  m.reactions = reactions
+  const row = document.querySelector(`.row[data-id="${mid}"] .body`)
+  if (!row) return
+  const old = row.querySelector('.reactions'); if (old) old.remove()
+  const tmp = document.createElement('div'); tmp.innerHTML = reactionsHTML(m)
+  if (tmp.firstElementChild) row.appendChild(tmp.firstElementChild)
+}
+
+// ── presence & typing ───────────────────────────────────────────────────────────
+function renderPresence(users){
+  const others = users.length
+  const dots = users.slice(0,5).map(u => avatar('u'+u.userId, u.name, true)).join('')
+  $('presence').innerHTML = `<span class="pdots">${dots}</span><span class="pcount">${others} online</span>`
+}
+function renderTyping(){
+  const names = [...typingUsers.keys()].map(id => (members.find(m=>m.userId===id)||{}).name || 'Someone')
+  let txt = ''
+  if (agentTyping) {
+    txt = agentTools.length
+      ? agentName + ' · 🛠 ' + agentTools[agentTools.length - 1] + '…'
+      : agentName + ' is thinking…'
+  }
+  else if (names.length === 1) txt = names[0] + ' is typing…'
+  else if (names.length > 1) txt = names.length + ' people are typing…'
+  $('typing').textContent = txt
+}
+function noteTyping(userId){
+  if (userId === ME.uid) return
+  clearTimeout(typingUsers.get(userId))
+  typingUsers.set(userId, setTimeout(() => { typingUsers.delete(userId); renderTyping() }, 3500))
+  renderTyping()
+}
+
+// ── websocket ────────────────────────────────────────────────────────────────────
+function connect(g){
+  gid = g
+  if (ws){ ws.onclose = null; ws.close() }
+  msgs = []; msgById.clear(); typingUsers.clear(); agentTyping = false
+  $('log').innerHTML = ''; $('typing').textContent = ''
+  loadMembers(g)
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  ws = new WebSocket(proto + '://' + location.host + '/wsroom?group=' + g)
+  ws.onmessage = e => {
+    const d = JSON.parse(e.data)
+    if (d.type === 'history'){ msgs = d.messages || []; msgById.clear(); msgs.forEach(m => msgById.set(m.id, m)); renderAll() }
+    else if (d.type === 'message'){
+      if (d.message && d.message.isAgent && agentTools.length){ d.message._tools = [...new Set(agentTools)]; agentTools = [] }
+      agentTyping = false; renderTyping(); addMessage(d.message)
+    }
+    else if (d.type === 'agent_typing'){ agentTyping = true; agentTools = []; renderTyping() }
+    else if (d.type === 'agent_tool'){ if (d.tool && agentTools[agentTools.length-1] !== d.tool) agentTools.push(d.tool); agentTyping = true; renderTyping() }
+    else if (d.type === 'typing'){ noteTyping(d.userId) }
+    else if (d.type === 'presence'){ renderPresence(d.users || []) }
+    else if (d.type === 'reaction'){ patchReactions(d.messageId, d.reactions || []) }
+    else if (d.type === 'room_config'){ agentName = d.agentName || 'Assistant' }
+  }
+}
+async function loadMembers(g){
+  try {
+    const d = await fetch('/api/group/members?group=' + g).then(r => r.json())
+    members = d.members || []; if (d.agentName) agentName = d.agentName
+  } catch(_) { members = [] }
+}
+
+// ── send / reply ─────────────────────────────────────────────────────────────────
+function setReply(m){
+  replyTo = m.id
+  $('reply-txt').innerHTML = `Replying to <b>${esc(m.authorName)}</b>: ${esc(m.content.slice(0,60))}`
+  $('reply-bar').classList.add('on'); $('box').focus()
+}
+function clearReply(){ replyTo = null; $('reply-bar').classList.remove('on') }
+$('reply-x').onclick = clearReply
+
+function send(){
+  const v = $('box').value.trim(); if (!v || !ws || ws.readyState !== 1) return
+  ws.send(JSON.stringify({ type: 'message', content: v, replyTo: replyTo }))
+  $('box').value = ''; autoGrow(); clearReply(); hideMentions()
+  $('send-ic').classList.remove('ready')
+}
+$('f').onsubmit = e => { e.preventDefault(); send() }
+
+// typing signal (throttled) + textarea autogrow + mention popup + Enter-to-send
+let lastTyping = 0
+function autoGrow(){ const b = $('box'); b.style.height = 'auto'; b.style.height = Math.min(b.scrollHeight, 120) + 'px' }
+$('box').addEventListener('input', () => {
+  autoGrow()
+  $('send-ic').classList.toggle('ready', !!$('box').value.trim())
+  const now = Date.now(); if (ws && ws.readyState === 1 && now - lastTyping > 1800){ ws.send(JSON.stringify({type:'typing'})); lastTyping = now }
+  updateMentions()
+})
+$('box').addEventListener('keydown', e => {
+  if (mentionOpen()){
+    if (e.key === 'ArrowDown'){ e.preventDefault(); moveMention(1); return }
+    if (e.key === 'ArrowUp'){ e.preventDefault(); moveMention(-1); return }
+    if (e.key === 'Enter' || e.key === 'Tab'){ e.preventDefault(); pickMention(); return }
+    if (e.key === 'Escape'){ hideMentions(); return }
+  }
+  if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send() }
+})
+
+// ── @mention autocomplete ────────────────────────────────────────────────────────
+let mentionMatches = [], mentionIdx = 0
+function mentionOpen(){ return $('mention-pop').classList.contains('on') }
+function mentionQuery(){
+  const b = $('box'); const upto = b.value.slice(0, b.selectionStart)
+  const m = upto.match(/@([\w.\-]*)$/)
+  return m ? m[1] : null
+}
+function candidates(){
+  const list = members.map(m => ({ name: m.name, uid: m.userId, role: m.role, agent: false }))
+  list.unshift({ name: agentName, uid: 0, role: 'shared agent', agent: true })
+  return list
+}
+function updateMentions(){
+  const q = mentionQuery()
+  if (q === null){ hideMentions(); return }
+  const ql = q.toLowerCase()
+  mentionMatches = candidates().filter(c => c.name.toLowerCase().includes(ql) || handleOf(c.name).includes(ql)).slice(0, 8)
+  if (!mentionMatches.length){ hideMentions(); return }
+  mentionIdx = 0; renderMentions()
+}
+function renderMentions(){
+  $('mention-pop').innerHTML = mentionMatches.map((c,i) =>
+    `<div class="mi${i===mentionIdx?' active':''}" data-i="${i}">${avatar(c.agent?('agent-g'+gid):('u'+c.uid), c.name, true)}<span class="nm">${esc(c.name)}</span><span class="rl">${esc(c.role||'')}</span></div>`
+  ).join('')
+  $('mention-pop').classList.add('on')
+}
+function moveMention(d){ mentionIdx = (mentionIdx + d + mentionMatches.length) % mentionMatches.length; renderMentions() }
+function hideMentions(){ $('mention-pop').classList.remove('on'); mentionMatches = [] }
+function pickMention(){
+  const c = mentionMatches[mentionIdx]; if (!c) return
+  const b = $('box'); const start = b.selectionStart
+  const before = b.value.slice(0, start).replace(/@([\w.\-]*)$/, '@' + handleOf(c.name) + ' ')
+  const after = b.value.slice(start)
+  b.value = before + after; b.selectionStart = b.selectionEnd = before.length
+  hideMentions(); b.focus(); autoGrow()
+}
+$('mention-pop').addEventListener('mousedown', e => {
+  const mi = e.target.closest('.mi'); if (!mi) return
+  e.preventDefault(); mentionIdx = +mi.dataset.i; pickMention()
+})
+
+// ── row actions: react / reply / reactions toggle / goto quote ────────────────────
+$('log').addEventListener('click', e => {
+  const react = e.target.closest('.react')
+  if (react){ toggleReaction(+react.dataset.mid, react.dataset.emoji); return }
+  const goto = e.target.closest('.quoted')
+  if (goto){ const el = document.querySelector(`.row[data-id="${goto.dataset.goto}"]`); if (el){ el.scrollIntoView({block:'center'}); el.style.transition='background .6s'; el.style.background='color-mix(in srgb, var(--accent) 22%, transparent)'; setTimeout(()=>el.style.background='',800) } return }
+  const act = e.target.closest('[data-act]'); if (!act) return
+  const row = e.target.closest('.row'); const m = msgById.get(+row.dataset.id); if (!m) return
+  if (act.dataset.act === 'reply') setReply(m)
+  else if (act.dataset.act === 'react') openEmoji(act, m.id)
+})
+function toggleReaction(mid, emoji){
+  const m = msgById.get(mid); if (!m || !ws) return
+  const mine = (m.reactions||[]).some(r => r.emoji === emoji && r.userId === ME.uid)
+  ws.send(JSON.stringify({ type: mine ? 'unreact' : 'react', messageId: mid, emoji }))
+}
+function openEmoji(anchor, mid){
+  const pop = $('emoji-pop')
+  pop.innerHTML = EMOJIS.map(e => `<button data-e="${e}">${e}</button>`).join('')
+  const r = anchor.getBoundingClientRect()
+  pop.style.left = Math.max(6, r.left - 40) + 'px'; pop.style.top = (r.bottom + 4) + 'px'
+  pop.classList.add('on'); pop.dataset.mid = mid
+}
+$('emoji-pop').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return
+  toggleReaction(+$('emoji-pop').dataset.mid, b.dataset.e); $('emoji-pop').classList.remove('on')
+})
+document.addEventListener('click', e => { if (!e.target.closest('#emoji-pop') && !e.target.closest('[data-act="react"]')) $('emoji-pop').classList.remove('on') })
+
+// ── init ──────────────────────────────────────────────────────────────────────
+$('group').onchange = () => connect($('group').value)
+async function init(){
+  try { const p = await fetch('/api/profile').then(r => r.json()); ME = { uid: p.userId || 0, name: p.displayName || p.email || '' } } catch(_){}
+  let d = {}
+  try { d = await fetch('/api/my/groups').then(r => r.json()) } catch(_){}
+  const g = $('group')
+  ;(d.groups || []).forEach(x => { const o = document.createElement('option'); o.value = x.id || x.groupId; o.textContent = x.name || x.groupName; g.appendChild(o) })
+  if (g.options.length){ connect(g.value) }
+  else { $('log').innerHTML = '<div class="room-empty">You are not in any group yet. Ask an admin to add you.</div>'; g.style.display = 'none' }
+}
+init()
+</script>
+</body>
+</html>
