@@ -87,7 +87,6 @@ func (s *Server) initRAG(ctx context.Context) {
 
 	s.ragEmbedder = embedder
 	s.ragStore = store
-	s.ragCaptioner = s.newCaptioner()
 	ragInitStatus.Store("ready")
 	log.Println("[rag] ready")
 
@@ -308,28 +307,23 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 		ext = ".pdf"
 	}
 
-	var pdfPages []string // per-page text, used for visual page detection
 	if ext == ".pdf" {
 		pages, err := rag.ParsePDFPages(parsePath)
 		if err != nil {
 			jsonError(w, "parse: "+err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
-		pdfPages = pages
-		for pageIdx, pageText := range pages {
-			for _, c := range rag.SplitText(pageText) {
-				chunks = append(chunks, c)
-				pageNums = append(pageNums, pageIdx+1)
-			}
-		}
+		// Split the document as a whole, not page by page: a paragraph running across
+		// a page break used to be cut in two, and neither half matched a search. Each
+		// chunk still records the page it starts on.
+		chunks, pageNums = rag.SplitPages(pages)
 	} else {
 		text, err := rag.ParseFile(tmp.Name())
 		if err != nil {
 			jsonError(w, "parse: "+err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
-		chunks = rag.SplitText(text)
-		pageNums = make([]int, len(chunks))
+		chunks, pageNums = rag.SplitDocument(text)
 	}
 
 	if strings.TrimSpace(strings.Join(chunks, "")) == "" {
@@ -348,28 +342,6 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract page/slide images for PDF and PPTX (converted to PDF above).
-	// For DOCX: extract embedded images directly from the ZIP.
-	var visualPages []int // pages selected for background figure captioning
-	var imgDir string
-	if s.cfg.WorkspaceDir != "" {
-		imgDir = rag.ImageDir(s.cfg.WorkspaceDir, collection, header.Filename)
-		origExt := strings.ToLower(filepath.Ext(header.Filename))
-		if origExt == ".pdf" || origExt == ".pptx" {
-			if err := rag.ExtractPageImages(parsePath, imgDir); err != nil {
-				log.Printf("[rag] warn: could not extract images from %s: %v", header.Filename, err)
-			} else {
-				// Keep only pages likely to contain figures; must run while
-				// parsePath (a temp file) still exists.
-				visualPages = rag.PlanVisualPages(parsePath, imgDir, pdfPages)
-			}
-		} else if origExt == ".docx" {
-			if _, err := rag.ExtractDOCXImages(tmp.Name(), imgDir); err != nil {
-				log.Printf("[rag] warn: could not extract docx images from %s: %v", header.Filename, err)
-			}
-		}
-	}
-
 	// Persist
 	if err := s.ragStore.UpsertDocument(r.Context(), collection, header.Filename, fileHash, size, chunks, pageNums, embeddings); err != nil {
 		jsonError(w, "store: "+err.Error(), http.StatusInternalServerError)
@@ -378,49 +350,13 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 	// Register collection ownership for this session (no-op if already exists)
 	_ = s.ragStore.EnsureCollection(r.Context(), collection, uploadSession)
 
-	// Caption visual pages in the background so figures become searchable.
-	if s.ragCaptioner != nil && len(visualPages) > 0 {
-		go s.captionFiguresBackground(uploadSession, collection, header.Filename, imgDir, visualPages)
-	}
-
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"ok":          true,
-		"collection":  collection,
-		"filename":    header.Filename,
-		"chunks":      len(chunks),
-		"size":        size,
-		"visualPages": len(visualPages),
+		"ok":         true,
+		"collection": collection,
+		"filename":   header.Filename,
+		"chunks":     len(chunks),
+		"size":       size,
 	})
-}
-
-// captionFiguresBackground runs vision captioning for the selected pages and
-// notifies the session when figures become searchable.
-func (s *Server) captionFiguresBackground(sessionID, collection, filename, imgDir string, pages []int) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-
-	notify := func(title, msg, level string) {
-		s.mu.RLock()
-		ms := s.memStore
-		s.mu.RUnlock()
-		if ms == nil {
-			return
-		}
-		id, err := ms.AddNotification(context.Background(), sessionID, title, msg, level)
-		if err != nil {
-			return
-		}
-		s.pushNotificationToSession(sessionID, id, title, msg, level)
-	}
-
-	n, err := rag.CaptionPages(ctx, s.ragStore, s.ragEmbedder, s.ragCaptioner, imgDir, collection, filename, pages)
-	if err != nil {
-		log.Printf("[rag] figure captioning for %s/%s: %v", collection, filename, err)
-		notify("RAG", fmt.Sprintf("Figure captioning failed for %q: %v", filename, err), "warning")
-		return
-	}
-	log.Printf("[rag] %d figure caption(s) added for %s/%s", n, collection, filename)
-	notify("RAG", fmt.Sprintf("%d figure(s) from %q are now searchable in collection %q.", n, filename, collection), "success")
 }
 
 func sanitizeName(s string) string {

@@ -3,12 +3,10 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"prism/internal/rag"
 )
@@ -59,8 +57,6 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 	var pageNums []int
 	var fileHash string
 	var sizeBytes int64
-	var visualPages []int // PDF pages selected for background figure captioning
-	var imgDir string
 
 	if sourcePath != "" {
 		// File-based ingestion — resolve and safety-check the path.
@@ -82,7 +78,6 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			source = filepath.Base(fullPath)
 		}
 
-		imgDir = rag.ImageDir(e.workspaceDir, collection, source)
 		fileExt := strings.ToLower(filepath.Ext(fullPath))
 
 		parsePath := fullPath
@@ -108,44 +103,28 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			if err != nil {
 				return fmt.Sprintf("ERROR parsing PDF: %v", err), nil
 			}
-			for pageIdx, pageText := range pages {
-				for _, c := range rag.SplitText(pageText) {
-					chunks = append(chunks, c)
-					pageNums = append(pageNums, pageIdx+1)
-				}
-			}
-			if err := rag.ExtractPageImages(parsePath, imgDir); err != nil {
-				fmt.Printf("WARN: could not extract page images from %s: %v\n", fullPath, err)
-			} else {
-				// Keep only pages likely to contain figures; must run while
-				// parsePath (possibly a temp PPTX→PDF conversion) still exists.
-				visualPages = rag.PlanVisualPages(parsePath, imgDir, pages)
-			}
+			// Whole-document split: a paragraph across a page break stays in one
+			// chunk, and each chunk keeps the page it starts on.
+			chunks, pageNums = rag.SplitPages(pages)
 		} else if fileExt == ".docx" {
 			text, err := rag.ParseFile(fullPath)
 			if err != nil {
 				return fmt.Sprintf("ERROR parsing DOCX: %v", err), nil
 			}
-			chunks = rag.SplitText(text)
-			pageNums = make([]int, len(chunks))
-			if _, err := rag.ExtractDOCXImages(fullPath, imgDir); err != nil {
-				fmt.Printf("WARN: could not extract DOCX images from %s: %v\n", fullPath, err)
-			}
+			chunks, pageNums = rag.SplitDocument(text)
 		} else {
 			text, err := rag.ParseFile(fullPath)
 			if err != nil {
 				return fmt.Sprintf("ERROR parsing file: %v", err), nil
 			}
-			chunks = rag.SplitText(text)
-			pageNums = make([]int, len(chunks))
+			chunks, pageNums = rag.SplitDocument(text)
 		}
 	} else {
 		// Inline text ingestion.
 		if source == "" || content == "" {
 			return "", fmt.Errorf("source and content are required when source_path is not provided")
 		}
-		chunks = rag.SplitText(content)
-		pageNums = make([]int, len(chunks))
+		chunks, pageNums = rag.SplitDocument(content)
 		sizeBytes = int64(len(content))
 	}
 
@@ -166,62 +145,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 		return fmt.Sprintf("ERROR storing document: %v", err), nil
 	}
 
-	if e.ragCaptioner != nil && len(visualPages) > 0 {
-		go e.captionFiguresBackground(collection, source, imgDir, visualPages)
-		return fmt.Sprintf("Ingested %q into collection %q: %d chunks indexed. %d page(s) look visual — figure captioning runs in the background and will add searchable [Figure — page N] chunks (a notification is sent when done).",
-			source, collection, len(chunks), len(visualPages)), nil
-	}
 	return fmt.Sprintf("Ingested %q into collection %q: %d chunks indexed.", source, collection, len(chunks)), nil
-}
-
-// captionFiguresBackground captions visual pages with the vision model and
-// notifies the dashboard when done. Runs detached from the request context.
-func (e *ToolExecutor) captionFiguresBackground(collection, source, imgDir string, pages []int) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-	n, err := rag.CaptionPages(ctx, e.ragStore, e.ragEmbedder, e.ragCaptioner, imgDir, collection, source, pages)
-	if err != nil {
-		fmt.Printf("WARN: figure captioning for %s/%s: %v\n", collection, source, err)
-		if e.onNotification != nil {
-			e.onNotification("RAG", fmt.Sprintf("Figure captioning failed for %q: %v", source, err), "warning")
-		}
-		return
-	}
-	if e.onNotification != nil {
-		e.onNotification("RAG", fmt.Sprintf("%d figure(s) from %q are now searchable in collection %q.", n, source, collection), "success")
-	}
-}
-
-func (e *ToolExecutor) ragShowPage(ctx context.Context, collection, filename string, page int) (string, []string, error) {
-	if e.ragStore == nil {
-		return "RAG not available (Postgres not configured)", nil, nil
-	}
-	if collection == "" || filename == "" || page < 1 {
-		return "", nil, fmt.Errorf("collection, filename and page are required")
-	}
-
-	doc, err := e.ragStore.FindDocument(ctx, collection, filename)
-	if err != nil {
-		return fmt.Sprintf("ERROR looking up document: %v", err), nil, nil
-	}
-	if doc == nil {
-		return fmt.Sprintf("Document %q not found in collection %q.", filename, collection), nil, nil
-	}
-
-	// Use glob to support both .jpg and .png (DOCX images may be PNG).
-	imgDir := rag.ImageDir(e.workspaceDir, collection, filename)
-	matches, _ := filepath.Glob(filepath.Join(imgDir, fmt.Sprintf("page-%04d.*", page)))
-	if len(matches) == 0 {
-		return fmt.Sprintf("No image available for page/image %d of %q (the document may not have been ingested with image extraction).", page, filename), nil, nil
-	}
-	imgPath := matches[0]
-	data, err := os.ReadFile(imgPath)
-	if err != nil {
-		return fmt.Sprintf("No image available for page/image %d of %q.", page, filename), nil, nil
-	}
-
-	attachPath := filepath.ToSlash(rag.PageImagePath("", collection, filename, page))
-	return fmt.Sprintf("Page %d of %q — call add_attachment(%q) to also include it in your response.", page, filename, attachPath), []string{base64.StdEncoding.EncodeToString(data)}, nil
 }
 
 func (e *ToolExecutor) ragListCollections(ctx context.Context) (string, error) {

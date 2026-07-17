@@ -20,7 +20,6 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - EMBED_BACKEND=${EMBED_BACKEND:-}
-      - VISION_MODEL=${VISION_MODEL:-}
       - POSTGRES_URL=${POSTGRES_URL}
       - SEARXNG_URL=${SEARXNG_URL}
       - PRISM_TOKEN=${PRISM_TOKEN:-}
@@ -107,9 +106,14 @@ services:
   # ProtonMail Bridge — speaks IMAP/SMTP for Proton accounts. The image re-exposes
   # the bridge on standard ports inside the Docker network: IMAP 143, SMTP 25.
   # Built from a small Dockerfile that adds libfido2 (upstream auto-update needs it).
-  # One-time login:  docker compose run --rm protonmail-bridge init
-  #   in the bridge shell:  login  → Proton email + password + 2FA,
-  #                         info   → copy the username + bridge password,  exit.
+  # One-time login (see docs/help/protonmail-bridge.md):
+  #   docker compose stop protonmail-bridge          ← it holds the /root volume
+  #   docker compose run --rm protonmail-bridge init ← inits gpg+pass, opens the shell
+  #     in the bridge shell:  login  → Proton email + password + 2FA,
+  #                           info   → copy the username + bridge password,  exit.
+  #   docker compose up -d protonmail-bridge
+  # The bridge password is generated here — it is NOT your Proton password, and it
+  # exists nowhere until `login` succeeds. Paid Proton plan required.
   # In Prism Email → ProtonMail → Advanced: host (IMAP & SMTP) = "protonmail-bridge",
   # IMAP port 143, SMTP port 25, STARTTLS + self-signed.
   protonmail-bridge:

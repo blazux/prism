@@ -29,7 +29,7 @@ func (e *ToolExecutor) loadEmailConfig(ctx context.Context) (email.Config, error
 	if e.memStore == nil {
 		return email.Config{}, fmt.Errorf("email unavailable: no database")
 	}
-	raw, ok, _ := e.memStore.GetConfig(ctx, emailConfigKey)
+	raw, ok, _ := e.userStore().GetConfig(ctx, emailConfigKey)
 	if !ok || raw == "" {
 		return email.Config{}, fmt.Errorf("email not configured — run email action=config first (imap_host, smtp_host, user, password)")
 	}
@@ -37,7 +37,7 @@ func (e *ToolExecutor) loadEmailConfig(ctx context.Context) (email.Config, error
 	if err := json.Unmarshal([]byte(raw), &sc); err != nil {
 		return email.Config{}, fmt.Errorf("corrupt email config: %w", err)
 	}
-	pass, _, _ := e.memStore.GetSecret(ctx, emailPasswordSecret)
+	pass, _, _ := e.userStore().GetSecret(ctx, emailPasswordSecret)
 	return email.Config{
 		IMAPHost: sc.IMAPHost, IMAPPort: sc.IMAPPort,
 		SMTPHost: sc.SMTPHost, SMTPPort: sc.SMTPPort,
@@ -48,11 +48,11 @@ func (e *ToolExecutor) loadEmailConfig(ctx context.Context) (email.Config, error
 
 func (e *ToolExecutor) saveEmailConfig(ctx context.Context, sc emailStoredConfig, password string) error {
 	b, _ := json.Marshal(sc)
-	if err := e.memStore.SetConfig(ctx, emailConfigKey, string(b)); err != nil {
+	if err := e.userStore().SetConfig(ctx, emailConfigKey, string(b)); err != nil {
 		return err
 	}
 	if password != "" {
-		return e.memStore.SetSecret(ctx, emailPasswordSecret, password)
+		return e.userStore().SetSecret(ctx, emailPasswordSecret, password)
 	}
 	return nil
 }
@@ -69,7 +69,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 	case "config", "setup":
 		// Merge over any existing config so partial updates work.
 		var sc emailStoredConfig
-		if raw, ok, _ := e.memStore.GetConfig(ctx, emailConfigKey); ok {
+		if raw, ok, _ := e.userStore().GetConfig(ctx, emailConfigKey); ok {
 			json.Unmarshal([]byte(raw), &sc)
 		}
 		if v := str("imap_host"); v != "" {

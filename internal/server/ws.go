@@ -102,7 +102,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
 	executor.SetLLM(ollamaClient, s.cfg.Model)
 	if s.ragStore != nil {
-		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
+		executor.SetRAG(s.ragStore, s.ragEmbedder)
 	}
 	executor.SetSessionID(sessionID)
 	if ms != nil {

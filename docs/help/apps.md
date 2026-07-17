@@ -31,6 +31,6 @@ notes for you.
 
 ## Terminal
 A real interactive terminal into the agent's workspace container. Toggle it with
-**Ctrl+`** (Control + backtick). Full TTY — `vim`, `htop`, colours, package
+**Ctrl+Enter**. Full TTY — `vim`, `htop`, colours, package
 installs all work. Useful for power users who want direct control of the
 environment the agent runs in.

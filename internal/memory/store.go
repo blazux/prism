@@ -33,6 +33,24 @@ type HistoryEntry struct {
 type Store struct {
 	pool   *pgxpool.Pool
 	encKey []byte // AES-256 key for encrypting secret values
+	// cfgScope, when set ("u<id>:"), prefixes config keys and secret names so
+	// external integrations (email, calendar, vault, OAuth…) are per-user instead
+	// of deployment-global. Obtained via ConfigScope; zero value = global, which
+	// is what single-user Prism always uses.
+	cfgScope string
+}
+
+// ConfigScope returns a view of the store whose config keys and secret names are
+// prefixed with scope. "global" (or empty) returns the store unchanged — so the
+// single-user build reads and writes exactly the keys it always has. The seam is
+// here for the multi-user build, which hands out a "u<id>" scope per user.
+func (s *Store) ConfigScope(scope string) *Store {
+	if s == nil || scope == "" || scope == "global" {
+		return s
+	}
+	c := *s
+	c.cfgScope = scope + ":"
+	return &c
 }
 
 func NewStore(ctx context.Context, connStr string, encKey []byte) (*Store, error) {
@@ -196,6 +214,99 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS calendar_session_idx ON calendar_events(session_id, start_at)`,
+
+		// ─── Multi-user tables ───────────────────────────────────────────────
+		// Created unconditionally and left empty by the single-user build: an empty
+		// table costs nothing, and having the schema present means the MULTI_USER
+		// switch is a config change rather than a migration. Order matters — the
+		// membership tables carry foreign keys onto users and groups.
+		`CREATE TABLE IF NOT EXISTS users (
+			id            BIGSERIAL PRIMARY KEY,
+			email         TEXT UNIQUE NOT NULL,
+			password_hash TEXT NOT NULL,
+			display_name  TEXT NOT NULL DEFAULT '',
+			role          TEXT NOT NULL DEFAULT 'member',   -- 'global_admin' | 'member'
+			status        TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'approved' | 'disabled'
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS groups (
+			id         BIGSERIAL PRIMARY KEY,
+			name       TEXT UNIQUE NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS group_members (
+			group_id   BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			group_role TEXT NOT NULL DEFAULT 'member',       -- 'admin' | 'member'
+			PRIMARY KEY (group_id, user_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS user_sessions (
+			token      TEXT PRIMARY KEY,
+			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			expires_at TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions(user_id)`,
+		`CREATE TABLE IF NOT EXISTS tool_policy (
+			tool   TEXT PRIMARY KEY,
+			access TEXT NOT NULL           -- 'open' | 'admin_only'
+		)`,
+		`CREATE TABLE IF NOT EXISTS group_models (
+			group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			model    TEXT NOT NULL,
+			PRIMARY KEY (group_id, model)
+		)`,
+		`CREATE TABLE IF NOT EXISTS room_config (
+			group_id     BIGINT PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
+			agent_name   TEXT NOT NULL DEFAULT 'Assistant',
+			agent_prompt TEXT NOT NULL DEFAULT '',
+			agent_model  TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS room_messages (
+			id          BIGSERIAL PRIMARY KEY,
+			group_id    BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			author_id   BIGINT,        -- NULL for the agent
+			author_name TEXT NOT NULL,
+			content     TEXT NOT NULL,
+			is_agent    BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS room_messages_group_idx ON room_messages(group_id, id)`,
+		`CREATE TABLE IF NOT EXISTS group_tool_policy (
+			group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+			tool     TEXT NOT NULL,
+			access   TEXT NOT NULL,   -- 'admin_only' (restrict)
+			PRIMARY KEY (group_id, tool)
+		)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT NOT NULL DEFAULT ''`,
+		`CREATE TABLE IF NOT EXISTS avatars (
+			scope      TEXT PRIMARY KEY,
+			mime       TEXT NOT NULL DEFAULT 'image/png',
+			data       BYTEA NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS usage_events (
+			id      BIGSERIAL PRIMARY KEY,
+			ts      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			user_id BIGINT NOT NULL DEFAULT 0,
+			session TEXT NOT NULL DEFAULT '',
+			kind    TEXT NOT NULL,
+			item    TEXT NOT NULL DEFAULT '',
+			qty     BIGINT NOT NULL DEFAULT 1,
+			meta    JSONB NOT NULL DEFAULT '{}'
+		)`,
+		`CREATE INDEX IF NOT EXISTS usage_events_ts_idx ON usage_events(ts DESC)`,
+		`CREATE INDEX IF NOT EXISTS usage_events_kind_idx ON usage_events(kind, ts DESC)`,
+		`ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`,
+		`CREATE TABLE IF NOT EXISTS room_reactions (
+			message_id BIGINT NOT NULL REFERENCES room_messages(id) ON DELETE CASCADE,
+			user_id    BIGINT NOT NULL,
+			emoji      TEXT NOT NULL,
+			PRIMARY KEY (message_id, user_id, emoji)
+		)`,
+		`CREATE INDEX IF NOT EXISTS room_reactions_msg_idx ON room_reactions(message_id)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.pool.Exec(ctx, stmt); err != nil {
@@ -356,7 +467,7 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 // GetConfig retrieves a config value by key. Returns ("", false, nil) if not found.
 func (s *Store) GetConfig(ctx context.Context, key string) (string, bool, error) {
 	var value string
-	err := s.pool.QueryRow(ctx, `SELECT value FROM agent_config WHERE key = $1`, key).Scan(&value)
+	err := s.pool.QueryRow(ctx, `SELECT value FROM agent_config WHERE key = $1`, s.cfgScope+key).Scan(&value)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", false, nil
@@ -372,7 +483,7 @@ func (s *Store) SetConfig(ctx context.Context, key, value string) error {
 		INSERT INTO agent_config (key, value, updated_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-	`, key, value)
+	`, s.cfgScope+key, value)
 	return err
 }
 
@@ -606,13 +717,13 @@ func (s *Store) SetSecret(ctx context.Context, name, value string) error {
 		INSERT INTO secrets (name, value, created_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value, created_at = NOW()
-	`, name, encrypted)
+	`, s.cfgScope+name, encrypted)
 	return err
 }
 
 func (s *Store) GetSecret(ctx context.Context, name string) (string, bool, error) {
 	var encrypted string
-	err := s.pool.QueryRow(ctx, `SELECT value FROM secrets WHERE name = $1`, name).Scan(&encrypted)
+	err := s.pool.QueryRow(ctx, `SELECT value FROM secrets WHERE name = $1`, s.cfgScope+name).Scan(&encrypted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", false, nil
@@ -644,7 +755,7 @@ func (s *Store) ListSecretNames(ctx context.Context) ([]string, error) {
 }
 
 func (s *Store) DeleteSecret(ctx context.Context, name string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM secrets WHERE name = $1`, name)
+	_, err := s.pool.Exec(ctx, `DELETE FROM secrets WHERE name = $1`, s.cfgScope+name)
 	return err
 }
 

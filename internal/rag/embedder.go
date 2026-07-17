@@ -43,9 +43,51 @@ func NewOpenAIEmbedder(baseURL, apiKey, model string) *Embedder {
 	}
 }
 
-// EmbedBatch embeds multiple texts in a single request. Both Ollama and the
-// OpenAI API accept a list of inputs and return one embedding per entry.
+// EmbedBatchSize caps how many texts go into one request. Measured against the
+// fleet's Qwen3-Embedding-8B: throughput plateaus around 20 chunks/s whatever the
+// batch, but a single request for a whole 1000-page manual never returns before
+// the browser gives up — and everything is lost. Slicing also gives us progress.
+const EmbedBatchSize = 128
+
+// Progress, when set, is called after each slice with (done, total). Used by the
+// ingestion paths to log where they are and how long is left.
+type ProgressFunc func(done, total int)
+
+// EmbedBatch embeds texts in slices of EmbedBatchSize, so a large document makes
+// steady, observable progress instead of one opaque request that may time out.
 func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	return e.EmbedBatchProgress(ctx, texts, nil)
+}
+
+// EmbedBatchProgress is EmbedBatch with a callback after every slice.
+func (e *Embedder) EmbedBatchProgress(ctx context.Context, texts []string, onProgress ProgressFunc) ([][]float32, error) {
+	if len(texts) <= EmbedBatchSize {
+		out, err := e.embedOne(ctx, texts)
+		if err == nil && onProgress != nil {
+			onProgress(len(texts), len(texts))
+		}
+		return out, err
+	}
+	out := make([][]float32, 0, len(texts))
+	for start := 0; start < len(texts); start += EmbedBatchSize {
+		end := start + EmbedBatchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		part, err := e.embedOne(ctx, texts[start:end])
+		if err != nil {
+			return nil, fmt.Errorf("embedding chunks %d-%d of %d: %w", start+1, end, len(texts), err)
+		}
+		out = append(out, part...)
+		if onProgress != nil {
+			onProgress(len(out), len(texts))
+		}
+	}
+	return out, nil
+}
+
+// embedOne sends exactly one request for the given texts.
+func (e *Embedder) embedOne(ctx context.Context, texts []string) ([][]float32, error) {
 	if e.backend == "openai" {
 		return e.embedOpenAI(ctx, texts)
 	}
