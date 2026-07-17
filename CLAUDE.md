@@ -24,7 +24,7 @@ go test ./internal/agent/ -run TestStripThinkingBlocks_UnclosedTag
 docker compose up -d
 
 # Rebuild after Go changes
-docker compose build server && docker compose up -d server
+docker compose build prism-server && docker compose up -d prism-server
 ```
 
 ## Architecture

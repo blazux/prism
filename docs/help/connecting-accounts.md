@@ -3,6 +3,23 @@
 These connections use a password or token — no OAuth dance. For Google and
 Microsoft, see their dedicated guides.
 
+## Email → IMAP/SMTP
+**Settings → Email**: pick your provider and Prism fills in the servers for you.
+Nearly every provider now refuses your normal password and wants an **app
+password** instead:
+
+- Gmail: turn on 2-Step Verification, then **Google Account → Security → App
+  passwords**.
+- Outlook / Hotmail: **account.microsoft.com → Security** (needed when 2FA is on).
+- iCloud: **appleid.apple.com → Sign-In and Security**.
+- Yahoo: **Account Security**.
+
+**ProtonMail is the exception**: there is no app password to go and fetch, because
+Proton has no IMAP at all. A local Bridge container logs into Proton and *generates*
+the password Prism uses — see the dedicated ProtonMail guide. If the Bridge logs
+say `no such user`, the Bridge itself isn't logged in yet, and nothing you type in
+Prism will help.
+
 ## Notes → Obsidian / Logseq vault
 A vault is just a folder of Markdown files, so Prism reads and writes it directly.
 

@@ -14,7 +14,7 @@ all your tools, not a search box.
 - **Build UI**: create widgets and dashboards (HTML) pinned to a board — ask for
   "a dashboard showing my unread mail and today's events".
 - **Run code**: execute commands, install packages, manage Docker, all inside its
-  workspace container (you also get a terminal with Ctrl+`).
+  workspace container (you also get a terminal with Ctrl+Enter).
 - **Automate**: schedule recurring jobs (cron), e.g. a morning email summary
   delivered to Telegram.
 - **Remember**: it keeps a profile of you and can search past conversations.
