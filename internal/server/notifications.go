@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"prism/internal/agent"
 )
 
 // handleExternalNotify allows cron scripts (running in Docker) to push notifications
@@ -50,6 +52,33 @@ func (s *Server) handleExternalNotify(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"id": id})
+}
+
+// injectAgentNote drops a one-line event into the live agent's conversation for a
+// session, so it learns about something the user just did in the UI.
+//
+// Why this is needed: the PIM tools read the DB live, so the agent CAN see fresh data —
+// but only if it calls the tool again. Left alone it answers from the stale `note list`
+// sitting in its history, and only notices after a page reload (which builds a new agent
+// with an empty history). Use it sparingly — every call appends to the persisted history.
+//
+// Agents are collected before injecting: InjectNote writes to the DB, and holding the
+// server lock across that would stall every other client.
+func (s *Server) injectAgentNote(sessionID, content string) {
+	if sessionID == "" || content == "" {
+		return
+	}
+	s.mu.RLock()
+	var agents []*agent.Agent
+	for c := range s.clients {
+		if c.sessionID == sessionID && c.ag != nil {
+			agents = append(agents, c.ag)
+		}
+	}
+	s.mu.RUnlock()
+	for _, a := range agents {
+		a.InjectNote(content)
+	}
 }
 
 // pushJSONToSession sends an arbitrary JSON payload to all live WS clients for a session.

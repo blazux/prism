@@ -208,11 +208,25 @@ function setSourceBadge(src) {
   const L = { google: 'Google', microsoft: 'Microsoft', caldav: 'CalDAV', todoist: 'Todoist', vault: 'Vault' };
   if (src && L[src]) { el.textContent = '◦ ' + L[src]; el.style.display = 'inline-block'; } else { el.style.display = 'none'; }
 }
-async function load() {
+async function load(syncEditor = false) {
   const data = await api(`?session=${encodeURIComponent(session)}`);
   notes = data.notes || [];
   setSourceBadge(data.source);
   render();
+  if (syncEditor) syncEditorFromServer();
+}
+
+// Pull the open note's fields back from the server copy. By design the agent's version
+// WINS over unsaved local edits: you ask it to complete a note, you want to see its work
+// — if it got it wrong, tell it. The view mode (edit/split/preview) is preserved.
+function syncEditorFromServer() {
+  if (!selectedId) return;
+  const n = notes.find(x => x.id === selectedId);
+  if (!n) { selectedId = null; closeEditor(); return; } // the agent deleted the open note
+  $('e-title').value = n.title || '';
+  $('e-tags').value = n.tags || '';
+  $('e-body').value = n.body || '';
+  if (mode !== 'edit') updatePreview();
 }
 
 function renderTagBar() {
@@ -436,7 +450,7 @@ $('search').addEventListener('input', e => { filter = e.target.value; render(); 
 ['e-title', 'e-tags', 'e-body'].forEach(id => $(id).addEventListener('blur', () => { if (selectedId) saveNote(); }));
 
 // Reload when the agent changes notes via chat.
-addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') load(); });
+addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') load(true); });
 
 load();
 </script>

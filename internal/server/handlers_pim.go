@@ -6,6 +6,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -81,17 +82,33 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad body", 400)
 			return
 		}
+		isNew := strings.TrimSpace(b.ID) == ""
 		id, err := prov.Save(r.Context(), b.ID, b.Title, b.Body, b.Tags)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		// Tell the live agent a note appeared, so it doesn't keep answering from the
+		// stale list in its history. Only on CREATE: the editor saves on every blur, so
+		// injecting on updates too would spam the conversation. An edit is covered
+		// anyway — the app posts the open note's id as context, and the tool reads live.
+		if isNew {
+			title := strings.TrimSpace(b.Title)
+			if title == "" {
+				title = "(untitled)"
+			}
+			s.injectAgentNote(r.URL.Query().Get("session"), fmt.Sprintf(
+				"[Notes] The user just created note id=%s titled %q in the Notes app. Any note list you read earlier is out of date — re-read with the note tool before answering about notes.", id, title))
+		}
 		writeJSON(w, map[string]interface{}{"id": id})
 	case "DELETE":
-		if err := prov.Delete(r.Context(), r.URL.Query().Get("id")); err != nil {
+		delID := r.URL.Query().Get("id")
+		if err := prov.Delete(r.Context(), delID); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		s.injectAgentNote(r.URL.Query().Get("session"), fmt.Sprintf(
+			"[Notes] The user just deleted note id=%s in the Notes app. It no longer exists — re-read with the note tool before answering about notes.", delID))
 		writeJSON(w, map[string]interface{}{"ok": true})
 	default:
 		http.Error(w, "method not allowed", 405)
