@@ -316,20 +316,17 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		pdfPages = pages
-		for pageIdx, pageText := range pages {
-			for _, c := range rag.SplitText(pageText) {
-				chunks = append(chunks, c)
-				pageNums = append(pageNums, pageIdx+1)
-			}
-		}
+		// Split the document as a whole, not page by page: a paragraph running across
+		// a page break used to be cut in two, and neither half matched a search. Each
+		// chunk still records the page it starts on.
+		chunks, pageNums = rag.SplitPages(pages)
 	} else {
 		text, err := rag.ParseFile(tmp.Name())
 		if err != nil {
 			jsonError(w, "parse: "+err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
-		chunks = rag.SplitText(text)
-		pageNums = make([]int, len(chunks))
+		chunks, pageNums = rag.SplitDocument(text)
 	}
 
 	if strings.TrimSpace(strings.Join(chunks, "")) == "" {

@@ -113,13 +113,15 @@ func TestSplitText_ChunkSizeRespected(t *testing.T) {
 }
 
 func TestSplitText_OverlapExists(t *testing.T) {
-	// Build two paragraphs each slightly over ChunkSize/2 so they form two chunks.
-	para := strings.Repeat("a", 600) // 600 chars each
-	input := para + "\n\n" + para    // 1202 chars total — exceeds ChunkSize
+	// Two paragraphs, each just over ChunkSize/2, so they cannot share a chunk.
+	// Sized from the constant rather than hard-coded: ChunkSize is a tuning knob.
+	para := strings.Repeat("a", ChunkSize/2+50)
+	input := para + "\n\n" + para
 
 	chunks := SplitText(input)
 	if len(chunks) < 2 {
-		t.Fatalf("expected at least 2 chunks for 1200-char text, got %d", len(chunks))
+		t.Fatalf("expected at least 2 chunks for a %d-char text (ChunkSize=%d), got %d",
+			len([]rune(input)), ChunkSize, len(chunks))
 	}
 
 	// Verify that the last ChunkOverlap runes of chunks[0] appear at the start of chunks[1].

@@ -108,12 +108,9 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			if err != nil {
 				return fmt.Sprintf("ERROR parsing PDF: %v", err), nil
 			}
-			for pageIdx, pageText := range pages {
-				for _, c := range rag.SplitText(pageText) {
-					chunks = append(chunks, c)
-					pageNums = append(pageNums, pageIdx+1)
-				}
-			}
+			// Whole-document split: a paragraph across a page break stays in one
+			// chunk, and each chunk keeps the page it starts on.
+			chunks, pageNums = rag.SplitPages(pages)
 			if err := rag.ExtractPageImages(parsePath, imgDir); err != nil {
 				fmt.Printf("WARN: could not extract page images from %s: %v\n", fullPath, err)
 			} else {
@@ -126,8 +123,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			if err != nil {
 				return fmt.Sprintf("ERROR parsing DOCX: %v", err), nil
 			}
-			chunks = rag.SplitText(text)
-			pageNums = make([]int, len(chunks))
+			chunks, pageNums = rag.SplitDocument(text)
 			if _, err := rag.ExtractDOCXImages(fullPath, imgDir); err != nil {
 				fmt.Printf("WARN: could not extract DOCX images from %s: %v\n", fullPath, err)
 			}
@@ -136,16 +132,14 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			if err != nil {
 				return fmt.Sprintf("ERROR parsing file: %v", err), nil
 			}
-			chunks = rag.SplitText(text)
-			pageNums = make([]int, len(chunks))
+			chunks, pageNums = rag.SplitDocument(text)
 		}
 	} else {
 		// Inline text ingestion.
 		if source == "" || content == "" {
 			return "", fmt.Errorf("source and content are required when source_path is not provided")
 		}
-		chunks = rag.SplitText(content)
-		pageNums = make([]int, len(chunks))
+		chunks, pageNums = rag.SplitDocument(content)
 		sizeBytes = int64(len(content))
 	}
 
