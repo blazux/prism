@@ -56,13 +56,10 @@ func main() {
 		}
 	}
 
-	// EMBED_BACKEND decouples RAG embeddings + vision captioning from the chat
-	// backend. Empty follows LLM_BACKEND; set "ollama" to keep RAG on Ollama when
-	// chat runs on a chat-only server with no /v1/embeddings (e.g. Qwen3.5+DFlash).
-	// VISION_MODEL overrides the captioning model (needed when captioning runs on
-	// Ollama but the chat model name isn't an Ollama tag).
+	// EMBED_BACKEND decouples RAG embeddings from the chat backend. Empty follows
+	// LLM_BACKEND; set "ollama" to keep RAG on Ollama when chat runs on a chat-only
+	// server with no /v1/embeddings (e.g. Qwen3.5+DFlash).
 	embedBackend := os.Getenv("EMBED_BACKEND")
-	visionModel := os.Getenv("VISION_MODEL")
 
 	agentContainer := os.Getenv("AGENT_CONTAINER")
 	if agentContainer == "" {
@@ -101,7 +98,6 @@ func main() {
 		OpenAIBaseURL:    openAIBaseURL,
 		OpenAIAPIKey:     openAIAPIKey,
 		EmbedBackend:     embedBackend,
-		VisionModel:      visionModel,
 		AgentContainer:   agentContainer,
 		SearxngURL:       searxngURL,
 		PostgresURL:      postgresURL,

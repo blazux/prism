@@ -31,7 +31,6 @@ type Config struct {
 	OpenAIBaseURL    string // /v1 root, used when LLMBackend == "openai"
 	OpenAIAPIKey     string // optional bearer token for the openai backend
 	EmbedBackend     string // "" (follow LLMBackend), "ollama" or "openai": backend for RAG embeddings + captioning
-	VisionModel      string // optional override model for RAG vision captioning (needed when captioning ≠ chat backend)
 	AgentContainer   string
 	SearxngURL       string
 	ServicePortStart int
@@ -51,14 +50,13 @@ type Server struct {
 	mu             sync.RWMutex
 	ragStore       *rag.Store
 	ragEmbedder    *rag.Embedder
-	ragCaptioner   *rag.Captioner
 	customMgr      *customtools.Manager
 	memStore       *memory.Store
 	mcpMgr         *mcp.Manager
-	socketSessions sync.Map // socket.io sid → targetHost (for WebSocket upgrade routing)
+	socketSessions sync.Map           // socket.io sid → targetHost (for WebSocket upgrade routing)
 	channels       map[string]Channel // messaging bridges (telegram, slack, …)
 	chanCancel     context.CancelFunc // cancels the running channel receive loops
-	oauthStates    sync.Map // CSRF state → oauthState (pending OAuth authorizations)
+	oauthStates    sync.Map           // CSRF state → oauthState (pending OAuth authorizations)
 }
 
 func New(cfg Config) *Server {
@@ -152,11 +150,6 @@ func (s *Server) Start() error {
 	screenshotsDir := filepath.Join(s.cfg.WorkspaceDir, ".screenshots")
 	os.MkdirAll(screenshotsDir, 0755)
 	mux.Handle("/screenshots/", http.StripPrefix("/screenshots/", http.FileServer(http.Dir(screenshotsDir))))
-
-	// RAG page images — served at /rag_images/<collection>/<doc>/<page>.jpg
-	ragImagesDir := filepath.Join(s.cfg.WorkspaceDir, "rag_images")
-	os.MkdirAll(ragImagesDir, 0755)
-	mux.Handle("/rag_images/", http.StripPrefix("/rag_images/", http.FileServer(http.Dir(ragImagesDir))))
 
 	// WebSocket
 	mux.HandleFunc("/ws", s.handleWS)

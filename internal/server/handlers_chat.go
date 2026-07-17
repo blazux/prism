@@ -198,7 +198,7 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 	executor.SetLLM(ollamaClient, model)
 
 	if s.ragStore != nil {
-		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
+		executor.SetRAG(s.ragStore, s.ragEmbedder)
 	}
 	executor.SetSessionID(sessionID)
 	if ms != nil {

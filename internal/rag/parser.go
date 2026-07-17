@@ -13,29 +13,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/xuri/excelize/v2"
 )
-
-// ImageDir returns the directory where page images for a document are stored.
-// Uses the sanitized filename (without extension) — no hash — so the agent can
-// reference the path without risk of copy errors.
-func ImageDir(workspaceDir, collection, filename string) string {
-	base := strings.TrimSuffix(filename, filepath.Ext(filename))
-	safe := strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
-			return r
-		}
-		return '_'
-	}, base)
-	return filepath.Join(workspaceDir, "rag_images", collection, safe)
-}
-
-// PageImagePath returns the path for a specific page image.
-func PageImagePath(workspaceDir, collection, filename string, page int) string {
-	return filepath.Join(ImageDir(workspaceDir, collection, filename), fmt.Sprintf("page-%04d.jpg", page))
-}
 
 // ParseFile extracts plain text from a file based on its extension.
 // Supported: .txt .md .csv .json (raw read), .pdf (pdftotext), .docx (zip+xml), .xlsx (excelize), .pptx (zip+xml).
@@ -108,50 +88,6 @@ func ConvertToPDF(path, outDir string) (string, error) {
 	}
 	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	return filepath.Join(outDir, base+".pdf"), nil
-}
-
-// ExtractDOCXImages extracts JPEG and PNG images embedded in a DOCX file.
-// Images are saved to outDir as page-0001.jpg, page-0002.png, etc.
-// Returns the number of images extracted.
-func ExtractDOCXImages(path, outDir string) (int, error) {
-	r, err := zip.OpenReader(path)
-	if err != nil {
-		return 0, fmt.Errorf("open docx: %w", err)
-	}
-	defer r.Close()
-
-	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return 0, err
-	}
-
-	var count int
-	for _, f := range r.File {
-		if !strings.HasPrefix(f.Name, "word/media/") {
-			continue
-		}
-		ext := strings.ToLower(filepath.Ext(f.Name))
-		if ext == ".jpeg" {
-			ext = ".jpg"
-		}
-		if ext != ".jpg" && ext != ".png" {
-			continue
-		}
-		rc, err := f.Open()
-		if err != nil {
-			continue
-		}
-		data, err := io.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			continue
-		}
-		count++
-		dst := filepath.Join(outDir, fmt.Sprintf("page-%04d%s", count, ext))
-		if err := os.WriteFile(dst, data, 0644); err != nil {
-			return count, err
-		}
-	}
-	return count, nil
 }
 
 // parsePPTX extracts text from all slides in a PPTX file, one slide per paragraph block.
@@ -263,30 +199,6 @@ func ParsePDFPages(path string) ([]string, error) {
 		pages = pages[:len(pages)-1]
 	}
 	return pages, nil
-}
-
-// ExtractPageImages renders each PDF page as a JPEG into outDir using pdftoppm.
-// Output files are named page-0001.jpg, page-0002.jpg, etc.
-func ExtractPageImages(pdfPath, outDir string) error {
-	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", outDir, err)
-	}
-	tmp := filepath.Join(outDir, "p")
-	if err := exec.Command("pdftoppm", "-jpeg", "-r", "120", pdfPath, tmp).Run(); err != nil {
-		return fmt.Errorf("pdftoppm: %w (is poppler-utils installed?)", err)
-	}
-	matches, err := filepath.Glob(filepath.Join(outDir, "p-*.jpg"))
-	if err != nil {
-		return err
-	}
-	sort.Strings(matches)
-	for i, src := range matches {
-		dst := filepath.Join(outDir, fmt.Sprintf("page-%04d.jpg", i+1))
-		if err := os.Rename(src, dst); err != nil {
-			return fmt.Errorf("rename %s: %w", src, err)
-		}
-	}
-	return nil
 }
 
 // execCommandOutput runs a command and returns its stdout as a string.

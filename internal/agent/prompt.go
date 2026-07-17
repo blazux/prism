@@ -163,7 +163,7 @@ Screenshots saved to /workspace/.screenshots/, served at /screenshots/<file>.
 
 ### RAG
 
-rag_search includes page numbers per chunk. PDF pages containing figures are auto-captioned at ingestion into searchable "[Figure — page N]" chunks; page images exist only for those pages. When a search hit is a figure caption, call rag_show_page to actually see the image; add_attachment embeds it in your reply.
+rag_search includes page numbers per chunk.
 
 ## Missing information
 

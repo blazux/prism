@@ -200,7 +200,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name:        "cron",
+			Name: "cron",
 			Description: "Manage scheduled cron jobs running inside the workspace container. Actions: list, add (name+schedule+command, plus a description), remove (name).\n" +
 				"To deliver a result to the user on a messaging channel on a schedule, make the command POST a prompt to yourself with delivery enabled. Set \"deliver\" to \"telegram\" or \"slack\", e.g.:\n" +
 				"curl -s -X POST $PRISM_URL/api/chat -H \"Authorization: Bearer $PRISM_TOKEN\" -H 'Content-Type: application/json' -d '{\"message\":\"Summarize my unread emails in 5 bullet points\",\"session\":\"telegram\",\"deliver\":\"telegram\"}'\n" +
@@ -252,7 +252,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name: "deep_research",
+			Name:        "deep_research",
 			Description: "Run multi-round, in-depth web research on a question. Iteratively plans, searches the web, reads pages, and synthesizes an evolving report until comprehensive, then returns a long Markdown report with sources. Use for open-ended questions needing many sources (comparisons, surveys, 'everything about X'); not for a single quick lookup (use web_search for that). Slow — runs several search+read+LLM rounds.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -267,7 +267,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name: "skill",
+			Name:        "skill",
 			Description: "Reusable skills library. Save a procedure you worked out (action=add) so you can recall it later; an index of saved skills (name + when-to-use) is always in your system prompt. action=get loads a skill's full steps; action=list / delete also available. Save a skill after solving something non-trivial you may need again.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -285,7 +285,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name: "note",
+			Name:        "note",
 			Description: "Personal notes, shared across the dashboard. action=add|list|update|delete. Notes have a title, body (Markdown) and comma-separated tags. Use to remember free-form information the user wants kept — and proactively offer to save substantial outputs (deep_research reports, summaries, drafts) as a note so they persist in the Notes app.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -303,7 +303,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name: "task",
+			Name:        "task",
 			Description: "To-do tasks (per board). action=add|list|done|reopen|delete. Tasks have a title, priority (low|normal|high) and optional due date. list hides completed tasks unless include_done=true.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -322,7 +322,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name: "email",
+			Name:        "email",
 			Description: "Email over IMAP/SMTP. action=config sets up the account (imap_host, smtp_host, user, password, optional ports/from — password is stored encrypted). Then: list (recent inbox), read (uid → full body), search (query), send (to, subject, body), reply (uid, body — threads to the original). Summarize/triage/draft using the LLM yourself from list/read output.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -349,7 +349,7 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name: "calendar",
+			Name:        "calendar",
 			Description: "Calendar events (per board). action=add|list|delete. Events have a title, start (required), optional end, description and location. For list, optionally pass from/to to bound the range.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
@@ -414,22 +414,6 @@ var ToolDefinitions = []ollama.Tool{
 					"document":   {Type: "string", Description: "Document filename (delete action — omit to delete the whole collection)"},
 				},
 				Required: []string{"action"},
-			},
-		},
-	},
-	{
-		Type: "function",
-		Function: ollama.ToolFunction{
-			Name:        "rag_show_page",
-			Description: "Display a specific PDF page to the user and to yourself. The image appears in the tool result so both you and the user can see it. Call this when a rag_search chunk references a diagram, figure, or visual content worth showing. If you also want the image in your response bubble, call add_attachment with the path it returns.",
-			Parameters: ollama.ToolParameters{
-				Type: "object",
-				Properties: map[string]ollama.ToolProperty{
-					"collection": {Type: "string", Description: "The RAG collection name"},
-					"filename":   {Type: "string", Description: "The document filename as returned by rag_search"},
-					"page":       {Type: "integer", Description: "The 1-based page number to display"},
-				},
-				Required: []string{"collection", "filename", "page"},
 			},
 		},
 	},

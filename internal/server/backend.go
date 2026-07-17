@@ -78,7 +78,7 @@ func (s *Server) chatBackendFor(model string) ollama.Backend {
 	return s.newChatBackend() // openai server unreachable: use the primary backend
 }
 
-// embedBackend selects the backend for RAG embeddings + vision captioning.
+// embedBackend selects the backend for RAG embeddings.
 // It defaults to the chat backend (LLMBackend) but can be pinned independently
 // via EMBED_BACKEND — e.g. keep RAG on Ollama when chat runs on a vLLM server
 // that only serves /v1/chat/completions and has no /v1/embeddings (Qwen3.5 +
@@ -90,29 +90,10 @@ func (s *Server) embedBackend() string {
 	return s.cfg.LLMBackend
 }
 
-// captionModel is the model used for RAG vision captioning. It defaults to the
-// chat model but VISION_MODEL overrides it — needed when captioning is pinned to
-// Ollama (EMBED_BACKEND=ollama) while chat runs a text-only server, since the
-// chat model name won't exist on the Ollama side.
-func (s *Server) captionModel() string {
-	if s.cfg.VisionModel != "" {
-		return s.cfg.VisionModel
-	}
-	return s.cfg.Model
-}
-
-// newEmbedder returns the RAG embedder for the embedding backend.
+// newEmbedder returns the RAG embedder for the active backend.
 func (s *Server) newEmbedder() *rag.Embedder {
 	if s.embedBackend() == "openai" {
 		return rag.NewOpenAIEmbedder(s.cfg.OpenAIBaseURL, s.cfg.OpenAIAPIKey, s.cfg.EmbedModel)
 	}
 	return rag.NewEmbedder(s.cfg.OllamaURL, s.cfg.EmbedModel)
-}
-
-// newCaptioner returns the RAG vision captioner for the embedding backend.
-func (s *Server) newCaptioner() *rag.Captioner {
-	if s.embedBackend() == "openai" {
-		return rag.NewOpenAICaptioner(s.cfg.OpenAIBaseURL, s.cfg.OpenAIAPIKey, s.captionModel())
-	}
-	return rag.NewCaptioner(s.cfg.OllamaURL, s.captionModel())
 }

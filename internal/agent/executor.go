@@ -22,7 +22,6 @@ type ToolExecutor struct {
 	sessionID       string
 	ragStore        *rag.Store
 	ragEmbedder     *rag.Embedder
-	ragCaptioner    *rag.Captioner
 	customMgr       *customtools.Manager
 	mcpMgr          *mcp.Manager
 	memStore        *memory.Store
@@ -60,10 +59,9 @@ func (e *ToolExecutor) SetLLM(backend ollama.Backend, model string) {
 // step-by-step), streamed into the chat.
 func (e *ToolExecutor) SetProgressFn(fn func(text string)) { e.onProgress = fn }
 
-func (e *ToolExecutor) SetRAG(store *rag.Store, embedder *rag.Embedder, captioner *rag.Captioner) {
+func (e *ToolExecutor) SetRAG(store *rag.Store, embedder *rag.Embedder) {
 	e.ragStore = store
 	e.ragEmbedder = embedder
-	e.ragCaptioner = captioner
 }
 
 func (e *ToolExecutor) SetCustomTools(mgr *customtools.Manager, onReload func()) {
@@ -339,9 +337,6 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		return e.ragSearch(ctx, str("query"), str("collection"), limit)
 	case "rag_ingest":
 		return wrap(e.ragIngest(ctx, str("collection"), str("source"), str("content"), str("source_path")))
-	case "rag_show_page":
-		pageFloat, _ := args["page"].(float64)
-		return e.ragShowPage(ctx, str("collection"), str("filename"), int(pageFloat))
 	case "add_attachment":
 		return e.addAttachment(str("path"))
 	case "rag_manage":
