@@ -33,6 +33,24 @@ type HistoryEntry struct {
 type Store struct {
 	pool   *pgxpool.Pool
 	encKey []byte // AES-256 key for encrypting secret values
+	// cfgScope, when set ("u<id>:"), prefixes config keys and secret names so
+	// external integrations (email, calendar, vault, OAuth…) are per-user instead
+	// of deployment-global. Obtained via ConfigScope; zero value = global, which
+	// is what single-user Prism always uses.
+	cfgScope string
+}
+
+// ConfigScope returns a view of the store whose config keys and secret names are
+// prefixed with scope. "global" (or empty) returns the store unchanged — so the
+// single-user build reads and writes exactly the keys it always has. The seam is
+// here for the multi-user build, which hands out a "u<id>" scope per user.
+func (s *Store) ConfigScope(scope string) *Store {
+	if s == nil || scope == "" || scope == "global" {
+		return s
+	}
+	c := *s
+	c.cfgScope = scope + ":"
+	return &c
 }
 
 func NewStore(ctx context.Context, connStr string, encKey []byte) (*Store, error) {
@@ -356,7 +374,7 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 // GetConfig retrieves a config value by key. Returns ("", false, nil) if not found.
 func (s *Store) GetConfig(ctx context.Context, key string) (string, bool, error) {
 	var value string
-	err := s.pool.QueryRow(ctx, `SELECT value FROM agent_config WHERE key = $1`, key).Scan(&value)
+	err := s.pool.QueryRow(ctx, `SELECT value FROM agent_config WHERE key = $1`, s.cfgScope+key).Scan(&value)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", false, nil
@@ -372,7 +390,7 @@ func (s *Store) SetConfig(ctx context.Context, key, value string) error {
 		INSERT INTO agent_config (key, value, updated_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-	`, key, value)
+	`, s.cfgScope+key, value)
 	return err
 }
 
@@ -606,13 +624,13 @@ func (s *Store) SetSecret(ctx context.Context, name, value string) error {
 		INSERT INTO secrets (name, value, created_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value, created_at = NOW()
-	`, name, encrypted)
+	`, s.cfgScope+name, encrypted)
 	return err
 }
 
 func (s *Store) GetSecret(ctx context.Context, name string) (string, bool, error) {
 	var encrypted string
-	err := s.pool.QueryRow(ctx, `SELECT value FROM secrets WHERE name = $1`, name).Scan(&encrypted)
+	err := s.pool.QueryRow(ctx, `SELECT value FROM secrets WHERE name = $1`, s.cfgScope+name).Scan(&encrypted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", false, nil
@@ -644,7 +662,7 @@ func (s *Store) ListSecretNames(ctx context.Context) ([]string, error) {
 }
 
 func (s *Store) DeleteSecret(ctx context.Context, name string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM secrets WHERE name = $1`, name)
+	_, err := s.pool.Exec(ctx, `DELETE FROM secrets WHERE name = $1`, s.cfgScope+name)
 	return err
 }
 
