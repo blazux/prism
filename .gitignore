@@ -13,3 +13,8 @@ docker-compose.override.yml
 # Runtime-generated content
 web/plugins/
 workspace/
+
+# Claude Code / assistant-local files
+.claude/
+CLAUDE.md
+MEMORY.md
