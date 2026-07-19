@@ -68,6 +68,10 @@ type rpcError struct {
 }
 
 // postURL returns the URL to POST JSON-RPC requests to.
+// setAuth updates the Authorization header sent on subsequent requests, so a cached
+// client picks up a refreshed OAuth token.
+func (c *Client) setAuth(header string) { c.authHeader = header }
+
 func (c *Client) postURL() string {
 	if c.messagesURL != "" {
 		return c.messagesURL
@@ -104,6 +108,13 @@ func (c *Client) call(ctx context.Context, method string, params interface{}) (j
 		c.sessionID = sid
 	}
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		// The server wants OAuth. Surface a typed error carrying the resource_metadata
+		// pointer so the manager can run discovery + the authorization flow.
+		rm, _ := resourceMetadataFromChallenge(resp.Header.Get("WWW-Authenticate"))
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 512))
+		return nil, &OAuthRequiredError{ResourceMetadata: rm}
+	}
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))

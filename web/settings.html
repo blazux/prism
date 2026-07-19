@@ -1330,7 +1330,22 @@ async function addMCPServer() {
     })
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
-    status.textContent = `✓ ${data.count} tool(s) loaded`; status.className = 'mcp-add-status ok'
+    if (data.needs_oauth) {
+      // The server wants OAuth: open the consent popup and wait for the callback
+      // page to signal completion (it posts 'mcp-oauth-done' to this window).
+      status.textContent = 'Authorize in the popup…'; status.className = 'mcp-add-status'
+      const popup = window.open(data.authorize_url, 'mcp-oauth', 'width=520,height=700')
+      if (!popup) { status.textContent = 'Popup blocked — allow popups and retry.'; status.className = 'mcp-add-status error'; return }
+      await new Promise(resolve => {
+        function onMsg(e) { if (e.data === 'mcp-oauth-done') { cleanup(); resolve() } }
+        const poll = setInterval(() => { if (popup.closed) { cleanup(); resolve() } }, 700)
+        function cleanup() { window.removeEventListener('message', onMsg); clearInterval(poll) }
+        window.addEventListener('message', onMsg)
+      })
+      status.textContent = '✓ Connected'; status.className = 'mcp-add-status ok'
+    } else {
+      status.textContent = `✓ ${data.count} tool(s) loaded`; status.className = 'mcp-add-status ok'
+    }
     document.getElementById('mcp-add-name').value = ''
     document.getElementById('mcp-add-url').value = ''
     document.getElementById('mcp-add-secret').value = ''

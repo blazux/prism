@@ -29,6 +29,8 @@ type Manager struct {
 	store     *memory.Store
 	clientsMu sync.Mutex
 	clients   map[string]*Client // keyed by "sessionID:serverID", populated lazily
+	pendingMu sync.Mutex
+	pending   map[string]*pendingOAuth // OAuth flows awaiting the consent redirect, keyed by state
 }
 
 func NewManager(ms *memory.Store) *Manager {
@@ -55,16 +57,9 @@ func (m *Manager) Connect(ctx context.Context, sessionID, name, url, authSecret 
 		return nil, fmt.Errorf("database not available (Postgres required)")
 	}
 
-	authHeader := ""
-	if authSecret != "" {
-		val, exists, err := ms.GetSecret(ctx, authSecret)
-		if err != nil {
-			return nil, fmt.Errorf("get secret %q: %w", authSecret, err)
-		}
-		if !exists {
-			return nil, fmt.Errorf("secret %q not found — call request_secret first", authSecret)
-		}
-		authHeader = "Bearer " + val
+	authHeader, err := m.bearerFor(ctx, authSecret)
+	if err != nil {
+		return nil, err
 	}
 
 	connCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -221,16 +216,15 @@ func (m *Manager) CallTool(ctx context.Context, sessionID, toolName string, args
 			if t.Name != toolName {
 				continue
 			}
-			authHeader := ""
-			if srv.AuthSecret != "" {
-				if val, exists, _ := ms.GetSecret(ctx, srv.AuthSecret); exists {
-					authHeader = "Bearer " + val
-				}
+			authHeader, err := m.bearerFor(ctx, srv.AuthSecret)
+			if err != nil {
+				return "", fmt.Errorf("auth for MCP server %q: %w", srv.Name, err)
 			}
 			client, err := m.getOrInitClient(ctx, sessionID, srv.ID, srv.URL, authHeader)
 			if err != nil {
 				return "", fmt.Errorf("connect to MCP server %q: %w", srv.Name, err)
 			}
+			client.setAuth(authHeader) // a cached client may hold a now-refreshed token
 			return client.CallTool(ctx, toolName, args)
 		}
 	}

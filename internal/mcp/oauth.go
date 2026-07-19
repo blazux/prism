@@ -23,6 +23,16 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// OAuthRequiredError is returned when a server answers 401 with a Bearer challenge:
+// it means "authenticate with OAuth first". ResourceMetadata is the RFC 9728 URL the
+// challenge pointed at (empty if the server 401'd without one — discovery then falls
+// back to the well-known path).
+type OAuthRequiredError struct{ ResourceMetadata string }
+
+func (e *OAuthRequiredError) Error() string {
+	return "MCP server requires OAuth authorization"
+}
+
 // OAuthMeta is everything discovery + registration yields for one server: where to
 // send the user, where to swap the code, and the client_id we registered. It is
 // what we persist alongside the token so a refresh needs no re-discovery.

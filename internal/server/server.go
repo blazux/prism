@@ -244,6 +244,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/secrets/", s.handleSecretByName)
 	mux.HandleFunc("/api/mcp/servers", s.handleMCPServers)
 	mux.HandleFunc("/api/mcp/servers/", s.handleMCPServerByID)
+	mux.HandleFunc("/api/oauth/mcp/callback", s.handleMCPOAuthCallback)
 	mux.HandleFunc("/api/auth", s.handleAuth)
 	// Multi-user identity (Prism heavy)
 	mux.HandleFunc("/api/signup", s.handleSignup)

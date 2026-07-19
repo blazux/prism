@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"html"
 	"net/http"
 	"strings"
 
@@ -64,6 +66,23 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 		}
 		tools, err := s.mcpMgr.Connect(r.Context(), sessionID, body.Name, body.URL, body.AuthSecret)
 		if err != nil {
+			// The server wants OAuth: run discovery + registration and hand the UI a
+			// consent URL to open, instead of failing.
+			var needAuth *mcp.OAuthRequiredError
+			if errors.As(err, &needAuth) {
+				redirectURI := externalBase(r) + "/api/oauth/mcp/callback"
+				authURL, state, serr := s.mcpMgr.StartOAuth(r.Context(), sessionID, body.Name, body.URL, needAuth.ResourceMetadata, redirectURI)
+				if serr != nil {
+					http.Error(w, "oauth setup: "+serr.Error(), 500)
+					return
+				}
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"needs_oauth":   true,
+					"authorize_url": authURL,
+					"state":         state,
+				})
+				return
+			}
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -149,4 +168,42 @@ func (s *Server) broadcastMCP(sessionID string) {
 			}
 		}
 	}
+}
+
+// handleMCPOAuthCallback finishes an MCP OAuth flow. The provider (Asana, Linear…)
+// redirects the user's browser here with ?code&state after they consent. It is a
+// cross-site top-level GET, so it is whitelisted from auth (see isOAuthCallback);
+// the unguessable `state` is the CSRF guard. On success the little page tells the
+// opener window to refresh its MCP list, then closes itself.
+func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	if e := r.URL.Query().Get("error"); e != "" {
+		desc := r.URL.Query().Get("error_description")
+		writeOAuthClosePage(w, "Authorization was refused: "+strings.TrimSpace(e+" "+desc))
+		return
+	}
+	code, state := r.URL.Query().Get("code"), r.URL.Query().Get("state")
+	if code == "" || state == "" {
+		writeOAuthClosePage(w, "Missing code or state in the callback.")
+		return
+	}
+	if _, err := s.mcpMgr.CompleteOAuth(r.Context(), state, code); err != nil {
+		writeOAuthClosePage(w, "Connection failed: "+err.Error())
+		return
+	}
+	writeOAuthClosePage(w, "")
+}
+
+// writeOAuthClosePage renders the popup landing page. errMsg empty = success: it
+// pings the opener (the MCP tab) to reload and closes; otherwise it shows the error.
+func writeOAuthClosePage(w http.ResponseWriter, errMsg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if errMsg == "" {
+		w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>Connected</title>
+<body style="font:14px system-ui;padding:2rem;color:#2b7a3f">✓ Connected. You can close this window.
+<script>try{window.opener&&window.opener.postMessage('mcp-oauth-done','*')}catch(e){}setTimeout(function(){window.close()},600)</script>`))
+		return
+	}
+	w.WriteHeader(http.StatusBadRequest)
+	w.Write([]byte(`<!doctype html><meta charset="utf-8"><title>Failed</title>
+<body style="font:14px system-ui;padding:2rem;color:#b23">✗ ` + html.EscapeString(errMsg) + `<br><br>You can close this window and try again.`))
 }
