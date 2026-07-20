@@ -13,7 +13,7 @@ func (s *Server) handleAdminConsolePage(w http.ResponseWriter, r *http.Request) 
 }
 
 const adminConsolePage = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Admin — SPECTRUM</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Admin — PRISM</title>
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link rel="stylesheet" href="/style.css">
 <script src="/theme.js"></script>
@@ -79,7 +79,7 @@ code{font-size:12px}
 #status{margin-left:8px;color:var(--accent);font-size:12px}
 </style></head><body><div id="adm">
 <div id="adm-top">
-<a id="adm-back" href="/" target="_top" style="display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--text3);font-size:12.5px;transition:color .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>SPECTRUM</a>
+<a id="adm-back" href="/" target="_top" style="display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--text3);font-size:12.5px;transition:color .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>PRISM</a>
 <span style="color:var(--text3);font-size:12px">›</span>
 <span style="color:var(--text2);font-size:13px;font-weight:600">Administration</span>
 <span class="sp"></span><span id="who"></span></div>
@@ -364,6 +364,24 @@ async function setToolAccess(tool,access){const g=$('mc-group').value;if(!g)retu
 async function addGroupMCP(){const g=$('mc-group').value;if(!g)return;const n=$('gmcp-name').value.trim(),u=$('gmcp-url').value.trim();if(!n||!u)return;
  $('gmcp-status').textContent='connecting…';
  const r=await jpost('/api/group/mcp?group='+g,{name:n,url:u,authSecret:$('gmcp-secret').value});
+ let d=null;try{d=await r.json();}catch(e){}
+ if(r.ok&&d&&d.needs_oauth){
+  // The server wants OAuth: open the consent popup and wait for the callback
+  // page to signal completion (it posts 'mcp-oauth-done' to this window) —
+  // mirrors the personal MCP flow in settings.html.
+  $('gmcp-status').textContent='authorize in the popup…';
+  const popup=window.open(d.authorize_url,'mcp-oauth','width=520,height=700');
+  if(!popup){$('gmcp-status').textContent='popup blocked';return;}
+  await new Promise(resolve=>{
+   function onMsg(e){if(e.data==='mcp-oauth-done'){cleanup();resolve();}}
+   const poll=setInterval(()=>{if(popup.closed){cleanup();resolve();}},700);
+   function cleanup(){window.removeEventListener('message',onMsg);clearInterval(poll);}
+   window.addEventListener('message',onMsg);
+  });
+  $('gmcp-status').textContent='connected ✓';setTimeout(()=>$('gmcp-status').textContent='',2500);
+  $('gmcp-name').value='';$('gmcp-url').value='';$('gmcp-secret').value='';loadGroupMCP();
+  return;
+ }
  $('gmcp-status').textContent=r.ok?'connected ✓':'error';setTimeout(()=>$('gmcp-status').textContent='',2500);
  if(r.ok){$('gmcp-name').value='';$('gmcp-url').value='';$('gmcp-secret').value='';}loadGroupMCP();}
 async function removeGroupMCP(id){const g=$('mc-group').value;if(!g)return;await fetch('/api/group/mcp?group='+g+'&id='+encodeURIComponent(id),{method:'DELETE'});loadGroupMCP();}

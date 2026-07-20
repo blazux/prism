@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -67,6 +68,23 @@ func (s *Server) handleGroupMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		tools, err := s.mcpMgr.Connect(r.Context(), scope, b.Name, b.URL, b.AuthSecret)
 		if err != nil {
+			// The server wants OAuth: run discovery + registration and hand the UI a
+			// consent URL to open, same as the personal MCP flow (handleMCPServers).
+			var needAuth *mcp.OAuthRequiredError
+			if errors.As(err, &needAuth) {
+				redirectURI := externalBase(r) + "/api/oauth/mcp/callback"
+				authURL, state, serr := s.mcpMgr.StartOAuth(r.Context(), scope, b.Name, b.URL, needAuth.ResourceMetadata, redirectURI)
+				if serr != nil {
+					writeErr(w, http.StatusInternalServerError, "oauth setup: "+serr.Error())
+					return
+				}
+				writeJSON(w, map[string]interface{}{
+					"needs_oauth":   true,
+					"authorize_url": authURL,
+					"state":         state,
+				})
+				return
+			}
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
