@@ -207,10 +207,20 @@ func (s *Server) startLoginSession(w http.ResponseWriter, r *http.Request, ms *m
 // GET /api/me → the current user (or {authenticated:false}).
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	// Single-user mode: reaching this handler means the middleware already vetted
+	// PRISM_TOKEN — the caller is the owner, the same identity requireAdminUser
+	// admits into /api/terminal and /api/exec. Report isAdmin accordingly, so the
+	// UI offers the workspace terminal here too. No user object: the account/group
+	// UI (admin link, rooms) keys off user.role and must stay hidden in this mode.
+	if !s.cfg.MultiUser {
+		json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "isAdmin": true, "legacy": true})
+		return
+	}
 	// /api/me is public, so resolve the cookie here directly.
 	ms := s.store()
 	if ms == nil {
-		json.NewEncoder(w).Encode(map[string]any{"authenticated": s.cfg.AuthToken == "" || s.legacyCookieAuthed(r), "legacy": true})
+		authed := s.cfg.AuthToken == "" || s.legacyCookieAuthed(r)
+		json.NewEncoder(w).Encode(map[string]any{"authenticated": authed, "legacy": true, "isAdmin": authed})
 		return
 	}
 	u := s.userFromCookie(r, ms)

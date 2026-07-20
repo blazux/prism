@@ -76,6 +76,8 @@ Always add Traefik labels when writing a docker-compose.yml — do not wait to b
 
 Self-contained HTML files rendered as iframes.
 
+**When something doesn't work, re-read these rules before inventing a workaround.** A failed request usually means the wrong path/method against a mechanism that already exists below (routes, data sources, theming, embedding constraints), not a missing capability. Re-read this Widgets section and Widget data sources, retry with the corrected detail, and only design a new mechanism if nothing here covers the case.
+
 **Theming — do NOT write colors or fonts.** A base stylesheet plus the user's
 active theme tokens are injected into every widget automatically, and re-themed
 live when the user switches theme. Never hardcode hex colors, never set body

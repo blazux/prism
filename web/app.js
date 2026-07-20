@@ -1268,6 +1268,7 @@ function openCmdK() {
   ov.appendChild(box); document.body.appendChild(ov)
   const input = box.querySelector('#cmdk-input'), list = box.querySelector('#cmdk-list')
   const all = [
+    { kind: 'action', label: 'Chat (Ctrl+J)', icon: '❞', run: () => toggleChat() },
     ...(ME.isAdmin ? [{ kind: 'action', label: 'Terminal (Ctrl+Enter)', icon: '▸', run: () => toggleTerm(true) }] : []),
     ...(currentView.type === 'board' ? [{ kind: 'action', label: 'Tidy up windows', icon: '▦', run: tidyWindows }] : []),
     ...Object.keys(APP_TITLES).filter(n => !DISABLED_APPS.has(n)).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
@@ -1309,6 +1310,9 @@ document.addEventListener('keydown', e => {
   // — chat, dialogs, command palette — now ignores the key while Ctrl/⌘ is held, so
   // the shortcut can never fire an action *and* open the terminal.
   else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); toggleTerm() }
+  // Ctrl+J (or ⌘+J) toggles the chat drawer — the browser's downloads-panel default
+  // is worth overriding here, and the key is reachable without AltGr on AZERTY.
+  else if ((e.metaKey || e.ctrlKey) && (e.key === 'j' || e.key === 'J')) { e.preventDefault(); toggleChat() }
 })
 
 // ─── Workspace terminal (interactive PTY via xterm.js over WebSocket) ────────────

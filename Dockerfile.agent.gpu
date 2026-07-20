@@ -32,6 +32,12 @@ RUN pip install --no-cache-dir playwright && \
     python -m playwright install-deps chromium && \
     mkdir -p /workspace/.screenshots
 
+# /data is a compatibility symlink to /workspace/widget_data — see Dockerfile.agent
+# for why (an agent script writing literally to /data/<name>.json instead of the
+# documented /workspace/widget_data/<name>.json silently created an unrelated file
+# at the container root; the symlink makes both paths land in the same real file).
+RUN ln -s /workspace/widget_data /data
+
 WORKDIR /workspace
 
 CMD ["sh", "-c", "[ -f /workspace/.apt-packages ] && apt-get update -qq && xargs apt-get install -y < /workspace/.apt-packages; [ -f /workspace/.pip-packages ] && pip install -q $(cat /workspace/.pip-packages); [ -f /workspace/.crontab ] && crontab /workspace/.crontab; cron && tail -f /dev/null"]
