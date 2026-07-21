@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,12 @@ func (e *ToolExecutor) cronOwner() string {
 		}
 	}
 	return s
+}
+
+// shQuote single-quotes a value for safe use as a POSIX shell word, escaping
+// any embedded single quotes the standard way ('\'').
+func shQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 type CronJob struct{ Name, Owner, Desc, Schedule, Command string }
@@ -72,6 +79,15 @@ func ParseCronJobs(raw string) []CronJob {
 	return jobs
 }
 
+// cronEnvPrefixRe matches the "PRISM_URL=... PRISM_SESSION=... PRISM_TOKEN=... "
+// prefix cronAdd injects ahead of every command (see cronAdd) — stripped again
+// for display so cron_list doesn't dump the live token in every listing.
+var cronEnvPrefixRe = regexp.MustCompile(`^PRISM_URL='[^']*' PRISM_SESSION='[^']*' PRISM_TOKEN='[^']*' `)
+
+func displayCommand(command string) string {
+	return cronEnvPrefixRe.ReplaceAllString(command, "")
+}
+
 func (e *ToolExecutor) cronList(ctx context.Context) (string, error) {
 	raw, err := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)
 	if err != nil {
@@ -83,7 +99,7 @@ func (e *ToolExecutor) cronList(ctx context.Context) (string, error) {
 		if j.Owner != "" && j.Owner != owner {
 			continue // another user's job
 		}
-		line := fmt.Sprintf("• %s — %s  %s", j.Name, j.Schedule, j.Command)
+		line := fmt.Sprintf("• %s — %s  %s", j.Name, j.Schedule, displayCommand(j.Command))
 		if j.Desc != "" {
 			line += "  (" + j.Desc + ")"
 		}
@@ -132,6 +148,16 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 	command = strings.ReplaceAll(command, "${PRISM_SESSION}", session)
 	command = strings.ReplaceAll(command, "$PRISM_TOKEN", e.prismToken)
 	command = strings.ReplaceAll(command, "${PRISM_TOKEN}", e.prismToken)
+
+	// Also export them as real env vars for the command's own process — every
+	// other execution path (exec_command, register_tool) gives a script
+	// os.environ['PRISM_TOKEN'] etc. directly; a cron job is not a special case
+	// a model needs to remember differently, it should just work the same way.
+	// The text substitution above is still needed separately: a shell expands
+	// $VAR in a command's own arguments before this same line's prefix
+	// assignments take effect, so it wouldn't see them otherwise.
+	command = fmt.Sprintf("PRISM_URL=%s PRISM_SESSION=%s PRISM_TOKEN=%s %s",
+		shQuote("http://prism-server:8080"), shQuote(session), shQuote(e.prismToken), command)
 
 	// Tag the job with its owner so each user only manages their own tasks.
 	entry := marker + "\n# agent-owner: " + e.cronOwner()
