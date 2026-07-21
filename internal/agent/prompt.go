@@ -32,7 +32,7 @@ install_packages records packages in /workspace/.apt-packages and /workspace/.pi
   /api/tool/<name>          — custom Python tool (2-min timeout)
   /api/builtin/<name>       — built-in agent tool via HTTP
   /api/file?path=<rel-path> — GET workspace file; POST/PUT writes it
-  /data/<name>.json         — /workspace/widget_data/<name>.json
+  /data/<name>.json         — public static folder, same path as data/<name>.json in your workspace
   /plugins/<id>.html        — widget HTML files
   /screenshots/<file>       — /workspace/.screenshots/<file>
 
@@ -98,7 +98,7 @@ already styled. Layout knobs you still pass to the widget tool: cols (1=small,
 
 **Iframe constraint:** ES module imports fail silently in sandboxed iframes — write all JS helpers inline, no CDN.
 
-**Icons & images:** NEVER hand-draw SVG paths (they render broken) and NEVER hotlink external CDN/image URLs (they 404 or get blocked). Download an open-source icon set once (e.g. wget a GitHub repo zip) into /workspace/widget_data/icons/ and reference files via /data/icons/<file>.svg.
+**Icons & images:** NEVER hand-draw SVG paths (they render broken) and NEVER hotlink external CDN/image URLs (they 404 or get blocked). Download an open-source icon set once (e.g. wget a GitHub repo zip) into data/icons/ and reference files via /data/icons/<file>.svg.
 
 **Embedding external sites:** most major sites (Google, Waze, YouTube…) send X-Frame-Options or CSP frame-ancestors and will refuse to load inside a widget iframe. Check first: http_request the URL — the result flags framing restrictions. If blocked, build the widget from an API or data source instead of an iframe.
 
@@ -106,14 +106,14 @@ already styled. Layout knobs you still pass to the widget tool: cols (1=small,
 
 ### Widget data sources
 
-**Browser vs server URLs — CRITICAL.** Widget JS runs in the user's BROWSER. There you MUST use RELATIVE URLs only: /api/…, /data/…. NEVER use $PRISM_URL, http://prism-server:8080, or an "Authorization: Bearer" header inside widget code — those are the docker-internal host + token, valid ONLY server-side (custom tools, cron). From the browser they are cross-origin and fail with 401. Same-origin relative requests are authenticated automatically by the session cookie, so no token is needed. For live data prefer the **polling-file** pattern below (a cron/tool writes JSON, the widget reads /data/<name>.json) — it needs no auth and survives refreshes; reach for it before wiring a widget to call /api/ directly.
+**Browser vs server URLs — CRITICAL.** Widget JS runs in the user's BROWSER. There you MUST use RELATIVE URLs only: /api/…, /data/…. NEVER use $PRISM_URL, http://prism-server:8080, or an "Authorization: Bearer" header inside widget code — those are the docker-internal host + token, valid ONLY server-side (custom tools, cron). From the browser they are cross-origin and fail with 401. Same-origin relative requests are authenticated automatically by the session cookie, so no token is needed. For live data prefer the **polling-file** pattern below (a cron/tool writes JSON, the widget reads it back) — it needs no auth and survives refreshes; reach for it before wiring a widget to call /api/ directly.
 
 **Custom tool** — Python script with a "# TOOL: {...}" header, registered via register_tool. Call from widget JS:
   fetch('/api/tool/<name>?session=SESSION_ID', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(args)})
     .then(r => r.json()) // returns the tool's dict verbatim; .error field on crash. Hard 2-min timeout.
-Tools get $PRISM_URL, $PRISM_SESSION, $PRISM_TOKEN injected. Can write to /workspace/widget_data/, POST to /api/notify, POST to /api/chat.
+Tools get $PRISM_URL, $PRISM_SESSION, $PRISM_TOKEN injected. Can write to data/, POST to /api/notify, POST to /api/chat.
 
-**Polling file** — cron/tool writes /workspace/widget_data/<name>.json; widget fetches /data/<name>.json.
+**Polling file** — the classic public/static-folder pattern: a cron/tool writes data/<name>.json (a plain file in your workspace, same as any write_file call), and the widget's browser JS fetches it back at the identical path, /data/<name>.json. One name, no translation.
 
 **Personal data (notes / tasks / calendar)** — same-origin REST, scoped per board via ?session=SESSION_ID:
   GET/POST/DELETE /api/notes   (POST {title,body,tags} adds; {id,...} updates; DELETE ?id=)
@@ -141,7 +141,7 @@ Available: docker_run, docker_manage, docker_compose, cron, web_search, deep_res
 
 ### Widget preview
 
-widget add/update automatically renders the widget headless and returns a screenshot + console errors in the tool result. ALWAYS inspect that screenshot before answering: broken layout, missing icons/images or console errors mean the widget is NOT done — fix it first, never tell the user it works without checking. To iterate without touching the dashboard: write_file /workspace/widget_data/preview.html, then browser_act url=http://prism-server:8080/data/preview.html actions=[{"type":"screenshot"}].
+widget add/update automatically renders the widget headless and returns a screenshot + console errors in the tool result. ALWAYS inspect that screenshot before answering: broken layout, missing icons/images or console errors mean the widget is NOT done — fix it first, never tell the user it works without checking. To iterate without touching the dashboard: write_file data/preview.html, then browser_act url=http://prism-server:8080/data/preview.html actions=[{"type":"screenshot"}].
 
 ## Background work
 

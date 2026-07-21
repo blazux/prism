@@ -173,10 +173,11 @@ func (s *Server) Start() error {
 	os.MkdirAll(s.cfg.PluginDir, 0755)
 	mux.Handle("/plugins/", http.StripPrefix("/plugins/", s.servePluginHTML(http.FileServer(http.Dir(s.cfg.PluginDir)))))
 
-	// Widget data directory — writable by cron/tools, readable by widgets via /data/<file>
-	widgetDataDir := filepath.Join(s.cfg.WorkspaceDir, "widget_data")
-	os.MkdirAll(widgetDataDir, 0755)
-	mux.Handle("/data/", http.StripPrefix("/data/", http.FileServer(http.Dir(widgetDataDir))))
+	// The classic "public/static folder" pattern: workspace/data/ is served verbatim
+	// at /data/ — same name for the write path and the URL, nothing to translate.
+	dataDir := filepath.Join(s.cfg.WorkspaceDir, "data")
+	os.MkdirAll(dataDir, 0755)
+	mux.Handle("/data/", http.StripPrefix("/data/", http.FileServer(http.Dir(dataDir))))
 
 	// Browser automation screenshots — served at /screenshots/<file>
 	screenshotsDir := filepath.Join(s.cfg.WorkspaceDir, ".screenshots")

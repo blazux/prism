@@ -85,6 +85,17 @@ services:
       - LC_ALL=C.UTF-8
       - PAGER=cat
       - COLORTERM=truecolor
+      # On a network with an outbound proxy (e.g. Squid), it must not swallow
+      # traffic to prism-server or docker_run/docker_compose services — those
+      # are internal Docker-network calls (the agent's own $PRISM_URL,
+      # /api/builtin, /api/tool, MCP tool calls), not egress. Without this, an
+      # HTTP call the agent makes to its own backend gets silently routed
+      # through the proxy and fails (observed as a bare 503, with nothing in
+      # Prism's own logs — the request never reached prism-server at all).
+      # Prepends onto whatever HTTP(S)_PROXY/NO_PROXY the host/daemon already
+      # injects, rather than replacing it.
+      - NO_PROXY=prism-server,prism-svc-*,localhost,127.0.0.1,${NO_PROXY:-}
+      - no_proxy=prism-server,prism-svc-*,localhost,127.0.0.1,${no_proxy:-}
     command: >
       sh -c "
         [ -f /workspace/.apt-packages ] && apt-get update -qq && xargs apt-get install -y < /workspace/.apt-packages;

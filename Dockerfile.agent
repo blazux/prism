@@ -35,15 +35,15 @@ RUN pip3 install --no-cache-dir playwright && \
     python3 -m playwright install-deps chromium && \
     mkdir -p /workspace/.screenshots
 
-# /data is a compatibility symlink to /workspace/widget_data — the agent writes
-# widget polling files under /workspace/widget_data/, and prism-server serves them
-# to the browser at the URL /data/<name>.json. Two different names for the same
-# thing invited exactly the bug this fixes: an agent script that wrote to a literal
-# /data/<name>.json (mistaking the browser-facing URL prefix for a container path)
-# silently created an unrelated file at the container root instead of erroring —
-# the write looked like it worked, but the browser never saw it. With the symlink,
-# writing to either path lands in the same real file.
-RUN ln -s /workspace/widget_data /data
+# Widget data lives at /workspace/data, served verbatim to the browser at /data/
+# — the classic public/static-folder pattern, same name on both sides so there is
+# nothing to translate. Two compatibility symlinks guard against the two ways a
+# script can still miss: writing to the literal URL /data/<name>.json (mistaking
+# the browser-facing prefix for a container path) instead of the relative
+# data/<name>.json, and any old script still targeting the pre-rename
+# widget_data/ directory name.
+RUN ln -s /workspace/data /data
+RUN ln -s data /workspace/widget_data
 
 WORKDIR /workspace
 

@@ -32,11 +32,11 @@ RUN pip install --no-cache-dir playwright && \
     python -m playwright install-deps chromium && \
     mkdir -p /workspace/.screenshots
 
-# /data is a compatibility symlink to /workspace/widget_data — see Dockerfile.agent
-# for why (an agent script writing literally to /data/<name>.json instead of the
-# documented /workspace/widget_data/<name>.json silently created an unrelated file
-# at the container root; the symlink makes both paths land in the same real file).
-RUN ln -s /workspace/widget_data /data
+# Widget data lives at /workspace/data, served verbatim to the browser at /data/ —
+# see Dockerfile.agent for the rationale. Two compatibility symlinks: the literal
+# URL-shaped path some scripts still write to, and the pre-rename directory name.
+RUN ln -s /workspace/data /data
+RUN ln -s data /workspace/widget_data
 
 WORKDIR /workspace
 
