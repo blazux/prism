@@ -337,6 +337,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		if u := currentUser(r); u != nil && s.isAdminUser(r.Context(), u) {
 			items = append(s.voxPendingCallTasks(r.Context()), items...)
 		}
+		items = append(s.cronPendingJobTasks(r), items...)
 		writeJSON(w, map[string]interface{}{"tasks": items, "source": prov.Kind()})
 	case "POST":
 		var b struct {
@@ -352,6 +353,10 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		if isCallTaskID(b.ID) {
 			writeErr(w, http.StatusBadRequest, callTaskReadOnlyMsg)
+			return
+		}
+		if isCronTaskID(b.ID) {
+			writeErr(w, http.StatusBadRequest, cronTaskReadOnlyMsg)
 			return
 		}
 		if b.ID != "" && b.Done != nil {
@@ -371,6 +376,10 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	case "DELETE":
 		if id := r.URL.Query().Get("id"); isCallTaskID(id) {
 			writeErr(w, http.StatusBadRequest, callTaskReadOnlyMsg)
+			return
+		}
+		if id := r.URL.Query().Get("id"); isCronTaskID(id) {
+			writeErr(w, http.StatusBadRequest, cronTaskReadOnlyMsg)
 			return
 		}
 		if err := prov.Delete(r.Context(), r.URL.Query().Get("id")); err != nil {

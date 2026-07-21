@@ -29,12 +29,14 @@ func (e *ToolExecutor) cronOwner() string {
 	return s
 }
 
-type cronJob struct{ name, owner, desc, schedule, command string }
+type CronJob struct{ Name, Owner, Desc, Schedule, Command string }
 
-// parseCronJobs splits a crontab into the agent-managed jobs (marker blocks).
-func parseCronJobs(raw string) []cronJob {
-	var jobs []cronJob
-	var cur *cronJob
+// ParseCronJobs splits a crontab into the agent-managed jobs (marker blocks).
+// Exported so internal/server can render pending cron jobs into the Tasks
+// list (read-only) without re-implementing this parser.
+func ParseCronJobs(raw string) []CronJob {
+	var jobs []CronJob
+	var cur *CronJob
 	flush := func() {
 		if cur != nil {
 			jobs = append(jobs, *cur)
@@ -46,21 +48,21 @@ func parseCronJobs(raw string) []cronJob {
 		switch {
 		case strings.HasPrefix(t, "# agent-job:"):
 			flush()
-			cur = &cronJob{name: strings.TrimSpace(strings.TrimPrefix(t, "# agent-job:"))}
+			cur = &CronJob{Name: strings.TrimSpace(strings.TrimPrefix(t, "# agent-job:"))}
 		case cur != nil && strings.HasPrefix(t, "# agent-owner:"):
-			cur.owner = strings.TrimSpace(strings.TrimPrefix(t, "# agent-owner:"))
+			cur.Owner = strings.TrimSpace(strings.TrimPrefix(t, "# agent-owner:"))
 		case cur != nil && strings.HasPrefix(t, "# agent-desc:"):
-			cur.desc = strings.TrimSpace(strings.TrimPrefix(t, "# agent-desc:"))
+			cur.Desc = strings.TrimSpace(strings.TrimPrefix(t, "# agent-desc:"))
 		case t == "" || strings.HasPrefix(t, "#"):
 			// blank line or unrelated comment — ignore
 		default:
-			if cur != nil && cur.schedule == "" {
+			if cur != nil && cur.Schedule == "" {
 				fields := strings.Fields(t)
 				if len(fields) >= 6 {
-					cur.schedule = strings.Join(fields[:5], " ")
-					cur.command = strings.Join(fields[5:], " ")
+					cur.Schedule = strings.Join(fields[:5], " ")
+					cur.Command = strings.Join(fields[5:], " ")
 				} else {
-					cur.schedule = t
+					cur.Schedule = t
 				}
 				flush()
 			}
@@ -77,13 +79,13 @@ func (e *ToolExecutor) cronList(ctx context.Context) (string, error) {
 	}
 	owner := e.cronOwner()
 	var out []string
-	for _, j := range parseCronJobs(raw) {
-		if j.owner != "" && j.owner != owner {
+	for _, j := range ParseCronJobs(raw) {
+		if j.Owner != "" && j.Owner != owner {
 			continue // another user's job
 		}
-		line := fmt.Sprintf("• %s — %s  %s", j.name, j.schedule, j.command)
-		if j.desc != "" {
-			line += "  (" + j.desc + ")"
+		line := fmt.Sprintf("• %s — %s  %s", j.Name, j.Schedule, j.Command)
+		if j.Desc != "" {
+			line += "  (" + j.Desc + ")"
 		}
 		out = append(out, line)
 	}
@@ -159,9 +161,9 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 	// Authorize: the job must exist and belong to this user (legacy owner-less
 	// jobs stay removable by anyone).
 	owner := e.cronOwner()
-	var target *cronJob
-	for _, j := range parseCronJobs(current) {
-		if j.name == name {
+	var target *CronJob
+	for _, j := range ParseCronJobs(current) {
+		if j.Name == name {
 			jj := j
 			target = &jj
 			break
@@ -170,7 +172,7 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 	if target == nil {
 		return fmt.Sprintf("no job named %q found", name), nil
 	}
-	if target.owner != "" && target.owner != owner {
+	if target.Owner != "" && target.Owner != owner {
 		return fmt.Sprintf("job %q belongs to another user; you can only remove your own scheduled tasks", name), nil
 	}
 
