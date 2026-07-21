@@ -168,12 +168,12 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "widget",
-			Description: "Manage dashboard widgets — self-contained HTML/JS panels displayed in iframes (see the widget guidelines in the system prompt). Actions: add (id+title+content required), update (id + any of title/content/cols/height; only provided fields change), remove (id), list. add/update return a screenshot of the rendered widget plus console errors — inspect them and fix any problem before telling the user the widget is ready.",
+			Description: "Manage dashboard widgets — self-contained HTML/JS panels displayed in iframes (see the widget guidelines in the system prompt). Actions: add (title+content required; id optional, auto-derived by slugifying the title if omitted), update (id + any of title/content/cols/height; only provided fields change), remove (id), list. add/update return a screenshot of the rendered widget plus console errors — inspect them and fix any problem before telling the user the widget is ready.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"action":  {Type: "string", Description: "One of: add, update, remove, list"},
-					"id":      {Type: "string", Description: "Unique widget ID (alphanumeric, hyphens and underscores only, no spaces)"},
+					"id":      {Type: "string", Description: "Widget ID. For add: optional, derived from the title if omitted. For update/remove: required, must match the id shown by 'list' or returned by 'add'."},
 					"title":   {Type: "string", Description: "Widget title shown in the card header"},
 					"content": {Type: "string", Description: "Complete self-contained HTML for the widget (include <style> and <script> tags as needed)"},
 					"cols":    {Type: "integer", Description: "Width: 1=small (default), 2=medium, 3=full-width"},

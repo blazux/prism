@@ -204,3 +204,31 @@ func TestListFiles_DotDot_Blocked(t *testing.T) {
 		t.Error("'../' should have been rejected")
 	}
 }
+
+// ─── slugify / toolFilename — deriving a machine-safe id from free text ───────
+
+func TestSlugify(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"say_hello", "say_hello"},
+		{"Fetch RT Tickets", "fetch_rt_tickets"},
+		{"Tickets DBS_PROD_VOIP", "tickets_dbs_prod_voip"},
+		{"  leading and trailing spaces  ", "leading_and_trailing_spaces"},
+		{"éàü unicode", "unicode"}, // non-ASCII collapses to '_', leading run trimmed
+		{"already-a-slug-123", "already-a-slug-123"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := slugify(c.in); got != c.want {
+			t.Errorf("slugify(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestToolFilename(t *testing.T) {
+	if got := toolFilename("say_hello"); got != "say_hello.py" {
+		t.Errorf("toolFilename(%q) = %q, want %q", "say_hello", got, "say_hello.py")
+	}
+	if got := toolFilename("Fetch RT Tickets"); got != "fetch_rt_tickets.py" {
+		t.Errorf("toolFilename(%q) = %q, want %q", "Fetch RT Tickets", got, "fetch_rt_tickets.py")
+	}
+}

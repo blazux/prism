@@ -164,16 +164,26 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 	if e.headless {
 		return "", nil, fmt.Errorf("widgets are unavailable here: this conversation has no dashboard (group room / messaging channel). Present the information as a text or markdown reply instead")
 	}
-	if id == "" || title == "" || content == "" {
-		return "", nil, fmt.Errorf("id, title and content are required")
+	if title == "" || content == "" {
+		return "", nil, fmt.Errorf("title and content are required")
 	}
-
-	id = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			return r
-		}
-		return '-'
-	}, id)
+	// id is a machine-safe slug for the same widget title has a human-readable
+	// name for — deriving it automatically means there's exactly one name to
+	// pick, not two independent strings a model must keep in sync by hand (the
+	// same trap register_tool's filename/name pair had).
+	if id == "" {
+		id = slugify(title)
+	} else {
+		id = strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+				return r
+			}
+			return '-'
+		}, id)
+	}
+	if id == "" {
+		return "", nil, fmt.Errorf("title %q has no usable characters for a widget id — add a plain-alphanumeric word to it", title)
+	}
 
 	pluginPath := filepath.Join(e.pluginDir, id+".html")
 	if err := os.WriteFile(pluginPath, []byte(content), 0644); err != nil {

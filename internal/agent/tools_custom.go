@@ -12,6 +12,22 @@ import (
 	"prism/internal/customtools"
 )
 
+// slugify reduces a free-text string to lowercase [a-z0-9_-] characters, for
+// deriving a machine-safe identifier (a filename, a widget id) from something
+// a model would otherwise have to invent and keep in sync by hand alongside
+// the human-readable original — see toolFilename and addUIPlugin's id.
+func slugify(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
 // toolFilename derives the on-disk script name from the tool's own declared
 // name, so there is exactly one name to get right instead of two independent
 // strings (a filename the caller picks, plus the "name" in the # TOOL: header)
@@ -20,17 +36,7 @@ import (
 // list_tools/Get() already key by this declared name, never by filename, so
 // the file's name was always just a storage detail, never something callers
 // needed to choose themselves.
-func toolFilename(name string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(name) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	return strings.Trim(b.String(), "_") + ".py"
-}
+func toolFilename(name string) string { return slugify(name) + ".py" }
 
 func (e *ToolExecutor) registerTool(code string) (string, error) {
 	if e.customMgr == nil {
