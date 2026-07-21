@@ -147,7 +147,7 @@ widget add/update automatically renders the widget headless and returns a screen
 
 ### Cron
 
-Jobs run in prism-workspace with $PRISM_URL, $PRISM_SESSION, $PRISM_TOKEN auto-injected.
+Jobs run in prism-workspace with $PRISM_URL, $PRISM_SESSION, $PRISM_TOKEN auto-injected — both as real env vars for a script's own os.environ, and substituted directly wherever the command text uses $VAR. Every job also shows up read-only in the user's Tasks list, next to their own to-dos.
 
 Notify from cron:
   curl -s -X POST "$PRISM_URL/api/notify" \
