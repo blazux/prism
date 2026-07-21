@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"prism/internal/memory"
@@ -33,6 +34,25 @@ func personalScopeFromSessionID(sessionID string) string {
 		return m
 	}
 	return ""
+}
+
+// userIDFromSessionID extracts the numeric id from a "u<id>-<board>" session,
+// or 0 if the session carries no user prefix. Lets a caller resolve which
+// real user a server-side self-call (Bearer PRISM_TOKEN, i.e. the anonymous
+// service identity — see auth.go's serviceUser) is acting on behalf of, so
+// group-shared resources (RAG collections, group MCP servers) scoped to that
+// user's group stay reachable from cron/custom-tool/widget calls instead of
+// silently resolving to the service identity's empty scope.
+func userIDFromSessionID(sessionID string) int64 {
+	scope := personalScopeFromSessionID(sessionID)
+	if scope == "" {
+		return 0
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(scope, "u"), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // ownerPtr returns the storage owner id for a user: nil for the service identity

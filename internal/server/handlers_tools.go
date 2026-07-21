@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"prism/internal/agent"
+	"prism/internal/memory"
 )
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +202,23 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 	{
 		u := currentUser(r)
 		executor.SetToolGuard(s.buildUserGuard(r.Context(), u))
-		scope := s.ragScopeFor(r.Context(), u)
+		// Every cron job, custom tool and widget calls this endpoint with the
+		// service token (Bearer PRISM_TOKEN), which authenticates as the
+		// anonymous service identity (serviceUser, id 0) — intentional, that's
+		// what makes the guard above unrestricted for these internal
+		// self-calls. But ragScopeFor(serviceUser) always resolves to "", so a
+		// group-shared MCP server or RAG collection was invisible from any
+		// such call regardless of whose session this actually was. The
+		// session id already encodes which real user it belongs to
+		// ("u<id>-<board>"); use that to resolve scope even when the caller's
+		// authenticated identity itself carries no group membership.
+		scopeUser := u
+		if scopeUser == nil || scopeUser.ID == 0 {
+			if uid := userIDFromSessionID(sessionID); uid > 0 {
+				scopeUser = &memory.User{ID: uid}
+			}
+		}
+		scope := s.ragScopeFor(r.Context(), scopeUser)
 		executor.SetRAGScope(scope)
 		executor.SetHiddenTools(s.hiddenToolsFor(r.Context(), sessionID, scope))
 	}
