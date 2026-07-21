@@ -3,6 +3,13 @@ name: prism
 services:
   prism-server:
     image: blazux/prism:latest
+    # Without this, `docker compose build` has nothing to do for this service —
+    # `up`/`pull` silently keep whatever blazux/prism:latest was last pulled,
+    # so a `git pull` here never actually reaches the running container. Lived
+    # this: hours of "the fix isn't taking" chasing a stale image, not a bug.
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "48080:8080"
     volumes:
@@ -75,6 +82,14 @@ services:
   # Agent workspace container — the AI executes code here
   workspace:
     image: blazux/prism-workspace:latest
+    # See the prism-server build: comment — same reason. Uses Dockerfile.agent,
+    # or Dockerfile.agent.gpu when WORKSPACE=gpu is set.
+    # A GPU host also needs its own `deploy.resources.reservations.devices`
+    # (nvidia) block — add it via a local, untracked docker-compose.override.yml
+    # rather than here, since most deployments have no GPU on this box at all.
+    build:
+      context: .
+      dockerfile: Dockerfile.agent${WORKSPACE:+.gpu}
     container_name: prism-workspace
     volumes:
       - workspace:/workspace
