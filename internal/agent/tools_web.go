@@ -226,6 +226,7 @@ func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (
 }
 
 const browserActScript = `import json, os, time
+from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
 INPUT_FILE = os.environ['BROWSER_ACT_INPUT']
@@ -248,11 +249,16 @@ with sync_playwright() as p:
         ctx_opts['storage_state'] = SESSION_FILE
     context = browser.new_context(**ctx_opts)
     # Authenticated widget preview: attach the Prism service cookie, scoped to the
-    # start URL's origin only (never sent to other sites).
+    # start URL's host but every path on it (path='/') — a widget calls /api/...
+    # and /data/... from the SAME page, not just the /plugins/<id>.html path it
+    # was loaded from. Passing 'url' instead of 'domain'+'path' here silently
+    # scopes the cookie to that one page's path (e.g. /plugins/default/),
+    # so every other same-origin fetch the widget makes goes out with no
+    # cookie at all and gets a 401.
     auth_cookie = config.get('auth_cookie')
     if auth_cookie and start_url:
         try:
-            context.add_cookies([{'name': 'prism_session', 'value': auth_cookie, 'url': start_url}])
+            context.add_cookies([{'name': 'prism_session', 'value': auth_cookie, 'domain': urlparse(start_url).hostname, 'path': '/'}])
         except Exception:
             pass
     page = context.new_page()
