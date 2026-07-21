@@ -268,21 +268,17 @@ func (s *Server) handleTelegramMessage(ctx context.Context, api string, userID, 
 	// scopes — same identity as their browser chat, so their agent, their RAG,
 	// their knowledge. Legacy (userID 0): the old global "telegram" session.
 	session := "telegram"
-	var guard func(string, map[string]interface{}) error
-	ragScope := ""
+	var u *memory.User
 	if userID > 0 {
 		session = fmt.Sprintf("u%d-telegram", userID)
-		if u, err := s.store().GetUserByID(ctx, userID); err == nil && u != nil {
-			guard = s.buildUserGuard(ctx, u)
-			ragScope = s.ragScopeFor(ctx, u)
-		}
+		u, _ = s.store().GetUserByID(ctx, userID)
 	}
 
 	s.tgAction(api, chatID, "typing")
 	s.store().AddUsage(ctx, userID, session, "channel_msg", "telegram", 1, nil)
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	resp, err := s.runHeadlessChat(runCtx, session, text, "", guard, ragScope)
+	resp, err := s.runHeadlessChat(runCtx, session, text, "", s.callerContextForUser(ctx, u, session))
 	if err != nil {
 		log.Printf("[telegram] chat: %v", err)
 		s.tgSend(api, chatID, "⚠️ Sorry, something went wrong.")

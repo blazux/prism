@@ -142,7 +142,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "you are not allowed to use model "+body.Model)
 		return
 	}
-	resp, err := s.runHeadlessChat(ctx, sessionID, body.Message, body.Model, s.buildUserGuard(ctx, user), s.ragScopeFor(ctx, user))
+	resp, err := s.runHeadlessChat(ctx, sessionID, body.Message, body.Model, s.callerContextForUser(ctx, user, sessionID))
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -166,17 +166,17 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 // (used by /api/chat and the Telegram bridge). sessionID must already be
 // sanitized. Returns the assistant's final text (thinking blocks stripped).
 //
-// guard, if non-nil, authorizes each tool call before it runs — the Webex
-// channel passes a per-sender guard so untrusted space members can only reach
-// the tools they've been granted. Trusted callers (browser, Telegram, /api/chat)
-// pass nil to allow every tool.
-func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model string, guard agent.ToolGuard, ragScope string) (string, error) {
-	return s.runHeadlessChatTap(ctx, sessionID, message, model, guard, ragScope, nil)
+// cc's guard, if non-nil, authorizes each tool call before it runs — the
+// Webex channel passes a per-sender guard so untrusted space members can only
+// reach the tools they've been granted. Trusted callers (browser, Telegram,
+// /api/chat) get a nil guard (see callerContextForUser) to allow every tool.
+func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model string, cc CallerContext) (string, error) {
+	return s.runHeadlessChatTap(ctx, sessionID, message, model, cc, nil)
 }
 
 // runHeadlessChatTap is runHeadlessChat with an optional event tap, so callers
 // (the group room) can surface tool activity live while the turn runs.
-func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, guard agent.ToolGuard, ragScope string, tap func(agent.Event)) (string, error) {
+func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, cc CallerContext, tap func(agent.Event)) (string, error) {
 	s.mu.RLock()
 	ms := s.memStore
 	s.mu.RUnlock()
@@ -197,19 +197,15 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	if s.ragStore != nil {
 		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
 	}
-	executor.SetRAGScope(ragScope)
 	executor.SetSessionID(sessionID)
 	executor.SetHeadless(true) // no dashboard: widget tools refuse cleanly
-	executor.SetHiddenTools(s.hiddenToolsFor(ctx, sessionID, ragScope))
+	cc.apply(executor)
 	if ms != nil {
 		executor.SetMemoryStore(ms)
 	}
 	// MCP tools must be available in headless mode too (the Webex channel relies
 	// on them). The WS path wires this the same way.
 	executor.SetMCPManager(s.mcpMgr, func() { s.broadcastMCP(sessionID) })
-	// Per-caller authorization gate (Webex per-sender permissions). nil for
-	// trusted callers, which leaves every tool available.
-	executor.SetToolGuard(guard)
 	executor.SetCustomTools(s.customMgr, func() {
 		s.customMgr.Reload()
 		s.broadcastTools()
@@ -246,14 +242,14 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	if s.ragStore != nil {
 		ragStore := s.ragStore
 		ag.SetRAGContextFn(func() string {
-			cols, err := ragStore.ListCollections(context.Background(), ragScope)
+			cols, err := ragStore.ListCollections(context.Background(), cc.RAGScope)
 			if err != nil || len(cols) == 0 {
 				return ""
 			}
 			var sb strings.Builder
 			sb.WriteString("## Knowledge Base (RAG)\n\nYou have access to document collections via `rag_search`.\n\n")
 			for _, c := range cols {
-				name := unscopeCollection(ragScope, c.Name)
+				name := unscopeCollection(cc.RAGScope, c.Name)
 				if c.Description != "" {
 					fmt.Fprintf(&sb, "- **%s** — %s (%d docs)\n", name, c.Description, c.DocCount)
 				} else {

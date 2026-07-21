@@ -390,7 +390,6 @@ func (c *webexChannel) handleMessage(ctx context.Context, m webexMessage) {
 
 	// Isolated history per space, namespaced to the group.
 	sessionID := fmt.Sprintf("webex-g%d-%s", c.groupID, sanitizeSessionID(m.RoomID))
-	ragScope := fmt.Sprintf("g%d", c.groupID)
 
 	// Apply the group admin's configured shared-agent system prompt for this space.
 	if cfg.AgentPrompt != "" {
@@ -399,12 +398,12 @@ func (c *webexChannel) handleMessage(ctx context.Context, m webexMessage) {
 
 	// Two gates in series: the group's tool policy AND the per-sender Webex
 	// allowlist. A tool call must pass both.
-	guard := c.composedGuard(ctx, m.PersonEmail)
+	cc := c.s.callerContextForGroup(ctx, c.groupID).withSenderGate(c.guardFor(m.PersonEmail))
 
 	ms.AddUsage(ctx, 0, sessionID, "channel_msg", "webex", 1, nil)
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	resp, err := c.s.runHeadlessChat(runCtx, sessionID, text, cfg.AgentModel, guard, ragScope)
+	resp, err := c.s.runHeadlessChat(runCtx, sessionID, text, cfg.AgentModel, cc)
 	if err != nil {
 		log.Printf("[webex-g%d] chat: %v", c.groupID, err)
 		c.postMarkdown(ctx, m.RoomID, "⚠️ Sorry, something went wrong.")
@@ -443,18 +442,6 @@ func (c *webexChannel) guardFor(email string) agent.ToolGuard {
 	}
 }
 
-// composedGuard chains the group's tool policy and the per-sender Webex allowlist
-// — a tool call must satisfy both to run.
-func (c *webexChannel) composedGuard(ctx context.Context, email string) agent.ToolGuard {
-	group := c.s.buildGroupAgentGuard(ctx, c.groupID)
-	sender := c.guardFor(email)
-	return func(name string, args map[string]interface{}) error {
-		if err := group(name, args); err != nil {
-			return err
-		}
-		return sender(name, args)
-	}
-}
 
 // parseAllowlist splits a comma/newline/space separated list of emails into a
 // lookup set (lowercased). "*" means everyone.

@@ -143,20 +143,24 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		ragScope = s.ragScopeFor(r.Context(), voiceUser)
 		log.Printf("[voice] caller %q identified as user %d (%s) → own scope %q, voice-safe tools",
 			r.URL.Query().Get("caller"), voiceUser.ID, voiceUser.DisplayName, ragScope)
-		executor.SetToolGuard(voiceGuard(voiceKnownAllowedTools))
-		executor.SetRAGScope(ragScope)
-		executor.SetPersonalScope(fmt.Sprintf("u%d", voiceUser.ID)) // their memory/profile
-		executor.SetHiddenTools(voiceHiddenTools(voiceKnownAllowedTools))
+		CallerContext{
+			Guard:         voiceGuard(voiceKnownAllowedTools),
+			RAGScope:      ragScope,
+			PersonalScope: fmt.Sprintf("u%d", voiceUser.ID), // their memory/profile
+			HiddenTools:   voiceHiddenTools(voiceKnownAllowedTools),
+		}.apply(executor)
 	} else if voiceCall {
 		ragScope = s.voiceRAGScope(r.Context())
 		log.Printf("[voice] inbound call from %q → guest identity (tools deny-by-default, rag scope %q)",
 			r.URL.Query().Get("caller"), ragScope)
-		executor.SetToolGuard(voiceGuard(voiceGuestAllowedTools))
-		executor.SetRAGScope(ragScope)
-		// Pin an isolated personal scope: without it personalScope() falls back to
-		// the rag scope and a caller could read the owner's profile / learnings.
-		executor.SetPersonalScope(voiceGuestScope)
-		executor.SetHiddenTools(voiceHiddenTools(voiceGuestAllowedTools))
+		CallerContext{
+			Guard:    voiceGuard(voiceGuestAllowedTools),
+			RAGScope: ragScope,
+			// Pin an isolated personal scope: without it personalScope() falls back
+			// to the rag scope and a caller could read the owner's profile / learnings.
+			PersonalScope: voiceGuestScope,
+			HiddenTools:   voiceHiddenTools(voiceGuestAllowedTools),
+		}.apply(executor)
 		// Deliberately no custom tools and no MCP for a guest: built-ins only, and
 		// only the allow-listed ones survive.
 	} else {
@@ -170,16 +174,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		// RBAC: gate this personal agent's tool calls by the connected user's
 		// permissions (nil user / admin → unrestricted). Resolved once at connect;
 		// the guard closure captures the policy snapshot.
-		executor.SetToolGuard(s.buildUserGuard(r.Context(), wsUser))
-		ragScope = s.ragScopeFor(r.Context(), wsUser)
-		executor.SetRAGScope(ragScope)
+		cc := s.callerContextForUser(r.Context(), wsUser, sessionID)
+		ragScope = cc.RAGScope
 		// Personal knowledge (profile, learnings) is per-user, not per-group: the
 		// browser session id doesn't carry "u<id>-", so pin it explicitly or a grouped
 		// user reads their profile under the group scope and finds nothing.
 		if wsUser != nil && wsUser.ID > 0 {
-			executor.SetPersonalScope(fmt.Sprintf("u%d", wsUser.ID))
+			cc.PersonalScope = fmt.Sprintf("u%d", wsUser.ID)
 		}
-		executor.SetHiddenTools(s.hiddenToolsFor(r.Context(), sessionID, ragScope))
+		cc.apply(executor)
 	}
 
 	var ragContextFn func() string

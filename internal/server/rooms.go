@@ -290,10 +290,9 @@ func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, co
 	defer cancel()
 
 	sessionID := fmt.Sprintf("room-g%d", groupID)
-	ragScope := fmt.Sprintf("g%d", groupID)
 	// The shared agent runs with the group-admin-defined rights: global policy +
 	// this group's restrictions, at member level (no admin-only tools by default).
-	guard := s.buildGroupAgentGuard(ctx, groupID)
+	cc := s.callerContextForGroup(ctx, groupID)
 
 	// Apply the group admin's configured system prompt for the shared agent.
 	if cfg.AgentPrompt != "" {
@@ -340,7 +339,7 @@ func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, co
 			s.rooms.broadcast(groupID, map[string]interface{}{"type": "agent_tool", "tool": ev.Tool})
 		}
 	}
-	reply, err := s.runHeadlessChatTap(ctx, sessionID, message, model, guard, ragScope, tap)
+	reply, err := s.runHeadlessChatTap(ctx, sessionID, message, model, cc, tap)
 	if err != nil || strings.TrimSpace(reply) == "" {
 		reply = "⚠️ Sorry, I couldn't produce a response."
 	}

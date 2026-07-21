@@ -151,7 +151,7 @@ func (c *slackChannel) handleMessage(ctx context.Context, api *slack.Client, ev 
 
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	resp, err := c.s.runHeadlessChat(runCtx, "slack", text, "", nil, "")
+	resp, err := c.s.runHeadlessChat(runCtx, "slack", text, "", trustedCallerContext())
 	if err != nil {
 		log.Printf("[slack] chat: %v", err)
 		api.PostMessage(ev.Channel, slack.MsgOptionText("⚠️ Sorry, something went wrong.", false))
