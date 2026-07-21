@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"prism/internal/agent"
 	"prism/internal/caldav"
 	"prism/internal/calendar"
 	"prism/internal/oauthx"
@@ -41,8 +42,8 @@ func (s *Server) handlePimSources(w http.ResponseWriter, r *http.Request) {
 			},
 			// What each choice resolves to right now (so the UI can show "Auto → Google").
 			"resolved": map[string]string{
-				"calendar": calendar.ProviderFor(ctx, s.userStore(r), pimScope).Kind(),
-				"tasks":    tasks.ProviderFor(ctx, s.userStore(r), pimScope).Kind(),
+				"calendar": calendar.ProviderFor(ctx, s.userStore(r), agent.PIMScope).Kind(),
+				"tasks":    tasks.ProviderFor(ctx, s.userStore(r), agent.PIMScope).Kind(),
 			},
 		})
 	case "POST":

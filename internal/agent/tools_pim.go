@@ -12,10 +12,12 @@ import (
 	"prism/internal/tasks"
 )
 
-// pimScope is the fallback scope for personal data (notes, tasks, calendar) when
+// PIMScope is the fallback scope for personal data (notes, tasks, calendar) when
 // the session has no user prefix (legacy single-owner / no-DB). With multi-user
-// auth each user's PIM is scoped to "u<id>" — see pimSessionScope.
-const pimScope = "global"
+// auth each user's PIM is scoped to "u<id>" — see pimSessionScope. Exported so
+// internal/server's pimScopeFor (handlers_pim.go) shares this exact constant
+// instead of keeping its own copy in sync by hand.
+const PIMScope = "global"
 
 // pimSessionScope returns the caller's personal PIM scope ("u<id>"), matching the
 // server's pimScopeFor so the agent and the Notes app see the same data. Shared
@@ -24,7 +26,7 @@ func (e *ToolExecutor) pimSessionScope() string {
 	if s := e.personalScope(); s != "" {
 		return s
 	}
-	return pimScope
+	return PIMScope
 }
 
 // parseTime accepts a few human-friendly layouts (local time) and RFC3339.

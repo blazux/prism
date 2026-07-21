@@ -2,7 +2,8 @@ package server
 
 // REST endpoints for the PIM features (notes / tasks / calendar) so widgets and
 // apps can read and write them directly. This data is global (shared across all
-// workspaces) — see pimScope. Auth is handled by the global middleware.
+// workspaces) unless per-user scoped — see pimScopeFor. Auth is handled by the
+// global middleware.
 
 import (
 	"encoding/json"
@@ -13,24 +14,21 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/agent"
 	"prism/internal/calendar"
 	"prism/internal/notes"
 	"prism/internal/tasks"
 )
 
-// pimScope is the fallback scope for personal data when there is no authenticated
-// user (no-DB / service identity). With multi-user auth, notes/tasks/calendar are
-// scoped per user ("u<id>") — see pimScopeFor. Keep the constant in sync with the
-// agent's default PIM scope.
-const pimScope = "global"
-
-// pimScopeFor returns the caller's personal PIM scope ("u<id>"), or the global
-// fallback for the service identity / legacy no-DB mode.
+// pimScopeFor returns the caller's personal PIM scope ("u<id>"), or
+// agent.PIMScope for the service identity / legacy no-DB mode — the single
+// shared constant (internal/agent/tools_pim.go) so this handler and the
+// agent's own pimSessionScope can't drift apart.
 func (s *Server) pimScopeFor(r *http.Request) string {
 	if u := currentUser(r); u != nil && u.ID > 0 {
 		return fmt.Sprintf("u%d", u.ID)
 	}
-	return pimScope
+	return agent.PIMScope
 }
 
 // pimGroupScopeFor returns the caller's group note scope ("g<id>", their primary

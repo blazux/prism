@@ -300,13 +300,20 @@ func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
 	if e.mcpMgr != nil {
 		own := e.mcpMgr.ToOllamaTools(e.sessionID)
 		tools = append(tools, own...)
-		if scope := e.ragScope; scope != "" && scope != e.sessionID {
-			seen := make(map[string]bool, len(own))
-			for _, t := range own {
-				seen[t.Function.Name] = true
+		seen := make(map[string]bool, len(own))
+		for _, t := range own {
+			seen[t.Function.Name] = true
+		}
+		// Personal MCP servers are connected once per user, not once per board —
+		// merge them in under the user's stable scope regardless of which
+		// session/board is currently active. Then the group's shared servers.
+		for _, scope := range []string{e.personalScope(), e.ragScope} {
+			if scope == "" || scope == e.sessionID {
+				continue
 			}
 			for _, t := range e.mcpMgr.ToOllamaTools(scope) {
 				if !seen[t.Function.Name] {
+					seen[t.Function.Name] = true
 					tools = append(tools, t)
 				}
 			}
@@ -326,8 +333,11 @@ func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
 	return tools
 }
 
-// mcpSessionFor returns which MCP layer (own session or group scope) serves the
-// named tool, preferring the session's own servers.
+// mcpSessionFor returns which MCP layer (this board's own session, the user's
+// personal scope, or the group scope) serves the named tool, preferring the
+// session's own servers. The personal-scope check is what lets a personal MCP
+// server connected from one board stay reachable from every other board the
+// same user opens — see personalScope's doc comment.
 func (e *ToolExecutor) mcpSessionFor(name string) (string, bool) {
 	if e.mcpMgr == nil {
 		return "", false
@@ -335,8 +345,10 @@ func (e *ToolExecutor) mcpSessionFor(name string) (string, bool) {
 	if e.mcpMgr.HasTool(e.sessionID, name) {
 		return e.sessionID, true
 	}
-	if scope := e.ragScope; scope != "" && scope != e.sessionID && e.mcpMgr.HasTool(scope, name) {
-		return scope, true
+	for _, scope := range []string{e.personalScope(), e.ragScope} {
+		if scope != "" && scope != e.sessionID && e.mcpMgr.HasTool(scope, name) {
+			return scope, true
+		}
 	}
 	return "", false
 }
@@ -353,19 +365,28 @@ func (e *ToolExecutor) SetSessionID(id string) { e.sessionID = id }
 func (e *ToolExecutor) SetRAGScope(scope string) { e.ragScope = scope }
 
 // col returns the storage name for a user-facing collection name (scope-prefixed).
-func (e *ToolExecutor) col(name string) string {
-	if e.ragScope == "" || name == "" {
-		return name
-	}
-	return e.ragScope + "--" + name
-}
+func (e *ToolExecutor) col(name string) string { return ScopeCollection(e.ragScope, name) }
 
 // uncol strips the scope prefix from a stored collection name for display.
-func (e *ToolExecutor) uncol(name string) string {
-	if e.ragScope == "" {
+func (e *ToolExecutor) uncol(name string) string { return UnscopeCollection(e.ragScope, name) }
+
+// ScopeCollection / UnscopeCollection prefix (or strip) a tenant scope on a
+// user-facing collection name, so collection names never collide across
+// tenants in storage. Exported so internal/server's RAG handlers and the
+// agent's own col/uncol (above) share one implementation instead of two
+// hand-synchronized copies.
+func ScopeCollection(scope, name string) string {
+	if scope == "" || name == "" {
 		return name
 	}
-	return strings.TrimPrefix(name, e.ragScope+"--")
+	return scope + "--" + name
+}
+
+func UnscopeCollection(scope, name string) string {
+	if scope == "" {
+		return name
+	}
+	return strings.TrimPrefix(name, scope+"--")
 }
 
 var userSessionPrefixRe = regexp.MustCompile(`^u\d+`)

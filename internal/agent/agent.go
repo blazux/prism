@@ -316,6 +316,14 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		sb.WriteString(a.agentName)
 		sb.WriteString(".\n\n")
 	}
+	// Every place in this prompt that says "session=SESSION_ID" (widget JS, cron
+	// scripts, /api/notes etc.) means THIS value, verbatim — never invent one, and
+	// never reuse a value from a past turn or a different board.
+	if a.sessionID != "" {
+		sb.WriteString("Your session id is `")
+		sb.WriteString(a.sessionID)
+		sb.WriteString("`. Wherever these instructions say SESSION_ID, use this exact string.\n\n")
+	}
 	// The role always comes first, whatever the persona says — see systemPromptRole.
 	// A persona describes how the agent talks; it must not be able to remove what it is.
 	sb.WriteString(systemPromptRole)

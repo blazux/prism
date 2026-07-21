@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"prism/internal/agent"
 	"prism/internal/memory"
@@ -192,21 +191,12 @@ func (s *Server) canManageRAGScope(ctx context.Context, u *memory.User) bool {
 	return true // personal scope
 }
 
-// scopeCollection / unscopeCollection mirror the executor's col/uncol so the RAG
-// HTTP handlers and system-prompt context use the same scoped storage names.
-func scopeCollection(scope, name string) string {
-	if scope == "" || name == "" {
-		return name
-	}
-	return scope + "--" + name
-}
-
-func unscopeCollection(scope, name string) string {
-	if scope == "" {
-		return name
-	}
-	return strings.TrimPrefix(name, scope+"--")
-}
+// scopeCollection / unscopeCollection delegate to agent.ScopeCollection /
+// agent.UnscopeCollection — the same implementation the executor's own
+// col/uncol use, so the RAG HTTP handlers and system-prompt context can never
+// drift onto a different scoped-name format.
+func scopeCollection(scope, name string) string   { return agent.ScopeCollection(scope, name) }
+func unscopeCollection(scope, name string) string { return agent.UnscopeCollection(scope, name) }
 
 // builtinToolNames lists the names of the built-in tools, for the admin policy UI.
 func builtinToolNames() []string {

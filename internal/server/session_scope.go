@@ -20,6 +20,20 @@ import (
 )
 
 var userPrefixRe = regexp.MustCompile(`^u\d+-`)
+var userIDPrefixRe = regexp.MustCompile(`^u\d+`)
+
+// personalScopeFromSessionID extracts the stable per-user scope ("u<id>") from
+// a board session id ("u<id>-<board>"), or "" if the id carries no user
+// prefix (legacy/service-identity sessions). Mirrors the agent's own
+// personalScope() (internal/agent/executor.go) so server-side code that only
+// has the session id string — not an authenticated *memory.User — can still
+// resolve where that user's personal MCP servers live.
+func personalScopeFromSessionID(sessionID string) string {
+	if m := userIDPrefixRe.FindString(sessionID); m != "" && strings.HasPrefix(sessionID, m+"-") {
+		return m
+	}
+	return ""
+}
 
 // ownerPtr returns the storage owner id for a user: nil for the service identity
 // (id 0) or a nil user, else a pointer to the user id.

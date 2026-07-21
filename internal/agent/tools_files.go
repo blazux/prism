@@ -21,7 +21,7 @@ func (e *ToolExecutor) downloadFile(ctx context.Context, rawURL, path string) (s
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return "", fmt.Errorf("invalid URL: must be http or https")
 	}
-	fullPath := filepath.Join(e.workspaceDir, filepath.Clean("/"+path))
+	fullPath := filepath.Join(e.workspaceDir, filepath.Clean("/"+NormalizeWorkspacePath(path)))
 	rel, err := filepath.Rel(e.workspaceDir, fullPath)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("path escapes workspace")
@@ -87,9 +87,9 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 	return out, nil
 }
 
-// normalizeWorkspacePath strips the /workspace prefix that models often include
+// NormalizeWorkspacePath strips the /workspace prefix that models often include
 // when they should be passing a path relative to the workspace root.
-func normalizeWorkspacePath(path string) string {
+func NormalizeWorkspacePath(path string) string {
 	path = strings.TrimPrefix(path, "/workspace/")
 	path = strings.TrimPrefix(path, "/workspace")
 	if path == "" {
@@ -99,7 +99,7 @@ func normalizeWorkspacePath(path string) string {
 }
 
 func (e *ToolExecutor) writeFile(path, content string) (string, error) {
-	path = filepath.Clean(normalizeWorkspacePath(path))
+	path = filepath.Clean(NormalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
 	}
@@ -119,7 +119,7 @@ func (e *ToolExecutor) writeFile(path, content string) (string, error) {
 }
 
 func (e *ToolExecutor) readFile(path string) (string, error) {
-	path = filepath.Clean(normalizeWorkspacePath(path))
+	path = filepath.Clean(NormalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
 	}
@@ -137,7 +137,7 @@ func (e *ToolExecutor) readFile(path string) (string, error) {
 }
 
 func (e *ToolExecutor) deleteFile(path string) (string, error) {
-	path = filepath.Clean(normalizeWorkspacePath(path))
+	path = filepath.Clean(NormalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
 	}
@@ -152,7 +152,7 @@ func (e *ToolExecutor) deleteFile(path string) (string, error) {
 }
 
 func (e *ToolExecutor) listFiles(path string) (string, error) {
-	path = filepath.Clean(normalizeWorkspacePath(path))
+	path = filepath.Clean(NormalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
 	}
@@ -234,7 +234,7 @@ func (e *ToolExecutor) openFile(path string) (string, error) {
 var imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true}
 
 func (e *ToolExecutor) addAttachment(path string) (string, []string, error) {
-	path = filepath.Clean(normalizeWorkspacePath(path))
+	path = filepath.Clean(NormalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", nil, fmt.Errorf("path escapes workspace")
 	}

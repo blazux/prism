@@ -99,6 +99,7 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	env := map[string]string{
 		"PRISM_SESSION": sessionID,
 		"PRISM_URL":     "http://prism-server:8080",
+		"PRISM_TOKEN":   s.cfg.AuthToken,
 	}
 
 	// Pass the JSON payload via stdin to avoid shell argument-length limits (ARG_MAX).

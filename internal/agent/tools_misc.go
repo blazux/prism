@@ -120,7 +120,7 @@ func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret s
 	if name == "" || url == "" {
 		return "", fmt.Errorf("name and url are required")
 	}
-	tools, err := e.mcpMgr.Connect(ctx, e.sessionID, name, url, authSecret)
+	tools, err := e.mcpMgr.Connect(ctx, e.personalScope(), name, url, authSecret)
 	if err != nil {
 		return fmt.Sprintf("Failed to connect MCP server '%s': %v", name, err), nil
 	}
@@ -139,7 +139,7 @@ func (e *ToolExecutor) mcpRemoveServer(ctx context.Context, name string) (string
 	if e.mcpMgr == nil {
 		return "MCP not available", nil
 	}
-	if err := e.mcpMgr.Remove(ctx, e.sessionID, name); err != nil {
+	if err := e.mcpMgr.Remove(ctx, e.personalScope(), name); err != nil {
 		return fmt.Sprintf("Error: %v", err), nil
 	}
 	if e.onMCPReload != nil {
@@ -152,9 +152,25 @@ func (e *ToolExecutor) mcpListServers(ctx context.Context) (string, error) {
 	if e.mcpMgr == nil {
 		return "MCP not available (Postgres required).", nil
 	}
-	servers, err := e.mcpMgr.List(ctx, e.sessionID)
+	// Personal servers (this user, any board) plus the group's shared servers
+	// (if any) — the same two layers AllDynamicTools exposes as callable tools,
+	// so this list matches what the agent can actually reach.
+	servers, err := e.mcpMgr.List(ctx, e.personalScope())
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err), nil
+	}
+	if scope := e.ragScope; scope != "" && scope != e.personalScope() {
+		if groupServers, err := e.mcpMgr.List(ctx, scope); err == nil {
+			seen := make(map[string]bool, len(servers))
+			for _, s := range servers {
+				seen[s.Name] = true
+			}
+			for _, s := range groupServers {
+				if !seen[s.Name] {
+					servers = append(servers, s)
+				}
+			}
+		}
 	}
 	if len(servers) == 0 {
 		return "No MCP servers configured. Use mcp action=add to connect one.", nil

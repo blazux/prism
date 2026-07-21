@@ -4,12 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"net/http"
 	"strings"
 
 	"prism/internal/mcp"
 )
+
+// personalMCPScope returns the storage scope for this request's PERSONAL
+// (non-group) MCP servers. Authenticated users get a stable per-user scope
+// ("u<id>") instead of the literal per-board session id: a personal MCP
+// server is the user's own connection, independent of which board/session
+// window they happened to have open when they added it, and must stay
+// reachable from every board they use afterward. Falls back to sessionID for
+// the service identity / legacy no-DB mode, where there is no user to key on.
+func (s *Server) personalMCPScope(r *http.Request, sessionID string) string {
+	if u := currentUser(r); u != nil && u.ID > 0 {
+		return fmt.Sprintf("u%d", u.ID)
+	}
+	return sessionID
+}
 
 // handleMCPServers handles GET /api/mcp/servers?session=<id>
 // and POST /api/mcp/servers (body: {session, name, url, auth_secret?}).
@@ -30,10 +45,11 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = "default"
 	}
+	scope := s.personalMCPScope(r, sessionID)
 
 	switch r.Method {
 	case "GET":
-		servers, err := s.mcpMgr.List(r.Context(), sessionID)
+		servers, err := s.mcpMgr.List(r.Context(), scope)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -63,15 +79,16 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			sessionID = mapped
+			scope = s.personalMCPScope(r, sessionID)
 		}
-		tools, err := s.mcpMgr.Connect(r.Context(), sessionID, body.Name, body.URL, body.AuthSecret)
+		tools, err := s.mcpMgr.Connect(r.Context(), scope, body.Name, body.URL, body.AuthSecret)
 		if err != nil {
 			// The server wants OAuth: run discovery + registration and hand the UI a
 			// consent URL to open, instead of failing.
 			var needAuth *mcp.OAuthRequiredError
 			if errors.As(err, &needAuth) {
 				redirectURI := externalBase(r) + "/api/oauth/mcp/callback"
-				authURL, state, serr := s.mcpMgr.StartOAuth(r.Context(), sessionID, body.Name, body.URL, needAuth.ResourceMetadata, redirectURI)
+				authURL, state, serr := s.mcpMgr.StartOAuth(r.Context(), scope, body.Name, body.URL, needAuth.ResourceMetadata, redirectURI)
 				if serr != nil {
 					http.Error(w, "oauth setup: "+serr.Error(), 500)
 					return
@@ -116,10 +133,11 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = "default"
 	}
+	scope := s.personalMCPScope(r, sessionID)
 
 	switch r.Method {
 	case "DELETE":
-		if err := s.mcpMgr.RemoveByID(r.Context(), sessionID, id); err != nil {
+		if err := s.mcpMgr.RemoveByID(r.Context(), scope, id); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -134,7 +152,7 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "enabled field required", 400)
 			return
 		}
-		if err := s.mcpMgr.SetEnabled(r.Context(), sessionID, id, *body.Enabled); err != nil {
+		if err := s.mcpMgr.SetEnabled(r.Context(), scope, id, *body.Enabled); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -148,8 +166,25 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // broadcastMCP pushes updated MCP server list to all WS clients for a session.
+// Lists both the board's own servers and the user's personal-scope servers
+// ("u<id>", derived from the session id's own "u<id>-" prefix — see
+// personalMCPScope) so a client watching one board still sees a server it
+// connected while on another board.
 func (s *Server) broadcastMCP(sessionID string) {
 	servers, _ := s.mcpMgr.List(context.Background(), sessionID)
+	if scope := personalScopeFromSessionID(sessionID); scope != "" && scope != sessionID {
+		if personal, err := s.mcpMgr.List(context.Background(), scope); err == nil {
+			seen := make(map[string]bool, len(servers))
+			for _, sv := range servers {
+				seen[sv.Name] = true
+			}
+			for _, sv := range personal {
+				if !seen[sv.Name] {
+					servers = append(servers, sv)
+				}
+			}
+		}
+	}
 	if servers == nil {
 		servers = []mcp.ServerConfig{}
 	}

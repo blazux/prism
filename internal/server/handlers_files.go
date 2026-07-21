@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"prism/internal/agent"
 )
 
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +27,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing path", 400)
 		return
 	}
-	cleanPath := filepath.Clean(path)
+	cleanPath := filepath.Clean(agent.NormalizeWorkspacePath(path))
 	if strings.HasPrefix(cleanPath, "..") {
 		http.Error(w, "invalid path", 400)
 		return
