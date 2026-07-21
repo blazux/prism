@@ -483,19 +483,18 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name: "register_tool",
-			Description: "Write a Python script that becomes a callable tool. " +
+			Description: "Write a Python script that becomes a callable tool, named after its own header — no filename to pick or keep in sync. " +
 				"The script must start with exactly this comment (one line, valid JSON): " +
 				"# TOOL: {\"name\":\"...\",\"description\":\"...\",\"when_to_use\":\"...\",\"usage\":\"...\",\"parameters\":{\"type\":\"object\",\"properties\":{\"arg\":{\"type\":\"string\",\"description\":\"...\"}},\"required\":[\"arg\"]}}. " +
 				"Always fill \"when_to_use\" (the situations this tool is for — this is how you'll recognise it later, don't rely on the name) and \"usage\" (how to call it, gotchas, an example); both are optional but strongly recommended. " +
 				"Arguments arrive as a JSON string in sys.argv[1]. Print the result to stdout. " +
-				"The tool is immediately callable after registration.",
+				"The tool is immediately callable, by its header's \"name\", right after registration.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"filename": {Type: "string", Description: "Script filename, e.g. 'fetch_rss.py' (must end in .py)"},
-					"code":     {Type: "string", Description: "Complete Python script. Must contain a # TOOL: {...} header line (all on one line)."},
+					"code": {Type: "string", Description: "Complete Python script. Must contain a # TOOL: {...} header line (all on one line) — its \"name\" is what you'll call the tool by."},
 				},
-				Required: []string{"filename", "code"},
+				Required: []string{"code"},
 			},
 		},
 	},

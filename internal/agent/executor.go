@@ -763,7 +763,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		}
 		return wrap(e.sendNotification(str("title"), str("message"), str("level")))
 	case "register_tool":
-		return wrap(e.registerTool(str("filename"), str("code")))
+		return wrap(e.registerTool(str("code")))
 	case "list_tools":
 		return wrap(e.listTools())
 	case "request_secret":

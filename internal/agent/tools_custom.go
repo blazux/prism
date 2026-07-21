@@ -12,16 +12,37 @@ import (
 	"prism/internal/customtools"
 )
 
-func (e *ToolExecutor) registerTool(filename, code string) (string, error) {
+// toolFilename derives the on-disk script name from the tool's own declared
+// name, so there is exactly one name to get right instead of two independent
+// strings (a filename the caller picks, plus the "name" in the # TOOL: header)
+// that are free to disagree — the exact shape of trap that cost real time
+// elsewhere in this codebase (add_attachment's path handling, MCP scope).
+// list_tools/Get() already key by this declared name, never by filename, so
+// the file's name was always just a storage detail, never something callers
+// needed to choose themselves.
+func toolFilename(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return strings.Trim(b.String(), "_") + ".py"
+}
+
+func (e *ToolExecutor) registerTool(code string) (string, error) {
 	if e.customMgr == nil {
 		return "", fmt.Errorf("custom tools not configured")
 	}
-	if !strings.HasSuffix(filename, ".py") {
-		return "", fmt.Errorf("filename must end in .py")
+	name := extractToolName(code)
+	if name == "" {
+		return "", fmt.Errorf("no valid # TOOL: {...} header found (must be one line, valid JSON, with a \"name\" field) — fix the header and try again")
 	}
-	base := filepath.Base(filename)
-	if strings.HasPrefix(base, ".") {
-		return "", fmt.Errorf("invalid filename")
+	base := toolFilename(name)
+	if base == ".py" {
+		return "", fmt.Errorf("tool name %q has no usable characters for a filename", name)
 	}
 
 	path := filepath.Join(e.customMgr.Dir(), base)
@@ -33,10 +54,6 @@ func (e *ToolExecutor) registerTool(filename, code string) (string, error) {
 		e.onToolsReload()
 	}
 
-	name := extractToolName(code)
-	if name == "" {
-		return fmt.Sprintf("Script written to agent_tools/%s but no valid # TOOL: header found — check your header format.", base), nil
-	}
 	return fmt.Sprintf("Tool '%s' registered from %s — it now appears in the admin panel and is immediately callable.", name, base), nil
 }
 
