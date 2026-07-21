@@ -234,6 +234,11 @@ func (e *ToolExecutor) openFile(path string) (string, error) {
 var imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true}
 
 func (e *ToolExecutor) addAttachment(path string) (string, []string, error) {
+	path = filepath.Clean(normalizeWorkspacePath(path))
+	if strings.HasPrefix(path, "..") {
+		return "", nil, fmt.Errorf("path escapes workspace")
+	}
+
 	fullPath := filepath.Join(e.workspaceDir, path)
 	rel, err := filepath.Rel(e.workspaceDir, fullPath)
 	if err != nil || strings.HasPrefix(rel, "..") {

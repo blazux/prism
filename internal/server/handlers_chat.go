@@ -288,6 +288,11 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 			tap(ev)
 		}
 		switch ev.Type {
+		case "error":
+			// Otherwise silent: headless only collects "tool_use"/"stream" events,
+			// so a backend error (bad status, stream parse failure) previously
+			// vanished with no trace — the caller just saw an empty response.
+			log.Printf("[chat-headless] session=%q agent error: %s", sessionID, ev.Content)
 		case "tool_use":
 			response.Reset()
 			inThink = false
