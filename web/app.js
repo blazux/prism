@@ -557,6 +557,7 @@ function appendUserMessage(text, images, files) {
 }
 
 function appendStream(content) {
+  const wasAtBottom = chatWasAtBottom()
   if (!currentAssistantEl) {
     const msgs = document.getElementById('chat-messages')
     const div = document.createElement('div')
@@ -570,10 +571,11 @@ function appendStream(content) {
   currentAssistantContent += content
   currentAssistantEl.innerHTML = renderMarkdown(currentAssistantContent)
   currentAssistantEl.classList.add('cursor')
-  scrollChat()
+  if (wasAtBottom) scrollChat(true)
 }
 
 function finalizeStream() {
+  const wasAtBottom = chatWasAtBottom()
   if (currentAssistantEl) {
     currentAssistantEl.classList.remove('cursor')
     currentAssistantEl.innerHTML = renderMarkdown(currentAssistantContent)
@@ -596,21 +598,23 @@ function finalizeStream() {
     currentAssistantContent = ''
   }
   setStreaming(false)
-  scrollChat()
+  if (wasAtBottom) scrollChat(true)
 }
 
 // Live tool progress (e.g. deep_research step-by-step) — a muted log line.
 function appendProgress(text) {
   const msgs = document.getElementById('chat-messages')
   if (!msgs) return
+  const wasAtBottom = chatWasAtBottom()
   const div = document.createElement('div')
   div.className = 'chat-progress'
   div.textContent = text || ''
   msgs.appendChild(div)
-  scrollChat() // live tool progress: follow only if the user hasn't scrolled up
+  if (wasAtBottom) scrollChat(true) // live tool progress: follow only if the user hasn't scrolled up
 }
 
 function appendToolUse(msg) {
+  const wasAtBottom = chatWasAtBottom()
   if (currentAssistantEl) {
     currentAssistantEl.classList.remove('cursor')
     currentAssistantEl = null
@@ -637,10 +641,11 @@ function appendToolUse(msg) {
       <div class="tool-block-output running" id="tool-out-${msg.id}"><span class="tool-spinner"></span> Running…</div>
     </div>`
   msgs.appendChild(div)
-  scrollChat()
+  if (wasAtBottom) scrollChat(true)
 }
 
 function appendToolResult(msg) {
+  const wasAtBottom = chatWasAtBottom()
   const el = document.getElementById('tool-out-' + msg.id)
   if (!el) {
     console.error('[prism] tool_result orphan — no element for id:', msg.id, msg)
@@ -665,17 +670,18 @@ function appendToolResult(msg) {
       }
     }
   }
-  scrollChat()
+  if (wasAtBottom) scrollChat(true)
 }
 
 function appendError(text) {
   const msgs = document.getElementById('chat-messages')
+  const wasAtBottom = chatWasAtBottom()
   const div = document.createElement('div')
   div.className = 'chat-msg assistant'
   div.innerHTML = `<div class="chat-msg-content" style="color:var(--red)">${escHtml(text)}</div>`
   msgs.appendChild(div)
   setStreaming(false)
-  scrollChat()
+  if (wasAtBottom) scrollChat(true)
 }
 
 function clearChat() {
@@ -746,6 +752,18 @@ function scrollChat(force = false) {
   const msgs = document.getElementById('chat-messages')
   if (!msgs) return
   if (force || chatAtBottom(msgs)) msgs.scrollTop = msgs.scrollHeight
+}
+// Capture "should we auto-follow" BEFORE a DOM mutation that can grow
+// scrollHeight — checking after the mutation (as scrollChat() alone does)
+// conflates "the user scrolled up" with "the content just grew out from under
+// a still-at-bottom scrollTop": a table, a code block or a big streamed chunk
+// can add more than SCROLL_SLACK in one step, which reads as "not at bottom"
+// and silently, permanently stops auto-follow for the rest of the reply even
+// though the user never touched the scrollbar. Call this first, mutate, then
+// `if (wasAtBottom) scrollChat(true)`.
+function chatWasAtBottom() {
+  const msgs = document.getElementById('chat-messages')
+  return msgs ? chatAtBottom(msgs) : true
 }
 
 function formatToolInput(tool, inp) {
