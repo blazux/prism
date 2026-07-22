@@ -467,6 +467,12 @@ func (e *ToolExecutor) userStore() *memory.Store {
 	return e.memStore.ConfigScope(e.personalScope())
 }
 
+// SecretsScope exposes personalScope() to package server: ws.go's async
+// secret-request callback needs the same per-user/per-group scope this
+// executor uses everywhere else for secrets and personal knowledge, but it
+// lives in a different package and can't call the unexported method.
+func (e *ToolExecutor) SecretsScope() string { return e.personalScope() }
+
 func (e *ToolExecutor) WorkspaceDir() string { return e.workspaceDir }
 
 func (e *ToolExecutor) SetMemoryStore(ms *memory.Store) { e.memStore = ms }

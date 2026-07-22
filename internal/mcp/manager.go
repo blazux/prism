@@ -57,7 +57,7 @@ func (m *Manager) Connect(ctx context.Context, sessionID, name, url, authSecret 
 		return nil, fmt.Errorf("database not available (Postgres required)")
 	}
 
-	authHeader, err := m.bearerFor(ctx, authSecret)
+	authHeader, err := m.bearerFor(ctx, sessionID, authSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (m *Manager) CallTool(ctx context.Context, sessionID, toolName string, args
 			if t.Name != toolName {
 				continue
 			}
-			authHeader, err := m.bearerFor(ctx, srv.AuthSecret)
+			authHeader, err := m.bearerFor(ctx, sessionID, srv.AuthSecret)
 			if err != nil {
 				return "", fmt.Errorf("auth for MCP server %q: %w", srv.Name, err)
 			}

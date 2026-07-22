@@ -218,7 +218,11 @@ code{font-size:12px}
       <label>Group</label><select id="mc-group"></select>
       <div id="gmcp" class="list" style="max-height:none"></div>
       <div class="row"><input id="gmcp-name" placeholder="name"><input id="gmcp-url" placeholder="http://host:port/mcp" style="flex:1;min-width:220px"><select id="gmcp-secret"><option value="">— no auth —</option></select><button class="primary" onclick="addGroupMCP()">Connect</button><span id="gmcp-status"></span></div>
-      <div class="hint">Transport (Streamable HTTP / legacy SSE) is auto-detected from the URL. To authenticate, pick a stored secret — it is sent as a <code>Bearer</code> token. Create keys in Settings → Secrets first.</div></div>
+      <div class="hint">Transport (Streamable HTTP / legacy SSE) is auto-detected from the URL. To authenticate, pick a stored secret — it is sent as a <code>Bearer</code> token, or create one inline from the picker below.</div></div>
+    <div class="pane" data-pane="secrets"><h2>Group secrets</h2><div class="hint">Secrets stored here are scoped to this group only — used for its MCP servers / group tools, isolated from every other group. Members see the list read-only; only group admins add or remove them.</div>
+      <label>Group</label><select id="gs-group"></select>
+      <div id="gsecrets" class="list" style="max-height:none"></div>
+      <div class="row"><input id="gs-name" placeholder="name"><input id="gs-value" type="password" placeholder="value"><button class="primary" onclick="addGroupSecret()">Save</button><span id="gs-status"></span></div></div>
     <div class="pane" data-pane="access"><h2>Group tool access</h2><div class="hint">Toggle a tool <b>ON</b> to let your group's members use it, <b>OFF</b> to restrict it to admins. You can only tighten the global policy, never loosen it — tools locked globally stay admin-only.</div>
       <label>Group</label><select id="ac-group"></select>
       <div id="ac-tools" class="tool-box"></div></div>
@@ -289,7 +293,7 @@ async function setPol(t,a){await jpost('/api/admin/tool-policy',{tool:t,access:a
 // group admins only the groups where they hold the admin role.
 function adminGroups(){return MY.isGlobalAdmin?ALLGROUPS:(MY.groups||[]).filter(g=>g.role==='admin');}
 function fillGroupPickers(){const opts=adminGroups().map(g=>'<option value="'+(g.groupId||g.id)+'">'+esc(g.groupName||g.name)+'</option>').join('');
- ['ag-group','ac-group','rg-group','mc-group'].forEach(i=>{if($(i))$(i).innerHTML=opts;});}
+ ['ag-group','ac-group','rg-group','mc-group','gs-group'].forEach(i=>{if($(i))$(i).innerHTML=opts;});}
 async function loadAgent(){const g=$('ag-group').value;if(!g)return;const c=await jget('/api/room/config?group='+g);if(!c)return;
  $('ag-name').value=c.agentName||'';$('ag-prompt').value=c.agentPrompt||'';$('ag-model').value=c.agentModel||'';renderAgentAvatar();}
 // ── Shared-agent avatar ──
@@ -328,18 +332,34 @@ async function saveWebex(){const g=$('ag-group').value;if(!g)return;const b={rag
  const t=$('wx-token').value.trim();if(t)b.token=t;const r=await jpost('/api/webex/config?group='+g,b);
  $('wx-status').textContent=r.ok?'saved ✓':'error';setTimeout(()=>$('wx-status').textContent='',2000);loadWebex();}
 async function disconnectWebex(){const g=$('ag-group').value;if(!g)return;await jpost('/api/webex/config?group='+g,{disconnect:true});loadWebex();}
+// ── Group secrets (scoped to this group only — used by its MCP servers/tools) ──
+async function loadGroupSecrets(){const g=$('gs-group').value;if(!g)return;
+ const d=await jget('/api/group/secrets?group='+g);const box=$('gsecrets');box.innerHTML='';
+ const names=(d&&d.secrets)||[];
+ if(!names.length){box.innerHTML='<div style="color:var(--text3)">No secrets for this group.</div>';return;}
+ names.forEach(n=>{const el=document.createElement('div');
+  el.innerHTML='<span><b>'+esc(n)+'</b></span><button class="mini" onclick="removeGroupSecret(\''+esc(n)+'\')">remove</button>';
+  box.appendChild(el);});}
+async function addGroupSecret(){const g=$('gs-group').value;if(!g)return;const n=$('gs-name').value.trim(),v=$('gs-value').value;if(!n||!v)return;
+ $('gs-status').textContent='saving…';
+ const r=await jpost('/api/group/secrets?group='+g,{name:n,value:v});
+ $('gs-status').textContent=r.ok?'saved ✓':'error';setTimeout(()=>$('gs-status').textContent='',2000);
+ if(r.ok){$('gs-name').value='';$('gs-value').value='';}loadGroupSecrets();}
+async function removeGroupSecret(name){const g=$('gs-group').value;if(!g)return;
+ await fetch('/api/group/secrets?group='+g+'&name='+encodeURIComponent(name),{method:'DELETE'});loadGroupSecrets();}
+
 // ── Group MCP servers (shared with the whole group) ──
 async function loadGroupMCP(){const g=$('mc-group').value;if(!g)return;
- // Fill the auth-secret picker from the team secrets store (+ inline creation).
- try{const s2=await jget('/api/secrets');const names=(s2&&s2.secrets)||[];
+ // Fill the auth-secret picker from this group's own scoped secrets (+ inline creation).
+ try{const s2=await jget('/api/group/secrets?group='+g);const names=(s2&&s2.secrets)||[];
   $('gmcp-secret').innerHTML='<option value="">— no auth —</option>'+names.map(n=>'<option value="'+esc(n)+'">🔑 '+esc(n)+'</option>').join('')+'<option value="__new__">＋ New secret…</option>';
   $('gmcp-secret').onchange=async function(){if(this.value!=='__new__')return;this.value='';
-   const res=await PrismModal.prompt('New team secret',[
+   const res=await PrismModal.prompt('New group secret',[
     {name:'name',label:'Name',placeholder:'e.g. CONTEXT7_API_KEY'},
-    {name:'value',label:'Value',type:'password',placeholder:'stored encrypted, shared with the team'}]);
+    {name:'value',label:'Value',type:'password',placeholder:'stored encrypted, scoped to this group only'}]);
    if(!res||!res.name.trim()||!res.value)return;
    const n=res.name.trim();
-   const r=await jpost('/api/secrets',{name:n,value:res.value});
+   const r=await jpost('/api/group/secrets?group='+g,{name:n,value:res.value});
    if(r&&r.ok){const o=document.createElement('option');o.value=n;o.textContent='🔑 '+n;
     this.insertBefore(o,this.querySelector('option[value="__new__"]'));this.value=n;}
    else{PrismModal.alert('Could not save the secret.');}};}catch(e){}
@@ -745,12 +765,12 @@ async function init(){
  // Vortex: telephony admin (switchboard persona + SIP trunk) — only when docked with Vox.
  let VORTEX=false;try{VORTEX=!!(await fetch('/api/platform').then(r=>r.json())).vortexMode;}catch(e){}
  if(isGA&&VORTEX){items.push(['telephony','Telephony']);}
- if(adminGroups().length){items.push(['agent','Shared agent'],['rag','RAG'],['mcp','MCP'],['access','Tool access']);}
+ if(adminGroups().length){items.push(['agent','Shared agent'],['rag','RAG'],['mcp','MCP'],['secrets','Secrets'],['access','Tool access']);}
  if(!items.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
  nav.innerHTML=items.map(([p,l])=>'<div class="nav-item" data-pane="'+p+'">'+l+'</div>').join('');
  nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=()=>{const p=el.dataset.pane;show(p);
-  if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='access')loadAccess();});
- $('ag-group').onchange=()=>{loadAgent();loadWebex();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; $('ac-group').onchange=loadAccess;
+  if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
+ $('ag-group').onchange=()=>{loadAgent();loadWebex();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
  $('ag-model').innerHTML='<option value="">(server default)</option>'+MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');
  fillGroupPickers();
  show(items[0][0]);

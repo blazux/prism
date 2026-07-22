@@ -50,3 +50,26 @@ func TestPersonalScope_UnaffectedByMultiUser(t *testing.T) {
 		}
 	}
 }
+
+// SecretsScope is a thin exported wrapper around personalScope(), needed so
+// package server (ws.go's async secret-request callback) can resolve the
+// same per-user/per-group scope — it must never diverge from personalScope().
+func TestSecretsScope_MatchesPersonalScope(t *testing.T) {
+	cases := []struct {
+		name      string
+		sessionID string
+		ragScope  string
+		override  string
+	}{
+		{"browser, grouped user, override pins user", "default", "g1", "u1"},
+		{"telegram encodes the user in the session", "u1-telegram", "g1", ""},
+		{"webex shared agent falls back to group", "webex-g1-abc", "g1", ""},
+		{"solo user, no group", "default", "u5", ""},
+	}
+	for _, c := range cases {
+		e := &ToolExecutor{sessionID: c.sessionID, ragScope: c.ragScope, personalScopeOverride: c.override}
+		if got, want := e.SecretsScope(), e.personalScope(); got != want {
+			t.Errorf("%s: SecretsScope()=%q, personalScope()=%q — must match", c.name, got, want)
+		}
+	}
+}

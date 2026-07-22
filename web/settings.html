@@ -1380,6 +1380,9 @@ async function deleteMCPServer(id) {
 // ── Secrets tab ───────────────────────────────────────────────────────────────
 
 async function renderSecretsTab(container) {
+  await computeRagManage() // needs MULTI_USER + RAG_SCOPED (== "in a group", under MULTI_USER)
+  if (MULTI_USER) return renderMultiUserSecretsTab(container)
+
   const page = document.createElement('div')
   page.className = 'settings-page'
   container.appendChild(page)
@@ -1466,6 +1469,102 @@ async function renderSecretsTab(container) {
     }
   } catch {
     const list = document.getElementById('secrets-list')
+    if (list) list.innerHTML = '<span style="color:var(--text3);font-size:12px">Indisponible (Postgres requis).</span>'
+  }
+}
+
+// MULTI_USER Secrets tab: a "Personal secrets" section (always, backed by
+// /api/user/secrets — own scope) and, if the user belongs to a group, a
+// read-only pointer to the Admin console instead of any group-secret editor.
+// Never shows the raw global /api/secrets bucket — that's the cross-group
+// leak this replaces (it used to be visible to literally everyone).
+async function renderMultiUserSecretsTab(container) {
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  container.appendChild(page)
+
+  const section = document.createElement('div')
+  section.className = 'config-section'
+  section.innerHTML = `
+    <div class="config-cat-header">
+      <span class="config-cat-icon" style="color:var(--accent)">${icon('key')}</span>
+      <span class="config-cat-name">Personal secrets</span>
+    </div>
+    <div id="user-secrets-list" class="config-secrets-list">
+      <span style="color:var(--text3);font-size:12px">Loading…</span>
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--text3);line-height:1.6">
+      Secrets are stored encrypted and never exposed in plain text. The agent can also add them via <code style="background:var(--bg2);padding:1px 6px;border-radius:3px;font-size:11px">request_secret</code>.
+      These are yours only — no other member or the group's shared agent can see or use them.
+    </div>
+    ${RAG_SCOPED ? '<div style="padding:10px 12px;color:var(--text3);font-size:11.5px">Group secrets (used for the group\'s MCP servers/tools) are managed by your group admin in the Admin console.</div>' : ''}`
+  page.appendChild(section)
+
+  const addForm = document.createElement('div')
+  addForm.className = 'mcp-add-form'
+  addForm.innerHTML = `
+    <div class="mcp-add-title">Add a personal secret</div>
+    <div class="mcp-add-fields">
+      <input id="user-secret-add-name" class="mcp-input" type="text" placeholder="Name (e.g. MY_API_KEY)" autocomplete="off">
+      <input id="user-secret-add-value" class="mcp-input" type="password" placeholder="Value" autocomplete="new-password">
+    </div>
+    <button id="user-secret-add-btn" class="mcp-add-submit">Save</button>
+    <div id="user-secret-add-status" class="mcp-add-status"></div>`
+  page.appendChild(addForm)
+  document.getElementById('user-secret-add-btn').addEventListener('click', async () => {
+    const name  = document.getElementById('user-secret-add-name').value.trim()
+    const value = document.getElementById('user-secret-add-value').value
+    const status = document.getElementById('user-secret-add-status')
+    const btn   = document.getElementById('user-secret-add-btn')
+    if (!name || !value) { status.textContent = 'Name and value required.'; status.className = 'mcp-add-status error'; return }
+    btn.disabled = true
+    status.textContent = 'Saving…'; status.className = 'mcp-add-status'
+    try {
+      const res = await fetch('/api/user/secrets', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, value }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      status.textContent = '✓ Saved'; status.className = 'mcp-add-status ok'
+      document.getElementById('user-secret-add-name').value = ''
+      document.getElementById('user-secret-add-value').value = ''
+      container.innerHTML = ''
+      renderMultiUserSecretsTab(container)
+    } catch(e) {
+      status.textContent = 'Error: ' + e.message; status.className = 'mcp-add-status error'
+    } finally { btn.disabled = false }
+  })
+
+  try {
+    const res = await fetch('/api/user/secrets')
+    const data = await res.json()
+    const names = data.secrets || []
+    const list = document.getElementById('user-secrets-list')
+    if (names.length === 0) {
+      list.innerHTML = '<span style="color:var(--text3);font-size:12px">No secret stored.</span>'
+    } else {
+      list.innerHTML = ''
+      for (const name of names) {
+        const row = document.createElement('div')
+        row.className = 'config-secret-row'
+        row.id = `user-secret-row-${CSS.escape(name)}`
+        row.innerHTML = `
+          <div class="config-secret-info">
+            <span class="config-secret-name">${escHtml(name)}</span>
+            <span class="config-secret-env">$${escHtml(name.toUpperCase().replace(/[^A-Z0-9]/g,'_'))}</span>
+          </div>
+          <button class="config-secret-del" title="Delete" data-name="${escHtml(name)}">✕</button>`
+        row.querySelector('button').addEventListener('click', async function() {
+          const n = this.dataset.name
+          if (!await PrismModal.confirm(`Delete secret "${n}"?`, { danger: true })) return
+          await fetch(`/api/user/secrets/${encodeURIComponent(n)}`, { method: 'DELETE' })
+          document.getElementById(`user-secret-row-${CSS.escape(n)}`)?.remove()
+        })
+        list.appendChild(row)
+      }
+    }
+  } catch {
+    const list = document.getElementById('user-secrets-list')
     if (list) list.innerHTML = '<span style="color:var(--text3);font-size:12px">Indisponible (Postgres requis).</span>'
   }
 }

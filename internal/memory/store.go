@@ -869,6 +869,37 @@ func (s *Store) DeleteSecret(ctx context.Context, name string) error {
 	return err
 }
 
+// ListScopedSecretNames lists secret names visible under this store's
+// ConfigScope ("u<id>:" or "g<id>:"), prefix stripped — e.g. a "u42:"-scoped
+// store lists "email_password" for the row named "u42:email_password".
+// Unlike ListSecretNames (the legacy global bucket, kept unmodified since
+// /api/secrets still uses it directly), an empty cfgScope returns nothing
+// rather than the whole table: this method is only ever called on an
+// already-scoped store (the new group/personal secrets endpoints), so a
+// caller can never accidentally enumerate every legacy global secret name by
+// forgetting to scope first. cfgScope is always built as "u%d:"/"g%d:"
+// (digits + colon), never containing a LIKE wildcard, so no escaping is
+// needed — same assumption the existing scope cleanup in permissions.go makes.
+func (s *Store) ListScopedSecretNames(ctx context.Context) ([]string, error) {
+	if s.cfgScope == "" {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT name FROM secrets WHERE name LIKE $1 ORDER BY name ASC`, s.cfgScope+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		names = append(names, strings.TrimPrefix(n, s.cfgScope))
+	}
+	return names, rows.Err()
+}
+
 func (s *Store) GetAllSecrets(ctx context.Context) (map[string]string, error) {
 	rows, err := s.pool.Query(ctx, `SELECT name, value FROM secrets`)
 	if err != nil {

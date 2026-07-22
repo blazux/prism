@@ -66,8 +66,8 @@ func (e *ToolExecutor) requestSecret(ctx context.Context, name, description stri
 	name = strings.ToLower(strings.TrimSpace(name))
 	envVar := toEnvVarName(name)
 
-	if e.memStore != nil {
-		if _, exists, _ := e.memStore.GetSecret(ctx, name); exists {
+	if us := e.userStore(); us != nil {
+		if _, exists, _ := us.GetSecret(ctx, name); exists {
 			return fmt.Sprintf("Secret '%s' already stored. Available as os.environ['%s'] / $%s. Use delete_secret to replace it.", name, envVar, envVar), nil
 		}
 	}
@@ -82,10 +82,22 @@ func (e *ToolExecutor) requestSecret(ctx context.Context, name, description stri
 }
 
 func (e *ToolExecutor) listSecrets(ctx context.Context) (string, error) {
-	if e.memStore == nil {
+	us := e.userStore()
+	if us == nil {
 		return "Secret store not available (Postgres not configured).", nil
 	}
-	names, err := e.memStore.ListSecretNames(ctx)
+	// personalScope() is "" for single-user/legacy sessions (no group, no
+	// user identity) — ListScopedSecretNames deliberately returns nothing for
+	// an empty scope (it's meant for already-scoped u<id>/g<id> stores only),
+	// so fall back to the old unscoped listing there to keep single-user mode
+	// byte-for-byte unchanged.
+	var names []string
+	var err error
+	if e.SecretsScope() == "" {
+		names, err = e.memStore.ListSecretNames(ctx)
+	} else {
+		names, err = us.ListScopedSecretNames(ctx)
+	}
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err), nil
 	}
@@ -101,13 +113,14 @@ func (e *ToolExecutor) listSecrets(ctx context.Context) (string, error) {
 }
 
 func (e *ToolExecutor) deleteSecret(ctx context.Context, name string) (string, error) {
-	if e.memStore == nil {
+	us := e.userStore()
+	if us == nil {
 		return "Secret store not available (Postgres not configured).", nil
 	}
 	if name == "" {
 		return "", fmt.Errorf("name is required")
 	}
-	if err := e.memStore.DeleteSecret(ctx, name); err != nil {
+	if err := us.DeleteSecret(ctx, name); err != nil {
 		return fmt.Sprintf("Error: %v", err), nil
 	}
 	return fmt.Sprintf("Secret '%s' deleted.", name), nil

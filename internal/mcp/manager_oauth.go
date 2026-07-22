@@ -98,14 +98,14 @@ func (m *Manager) CompleteOAuth(ctx context.Context, state, code string) ([]Tool
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
 	id := slugify(p.name)
-	if err := m.saveOAuthState(ctx, id, &oauthState{Meta: p.meta, Token: tok}); err != nil {
+	if err := m.saveOAuthState(ctx, p.sessionID, id, &oauthState{Meta: p.meta, Token: tok}); err != nil {
 		return nil, err
 	}
 	// Connect with the freshly-minted bearer; this lists tools and persists the row.
 	return m.Connect(ctx, p.sessionID, p.name, p.url, oauthSecretPrefix+id)
 }
 
-func (m *Manager) saveOAuthState(ctx context.Context, id string, st *oauthState) error {
+func (m *Manager) saveOAuthState(ctx context.Context, scope, id string, st *oauthState) error {
 	ms := m.getStore()
 	if ms == nil {
 		return fmt.Errorf("database not available")
@@ -114,17 +114,26 @@ func (m *Manager) saveOAuthState(ctx context.Context, id string, st *oauthState)
 	if err != nil {
 		return err
 	}
-	return ms.SetSecret(ctx, oauthSecretPrefix+id, string(blob))
+	return ms.ConfigScope(scope).SetSecret(ctx, oauthSecretPrefix+id, string(blob))
 }
 
-func (m *Manager) loadOAuthState(ctx context.Context, secretName string) (*oauthState, error) {
+// loadOAuthState resolves the token blob under scope first (a group/personal
+// MCP server's own tenant), falling back to the legacy unscoped lookup for a
+// server connected before scoping existed — no migration needed.
+func (m *Manager) loadOAuthState(ctx context.Context, scope, secretName string) (*oauthState, error) {
 	ms := m.getStore()
 	if ms == nil {
 		return nil, fmt.Errorf("database not available")
 	}
-	raw, ok, err := ms.GetSecret(ctx, secretName)
+	raw, ok, err := ms.ConfigScope(scope).GetSecret(ctx, secretName)
 	if err != nil {
 		return nil, err
+	}
+	if !ok && scope != "" {
+		raw, ok, err = ms.GetSecret(ctx, secretName)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if !ok {
 		return nil, fmt.Errorf("oauth token %q not found — reconnect the server", secretName)
@@ -139,8 +148,12 @@ func (m *Manager) loadOAuthState(ctx context.Context, secretName string) (*oauth
 // bearerFor resolves the Authorization header value for a server. For OAuth servers
 // (auth_secret prefixed mcp_oauth_) it loads the token, refreshes and re-persists it
 // when expired, and returns a fresh bearer. For everything else it's the stored
-// secret as-is. Empty authSecret → no header.
-func (m *Manager) bearerFor(ctx context.Context, authSecret string) (string, error) {
+// secret as-is. Empty authSecret → no header. scope is the server's own tenant
+// ("g<id>" for a group MCP server, "u<id>"/board id for a personal one, or ""
+// for legacy/single-user) — resolved first, falling back to the unscoped
+// global lookup so a server connected before scoping existed keeps working
+// with no migration.
+func (m *Manager) bearerFor(ctx context.Context, scope, authSecret string) (string, error) {
 	if authSecret == "" {
 		return "", nil
 	}
@@ -149,16 +162,22 @@ func (m *Manager) bearerFor(ctx context.Context, authSecret string) (string, err
 		return "", fmt.Errorf("database not available")
 	}
 	if !strings.HasPrefix(authSecret, oauthSecretPrefix) {
-		val, exists, err := ms.GetSecret(ctx, authSecret)
+		val, exists, err := ms.ConfigScope(scope).GetSecret(ctx, authSecret)
 		if err != nil {
 			return "", err
+		}
+		if !exists && scope != "" {
+			val, exists, err = ms.GetSecret(ctx, authSecret)
+			if err != nil {
+				return "", err
+			}
 		}
 		if !exists {
 			return "", fmt.Errorf("secret %q not found — call request_secret first", authSecret)
 		}
 		return "Bearer " + val, nil
 	}
-	st, err := m.loadOAuthState(ctx, authSecret)
+	st, err := m.loadOAuthState(ctx, scope, authSecret)
 	if err != nil {
 		return "", err
 	}
@@ -168,7 +187,7 @@ func (m *Manager) bearerFor(ctx context.Context, authSecret string) (string, err
 			return "", fmt.Errorf("refresh token: %w — the server may need re-authorization", err)
 		}
 		st.Token = newTok
-		_ = m.saveOAuthState(ctx, strings.TrimPrefix(authSecret, oauthSecretPrefix), st)
+		_ = m.saveOAuthState(ctx, scope, strings.TrimPrefix(authSecret, oauthSecretPrefix), st)
 	}
 	return "Bearer " + st.Token.AccessToken, nil
 }

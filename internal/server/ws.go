@@ -344,7 +344,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			curMS := s.memStore
 			s.mu.RUnlock()
 			if curMS != nil {
-				if err := curMS.SetSecret(context.Background(), name, val); err != nil {
+				if err := curMS.ConfigScope(executor.SecretsScope()).SetSecret(context.Background(), name, val); err != nil {
 					return fmt.Errorf("store secret: %w", err)
 				}
 			}
