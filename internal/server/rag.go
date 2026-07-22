@@ -155,7 +155,11 @@ func (s *Server) ragScopeForRequest(r *http.Request) (scope string, manage, ok b
 		return fmt.Sprintf("g%d", gid), true, true
 	}
 	u := currentUser(r)
-	return s.ragScopeFor(r.Context(), u), s.canManageRAGScope(r.Context(), u), true
+	scope = s.ragScopeFor(r.Context(), u)
+	if s.ragPersonalFallbackBlocked(scope) {
+		return "", false, false
+	}
+	return scope, s.canManageRAGScope(r.Context(), u), true
 }
 
 func (s *Server) handleRAGCollections(w http.ResponseWriter, r *http.Request) {

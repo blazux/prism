@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"prism/internal/agent"
 	"prism/internal/memory"
@@ -188,7 +189,18 @@ func (s *Server) canManageRAGScope(ctx context.Context, u *memory.User) bool {
 			return groups[0].Role == memory.GroupRoleAdmin // scope = first group
 		}
 	}
-	return true // personal scope
+	if s.cfg.MultiUser {
+		return false // multi-user: no personal RAG scope is ever manageable
+	}
+	return true // personal scope (single-user only)
+}
+
+// ragPersonalFallbackBlocked reports whether scope is the personal RAG fallback
+// that MULTI_USER retires: true only for a real multi-user account with no
+// group (scope starts with "u", not "g"). Never true for "" (service identity
+// / legacy single-user mode — unaffected) or for a group scope.
+func (s *Server) ragPersonalFallbackBlocked(scope string) bool {
+	return s.cfg.MultiUser && scope != "" && !strings.HasPrefix(scope, "g")
 }
 
 // scopeCollection / unscopeCollection delegate to agent.ScopeCollection /

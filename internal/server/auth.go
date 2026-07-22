@@ -213,25 +213,25 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	// UI offers the workspace terminal here too. No user object: the account/group
 	// UI (admin link, rooms) keys off user.role and must stay hidden in this mode.
 	if !s.cfg.MultiUser {
-		json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "isAdmin": true, "legacy": true})
+		json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "isAdmin": true, "legacy": true, "multiUser": false})
 		return
 	}
 	// /api/me is public, so resolve the cookie here directly.
 	ms := s.store()
 	if ms == nil {
 		authed := s.cfg.AuthToken == "" || s.legacyCookieAuthed(r)
-		json.NewEncoder(w).Encode(map[string]any{"authenticated": authed, "legacy": true, "isAdmin": authed})
+		json.NewEncoder(w).Encode(map[string]any{"authenticated": authed, "legacy": true, "isAdmin": authed, "multiUser": true})
 		return
 	}
 	u := s.userFromCookie(r, ms)
 	if u == nil {
-		json.NewEncoder(w).Encode(map[string]any{"authenticated": false})
+		json.NewEncoder(w).Encode(map[string]any{"authenticated": false, "multiUser": true})
 		return
 	}
 	// isAdmin = global admin OR admin of any group — the very predicate that guards
 	// /api/terminal and /api/exec. The UI hides the terminal on it; the server never
 	// trusts it.
-	json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "user": u, "isAdmin": s.isAdminUser(r.Context(), u)})
+	json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "user": u, "isAdmin": s.isAdminUser(r.Context(), u), "multiUser": true})
 }
 
 // POST /api/signup {email, password, displayName}

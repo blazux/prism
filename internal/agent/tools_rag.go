@@ -13,7 +13,14 @@ import (
 	"prism/internal/rag"
 )
 
+// ragBlockedMsg is returned by the RAG tools when MULTI_USER retires the
+// personal fallback scope (no group) — see ToolExecutor.ragBlocked.
+const ragBlockedMsg = "No knowledge base available — you're not in a group; ask your admin to add you to one."
+
 func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, limit int) (string, []string, error) {
+	if e.ragBlocked() {
+		return ragBlockedMsg, nil, nil
+	}
 	if e.ragStore == nil || e.ragEmbedder == nil {
 		return "RAG not available (Postgres not configured)", nil, nil
 	}
@@ -48,6 +55,9 @@ func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, 
 }
 
 func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, content, sourcePath string) (string, error) {
+	if e.ragBlocked() {
+		return ragBlockedMsg, nil
+	}
 	if e.ragStore == nil || e.ragEmbedder == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
@@ -169,6 +179,9 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 }
 
 func (e *ToolExecutor) ragListCollections(ctx context.Context) (string, error) {
+	if e.ragBlocked() {
+		return ragBlockedMsg, nil
+	}
 	if e.ragStore == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
@@ -194,6 +207,9 @@ func (e *ToolExecutor) ragListCollections(ctx context.Context) (string, error) {
 }
 
 func (e *ToolExecutor) ragListDocuments(ctx context.Context, collection string) (string, error) {
+	if e.ragBlocked() {
+		return ragBlockedMsg, nil
+	}
 	if e.ragStore == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
@@ -221,6 +237,9 @@ func (e *ToolExecutor) ragListDocuments(ctx context.Context, collection string) 
 }
 
 func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document string) (string, error) {
+	if e.ragBlocked() {
+		return ragBlockedMsg, nil
+	}
 	if e.ragStore == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}

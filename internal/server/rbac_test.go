@@ -67,3 +67,43 @@ func TestBuildUserGuard_AdminUnrestricted(t *testing.T) {
 		t.Error("nil user (legacy/service) should get a nil guard")
 	}
 }
+
+// canManageRAGScope must deny a groupless personal scope in MULTI_USER mode
+// (no personal RAG fallback), and keep allowing it in single-user mode — the
+// exact regression this change must not introduce.
+func TestCanManageRAGScope_MultiUser_NoGroup_Denied(t *testing.T) {
+	member := &memory.User{ID: 5, Role: memory.RoleMember, Status: memory.StatusApproved}
+
+	single := &Server{cfg: Config{MultiUser: false}}
+	if !single.canManageRAGScope(context.Background(), member) {
+		t.Error("single-user mode: groupless personal scope should remain manageable")
+	}
+
+	multi := &Server{cfg: Config{MultiUser: true}}
+	if multi.canManageRAGScope(context.Background(), member) {
+		t.Error("multi-user mode: groupless personal scope must NOT be manageable")
+	}
+}
+
+// ragPersonalFallbackBlocked must only fire for a real personal scope ("u<id>")
+// under MULTI_USER — never for "" (service identity / legacy) or a group scope,
+// and never at all in single-user mode.
+func TestRagPersonalFallbackBlocked(t *testing.T) {
+	cases := []struct {
+		name      string
+		multiUser bool
+		scope     string
+		want      bool
+	}{
+		{"multi-user, service identity", true, "", false},
+		{"multi-user, group scope", true, "g1", false},
+		{"multi-user, personal scope", true, "u5", true},
+		{"single-user, personal scope", false, "u5", false},
+	}
+	for _, c := range cases {
+		s := &Server{cfg: Config{MultiUser: c.multiUser}}
+		if got := s.ragPersonalFallbackBlocked(c.scope); got != c.want {
+			t.Errorf("%s: ragPersonalFallbackBlocked(%q)=%v, want %v", c.name, c.scope, got, c.want)
+		}
+	}
+}

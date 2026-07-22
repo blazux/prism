@@ -242,6 +242,9 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	if s.ragStore != nil {
 		ragStore := s.ragStore
 		ag.SetRAGContextFn(func() string {
+			if s.ragPersonalFallbackBlocked(cc.RAGScope) {
+				return ""
+			}
 			cols, err := ragStore.ListCollections(context.Background(), cc.RAGScope)
 			if err != nil || len(cols) == 0 {
 				return ""

@@ -1193,19 +1193,20 @@ async function renderMCPTab(container) {
   page.className = 'settings-page'
   container.appendChild(page)
 
+  // Personal MCP servers only exist in single-user mode — MULTI_USER retires
+  // the personal scope entirely (server-side too), so don't even fetch it there.
   const [serversRes, secretsRes] = await Promise.allSettled([
-    fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`).then(r => r.json()),
+    MULTI_USER ? Promise.resolve({ servers: [] }) : fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`).then(r => r.json()),
     fetch('/api/secrets').then(r => r.json()),
   ])
   mcpServers = serversRes.status === 'fulfilled' ? (serversRes.value.servers || []) : []
   const secretNames = secretsRes.status === 'fulfilled' ? (secretsRes.value.secrets || []) : []
 
-  renderMCPServerList(page)
+  if (!MULTI_USER) renderMCPServerList(page)
 
-  // Add server form — only for users who manage their own scope (personal scope,
-  // or group admins). Plain group members configure MCP via their group admin and
-  // see the group servers read-only below (mirrors RAG_MANAGE in the RAG tab).
-  if (RAG_MANAGE) {
+  // Add server form — single-user mode only. In MULTI_USER mode MCP is always
+  // group-managed (Admin console); members see the group servers read-only below.
+  if (!MULTI_USER && RAG_MANAGE) {
     const secretOptions = secretNames.length > 0
       ? secretNames.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('')
       : '<option value="" disabled>No secret available</option>'
@@ -2030,16 +2031,24 @@ async function renderProfileTab(container) {
 }
 
 let RAG_MANAGE = true // false whenever the scope is a group (managed in Admin console)
+let RAG_SCOPED = true // false only: multi-user mode + no group (no RAG/MCP at all)
+let MULTI_USER = false
 async function computeRagManage() {
   // Settings manages only a PERSONAL scope (user in no group). Any group scope —
   // member OR admin, including the global admin — is read-only here; group RAG/MCP
   // is configured in the Admin console, so there is a single place to manage it.
+  // In MULTI_USER mode there is no personal scope at all: a groupless user gets
+  // neither manage nor read access (RAG_SCOPED=false), instead of the old
+  // personal-fallback scope.
   try {
     const me = await fetch('/api/me').then(r => r.json())
-    if (!me.authenticated) { RAG_MANAGE = false; return }
+    MULTI_USER = !!me.multiUser
+    if (!me.authenticated) { RAG_MANAGE = false; RAG_SCOPED = false; return }
     const my = await fetch('/api/my/groups').then(r => r.json())
-    RAG_MANAGE = (my.groups || []).length === 0
-  } catch { RAG_MANAGE = false }
+    const inGroup = (my.groups || []).length > 0
+    RAG_SCOPED = inGroup || !MULTI_USER
+    RAG_MANAGE = !MULTI_USER && !inGroup
+  } catch { RAG_MANAGE = false; RAG_SCOPED = false }
 }
 
 async function renderRAGTab(container) {
@@ -2071,7 +2080,9 @@ async function renderRAGTab(container) {
       ${RAG_MANAGE ? '<button id="new-collection-btn" title="New collection" onclick="openModal()">+</button>' : ''}
     </div>
     <div id="collections-list"></div>
-    ${RAG_MANAGE ? '' : '<div style="padding:10px 12px;color:var(--text3);font-size:11.5px">Group knowledge base — managed by your group admin (read-only).</div>'}`
+    ${RAG_SCOPED
+      ? (RAG_MANAGE ? '' : '<div style="padding:10px 12px;color:var(--text3);font-size:11.5px">Group knowledge base — managed by your group admin (read-only).</div>')
+      : '<div style="padding:10px 12px;color:var(--text3);font-size:11.5px">You\'re not part of a group yet — ask an admin to add you to one to access shared knowledge.</div>'}`
   tab.appendChild(sidebar)
 
   // Content
@@ -2080,7 +2091,7 @@ async function renderRAGTab(container) {
   content.innerHTML = `<div id="no-collection-msg"><div class="icon">${icon('knowledge',40)}</div><div>Select a collection or create a new one</div></div>`
   tab.appendChild(content)
 
-  await loadCollections()
+  if (RAG_SCOPED) await loadCollections()
 }
 
 async function loadCollections() {

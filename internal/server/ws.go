@@ -148,6 +148,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			RAGScope:      ragScope,
 			PersonalScope: fmt.Sprintf("u%d", voiceUser.ID), // their memory/profile
 			HiddenTools:   voiceHiddenTools(voiceKnownAllowedTools),
+			MultiUser:     s.cfg.MultiUser,
 		}.apply(executor)
 	} else if voiceCall {
 		ragScope = s.voiceRAGScope(r.Context())
@@ -160,6 +161,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			// to the rag scope and a caller could read the owner's profile / learnings.
 			PersonalScope: voiceGuestScope,
 			HiddenTools:   voiceHiddenTools(voiceGuestAllowedTools),
+			MultiUser:     s.cfg.MultiUser,
 		}.apply(executor)
 		// Deliberately no custom tools and no MCP for a guest: built-ins only, and
 		// only the allow-listed ones survive.
@@ -189,6 +191,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if s.ragStore != nil {
 		ragStore := s.ragStore
 		ragContextFn = func() string {
+			if s.ragPersonalFallbackBlocked(ragScope) {
+				return ""
+			}
 			cols, err := ragStore.ListCollections(context.Background(), ragScope)
 			if err != nil || len(cols) == 0 {
 				return ""

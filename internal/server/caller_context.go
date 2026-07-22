@@ -23,6 +23,7 @@ type CallerContext struct {
 	RAGScope      string
 	PersonalScope string // "" = let the executor derive it from the session id itself
 	HiddenTools   map[string]bool
+	MultiUser     bool // MULTI_USER: retires the personal RAG/MCP fallback in the executor
 }
 
 // apply sets every field this bundles onto an executor in one call, instead
@@ -34,6 +35,7 @@ func (cc CallerContext) apply(e *agent.ToolExecutor) {
 		e.SetPersonalScope(cc.PersonalScope)
 	}
 	e.SetHiddenTools(cc.HiddenTools)
+	e.SetMultiUserMode(cc.MultiUser)
 }
 
 // callerContextForUser builds the standard per-user CallerContext — the
@@ -61,6 +63,7 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 		Guard:       s.buildUserGuard(ctx, u),
 		RAGScope:    scope,
 		HiddenTools: s.hiddenToolsFor(ctx, sessionID, scope),
+		MultiUser:   s.cfg.MultiUser,
 	}
 }
 
@@ -72,8 +75,9 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 // same as before this refactor).
 func (s *Server) callerContextForGroup(ctx context.Context, groupID int64) CallerContext {
 	return CallerContext{
-		Guard:    s.buildGroupAgentGuard(ctx, groupID),
-		RAGScope: fmt.Sprintf("g%d", groupID),
+		Guard:     s.buildGroupAgentGuard(ctx, groupID),
+		RAGScope:  fmt.Sprintf("g%d", groupID),
+		MultiUser: s.cfg.MultiUser,
 	}
 }
 

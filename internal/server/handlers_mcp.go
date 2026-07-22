@@ -20,6 +20,9 @@ import (
 // reachable from every board they use afterward. Falls back to sessionID for
 // the service identity / legacy no-DB mode, where there is no user to key on.
 func (s *Server) personalMCPScope(r *http.Request, sessionID string) string {
+	if s.cfg.MultiUser {
+		return "" // MULTI_USER: no personal MCP scope, ever — group scope only.
+	}
 	if u := currentUser(r); u != nil && u.ID > 0 {
 		return fmt.Sprintf("u%d", u.ID)
 	}
@@ -34,6 +37,10 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "OPTIONS" {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		return
+	}
+	if s.cfg.MultiUser {
+		http.Error(w, "personal MCP servers are not available in multi-user mode — manage MCP servers for your group from the Admin console", http.StatusForbidden)
 		return
 	}
 
@@ -119,6 +126,10 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		return
 	}
+	if s.cfg.MultiUser {
+		http.Error(w, "personal MCP servers are not available in multi-user mode — manage MCP servers for your group from the Admin console", http.StatusForbidden)
+		return
+	}
 
 	id := strings.TrimPrefix(r.URL.Path, "/api/mcp/servers/")
 	if id == "" {
@@ -172,7 +183,7 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 // connected while on another board.
 func (s *Server) broadcastMCP(sessionID string) {
 	servers, _ := s.mcpMgr.List(context.Background(), sessionID)
-	if scope := personalScopeFromSessionID(sessionID); scope != "" && scope != sessionID {
+	if scope := personalScopeFromSessionID(sessionID); !s.cfg.MultiUser && scope != "" && scope != sessionID {
 		if personal, err := s.mcpMgr.List(context.Background(), scope); err == nil {
 			seen := make(map[string]bool, len(servers))
 			for _, sv := range servers {

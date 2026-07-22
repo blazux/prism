@@ -27,12 +27,19 @@ func TestHandleMeReportsAdmin(t *testing.T) {
 			w := httptest.NewRecorder()
 			s.handleMe(w, httptest.NewRequest("GET", "/api/me", nil))
 
-			var body struct{ Authenticated, IsAdmin bool }
+			var body struct {
+				Authenticated, IsAdmin, MultiUser bool
+			}
 			if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 				t.Fatalf("decode: %v", err)
 			}
 			if !body.Authenticated || !body.IsAdmin {
 				t.Fatalf("got authenticated=%v isAdmin=%v, want both true", body.Authenticated, body.IsAdmin)
+			}
+			// The frontend gates personal RAG/MCP fallback UI on this field — it must
+			// truthfully reflect the deployment's actual mode, not just default false.
+			if body.MultiUser != tc.cfg.MultiUser {
+				t.Errorf("multiUser=%v, want %v (cfg.MultiUser)", body.MultiUser, tc.cfg.MultiUser)
 			}
 		})
 	}

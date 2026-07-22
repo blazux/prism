@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"prism/internal/mcp"
 )
 
 func (e *ToolExecutor) scheduleNotification(title, message, level string, delaySeconds int) (string, error) {
@@ -113,7 +115,15 @@ func (e *ToolExecutor) deleteSecret(ctx context.Context, name string) (string, e
 
 // ─── MCP tools ────────────────────────────────────────────────────────────────
 
+// mcpPersonalBlockedMsg is returned when MULTI_USER retires personal MCP
+// management via the agent's own `mcp` tool — group MCP stays reachable
+// through the same tool's list action and through Admin console management.
+const mcpPersonalBlockedMsg = "Personal MCP servers are not available in multi-user mode. Ask your group admin to add the server for your group from the Admin console."
+
 func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret string) (string, error) {
+	if e.multiUser {
+		return mcpPersonalBlockedMsg, nil
+	}
 	if e.mcpMgr == nil {
 		return "MCP not available (Postgres required)", nil
 	}
@@ -136,6 +146,9 @@ func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret s
 }
 
 func (e *ToolExecutor) mcpRemoveServer(ctx context.Context, name string) (string, error) {
+	if e.multiUser {
+		return mcpPersonalBlockedMsg, nil
+	}
 	if e.mcpMgr == nil {
 		return "MCP not available", nil
 	}
@@ -154,12 +167,17 @@ func (e *ToolExecutor) mcpListServers(ctx context.Context) (string, error) {
 	}
 	// Personal servers (this user, any board) plus the group's shared servers
 	// (if any) — the same two layers AllDynamicTools exposes as callable tools,
-	// so this list matches what the agent can actually reach.
-	servers, err := e.mcpMgr.List(ctx, e.personalScope())
-	if err != nil {
-		return fmt.Sprintf("Error: %v", err), nil
+	// so this list matches what the agent can actually reach. MULTI_USER
+	// retires the personal tier entirely: group scope only.
+	var servers []mcp.ServerConfig
+	if !e.multiUser {
+		var err error
+		servers, err = e.mcpMgr.List(ctx, e.personalScope())
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err), nil
+		}
 	}
-	if scope := e.ragScope; scope != "" && scope != e.personalScope() {
+	if scope := e.ragScope; scope != "" && (e.multiUser || scope != e.personalScope()) {
 		if groupServers, err := e.mcpMgr.List(ctx, scope); err == nil {
 			seen := make(map[string]bool, len(servers))
 			for _, s := range servers {

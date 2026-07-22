@@ -29,6 +29,7 @@ type ToolExecutor struct {
 	sessionID             string
 	ragScope              string // tenant scope prefix for RAG collection names (Phase 3b)
 	personalScopeOverride string // per-user scope for personal knowledge when the session id doesn't encode it
+	multiUser             bool   // MULTI_USER: retires the personal RAG/MCP fallback (group scope only)
 	ragStore              *rag.Store
 	ragEmbedder           *rag.Embedder
 	ragCaptioner          *rag.Captioner
@@ -288,6 +289,18 @@ func (e *ToolExecutor) cancelCall(args map[string]interface{}) (string, error) {
 	return fmt.Sprintf("Outbound call #%d has been cancelled — it will not be placed.", id), nil
 }
 
+// mcpFallbackScopes returns, in preference order, the extra MCP scopes to
+// consult beyond the session's own servers: the user's personal scope then
+// the group/rag scope, normally — or the group/rag scope alone under
+// MULTI_USER, which retires the personal fallback entirely. Shared by
+// AllDynamicTools and mcpSessionFor so the two never drift.
+func (e *ToolExecutor) mcpFallbackScopes() []string {
+	if e.multiUser {
+		return []string{e.ragScope}
+	}
+	return []string{e.personalScope(), e.ragScope}
+}
+
 func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
 	tools := e.CustomOllamaTools()
 	tools = append(tools, e.telephonyTools...)
@@ -307,7 +320,8 @@ func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
 		// Personal MCP servers are connected once per user, not once per board —
 		// merge them in under the user's stable scope regardless of which
 		// session/board is currently active. Then the group's shared servers.
-		for _, scope := range []string{e.personalScope(), e.ragScope} {
+		// MULTI_USER retires the personal tier entirely: group scope only.
+		for _, scope := range e.mcpFallbackScopes() {
 			if scope == "" || scope == e.sessionID {
 				continue
 			}
@@ -345,7 +359,7 @@ func (e *ToolExecutor) mcpSessionFor(name string) (string, bool) {
 	if e.mcpMgr.HasTool(e.sessionID, name) {
 		return e.sessionID, true
 	}
-	for _, scope := range []string{e.personalScope(), e.ragScope} {
+	for _, scope := range e.mcpFallbackScopes() {
 		if scope != "" && scope != e.sessionID && e.mcpMgr.HasTool(scope, name) {
 			return scope, true
 		}
@@ -417,6 +431,21 @@ func (e *ToolExecutor) personalScope() string {
 // SetPersonalScope pins the per-user scope for personal knowledge, for callers
 // that know the authenticated user but whose session id doesn't encode it.
 func (e *ToolExecutor) SetPersonalScope(scope string) { e.personalScopeOverride = scope }
+
+// SetMultiUserMode records whether this deployment runs MULTI_USER=1. It does
+// NOT change personalScope() itself (PIM and the agent-learnings/user-profile
+// pcol() collections must stay per-user in every mode) — it only retires the
+// personal-scope fallback tier in AllDynamicTools/mcpSessionFor (MCP) and gates
+// ragBlocked (RAG), so a groupless multi-user account gets neither, while a
+// grouped one still gets the group's.
+func (e *ToolExecutor) SetMultiUserMode(v bool) { e.multiUser = v }
+
+// ragBlocked reports whether this executor's RAG scope is the personal
+// fallback MULTI_USER retires: true only when multiUser is set and ragScope
+// isn't a group scope. Mirrors server.ragPersonalFallbackBlocked.
+func (e *ToolExecutor) ragBlocked() bool {
+	return e.multiUser && e.ragScope != "" && !strings.HasPrefix(e.ragScope, "g")
+}
 
 // pcol returns the storage name for a personal-knowledge collection.
 func (e *ToolExecutor) pcol(name string) string {
