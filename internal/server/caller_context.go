@@ -59,6 +59,17 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 		}
 	}
 	scope := s.ragScopeFor(ctx, scopeUser)
+	if scope == "" {
+		// Still no scope: this may be a service-token self-call into a
+		// SHARED-agent session (cron/widget/custom-tool hitting /api/chat or
+		// /api/builtin with a "webex-g<id>-…" or "room-g<id>" session, not a
+		// personal "u<id>-…" one) — recover the group scope the session id
+		// itself encodes, so its group-scoped RAG/MCP stays reachable. See
+		// groupScopeFromSessionID's doc comment.
+		if gscope := groupScopeFromSessionID(sessionID); gscope != "" {
+			scope = gscope
+		}
+	}
 	return CallerContext{
 		Guard:       s.buildUserGuard(ctx, u),
 		RAGScope:    scope,

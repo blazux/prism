@@ -43,3 +43,21 @@ func TestSessionFor(t *testing.T) {
 		t.Errorf(`service → got (%q,%v), want ("foo",true)`, id, ok)
 	}
 }
+
+// groupScopeFromSessionID must recover "g<id>" from every real shared-agent
+// session shape (webex.go, rooms.go) and nothing from unrelated ids — a cron
+// job's service-token self-call depends on this to see the group's RAG/MCP.
+func TestGroupScopeFromSessionID(t *testing.T) {
+	cases := []struct{ sessionID, want string }{
+		{"webex-g3-Y2lzY29zcGFyazovL3Vz", "g3"},
+		{"room-g3", "g3"},
+		{"webex", ""},       // the literal bug this exists to catch
+		{"default", ""},
+		{"u5-telegram", ""}, // personal, not a group scope
+	}
+	for _, c := range cases {
+		if got := groupScopeFromSessionID(c.sessionID); got != c.want {
+			t.Errorf("groupScopeFromSessionID(%q)=%q, want %q", c.sessionID, got, c.want)
+		}
+	}
+}

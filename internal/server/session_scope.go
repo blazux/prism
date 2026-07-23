@@ -22,6 +22,24 @@ import (
 
 var userPrefixRe = regexp.MustCompile(`^u\d+-`)
 var userIDPrefixRe = regexp.MustCompile(`^u\d+`)
+var groupScopeInSessionRe = regexp.MustCompile(`(?:^|-)(g\d+)(?:-|$)`)
+
+// groupScopeFromSessionID extracts the group scope ("g<id>") embedded in a
+// shared-agent session id — "room-g<id>" (rooms.go) or "webex-g<id>-<roomID>"
+// (webex.go) — or "" if the id carries no group token. Lets a service-token
+// self-call (cron job, custom tool, widget — all authenticate with the
+// deployment-wide Bearer PRISM_TOKEN) recover the group scope of the shared
+// agent it's really acting on behalf of, the same way personalScopeFromSessionID
+// recovers a personal "u<id>" scope for a Telegram/browser session. Without
+// this, a cron job created inside a Webex/room chat and later firing against
+// /api/chat resolves to an empty scope and the group's MCP/RAG become
+// invisible — the model has no way to tell it's blind, it just sees fewer tools.
+func groupScopeFromSessionID(sessionID string) string {
+	if m := groupScopeInSessionRe.FindStringSubmatch(sessionID); m != nil {
+		return m[1]
+	}
+	return ""
+}
 
 // personalScopeFromSessionID extracts the stable per-user scope ("u<id>") from
 // a board session id ("u<id>-<board>"), or "" if the id carries no user

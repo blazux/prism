@@ -203,7 +203,8 @@ var ToolDefinitions = []ollama.Tool{
 			Name:        "cron",
 			Description: "Manage scheduled cron jobs running inside the workspace container. Actions: list, add (name+schedule+command, plus a description), remove (name). Jobs also appear read-only in the user's Tasks list.\n" +
 				"To deliver a result to the user on a messaging channel on a schedule, make the command POST a prompt to yourself with delivery enabled. Set \"deliver\" to \"telegram\", \"slack\" or \"webex\" (Webex posts to the announcement room the group admin picked in the Webex config), e.g.:\n" +
-				"curl -s -X POST $PRISM_URL/api/chat -H \"Authorization: Bearer $PRISM_TOKEN\" -H 'Content-Type: application/json' -d '{\"message\":\"Summarize my unread emails in 5 bullet points\",\"session\":\"telegram\",\"deliver\":\"telegram\"}'\n" +
+				"curl -s -X POST $PRISM_URL/api/chat -H \"Authorization: Bearer $PRISM_TOKEN\" -H 'Content-Type: application/json' -d '{\"message\":\"Summarize my unread emails in 5 bullet points\",\"session\":\"'$PRISM_SESSION'\",\"deliver\":\"telegram\"}'\n" +
+				"ALWAYS use $PRISM_SESSION for \"session\" (never a hardcoded channel name like \"telegram\"/\"webex\") — it's the session you're in right now, and it carries THIS chat's knowledge base/MCP servers along to the scheduled run. A hardcoded literal creates a different, empty session with no tools.\n" +
 				"Use \"deliver\" only when you want the model's ANSWER delivered. To post an exact text, push a raw line instead:\n" +
 				"  Telegram: curl -s -X POST $PRISM_URL/api/telegram/send -H \"Authorization: Bearer $PRISM_TOKEN\" -d '{\"text\":\"Backup finished ✅\"}'\n" +
 				"  Webex:    curl -s -X POST $PRISM_URL/api/webex/send -H \"Authorization: Bearer $PRISM_TOKEN\" -d '{\"text\":\"Bonjour à tous !\"}'  (posts to the group's announcement room)\n" +

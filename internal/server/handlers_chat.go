@@ -102,6 +102,10 @@ func uniqueUploadPath(dir, name string) string {
 //
 //	{"session":"default","message":"Analyse les CVE…","model":"llama3"}
 //
+// From a cron job, "session" MUST be $PRISM_SESSION (the session the cron was
+// created from), not a hardcoded literal — a made-up session id has none of
+// that chat's RAG/MCP scope, so the agent silently loses its tools.
+//
 // The agent runs to completion (max 10 min), saves the exchange to DB history,
 // fires any notify calls normally, and returns the final response.
 // Secrets (request_secret) are not available in this headless mode.
