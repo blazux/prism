@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,27 @@ const (
 	// telegramSessionID is the reserved session for the Telegram bridge.
 	telegramSessionID = "telegram"
 )
+
+// liveContextCharBudget is roughly how large Agent.history's total content is
+// allowed to get before compactLiveContextIfNeeded kicks in. This is
+// deliberately independent of — and not synced with — MaybeSummarize's
+// DB-side thresholds above: that's the agent's long-term memory, summarized
+// on its own schedule, and it's fine if what it keeps diverges from what the
+// live chat keeps. This constant governs what actually gets replayed to the
+// LLM on every call (see callOllama) — a long-running session (same Agent,
+// many turns) would otherwise grow this unbounded until the backend rejects
+// the prompt as too long, with "new chat" as the only recourse. Character-
+// based like every other size cap in this codebase (no tokenizer dependency
+// anywhere here). Override via LIVE_CONTEXT_CHAR_BUDGET for a deployment
+// running a model with a known-larger/smaller context.
+var liveContextCharBudget = func() int {
+	if v := os.Getenv("LIVE_CONTEXT_CHAR_BUDGET"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 150_000
+}()
 
 type Agent struct {
 	ollama          ollama.Backend
@@ -254,6 +276,115 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 		a.history = append(a.history, msg)
 	}
 	log.Printf("[agent] loaded %d messages from DB", len(a.history))
+}
+
+// compactLiveContextIfNeeded shrinks the LIVE in-memory history when it gets
+// critically large, independent of and not synced with MaybeSummarize's
+// DB-side long-term memory (see liveContextCharBudget's doc comment). Never
+// touches tool-result CONTENT — never truncates an MCP or any other tool's
+// payload, only decides whether an older message is kept or replaced by a
+// short summary of the span it was part of. Only ever cuts at a "user"
+// message boundary so an in-progress turn's own tool calls are never split
+// from the assistant message that requested them — this also means it can
+// never discard the CURRENT task's own working data, only completed older
+// turns.
+func (a *Agent) compactLiveContextIfNeeded(ctx context.Context, events chan<- Event) {
+	a.histMu.Lock()
+	total := 0
+	for _, m := range a.history {
+		total += len(m.Content)
+	}
+	if total <= liveContextCharBudget {
+		a.histMu.Unlock()
+		return
+	}
+	// Walk forward from the start until the KEPT tail is back under half the
+	// budget (so compaction doesn't immediately re-trigger next iteration),
+	// then advance to the next "user" boundary for safety.
+	target := liveContextCharBudget / 2
+	cut, kept := 0, total
+	for cut < len(a.history) && kept > target {
+		kept -= len(a.history[cut].Content)
+		cut++
+	}
+	for cut < len(a.history) && a.history[cut].Role != "user" {
+		cut++
+	}
+	if cut == 0 || cut >= len(a.history) {
+		a.histMu.Unlock()
+		return // nothing safe to drop (e.g. a single huge in-progress turn)
+	}
+	dropped := append([]ollama.Message(nil), a.history[:cut]...)
+	tail := append([]ollama.Message(nil), a.history[cut:]...)
+	a.histMu.Unlock()
+
+	summary := a.summarizeDroppedSpan(ctx, dropped)
+
+	a.histMu.Lock()
+	a.history = append([]ollama.Message{
+		{Role: "user", Content: "[Contexte compacté automatiquement — résumé des échanges précédents : " + summary + "]"},
+	}, tail...)
+	a.histMu.Unlock()
+
+	log.Printf("[agent] session=%s compacted live context: dropped %d messages, kept %d", a.sessionID, len(dropped), len(tail))
+	events <- Event{Type: "progress", Content: fmt.Sprintf(
+		"Contexte compacté (%d messages plus anciens résumés) pour rester dans les limites du modèle.", len(dropped))}
+}
+
+// summarizeDroppedSpan asks the model to concisely summarize a span of
+// messages being dropped from the live context during compaction. Best
+// effort: never propagates an error or blocks the turn indefinitely — falls
+// back to a generic note so compaction can't itself become a source of
+// failures. Runs silently (no streamed "stream" events) so it never appears
+// as if the assistant said something in the visible transcript.
+func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Message) string {
+	const fallback = "échanges antérieurs compactés — détails non résumés suite à une erreur"
+	var sb strings.Builder
+	for _, m := range dropped {
+		if m.Content == "" {
+			continue
+		}
+		fmt.Fprintf(&sb, "[%s] %s\n", m.Role, m.Content)
+	}
+	if sb.Len() == 0 {
+		return fallback
+	}
+
+	sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	req := ollama.ChatRequest{
+		Model: a.model,
+		Messages: []ollama.Message{
+			{Role: "system", Content: "Summarize the following conversation excerpt concisely (a few sentences), preserving key facts, decisions, and any file/data references. Do not add commentary or preamble."},
+			{Role: "user", Content: sb.String()},
+		},
+		NoThinking: true,
+		Options:    ollama.Options{NumPredict: 300},
+	}
+	ch := make(chan ollama.StreamEvent, 20)
+	go func() {
+		a.ollama.Chat(sctx, req, ch)
+		close(ch)
+	}()
+
+	var out strings.Builder
+	failed := false
+	for ev := range ch {
+		if ev.Err != nil {
+			failed = true
+			continue
+		}
+		out.WriteString(ev.Content)
+	}
+	if failed {
+		return fallback
+	}
+	summary := strings.TrimSpace(stripThinkingBlocks(out.String()))
+	if summary == "" {
+		return fallback
+	}
+	return summary
 }
 
 // stripThinkingBlocks removes <thought>…</thought> and <thinking>…</thinking> blocks
@@ -499,6 +630,10 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			return
 		default:
 		}
+
+		// Checked every iteration, not just at turn-end, so it also catches
+		// bloat accumulating within one long multi-tool-call turn.
+		a.compactLiveContextIfNeeded(ctx, events)
 
 		fullContent, toolCalls, err := a.callOllama(ctx, learningsCtx, events)
 		if err != nil {
