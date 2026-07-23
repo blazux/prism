@@ -212,6 +212,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/notes", s.handleNotes)
 	mux.HandleFunc("/api/notes/share", s.handleNoteShare)
 	mux.HandleFunc("/api/notes/source", s.handleNotesSource)
+	mux.HandleFunc("/api/notes/image", s.handleNoteImage)
 	mux.HandleFunc("/api/caldav/config", s.handleCalDAVConfig)
 	mux.HandleFunc("/api/todoist/config", s.handleTodoistConfig)
 	mux.HandleFunc("/api/oauth/", s.handleOAuth)

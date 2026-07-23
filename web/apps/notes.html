@@ -134,6 +134,8 @@
           </div>
           <button class="btn" id="share-btn" onclick="toggleShare()" title="Share this note with your group" style="display:none">📤 Share</button>
           <button class="btn" id="kn-btn" onclick="addToKnowledge()" title="Add this note to the agent's knowledge base (RAG)" style="display:none">🧠</button>
+          <button class="btn" id="img-btn" onclick="$('img-file').click()" title="Insert an image">🖼 Image</button>
+          <input type="file" id="img-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="insertImage(event)">
           <button class="btn" id="save-btn" onclick="saveNote()">Save</button>
           <button class="btn" id="del-btn" onclick="deleteNote()" title="Delete" style="color:var(--red)">🗑</button>
         </div>
@@ -518,6 +520,32 @@ function applyResult(how) {
   closeResult(); saveNote();
 }
 function closeResult() { $('ai-result').classList.remove('open'); }
+
+async function insertImage(event) {
+  const file = event.target.files[0];
+  event.target.value = '' // allow picking the same file again later
+  if (!file || !selectedId) return;
+  const btn = $('img-btn'), orig = btn.textContent;
+  btn.textContent = '⏳'; btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/notes/image', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    const ta = $('e-body');
+    const at = ta.selectionStart != null ? ta.selectionStart : ta.value.length;
+    const alt = file.name.replace(/\.[^.]+$/, '');
+    const md = `![${alt}](${data.url})`;
+    ta.value = ta.value.slice(0, at) + md + ta.value.slice(at);
+    if (mode !== 'edit') updatePreview();
+    saveNote();
+  } catch (e) {
+    alert('Image upload failed: ' + e.message);
+  } finally {
+    btn.textContent = orig; btn.disabled = false;
+  }
+}
 function customAI() { $('p-instr').value = ''; $('overlay').classList.add('open'); setTimeout(() => $('p-instr').focus(), 30); }
 function closePrompt() { $('overlay').classList.remove('open'); }
 function runCustom() { const i = $('p-instr').value.trim(); closePrompt(); if (i) runAI('custom', i, 'Custom'); }

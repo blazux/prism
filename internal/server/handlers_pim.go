@@ -8,8 +8,10 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +62,60 @@ func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(v)
+}
+
+// handleNoteImage handles POST /api/notes/image (multipart form, field
+// "file") — uploads an image to embed in a note body. Saved under the
+// existing public "workspace/data/" static mount (server.go's /data/ route,
+// already serves correct Content-Types by extension — unlike /api/file,
+// which forces text/plain) so a note's Markdown ![alt](url) syntax actually
+// renders an image, not raw bytes. Scoped by pimScopeFor like every other
+// note operation, purely to avoid filename collisions between users/groups
+// — /data/ itself has no access control, same as today for any other file
+// dropped there.
+func (s *Server) handleNoteImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad form")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "file required")
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	allowedExt := map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true}
+	if !allowedExt[ext] {
+		writeErr(w, http.StatusBadRequest, "unsupported image type (png, jpg, jpeg, gif, webp only)")
+		return
+	}
+
+	scope := s.pimScopeFor(r)
+	dir := filepath.Join(s.cfg.WorkspaceDir, "data", "notes", scope)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		writeErr(w, http.StatusInternalServerError, "mkdir: "+err.Error())
+		return
+	}
+
+	name := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+	dst, err := os.Create(filepath.Join(dir, name))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "create: "+err.Error())
+		return
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, file); err != nil {
+		writeErr(w, http.StatusInternalServerError, "write: "+err.Error())
+		return
+	}
+
+	writeJSON(w, map[string]string{"url": fmt.Sprintf("/data/notes/%s/%s", scope, name)})
 }
 
 func (s *Server) pimStore(w http.ResponseWriter) bool {
