@@ -142,6 +142,14 @@ func (e *ToolExecutor) deleteFile(path string) (string, error) {
 		return "", fmt.Errorf("invalid path")
 	}
 	fullPath := filepath.Join(e.workspaceDir, path)
+	// A tool shipped WITH Prism (e.g. the pcap reader) lives in the same
+	// directory as tools the agent creates itself via register_tool, with no
+	// other distinction — refuse deleting one specifically marked "protected"
+	// in its own "# TOOL: {...}" header, so it can't be removed by mistake.
+	// Agent-created tools are unaffected and remain fully deletable.
+	if e.customMgr != nil && filepath.Dir(fullPath) == e.customMgr.Dir() && e.customMgr.IsProtectedFilename(filepath.Base(fullPath)) {
+		return "", fmt.Errorf("%q is a tool shipped with Prism and cannot be deleted", filepath.Base(fullPath))
+	}
 	if err := os.Remove(fullPath); err != nil {
 		return "", err
 	}

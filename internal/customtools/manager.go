@@ -12,15 +12,24 @@ import (
 )
 
 type Tool struct {
-	Name        string                `json:"name"`
-	Description string                `json:"description"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 	// WhenToUse / Usage are optional richer metadata folded into the description
 	// the model sees, so it picks the tool by intent (when + how) rather than by
 	// guessing from the name. Both are backward-compatible (empty = old behavior).
-	WhenToUse   string                `json:"when_to_use"`
-	Usage       string                `json:"usage"`
-	Parameters  ollama.ToolParameters `json:"parameters"`
-	Filename    string                `json:"filename"`
+	WhenToUse  string                `json:"when_to_use"`
+	Usage      string                `json:"usage"`
+	Parameters ollama.ToolParameters `json:"parameters"`
+	Filename   string                `json:"filename"`
+	// Protected marks a tool the agent may call and reload, but must never
+	// delete or overwrite — set via "protected":true in the tool's own
+	// "# TOOL: {...}" header. For tools shipped WITH Prism (e.g. the embedded
+	// pcap reader, agent_tools/pcap.py, re-materialized from the binary at
+	// boot) rather than created by the agent itself via register_tool. A
+	// self-declared flag on the file rather than external config, so any
+	// future embedded tool is protected automatically with no code changes
+	// elsewhere. See IsProtected.
+	Protected bool `json:"protected"`
 }
 
 // llmDescription composes the description sent to the model from the base
@@ -76,6 +85,24 @@ func (m *Manager) Get(name string) *Tool {
 		}
 	}
 	return nil
+}
+
+// IsProtectedFilename reports whether the tool CURRENTLY on disk under this
+// filename (e.g. "pcap.py") is marked protected — used by delete_file and
+// register_tool's overwrite path, both of which only have a filename/path to
+// go on, not the tool's declared name. Deliberately checks the DISCOVERED
+// (already-parsed-from-disk) set, never a caller-supplied claim, so a new
+// file that merely calls itself "pcap" without actually being on disk yet
+// can't bypass the check.
+func (m *Manager) IsProtectedFilename(filename string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, t := range m.tools {
+		if t.Filename == filename {
+			return t.Protected
+		}
+	}
+	return false
 }
 
 func (m *Manager) ToOllamaTools() []ollama.Tool {
@@ -134,6 +161,7 @@ func parseToolMeta(path, filename string) (Tool, bool) {
 			WhenToUse   string                `json:"when_to_use"`
 			Usage       string                `json:"usage"`
 			Parameters  ollama.ToolParameters `json:"parameters"`
+			Protected   bool                  `json:"protected"`
 		}
 		if err := json.Unmarshal([]byte(raw), &meta); err != nil || meta.Name == "" {
 			continue
@@ -145,6 +173,7 @@ func parseToolMeta(path, filename string) (Tool, bool) {
 			Usage:       meta.Usage,
 			Parameters:  meta.Parameters,
 			Filename:    filename,
+			Protected:   meta.Protected,
 		}, true
 	}
 	return Tool{}, false

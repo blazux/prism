@@ -51,6 +51,10 @@ func (e *ToolExecutor) registerTool(code string) (string, error) {
 		return "", fmt.Errorf("tool name %q has no usable characters for a filename", name)
 	}
 
+	if e.customMgr.IsProtectedFilename(base) {
+		return "", fmt.Errorf("a tool named %q is shipped with Prism and cannot be overwritten — pick a different name", name)
+	}
+
 	path := filepath.Join(e.customMgr.Dir(), base)
 	if err := os.WriteFile(path, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("write script: %w", err)
