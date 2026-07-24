@@ -229,7 +229,6 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/webex/config", s.handleWebexConfig)
 	mux.HandleFunc("/api/webex/rooms", s.handleWebexRooms)
 	mux.HandleFunc("/api/webex/send", s.handleWebexSend)
-	mux.HandleFunc("/webex", s.handleWebexPage)
 	mux.HandleFunc("/api/skills", s.handleSkills)
 	mux.HandleFunc("/api/email/config", s.handleEmailConfig)
 	mux.HandleFunc("/api/email/unread", s.handleEmailUnread)

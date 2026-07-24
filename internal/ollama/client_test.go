@@ -102,3 +102,33 @@ func TestChat_RetriesTransientThenSucceeds(t *testing.T) {
 		t.Errorf("calls = %d, want 3 (2 failures + 1 success)", calls)
 	}
 }
+
+// Ping and ListModels previously ignored the HTTP status code entirely — a
+// reverse proxy returning a 502/404 HTML error page for /api/tags still read
+// as "healthy" (Ping) or decoded into an empty, error-free model list
+// (ListModels), masking a genuinely down backend.
+func TestPing_NonOKStatusIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.Ping(context.Background()); err == nil {
+		t.Error("expected error for 502 response, got nil")
+	}
+}
+
+func TestListModels_NonOKStatusIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("<html>not found</html>"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	models, err := c.ListModels(context.Background())
+	if err == nil {
+		t.Errorf("expected error for 404 response, got nil (models=%v)", models)
+	}
+}

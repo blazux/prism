@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -187,7 +188,14 @@ func (m *Manager) bearerFor(ctx context.Context, scope, authSecret string) (stri
 			return "", fmt.Errorf("refresh token: %w — the server may need re-authorization", err)
 		}
 		st.Token = newTok
-		_ = m.saveOAuthState(ctx, scope, strings.TrimPrefix(authSecret, oauthSecretPrefix), st)
+		if err := m.saveOAuthState(ctx, scope, strings.TrimPrefix(authSecret, oauthSecretPrefix), st); err != nil {
+			// Non-fatal: the refreshed token still works for this call. But if this
+			// keeps failing, every subsequent call re-refreshes instead of reusing
+			// the saved token, and burns through the refresh token — some providers
+			// rotate/invalidate it on use, so this can eventually break the
+			// integration. Log so it's visible instead of silently degrading.
+			log.Printf("[mcp] save refreshed oauth token (scope=%s id=%s): %v", scope, strings.TrimPrefix(authSecret, oauthSecretPrefix), err)
+		}
 	}
 	return "Bearer " + st.Token.AccessToken, nil
 }

@@ -1081,6 +1081,7 @@ const TOOL_CATEGORIES = [
 ]
 
 async function renderToolsTab(container) {
+  await computeRagManage() // resolves MULTI_USER before the personal-MCP guard below runs
   const page = document.createElement('div')
   page.className = 'settings-page'
   container.appendChild(page)
@@ -1115,12 +1116,18 @@ async function renderToolsTab(container) {
     page.appendChild(section)
   }
 
-  // MCP tools
-  try {
-    const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
-    const data = await res.json()
-    mcpServers = data.servers || []
-  } catch { mcpServers = [] }
+  // MCP tools (personal scope — retired server-side under MULTI_USER, see
+  // renderMCPTab's identical guard; don't even fetch it there, it's a
+  // guaranteed 403 today).
+  if (!MULTI_USER) {
+    try {
+      const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+      const data = await res.json()
+      mcpServers = data.servers || []
+    } catch { mcpServers = [] }
+  } else {
+    mcpServers = []
+  }
 
   const enabledMCP = mcpServers.filter(s => s.enabled && s.tools && s.tools.length > 0)
   if (enabledMCP.length > 0) {
@@ -1231,14 +1238,18 @@ async function renderMCPTab(container) {
   }
 
   // Group-shared MCP servers (managed by the group admin) — read-only view.
+  let anyGroupSection = false
+  let hasGroups = false
   try {
     const my = await fetch('/api/my/groups').then(r => r.json())
+    hasGroups = (my.groups || []).length > 0
     for (const g of (my.groups || [])) {
       const gid = g.id || g.groupId
       const gname = g.name || g.groupName
       const d = await fetch(`/api/group/mcp?group=${gid}`).then(r => r.ok ? r.json() : { servers: [] })
       const servers = d.servers || []
       if (!servers.length) continue
+      anyGroupSection = true
       const sec = document.createElement('div')
       sec.className = 'mcp-add-form'
       sec.innerHTML = `<div class="mcp-add-title">“${escHtml(gname)}” group MCP servers</div>
@@ -1256,6 +1267,18 @@ async function renderMCPTab(container) {
       page.appendChild(sec)
     }
   } catch (_) {}
+
+  // MULTI_USER + nothing rendered above = an otherwise-blank page with no
+  // explanation (the RAG tab already has an equivalent message for the
+  // groupless case — this mirrors it here too).
+  if (MULTI_USER && !anyGroupSection) {
+    const msg = document.createElement('div')
+    msg.style.cssText = 'padding:10px 12px;color:var(--text3);font-size:11.5px'
+    msg.textContent = hasGroups
+      ? 'No MCP servers configured for your group yet — ask your group admin to add one from the Admin console.'
+      : "You're not part of a group yet — ask an admin to add you to one to access shared MCP servers."
+    page.appendChild(msg)
+  }
 }
 
 function renderMCPServerList(page) {

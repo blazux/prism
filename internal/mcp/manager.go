@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"prism/internal/memory"
 	"prism/internal/ollama"
 )
@@ -29,6 +31,14 @@ type Manager struct {
 	store     *memory.Store
 	clientsMu sync.Mutex
 	clients   map[string]*Client // keyed by "sessionID:serverID", populated lazily
+	// initGroup collapses concurrent getOrInitClient calls for the same key
+	// into one dial+handshake — without it, two simultaneous tool calls for a
+	// not-yet-cached server both pass the initial cache-miss check, both
+	// Initialize(), and the second write silently wins in m.clients,
+	// discarding the first (not a leak — Client holds no persistent
+	// connection — just a wasted duplicate handshake, worth avoiding if a
+	// server is stateful/rate-limited).
+	initGroup singleflight.Group
 	pendingMu sync.Mutex
 	pending   map[string]*pendingOAuth // OAuth flows awaiting the consent redirect, keyed by state
 }
@@ -240,16 +250,37 @@ func (m *Manager) getOrInitClient(ctx context.Context, sessionID, serverID, url,
 	if ok {
 		return client, nil
 	}
-	client = NewClient(url, authHeader)
-	initCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	if err := client.Initialize(initCtx); err != nil {
+	// singleflight.Do collapses concurrent callers for this key into a single
+	// dial+handshake — see initGroup's doc comment. Note: if several callers
+	// join the same in-flight call with different contexts, the work itself
+	// runs under whichever caller's context started it; an early cancellation
+	// there aborts it for every joined caller. Acceptable here (worst case:
+	// one caller's cancel makes a sibling turn retry the init on its next
+	// tool call) given the alternative is the duplicate-handshake race this
+	// closes.
+	v, err, _ := m.initGroup.Do(key, func() (interface{}, error) {
+		m.clientsMu.Lock()
+		if c, ok := m.clients[key]; ok {
+			m.clientsMu.Unlock()
+			return c, nil
+		}
+		m.clientsMu.Unlock()
+
+		c := NewClient(url, authHeader)
+		initCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		if err := c.Initialize(initCtx); err != nil {
+			return nil, err
+		}
+		m.clientsMu.Lock()
+		m.clients[key] = c
+		m.clientsMu.Unlock()
+		return c, nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	m.clientsMu.Lock()
-	m.clients[key] = client
-	m.clientsMu.Unlock()
-	return client, nil
+	return v.(*Client), nil
 }
 
 // toOllamaTool converts an MCP tool definition to Ollama's format.

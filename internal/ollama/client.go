@@ -263,6 +263,9 @@ func (c *Client) Ping(ctx context.Context) error {
 		return err
 	}
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama returned %d", resp.StatusCode)
+	}
 	return nil
 }
 
@@ -279,6 +282,9 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama returned %d", resp.StatusCode)
+	}
 
 	var result struct {
 		Models []struct {

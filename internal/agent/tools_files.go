@@ -54,6 +54,9 @@ func (e *ToolExecutor) downloadFile(ctx context.Context, rawURL, path string) (s
 	if err != nil {
 		return "", fmt.Errorf("write failed: %w", err)
 	}
+	if e.onFileChange != nil {
+		e.onFileChange()
+	}
 	return fmt.Sprintf("Downloaded %d bytes → %s", written, path), nil
 }
 
