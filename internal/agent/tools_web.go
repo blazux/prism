@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +17,26 @@ import (
 
 	"golang.org/x/net/html"
 )
+
+// isPrivateHost reports whether host (an IP literal or hostname) resolves to
+// an RFC1918/loopback/link-local address — i.e. it's on the local network
+// rather than the public internet. Lab and IoT devices on such addresses
+// routinely serve self-signed certs with no IP SANs, which every Go and
+// browser TLS stack rejects by default. We skip verification ONLY for these
+// addresses: an LLM-driven tool that fetches arbitrary URLs (from web search
+// results, a user's paste, etc.) must not silently disable TLS verification
+// for the public internet, where it would enable a real MITM.
+func isPrivateHost(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		ips, err := net.LookupIP(host)
+		if err != nil || len(ips) == 0 {
+			return false
+		}
+		ip = ips[0]
+	}
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+}
 
 func (e *ToolExecutor) httpRequest(ctx context.Context, method, rawURL string, headers map[string]string, body string) (string, error) {
 	u, err := url.Parse(rawURL)
@@ -41,6 +63,11 @@ func (e *ToolExecutor) httpRequest(ctx context.Context, method, rawURL string, h
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
+	if u.Scheme == "https" && isPrivateHost(u.Hostname()) {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		client.Transport = tr
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("request failed: %w", err)
@@ -134,14 +161,15 @@ const browserScript = `import sys, json, re
 from playwright.sync_api import sync_playwright
 
 url = sys.argv[1]
-js_expr = sys.argv[2] if len(sys.argv) > 2 else None
+js_expr = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
+ignore_https_errors = len(sys.argv) > 3 and sys.argv[3] == '1'
 
 with sync_playwright() as p:
     browser = p.chromium.launch(
         headless=True,
         args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
     )
-    page = browser.new_page()
+    page = browser.new_page(ignore_https_errors=ignore_https_errors)
     page.goto(url, wait_until='domcontentloaded', timeout=30000)
     page.wait_for_timeout(800)
 
@@ -208,12 +236,11 @@ func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (
 	}
 	defer os.Remove(scriptPath)
 
-	var cmd string
-	if jsExpr == "" {
-		cmd = fmt.Sprintf("python3 /workspace/.browser_exec.py %q 2>&1", rawURL)
-	} else {
-		cmd = fmt.Sprintf("python3 /workspace/.browser_exec.py %q %q 2>&1", rawURL, jsExpr)
+	ignoreHTTPS := "0"
+	if u, err := url.Parse(rawURL); err == nil && u.Scheme == "https" && isPrivateHost(u.Hostname()) {
+		ignoreHTTPS = "1"
 	}
+	cmd := fmt.Sprintf("python3 /workspace/.browser_exec.py %q %q %q 2>&1", rawURL, jsExpr, ignoreHTTPS)
 
 	out, err := e.docker.Exec(ctx, cmd, 60*time.Second)
 	if err != nil {
@@ -247,6 +274,8 @@ with sync_playwright() as p:
     ctx_opts = {}
     if os.path.exists(SESSION_FILE):
         ctx_opts['storage_state'] = SESSION_FILE
+    if config.get('ignore_https_errors'):
+        ctx_opts['ignore_https_errors'] = True
     context = browser.new_context(**ctx_opts)
     # Authenticated widget preview: attach the Prism service cookie, scoped to the
     # start URL's host but every path on it (path='/') — a widget calls /api/...
@@ -361,11 +390,16 @@ func (e *ToolExecutor) browserActAuth(ctx context.Context, rawURL string, rawAct
 	}
 
 	type actInput struct {
-		URL        string      `json:"url,omitempty"`
-		Actions    interface{} `json:"actions"`
-		AuthCookie string      `json:"auth_cookie,omitempty"`
+		URL               string      `json:"url,omitempty"`
+		Actions           interface{} `json:"actions"`
+		AuthCookie        string      `json:"auth_cookie,omitempty"`
+		IgnoreHTTPSErrors bool        `json:"ignore_https_errors,omitempty"`
 	}
-	inputJSON, err := json.Marshal(actInput{URL: rawURL, Actions: rawActions, AuthCookie: authToken})
+	ignoreHTTPS := false
+	if u, err := url.Parse(rawURL); err == nil && u.Scheme == "https" && isPrivateHost(u.Hostname()) {
+		ignoreHTTPS = true
+	}
+	inputJSON, err := json.Marshal(actInput{URL: rawURL, Actions: rawActions, AuthCookie: authToken, IgnoreHTTPSErrors: ignoreHTTPS})
 	if err != nil {
 		return "", fmt.Errorf("marshal actions: %w", err)
 	}
