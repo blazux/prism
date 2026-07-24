@@ -411,6 +411,10 @@ function applyNoteChrome(n) {
   $('del-btn').style.display = readOnly ? 'none' : '';
   $('del-btn').title = isGroup ? 'Remove from group' : 'Delete';
   document.querySelector('.ai-bar').style.display = readOnly ? 'none' : '';
+  // Uploading on a read-only shared note would succeed (the endpoint has no
+  // note-id check) but saveNote() then silently no-ops — the image would
+  // appear to be added, then vanish on reload, leaving an orphaned upload.
+  $('img-btn').style.display = readOnly ? 'none' : '';
   // RAG upsert — group admins / personal scope / global admin only.
   $('kn-btn').style.display = CAPS.canManageRag ? '' : 'none';
   // Share — only on a personal note, when the user has a group. On a group note,

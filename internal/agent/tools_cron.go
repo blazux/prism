@@ -36,7 +36,28 @@ func shQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-type CronJob struct{ Name, Owner, Desc, Schedule, Command string }
+type CronJob struct {
+	Name, Owner, Desc, Schedule, Command string
+	Enabled                              bool
+}
+
+// cronDisabledPrefix marks a paused job's command line so it's preserved
+// (and can be re-enabled) but not run by cron. Mirrors
+// server/handlers_cron.go's cronDisabledPrefix constant — can't share it
+// directly (internal/agent can't import internal/server), so it's
+// duplicated as a literal; keep both in sync if it ever changes.
+const cronDisabledPrefix = "#DISABLED# "
+
+// splitCronSchedule separates a cron schedule (5 fields) from the command
+// that follows it. Mirrors server/handlers_cron.go's splitSchedule for the
+// same reason cronDisabledPrefix is duplicated above.
+func splitCronSchedule(line string) (schedule, command string) {
+	fields := strings.Fields(line)
+	if len(fields) < 6 {
+		return line, ""
+	}
+	return strings.Join(fields[:5], " "), strings.Join(fields[5:], " ")
+}
 
 // ParseCronJobs splits a crontab into the agent-managed jobs (marker blocks).
 // Exported so internal/server can render pending cron jobs into the Tasks
@@ -55,22 +76,25 @@ func ParseCronJobs(raw string) []CronJob {
 		switch {
 		case strings.HasPrefix(t, "# agent-job:"):
 			flush()
-			cur = &CronJob{Name: strings.TrimSpace(strings.TrimPrefix(t, "# agent-job:"))}
+			cur = &CronJob{Name: strings.TrimSpace(strings.TrimPrefix(t, "# agent-job:")), Enabled: true}
 		case cur != nil && strings.HasPrefix(t, "# agent-owner:"):
 			cur.Owner = strings.TrimSpace(strings.TrimPrefix(t, "# agent-owner:"))
 		case cur != nil && strings.HasPrefix(t, "# agent-desc:"):
 			cur.Desc = strings.TrimSpace(strings.TrimPrefix(t, "# agent-desc:"))
+		case cur != nil && cur.Schedule == "" && strings.HasPrefix(t, cronDisabledPrefix):
+			// A paused job's line is itself a "#"-prefixed comment — must be
+			// checked before the generic "unrelated comment, ignore" case
+			// below, or a disabled job's Schedule/Command never get set (the
+			// bug this case fixes: it showed up in the Tasks list with a
+			// blank schedule instead of being recognized as paused).
+			cur.Enabled = false
+			cur.Schedule, cur.Command = splitCronSchedule(strings.TrimPrefix(t, cronDisabledPrefix))
+			flush()
 		case t == "" || strings.HasPrefix(t, "#"):
 			// blank line or unrelated comment — ignore
 		default:
 			if cur != nil && cur.Schedule == "" {
-				fields := strings.Fields(t)
-				if len(fields) >= 6 {
-					cur.Schedule = strings.Join(fields[:5], " ")
-					cur.Command = strings.Join(fields[5:], " ")
-				} else {
-					cur.Schedule = t
-				}
+				cur.Schedule, cur.Command = splitCronSchedule(t)
 				flush()
 			}
 		}

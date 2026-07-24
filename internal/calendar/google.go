@@ -137,6 +137,19 @@ func (p *GoogleProvider) Add(ctx context.Context, title, description, location s
 	return created.ID, nil
 }
 
+func (p *GoogleProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time) error {
+	e := start.Add(time.Hour)
+	if end != nil {
+		e = *end
+	}
+	ev := gcalEvent{
+		Summary: title, Description: description, Location: location,
+		Start: &gcalTime{DateTime: start.Format(time.RFC3339)},
+		End:   &gcalTime{DateTime: e.Format(time.RFC3339)},
+	}
+	return p.doJSON(ctx, "PATCH", gcalEventsURL+"/"+url.PathEscape(id), ev, nil)
+}
+
 func (p *GoogleProvider) Delete(ctx context.Context, id string) error {
 	return p.doJSON(ctx, "DELETE", gcalEventsURL+"/"+url.PathEscape(id), nil, nil)
 }

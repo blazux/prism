@@ -153,15 +153,24 @@ func todoistErr(resp *http.Response) error {
 	return fmt.Errorf("todoist: %s: %s", resp.Status, bytes.TrimSpace(b))
 }
 
-// Todoist priority: 4 = highest (p1) … 1 = default (p4). We have high/normal/low.
+// Todoist priority: 4 = highest (p1) … 1 = lowest (p4, also Todoist's own
+// default for a task with no priority set). We expose three tiers
+// (high/normal/low); "low" and "normal" used to both write as 1, silently
+// collapsing an explicit "low" into "normal" with no way to tell them apart
+// again on the next read. Distinct values now — high=4, normal=2, low=1 —
+// so a priority set through Prism round-trips correctly. Trade-off: a task
+// created directly in Todoist with no priority set (also value 1) now reads
+// back as "low" rather than "normal"; that's a labeling choice for
+// never-explicitly-prioritized tasks, not data loss, and unavoidable given
+// Todoist's own default already occupies the scale's floor value.
 func toTodoistPriority(p string) int {
 	switch p {
 	case "high":
 		return 4
 	case "low":
 		return 1
-	default:
-		return 1
+	default: // "normal", or anything unrecognized
+		return 2
 	}
 }
 
@@ -171,7 +180,7 @@ func fromTodoistPriority(p int) string {
 		return "high"
 	case p == 2:
 		return "normal"
-	default:
-		return "normal"
+	default: // p <= 1
+		return "low"
 	}
 }

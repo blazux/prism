@@ -198,8 +198,15 @@ func (s *Server) canManageRAGScope(ctx context.Context, u *memory.User) bool {
 // ragPersonalFallbackBlocked reports whether scope is the personal RAG fallback
 // that MULTI_USER retires: true only for a real multi-user account with no
 // group (scope starts with "u", not "g"). Never true for "" (service identity
-// / legacy single-user mode — unaffected) or for a group scope.
+// / legacy single-user mode — unaffected), for a group scope, or for the
+// reserved voiceGuestScope ("voice", voice.go) — that's the phone
+// switchboard's own fixed knowledge base, not a personal fallback, and an
+// admin can populate it (rag.go's ragScopeForRequest special-cases it) even
+// in MULTI_USER mode; blocking reads here would make it write-only.
 func (s *Server) ragPersonalFallbackBlocked(scope string) bool {
+	if scope == voiceGuestScope {
+		return false
+	}
 	return s.cfg.MultiUser && scope != "" && !strings.HasPrefix(scope, "g")
 }
 

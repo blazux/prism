@@ -3,6 +3,8 @@ package calendar
 import (
 	"context"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-ical"
@@ -96,6 +98,48 @@ func (p *CalDAVProvider) Add(ctx context.Context, title, description, location s
 		return "", err
 	}
 	return path, nil
+}
+
+// Update PUTs a fresh VEVENT to the SAME href Add originally created (id is
+// that href, e.g. ".../prism-<nanotime>.ics") — an in-place overwrite, not a
+// new object. The UID is recovered from that path (Add's own naming
+// convention: ObjectPath = uid + ".ics") so the resource keeps the same
+// identity server-side; if id doesn't match that convention (an event this
+// provider didn't create), a fresh UID is used — still a same-href PUT, just
+// without a UID to preserve.
+// uidFromObjectPath recovers the UID Add embedded in the href it returned
+// (ObjectPath = uid + ".ics"), or a fresh one if id doesn't match that shape
+// (an event this provider didn't create itself).
+func uidFromObjectPath(id string) string {
+	uid := strings.TrimSuffix(path.Base(id), ".ics")
+	if uid == "" || uid == "." || uid == "/" {
+		return caldav.NewUID()
+	}
+	return uid
+}
+
+func (p *CalDAVProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time) error {
+	conn, err := p.cfg.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	uid := uidFromObjectPath(id)
+	ev := ical.NewEvent()
+	ev.Props.SetText(ical.PropUID, uid)
+	ev.Props.SetDateTime(ical.PropDateTimeStamp, time.Now().UTC())
+	ev.Props.SetText(ical.PropSummary, title)
+	if description != "" {
+		ev.Props.SetText(ical.PropDescription, description)
+	}
+	if location != "" {
+		ev.Props.SetText(ical.PropLocation, location)
+	}
+	ev.Props.SetDateTime(ical.PropDateTimeStart, start)
+	if end != nil {
+		ev.Props.SetDateTime(ical.PropDateTimeEnd, *end)
+	}
+	_, err = conn.Client.PutCalendarObject(ctx, id, caldav.WrapCalendar(ev.Component))
+	return err
 }
 
 func (p *CalDAVProvider) Delete(ctx context.Context, id string) error {

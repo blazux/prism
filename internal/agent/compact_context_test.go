@@ -25,6 +25,23 @@ func (f *fakeSummarizeBackend) Chat(ctx context.Context, req ollama.ChatRequest,
 func (f *fakeSummarizeBackend) Ping(ctx context.Context) error                   { return nil }
 func (f *fakeSummarizeBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }
 
+// historyMutatingBackend simulates something else (the WS read pump calling
+// InjectNote/ResetHistory/SetSession) mutating history WHILE
+// summarizeDroppedSpan's LLM call is in flight (histMu deliberately
+// unlocked during that call) — the exact race compactLiveContextIfNeeded's
+// generation check guards against.
+type historyMutatingBackend struct {
+	agent *Agent
+	reply string
+}
+
+func (f *historyMutatingBackend) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
+	f.agent.InjectNote("concurrent note landed mid-summarization")
+	out <- ollama.StreamEvent{Content: f.reply}
+}
+func (f *historyMutatingBackend) Ping(ctx context.Context) error                   { return nil }
+func (f *historyMutatingBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }
+
 // Below budget: no-op, no event, history untouched.
 func TestCompactLiveContext_BelowBudget_NoOp(t *testing.T) {
 	a := &Agent{
@@ -134,4 +151,49 @@ func TestSummarizeDroppedSpan_FailureFallback(t *testing.T) {
 	if got == "something important" {
 		t.Fatal("fallback must not just echo the input back")
 	}
+}
+
+// If InjectNote lands while summarizeDroppedSpan's LLM call is in flight
+// (histMu deliberately unlocked for that ~20s best-effort call), applying
+// the stale pre-compaction view afterward must NOT silently discard the
+// concurrent note — the generation check should abort the compaction pass
+// instead, leaving the injected note in place.
+func TestCompactLiveContext_AbortsOnConcurrentMutation(t *testing.T) {
+	origBudget := liveContextCharBudget
+	liveContextCharBudget = 1000
+	defer func() { liveContextCharBudget = origBudget }()
+
+	var history []ollama.Message
+	for i := 0; i < 20; i++ {
+		history = append(history,
+			ollama.Message{Role: "user", Content: string(make([]byte, 100))},
+			ollama.Message{Role: "assistant", Content: string(make([]byte, 100))},
+		)
+	}
+	a := &Agent{model: "test", history: history}
+	a.ollama = &historyMutatingBackend{agent: a, reply: "summary"}
+
+	events := make(chan Event, 10)
+	a.compactLiveContextIfNeeded(context.Background(), events)
+	close(events)
+
+	// The concurrent InjectNote's message must survive, verbatim, as the last
+	// entry — compaction must not have overwritten it with its stale tail.
+	last := a.history[len(a.history)-1]
+	if last.Content != "concurrent note landed mid-summarization" {
+		t.Fatalf("concurrent InjectNote was lost: last message = %+v", last)
+	}
+	for _, ev := range drainEvents(events) {
+		if ev.Type == "progress" {
+			t.Error("compaction should not announce success when it aborted due to a concurrent mutation")
+		}
+	}
+}
+
+func drainEvents(ch chan Event) []Event {
+	var out []Event
+	for len(ch) > 0 {
+		out = append(out, <-ch)
+	}
+	return out
 }

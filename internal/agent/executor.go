@@ -444,6 +444,15 @@ func (e *ToolExecutor) SetMultiUserMode(v bool) { e.multiUser = v }
 // fallback MULTI_USER retires: true only when multiUser is set and ragScope
 // isn't a group scope. Mirrors server.ragPersonalFallbackBlocked.
 func (e *ToolExecutor) ragBlocked() bool {
+	// "voice" is the reserved switchboard scope for an unidentified phone
+	// caller (internal/server/voice.go's voiceGuestScope — duplicated as a
+	// literal here since internal/agent can't import internal/server). It's
+	// a fixed shared knowledge base an admin manages, not a personal
+	// fallback, so MULTI_USER must not block it — mirrors
+	// server.ragPersonalFallbackBlocked's own exemption for the same scope.
+	if e.ragScope == "voice" {
+		return false
+	}
 	return e.multiUser && e.ragScope != "" && !strings.HasPrefix(e.ragScope, "g")
 }
 

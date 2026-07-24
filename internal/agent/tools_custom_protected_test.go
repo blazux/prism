@@ -77,3 +77,29 @@ func TestRegisterTool_RefusesOverwritingProtectedTool(t *testing.T) {
 		t.Fatalf("expected registering a new, unprotected tool to succeed: %v", err)
 	}
 }
+
+// write_file is a second, structured path (besides register_tool) that could
+// overwrite a protected tool's content — it must refuse the same way.
+func TestWriteFile_RefusesOverwritingProtectedTool(t *testing.T) {
+	e, dir := newTestExecutorWithTools(t)
+	toolsDir := filepath.Join(dir, "agent_tools")
+	writeToolFile(t, toolsDir, "pcap.py", `# TOOL: {"name":"pcap","protected":true,"description":"d"}`)
+	writeToolFile(t, toolsDir, "weather.py", `# TOOL: {"name":"weather","description":"d"}`)
+	e.customMgr.Reload()
+
+	if _, err := e.writeFile("agent_tools/pcap.py", "evil replacement"); err == nil {
+		t.Fatal("expected write_file to refuse overwriting a protected tool")
+	}
+	data, err := os.ReadFile(filepath.Join(toolsDir, "pcap.py"))
+	if err != nil || string(data) == "evil replacement" {
+		t.Fatalf("protected tool content must not have been overwritten (err=%v)", err)
+	}
+
+	if _, err := e.writeFile("agent_tools/weather.py", "new content"); err != nil {
+		t.Fatalf("expected write_file on an unprotected tool file to succeed: %v", err)
+	}
+	// And a plain workspace file (outside agent_tools/) is entirely unaffected.
+	if _, err := e.writeFile("notes.txt", "hello"); err != nil {
+		t.Fatalf("expected write_file outside agent_tools/ to be unaffected: %v", err)
+	}
+}

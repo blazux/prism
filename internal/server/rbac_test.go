@@ -99,6 +99,7 @@ func TestRagPersonalFallbackBlocked(t *testing.T) {
 		{"multi-user, group scope", true, "g1", false},
 		{"multi-user, personal scope", true, "u5", true},
 		{"single-user, personal scope", false, "u5", false},
+		{"multi-user, voice switchboard scope", true, "voice", false},
 	}
 	for _, c := range cases {
 		s := &Server{cfg: Config{MultiUser: c.multiUser}}

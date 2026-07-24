@@ -14,6 +14,13 @@ import (
 )
 
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
+	// Same capability as /api/terminal by another door (raw read access to the
+	// whole shared workspace, including files a non-admin member has no
+	// business seeing) — gated the same way, and for the same reason
+	// handleExec already is: "gating one without the other would be theatre."
+	if !s.requireAdminUser(w, r) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	tree := s.buildFileTree(s.cfg.WorkspaceDir)
@@ -21,6 +28,13 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
+	// See handleFiles: unrestricted read/write over the whole workspace,
+	// including .secret_key (the AES key encrypting every secret in
+	// Postgres) — admin/service-identity only, no browser UI calls this today
+	// (it's documented in the agent's own system prompt as a self-call route).
+	if !s.requireAdminUser(w, r) {
+		return
+	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -45,13 +59,18 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		w.Write(data)
 	case "POST", "PUT":
 		var body struct{ Content string }
-		json.NewDecoder(r.Body).Decode(&body)
+		if json.NewDecoder(r.Body).Decode(&body) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
 		os.MkdirAll(filepath.Dir(fullPath), 0755)
 		if err := os.WriteFile(fullPath, []byte(body.Content), 0644); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		w.WriteHeader(204)
+	default:
+		http.Error(w, "method not allowed", 405)
 	}
 }
 

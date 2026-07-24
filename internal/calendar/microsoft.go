@@ -153,6 +153,25 @@ func (p *MicrosoftProvider) Add(ctx context.Context, title, description, locatio
 	return created.ID, nil
 }
 
+func (p *MicrosoftProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time) error {
+	e := start.Add(time.Hour)
+	if end != nil {
+		e = *end
+	}
+	ev := msEvent{
+		Subject: title,
+		Start:   &msDateTime{DateTime: start.UTC().Format("2006-01-02T15:04:05"), TimeZone: "UTC"},
+		End:     &msDateTime{DateTime: e.UTC().Format("2006-01-02T15:04:05"), TimeZone: "UTC"},
+	}
+	if description != "" {
+		ev.Body = &msBody{ContentType: "text", Content: description}
+	}
+	if location != "" {
+		ev.Location = &msLocation{DisplayName: location}
+	}
+	return p.doJSON(ctx, "PATCH", graphBase+"/me/events/"+url.PathEscape(id), ev, nil)
+}
+
 func (p *MicrosoftProvider) Delete(ctx context.Context, id string) error {
 	return p.doJSON(ctx, "DELETE", graphBase+"/me/events/"+url.PathEscape(id), nil, nil)
 }

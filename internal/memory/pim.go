@@ -214,3 +214,16 @@ func (s *Store) DeleteEvent(ctx context.Context, session string, id int64) error
 	_, err := s.pool.Exec(ctx, `DELETE FROM calendar_events WHERE id = $1 AND session_id = $2`, id, session)
 	return err
 }
+
+// UpdateEvent overwrites an existing event in place. Added alongside the
+// calendar.Provider interface's Update method — the UI previously worked
+// around its absence with DELETE-then-Add, which loses the row entirely if
+// the second call fails.
+func (s *Store) UpdateEvent(ctx context.Context, session string, id int64, title, description, location string, start time.Time, end *time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE calendar_events
+		SET title = $3, description = $4, location = $5, start_at = $6, end_at = $7
+		WHERE id = $1 AND session_id = $2
+	`, id, session, title, description, location, start, end)
+	return err
+}

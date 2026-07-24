@@ -487,6 +487,33 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]interface{}{"id": id})
+	case "PUT":
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			http.Error(w, "id required", 400)
+			return
+		}
+		var b struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Location    string `json:"location"`
+			Start       string `json:"start"`
+			End         string `json:"end"`
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
+		start := parsePIMTime(b.Start)
+		if start == nil {
+			http.Error(w, "valid start time required", 400)
+			return
+		}
+		if err := prov.Update(r.Context(), id, b.Title, b.Description, b.Location, *start, parsePIMTime(b.End)); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]interface{}{"ok": true})
 	case "DELETE":
 		if err := prov.Delete(r.Context(), r.URL.Query().Get("id")); err != nil {
 			http.Error(w, err.Error(), 500)

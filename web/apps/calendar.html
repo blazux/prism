@@ -450,8 +450,12 @@ async function saveForm() {
   if ($('f-allday').checked) { start = `${date}T00:00`; }
   else { start = `${date}T${$('f-start').value || '00:00'}`; if ($('f-end').value) end = `${date}T${$('f-end').value}`; }
   const body = { title, start, end, location: $('f-loc').value.trim(), description: $('f-desc').value.trim() };
-  if (editing) await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${encodeURIComponent(editing.id)}`, { method: 'DELETE' });
-  const res = await fetch(`/api/events?session=${encodeURIComponent(session)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  // In-place update (PUT) when editing — no more delete-then-recreate, which
+  // lost the event outright if the second call (the recreate) ever failed.
+  const url = editing
+    ? `/api/events?session=${encodeURIComponent(session)}&id=${encodeURIComponent(editing.id)}`
+    : `/api/events?session=${encodeURIComponent(session)}`;
+  const res = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) { $('f-err').textContent = 'Failed: ' + (await res.text()); return; }
   closeForm(); load();
 }

@@ -26,6 +26,9 @@ func (e *ToolExecutor) downloadFile(ctx context.Context, rawURL, path string) (s
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("path escapes workspace")
 	}
+	if e.isProtectedToolPath(fullPath) {
+		return "", fmt.Errorf("%q is a tool shipped with Prism and cannot be overwritten", filepath.Base(fullPath))
+	}
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
 	}
@@ -105,6 +108,9 @@ func (e *ToolExecutor) writeFile(path, content string) (string, error) {
 	}
 
 	fullPath := filepath.Join(e.workspaceDir, path)
+	if e.isProtectedToolPath(fullPath) {
+		return "", fmt.Errorf("%q is a tool shipped with Prism and cannot be overwritten", filepath.Base(fullPath))
+	}
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return "", err
 	}
@@ -136,18 +142,27 @@ func (e *ToolExecutor) readFile(path string) (string, error) {
 	return content, nil
 }
 
+// isProtectedToolPath reports whether fullPath points directly at a custom
+// tool file marked "protected" in its own "# TOOL: {...}" header (e.g. the
+// embedded pcap reader) — one shared check for every path by which a file
+// under agent_tools/ could otherwise be destroyed: delete_file, write_file's
+// overwrite, and wget/download_file's overwrite. exec_command's shell is
+// deliberately NOT gated here — sandboxing a generic shell against one
+// directory is fragile (trivially bypassed via mv/python os.remove/etc.) and
+// against this deployment's trusted-shell model; this closes the structured,
+// path-based tools instead. Agent-created (non-protected) tools are
+// unaffected by any of these checks.
+func (e *ToolExecutor) isProtectedToolPath(fullPath string) bool {
+	return e.customMgr != nil && filepath.Dir(fullPath) == e.customMgr.Dir() && e.customMgr.IsProtectedFilename(filepath.Base(fullPath))
+}
+
 func (e *ToolExecutor) deleteFile(path string) (string, error) {
 	path = filepath.Clean(NormalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
 	}
 	fullPath := filepath.Join(e.workspaceDir, path)
-	// A tool shipped WITH Prism (e.g. the pcap reader) lives in the same
-	// directory as tools the agent creates itself via register_tool, with no
-	// other distinction — refuse deleting one specifically marked "protected"
-	// in its own "# TOOL: {...}" header, so it can't be removed by mistake.
-	// Agent-created tools are unaffected and remain fully deletable.
-	if e.customMgr != nil && filepath.Dir(fullPath) == e.customMgr.Dir() && e.customMgr.IsProtectedFilename(filepath.Base(fullPath)) {
+	if e.isProtectedToolPath(fullPath) {
 		return "", fmt.Errorf("%q is a tool shipped with Prism and cannot be deleted", filepath.Base(fullPath))
 	}
 	if err := os.Remove(fullPath); err != nil {

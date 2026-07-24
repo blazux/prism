@@ -53,6 +53,9 @@ func (s *Server) cronPendingJobTasks(r *http.Request) []tasks.Item {
 		if j.Owner != "" && j.Owner != scope {
 			continue // another user's job
 		}
+		if !j.Enabled {
+			continue // paused from the Tasks app — not a pending to-do
+		}
 		title := fmt.Sprintf("⏰ %s — %s", j.Name, j.Schedule)
 		if j.Desc != "" {
 			title += " (" + j.Desc + ")"

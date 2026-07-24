@@ -86,6 +86,14 @@ type Agent struct {
 	basePersonality string // default personality prepended for non-default sessions (layered model)
 	agentName       string // optional global agent name injected into the prompt
 	historyLoaded   bool   // true after first DB load
+	// historyGen counts every external mutation of history (InjectNote,
+	// ResetHistory, SetSession) — bumped under histMu. compactLiveContextIfNeeded
+	// captures it before releasing the lock for its ~20s best-effort LLM
+	// summarization call, then checks it again before applying the compacted
+	// result: if a concurrent InjectNote/ResetHistory/SetSession landed in
+	// that window, the generation no longer matches and the stale compaction
+	// is discarded instead of clobbering what changed in the meantime.
+	historyGen int
 	// channel is the surface this turn arrives from ("" = dashboard/browser,
 	// "voice" = a phone call docked from Vox). It changes the *form* of the reply
 	// (spoken, short, no markup) and disables extended reasoning — never the
@@ -144,6 +152,7 @@ func (a *Agent) InjectNote(content string) {
 	msg := ollama.Message{Role: "user", Content: content}
 	a.histMu.Lock()
 	a.history = append(a.history, msg)
+	a.historyGen++
 	a.histMu.Unlock()
 	a.saveMessageToDB(context.Background(), msg)
 }
@@ -221,6 +230,7 @@ func (a *Agent) ResetHistory() {
 	a.history = []ollama.Message{}
 	a.toolSeq = 0
 	a.historyLoaded = false
+	a.historyGen++
 	a.histMu.Unlock()
 	if a.memStore != nil {
 		if err := a.memStore.ClearHistory(context.Background(), a.sessionID); err != nil {
@@ -241,6 +251,7 @@ func (a *Agent) SetSession(sessionID, personality string) {
 	a.history = []ollama.Message{}
 	a.toolSeq = 0
 	a.historyLoaded = false
+	a.historyGen++
 	a.histMu.Unlock()
 }
 
@@ -316,14 +327,27 @@ func (a *Agent) compactLiveContextIfNeeded(ctx context.Context, events chan<- Ev
 	}
 	dropped := append([]ollama.Message(nil), a.history[:cut]...)
 	tail := append([]ollama.Message(nil), a.history[cut:]...)
+	genBefore := a.historyGen
 	a.histMu.Unlock()
 
 	summary := a.summarizeDroppedSpan(ctx, dropped)
 
 	a.histMu.Lock()
+	if a.historyGen != genBefore {
+		// InjectNote/ResetHistory/SetSession ran while summarizeDroppedSpan was
+		// in flight (deliberately unlocked, up to ~20s) — a.history has moved
+		// on since dropped/tail were captured. Applying our stale view now
+		// would silently discard whatever that concurrent call did (a note,
+		// a "new chat", a session switch). Skip this pass; if still over
+		// budget, the next iteration will recompute from the current state.
+		a.histMu.Unlock()
+		log.Printf("[agent] session=%s compaction aborted: history changed concurrently (gen %d -> %d)", a.sessionID, genBefore, a.historyGen)
+		return
+	}
 	a.history = append([]ollama.Message{
 		{Role: "user", Content: "[Contexte compacté automatiquement — résumé des échanges précédents : " + summary + "]"},
 	}, tail...)
+	a.historyGen++
 	a.histMu.Unlock()
 
 	log.Printf("[agent] session=%s compacted live context: dropped %d messages, kept %d", a.sessionID, len(dropped), len(tail))

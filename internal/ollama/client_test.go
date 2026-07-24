@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
 
 // The generation cap is the only guard against a model that loops instead of
@@ -46,5 +48,57 @@ func TestChat_SendsGenerationCap(t *testing.T) {
 				t.Errorf("num_predict on the wire = %d, want %d", got.Options.NumPredict, tc.want)
 			}
 		})
+	}
+}
+
+// A transient failure at the start of a turn (503 / connection blip) must be
+// retried before any token is streamed — mirrors
+// internal/openai/client_test.go's TestChat_RetriesTransientThenSucceeds; the
+// GX10 fleet's flaky link bites this backend exactly as much as the
+// OpenAI-compatible one.
+func TestChat_RetriesTransientThenSucceeds(t *testing.T) {
+	old := retryBaseBackoff
+	retryBaseBackoff = time.Millisecond
+	defer func() { retryBaseBackoff = old }()
+
+	var mu sync.Mutex
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n := calls
+		calls++
+		mu.Unlock()
+		if n < 2 { // fail the first two attempts
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"message":{"content":"ok"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	ch := make(chan StreamEvent, 8)
+	go func() {
+		NewClient(srv.URL).Chat(context.Background(), ChatRequest{Model: "m"}, ch)
+		close(ch)
+	}()
+
+	var content string
+	var lastErr error
+	for ev := range ch {
+		content += ev.Content
+		if ev.Err != nil {
+			lastErr = ev.Err
+		}
+	}
+	if lastErr != nil {
+		t.Fatalf("unexpected err: %v", lastErr)
+	}
+	if content != "ok" {
+		t.Errorf("content = %q, want %q", content, "ok")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 3 {
+		t.Errorf("calls = %d, want 3 (2 failures + 1 success)", calls)
 	}
 }

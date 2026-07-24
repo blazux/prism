@@ -500,6 +500,14 @@ func (c Config) Send(to, subject, body, inReplyTo string, atts []OutAttachment) 
 	}
 	from := c.from()
 
+	// CRLF-strip every header value built from a caller-supplied string, same
+	// as attachment filenames already are (sanitizeHeaderVal) — otherwise a
+	// "\r\n" in a subject/recipient/reply-id injects arbitrary extra headers
+	// into the outgoing message.
+	to = sanitizeHeaderVal(to)
+	subject = sanitizeHeaderVal(subject)
+	inReplyTo = sanitizeHeaderVal(inReplyTo)
+
 	var msg bytes.Buffer
 	fmt.Fprintf(&msg, "From: %s\r\n", from)
 	fmt.Fprintf(&msg, "To: %s\r\n", to)
@@ -600,7 +608,7 @@ func (c Config) sendStartTLS(serverAddr string, auth smtp.Auth, from string, rcp
 // sendImplicitTLS handles port 465 (TLS from the first byte), which net/smtp's
 // SendMail (STARTTLS) does not cover.
 func (c Config) sendImplicitTLS(serverAddr string, auth smtp.Auth, from string, rcpts []string, msg []byte) error {
-	conn, err := tls.Dial("tcp", serverAddr, &tls.Config{ServerName: c.SMTPHost})
+	conn, err := tls.Dial("tcp", serverAddr, c.tlsConfig(c.SMTPHost))
 	if err != nil {
 		return fmt.Errorf("smtp tls dial: %w", err)
 	}

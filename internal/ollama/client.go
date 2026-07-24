@@ -10,6 +10,59 @@ import (
 	"time"
 )
 
+// retryBaseBackoff is the first retry delay (doubled each attempt); a package
+// var so tests can shrink it. Mirrors internal/openai/client.go's
+// postChatWithRetry — the GX10 fleet's flaky link bites this backend just as
+// much as the OpenAI-compatible one, and until now only that one retried.
+var retryBaseBackoff = time.Second
+
+// postChat retries a connection failure or a transient 502/503/504 with
+// exponential backoff (same transient-status set and budget as the
+// OpenAI-compatible client) instead of failing an entire agent turn on one
+// blip. Non-transient statuses and success are returned to the caller as-is;
+// context cancellation stops retrying immediately.
+func (c *Client) postChat(ctx context.Context, body []byte) (*http.Response, error) {
+	const maxAttempts = 4
+	backoff := retryBaseBackoff
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/chat", bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(httpReq)
+		if err == nil {
+			switch resp.StatusCode {
+			case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+				resp.Body.Close()
+				lastErr = fmt.Errorf("ollama returned %d", resp.StatusCode)
+			default:
+				return resp, nil // success (200) or a non-transient status the caller handles
+			}
+		} else {
+			lastErr = fmt.Errorf("http: %w", err) // dial/connection failure
+		}
+
+		if attempt == maxAttempts || ctx.Err() != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+
+	if lastErr == nil {
+		lastErr = ctx.Err()
+	}
+	return nil, lastErr
+}
+
 // Backend is the wire-neutral contract every LLM provider must satisfy. The
 // Ollama and OpenAI-compatible (SGLang/vLLM/…) clients both implement it, so
 // callers depend on this interface rather than a concrete client.
@@ -146,16 +199,9 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 		return
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/chat", bytes.NewReader(body))
+	resp, err := c.postChat(ctx, body)
 	if err != nil {
-		out <- StreamEvent{Err: fmt.Errorf("request: %w", err)}
-		return
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		out <- StreamEvent{Err: fmt.Errorf("http: %w", err)}
+		out <- StreamEvent{Err: err}
 		return
 	}
 	defer resp.Body.Close()
