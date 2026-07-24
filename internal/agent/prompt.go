@@ -131,7 +131,7 @@ Call any built-in tool from a custom tool or cron script (SERVER-SIDE only — u
   Authorization: Bearer $PRISM_TOKEN · Content-Type: application/json · Body: JSON args
   Returns: {"result":"...","images":[...],"error":"..."}
 From a WIDGET you almost never need this — fetch a custom tool (/api/tool, relative) or read a /data/<name>.json polling file instead. If you truly must hit a builtin from the browser, use the RELATIVE form with NO token: POST /api/builtin/<tool>?session=SESSION_ID (the session cookie authenticates it).
-Available: docker_run, docker_manage, docker_compose, cron, web_search, deep_research, browser_get, browser_act, rag_search, rag_ingest, rag_manage, notify, save_user_info, save_learning, register_tool, list_tools, secrets, mcp, widget.
+Works for ANY tool you can call in chat — not just a fixed list: every built-in (docker_run, docker_manage, docker_compose, cron, web_search, deep_research, browser_get, browser_act, rag_search, rag_ingest, rag_manage, notify, save_user_info, save_learning, register_tool, list_tools, secrets, mcp, widget, ...), every tool an MCP server provides (e.g. list_tickets), and every custom tool you registered. If it works when you call it directly, it works through /api/builtin/<name> too — the name is just passed straight through to the same dispatcher.
 
 ### postMessage API (widget → dashboard)
 
