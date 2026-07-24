@@ -65,9 +65,15 @@
     const skipSel = opts.skip || 'button, input, select, textarea, a';
 
     // Keep at least a sliver on-screen so windows can never be lost entirely.
+    // container.client{Width,Height} is only the visible viewport — once other
+    // widgets have been resized taller/wider than that, the container scrolls
+    // and its true extent is scroll{Width,Height}. Clamping against the
+    // client size would cap dragging at the original viewport even though
+    // resizing (which isn't bounded by the container at all) can already push
+    // content past it.
     function clampPos(left, top) {
-      const maxLeft = Math.max(0, container.clientWidth - 60);
-      const maxTop = Math.max(0, container.clientHeight - 30);
+      const maxLeft = Math.max(0, Math.max(container.clientWidth, container.scrollWidth) - 60);
+      const maxTop = Math.max(0, Math.max(container.clientHeight, container.scrollHeight) - 30);
       return [clamp(left, 0, maxLeft), clamp(top, 0, maxTop)];
     }
 
