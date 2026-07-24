@@ -900,25 +900,43 @@ func (s *Store) ListScopedSecretNames(ctx context.Context) ([]string, error) {
 	return names, rows.Err()
 }
 
-func (s *Store) GetAllSecrets(ctx context.Context) (map[string]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT name, value FROM secrets`)
-	if err != nil {
+// ScopedSecrets returns the secrets visible to a script running under scope:
+// the team-shared bucket (names with no ':', e.g. request_secret in
+// single-user/legacy mode) plus scope's own secrets, with the "<scope>:"
+// prefix stripped from the returned keys. Selecting the whole table gives no
+// way to tell one scope's entries apart from another's by name alone.
+func (s *Store) ScopedSecrets(ctx context.Context, scope string) (map[string]string, error) {
+	result := make(map[string]string)
+	if err := s.collectSecrets(ctx, `SELECT name, value FROM secrets WHERE name NOT LIKE '%:%'`, nil, "", result); err != nil {
 		return nil, err
 	}
+	if scope != "" && scope != "global" {
+		prefix := scope + ":"
+		if err := s.collectSecrets(ctx, `SELECT name, value FROM secrets WHERE name LIKE $1`, []interface{}{prefix + "%"}, prefix, result); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (s *Store) collectSecrets(ctx context.Context, query string, args []interface{}, stripPrefix string, into map[string]string) error {
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return err
+	}
 	defer rows.Close()
-	result := make(map[string]string)
 	for rows.Next() {
 		var name, encrypted string
 		if err := rows.Scan(&name, &encrypted); err != nil {
-			return nil, err
+			return err
 		}
 		value, err := decryptValue(s.encKey, encrypted)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt secret %q: %w", name, err)
+			return fmt.Errorf("decrypt secret %q: %w", name, err)
 		}
-		result[name] = value
+		into[strings.TrimPrefix(name, stripPrefix)] = value
 	}
-	return result, rows.Err()
+	return rows.Err()
 }
 
 // ─── MCP servers ──────────────────────────────────────────────────────────────

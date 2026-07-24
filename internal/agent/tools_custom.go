@@ -95,12 +95,12 @@ func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Too
 		"PRISM_TOKEN":   e.prismToken,
 	}
 	if e.memStore != nil {
-		if secrets, err := e.memStore.GetAllSecrets(ctx); err == nil {
+		if secrets, err := e.memStore.ScopedSecrets(ctx, e.SecretsScope()); err == nil {
 			for name, value := range secrets {
-				// Skip user-scoped credentials ("u<id>:email_password", …): they are
-				// personal (email, OAuth, Telegram) and must not leak into the shared
-				// workspace env. Only team-shared, user-created secrets are exported.
-				if strings.Contains(name, ":") {
+				// Skip built-in integration credentials (email, OAuth, Telegram, …):
+				// they share this scope with user-created keys but must not leak into
+				// the shared workspace env. Everything else is a request_secret key.
+				if isReservedSecretName(name) {
 					continue
 				}
 				env[toEnvVarName(name)] = value

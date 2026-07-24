@@ -46,6 +46,20 @@ func (e *ToolExecutor) sendNotification(title, message, level string) (string, e
 
 // ─── Secret tools ─────────────────────────────────────────────────────────────
 
+// isReservedSecretName reports whether a (scope-prefix-stripped) secret name
+// belongs to a built-in integration (email, CalDAV, Telegram, Slack, Webex,
+// MCP OAuth) rather than a key request_secret created for a script to use.
+// Both live in the same per-user/per-group scope, so name is the only way to
+// tell them apart — these must never be handed to arbitrary script execution.
+func isReservedSecretName(name string) bool {
+	switch name {
+	case "email_password", "caldav_password", "todoist_token",
+		"telegram_bot_token", "slack_bot_token", "slack_app_token":
+		return true
+	}
+	return strings.HasPrefix(name, "webex_bot_token:") || strings.HasPrefix(name, "mcp_oauth_")
+}
+
 func toEnvVarName(name string) string {
 	var sb strings.Builder
 	for _, r := range strings.ToUpper(name) {
