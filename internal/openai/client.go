@@ -241,6 +241,18 @@ func (t *toolAccumulator) result() []ollama.ToolCall {
 		args := acc.Arguments
 		if args == "" {
 			args = "{}"
+		} else if !json.Valid([]byte(args)) {
+			// A dropped connection or a max_tokens cutoff mid-stream can leave the
+			// accumulated arguments truncated. Storing that fragment verbatim would
+			// poison the conversation history forever: every future turn replays it
+			// to the backend, which rejects the whole request with a JSON parse
+			// error on retry, indefinitely. Fall back to {} so the turn can proceed.
+			snippet := args
+			if len(snippet) > 200 {
+				snippet = snippet[:200]
+			}
+			log.Printf("[openai] tool call %q got invalid JSON arguments, discarding: %s", acc.Name, snippet)
+			args = "{}"
 		}
 		calls = append(calls, ollama.ToolCall{
 			Function: ollama.ToolCallFunction{
