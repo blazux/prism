@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -271,11 +273,88 @@ func (e *ToolExecutor) removeUIPlugin(id string) (string, error) {
 			return "", fmt.Errorf("widget '%s' is locked by the user and cannot be removed", id)
 		}
 	}
+
+	// Read the widget's own source BEFORE deleting it — it's the only reliable
+	// signal for what data/ files fed it (see orphanedDataNote's doc comment).
+	orphanNote := e.orphanedDataNote(id, htmlPath)
+
 	os.Remove(htmlPath)
 	os.Remove(metaPath)
 
 	if e.onPluginRem != nil {
 		e.onPluginRem(id)
 	}
-	return fmt.Sprintf("Plugin '%s' removed", id), nil
+	msg := fmt.Sprintf("Plugin '%s' removed", id)
+	if orphanNote != "" {
+		msg += "\n" + orphanNote
+	}
+	return msg, nil
+}
+
+// widgetDataRefRe extracts data/<file> polling-file references (the pattern
+// documented in the system prompt: a cron/tool writes data/<name>.json, the
+// widget's browser JS fetches it back at /data/<name>.json) out of a
+// widget's HTML source. Requires a quote/paren/slash immediately before
+// "data/" so it can't match an unrelated substring like "metadata/foo".
+var widgetDataRefRe = regexp.MustCompile("[('\"`/]data/([\\w./-]+\\.\\w+)")
+
+func widgetDataRefs(html string) map[string]bool {
+	refs := map[string]bool{}
+	for _, m := range widgetDataRefRe.FindAllStringSubmatch(html, -1) {
+		refs[m[1]] = true
+	}
+	return refs
+}
+
+// orphanedDataNote checks whether the widget being removed referenced any
+// data/ polling files that no OTHER remaining widget still references, and —
+// if so — returns a note asking the model to relay it to the user. This
+// never deletes anything on its own: a data file could still be wanted, or
+// be written by a cron job/custom tool with no widget involved at all, so
+// only a human confirming "yes, remove it" makes that call safe. Detecting
+// the widget side is reliable (a widget must literally fetch its own data
+// path to work); detecting whether some tool/cron job still WRITES to it is
+// not attempted here — the note just tells the user to check.
+func (e *ToolExecutor) orphanedDataNote(removedID, removedHTMLPath string) string {
+	html, err := os.ReadFile(removedHTMLPath)
+	if err != nil {
+		return ""
+	}
+	refs := widgetDataRefs(string(html))
+	if len(refs) == 0 {
+		return ""
+	}
+
+	entries, err := os.ReadDir(e.pluginDir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == removedID+".html" || !strings.HasSuffix(name, ".html") {
+			continue
+		}
+		other, err := os.ReadFile(filepath.Join(e.pluginDir, name))
+		if err != nil {
+			continue
+		}
+		for ref := range widgetDataRefs(string(other)) {
+			delete(refs, ref)
+		}
+	}
+	if len(refs) == 0 {
+		return ""
+	}
+
+	var orphaned []string
+	for ref := range refs {
+		if _, err := os.Stat(filepath.Join(e.workspaceDir, "data", ref)); err == nil {
+			orphaned = append(orphaned, "data/"+ref)
+		}
+	}
+	if len(orphaned) == 0 {
+		return ""
+	}
+	sort.Strings(orphaned)
+	return fmt.Sprintf("Note: this widget also referenced %s, which no other widget currently uses. Ask the user before deleting it (or any custom tool/cron job that may still be writing to it) — never remove it on your own.", strings.Join(orphaned, ", "))
 }

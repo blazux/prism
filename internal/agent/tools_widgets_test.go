@@ -1,0 +1,97 @@
+package agent
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// newTestExecutorWithPlugins is newTestExecutor plus a plugin (widget) dir,
+// wired the way a real dashboard session sets it up (SetPluginDir).
+func newTestExecutorWithPlugins(t *testing.T) (*ToolExecutor, string, string) {
+	t.Helper()
+	e, workspaceDir := newTestExecutor(t)
+	pluginDir := filepath.Join(t.TempDir(), "plugins")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	e.SetPluginDir(pluginDir)
+	return e, workspaceDir, pluginDir
+}
+
+func writeWidget(t *testing.T, pluginDir, id, html string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(pluginDir, id+".html"), []byte(html), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, id+".meta.json"), []byte(`{"title":"`+id+`"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Removing a widget that fetches a data/ polling file no other widget uses
+// must surface a note pointing at it — and never delete the data file
+// itself, since it could still be wanted or written by a cron job/tool with
+// no widget involved at all.
+func TestRemoveUIPlugin_NotesOrphanedDataFile(t *testing.T) {
+	e, workspaceDir, pluginDir := newTestExecutorWithPlugins(t)
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "data", "stocks.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeWidget(t, pluginDir, "stocks", `<script>fetch('/data/stocks.json').then(...)</script>`)
+
+	msg, err := e.removeUIPlugin("stocks")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(msg, "data/stocks.json") {
+		t.Errorf("expected orphaned-data note mentioning data/stocks.json, got %q", msg)
+	}
+	if !strings.Contains(msg, "Ask the user") {
+		t.Errorf("expected note to require asking the user before deleting, got %q", msg)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceDir, "data", "stocks.json")); err != nil {
+		t.Error("the data file itself must NOT be deleted automatically")
+	}
+}
+
+// A data file still referenced by another live widget must never be flagged
+// as orphaned — it's still in use.
+func TestRemoveUIPlugin_NoNoteWhenDataStillSharedByAnotherWidget(t *testing.T) {
+	e, workspaceDir, pluginDir := newTestExecutorWithPlugins(t)
+	if err := os.MkdirAll(filepath.Join(workspaceDir, "data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "data", "shared.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeWidget(t, pluginDir, "widget-a", `<script>fetch('/data/shared.json')</script>`)
+	writeWidget(t, pluginDir, "widget-b", `<script>fetch('/data/shared.json')</script>`)
+
+	msg, err := e.removeUIPlugin("widget-a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(msg, "shared.json") {
+		t.Errorf("data file still used by widget-b must not be flagged as orphaned, got %q", msg)
+	}
+}
+
+// A widget with no data/ reference at all (e.g. fully static/self-contained)
+// must remove cleanly with no note.
+func TestRemoveUIPlugin_NoDataRefsNoNote(t *testing.T) {
+	e, _, pluginDir := newTestExecutorWithPlugins(t)
+	writeWidget(t, pluginDir, "clock", `<div id="clock"></div><script>setInterval(()=>{},1000)</script>`)
+
+	msg, err := e.removeUIPlugin("clock")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(msg, "removed") || strings.Contains(msg, "Note:") {
+		t.Errorf("expected a plain removal message with no orphan note, got %q", msg)
+	}
+}
