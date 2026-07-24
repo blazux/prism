@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"prism/internal/ollama"
 )
@@ -49,6 +50,17 @@ type Manager struct {
 	dir   string
 	mu    sync.RWMutex
 	tools []Tool
+	// dirMod is the tools directory's mtime as of the last discover() — see
+	// refreshIfStale. Adding/removing/renaming a file in dir updates its
+	// mtime on every OS Prism runs on, so this is how a tool file removed
+	// out-of-band (a shell/terminal `rm`, editing the host filesystem
+	// directly — anything that isn't Prism's own write_file/delete_file/
+	// register_tool, all of which already call Reload themselves) still gets
+	// picked up: previously it lingered in every read (All/Get/
+	// IsProtectedFilename/ToOllamaTools) until something unrelated happened
+	// to call Reload, so the model kept "seeing" and calling a tool whose
+	// file no longer existed, failing at exec time with a confusing error.
+	dirMod time.Time
 }
 
 func NewManager(dir string) *Manager {
@@ -62,12 +74,37 @@ func (m *Manager) Dir() string { return m.dir }
 
 func (m *Manager) Reload() {
 	tools := m.discover()
+	var modTime time.Time
+	if info, err := os.Stat(m.dir); err == nil {
+		modTime = info.ModTime()
+	}
 	m.mu.Lock()
 	m.tools = tools
+	m.dirMod = modTime
 	m.mu.Unlock()
 }
 
+// refreshIfStale re-discovers the tools directory if its mtime has moved
+// since the last discover() — a cheap os.Stat on every read, backstopping
+// every caller that already reloads explicitly on its own known writes
+// (register_tool, the onFileChange callback) against changes made any other
+// way. Two concurrent callers racing to refresh both just redo the same
+// discover(); harmless, not worth guarding against.
+func (m *Manager) refreshIfStale() {
+	info, err := os.Stat(m.dir)
+	if err != nil {
+		return
+	}
+	m.mu.RLock()
+	stale := !info.ModTime().Equal(m.dirMod)
+	m.mu.RUnlock()
+	if stale {
+		m.Reload()
+	}
+}
+
 func (m *Manager) All() []Tool {
+	m.refreshIfStale()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]Tool, len(m.tools))
@@ -76,6 +113,7 @@ func (m *Manager) All() []Tool {
 }
 
 func (m *Manager) Get(name string) *Tool {
+	m.refreshIfStale()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for i := range m.tools {
@@ -95,6 +133,7 @@ func (m *Manager) Get(name string) *Tool {
 // file that merely calls itself "pcap" without actually being on disk yet
 // can't bypass the check.
 func (m *Manager) IsProtectedFilename(filename string) bool {
+	m.refreshIfStale()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, t := range m.tools {
@@ -106,6 +145,7 @@ func (m *Manager) IsProtectedFilename(filename string) bool {
 }
 
 func (m *Manager) ToOllamaTools() []ollama.Tool {
+	m.refreshIfStale()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]ollama.Tool, 0, len(m.tools))

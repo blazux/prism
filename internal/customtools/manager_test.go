@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLLMDescriptionComposition(t *testing.T) {
@@ -81,5 +82,49 @@ func TestIsProtectedFilename(t *testing.T) {
 	}
 	if m.IsProtectedFilename("does_not_exist.py") {
 		t.Error("an unknown filename must not be reported as protected")
+	}
+}
+
+// A tool file removed any way other than Prism's own write_file/delete_file/
+// register_tool (a shell `rm`, editing the host filesystem directly) used to
+// leave a stale entry in every read (All/Get/ToOllamaTools) until something
+// unrelated happened to call Reload — the model kept seeing and calling a
+// tool whose script no longer existed. All four read methods now self-heal
+// via refreshIfStale without any explicit Reload call.
+func TestOutOfBandDeletionIsPickedUpWithoutExplicitReload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "weather.py")
+	if err := os.WriteFile(path, []byte("# TOOL: {\"name\":\"weather\",\"description\":\"d\"}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(dir)
+	if m.Get("weather") == nil {
+		t.Fatal("expected weather tool to be discovered on construction")
+	}
+
+	// Some filesystems (tmpfs observed here) batch mtime updates into coarse
+	// ticks — the write above and the remove below could otherwise land in
+	// the same tick and produce an identical mtime, defeating the check this
+	// test exists to exercise. Sleep BEFORE the removal, not after, so it
+	// falls in a later tick than the write NewManager already captured.
+	time.Sleep(20 * time.Millisecond)
+
+	// Remove it exactly as an out-of-band `rm` would — no call to Reload().
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if tool := m.Get("weather"); tool != nil {
+		t.Error("Get should no longer see a tool whose file was removed out-of-band")
+	}
+	if got := m.All(); len(got) != 0 {
+		t.Errorf("All() = %v, want empty after out-of-band deletion", got)
+	}
+	if got := m.ToOllamaTools(); len(got) != 0 {
+		t.Errorf("ToOllamaTools() = %v, want empty after out-of-band deletion", got)
+	}
+	if m.IsProtectedFilename("weather.py") {
+		t.Error("a removed file must not be reported as protected")
 	}
 }
