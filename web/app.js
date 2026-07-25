@@ -204,13 +204,19 @@ function addWidget(meta) {
   const defH = (meta.height > 0 ? meta.height : 260) + 26  // + header/border
 
   // Open/closed and geometry: explicit meta wins, else keep the previous
-  // instance's, else fall back to defaults / cascade. Treat 0 as "unset".
+  // instance's, else fall back to defaults / cascade.
   const open = (meta.open === undefined) ? (prev ? prev.open : true) : (meta.open !== false)
   let w = +meta.w || prev?.w || defW
   let h = +meta.h || prev?.h || defH
-  let x = +meta.x || prev?.x || 0
-  let y = +meta.y || prev?.y || 0
-  if (!x && !y) { const c = nextCascade(w, h); x = c.x; y = c.y }
+  // x/y: unlike w/h, 0 is a legitimate saved position (dragged to the exact
+  // left/top edge) — `||` would treat it as falsy and wrongly fall through to
+  // the cascade below every reload. Only a genuinely absent value (this
+  // plugin_load carries no geometry at all — a fresh agent add/update, see
+  // handlers_tools.go's onPluginAdd) should count as "never positioned".
+  const isSet = (v) => v !== undefined && v !== null
+  let x = isSet(meta.x) ? +meta.x : (isSet(prev?.x) ? prev.x : undefined)
+  let y = isSet(meta.y) ? +meta.y : (isSet(prev?.y) ? prev.y : undefined)
+  if (x === undefined || y === undefined) { const c = nextCascade(w, h); x = c.x; y = c.y }
 
   const rec = {
     id, title: meta.title || id, content: meta.content || '',
@@ -298,7 +304,11 @@ function restoreWidget(id) {
   const rec = widgets.get(id)
   if (!rec || rec.open) return
   rec.open = true
-  if (!rec.x && !rec.y) { const c = nextCascade(rec.w, rec.h); rec.x = c.x; rec.y = c.y }
+  // Same 0-vs-unset trap as addWidget: rec.x/y are already resolved numbers
+  // by this point (never undefined), so this only re-cascades a widget that
+  // genuinely has no position yet — a minimized widget parked at the exact
+  // left/top edge (0,0) must stay there on restore, not jump away.
+  if (rec.x === undefined || rec.y === undefined) { const c = nextCascade(rec.w, rec.h); rec.x = c.x; rec.y = c.y }
   mountWindow(rec)
   persistState(id, { open: true, x: rec.x, y: rec.y, w: rec.w, h: rec.h })
   renderDock()

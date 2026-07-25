@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,5 +94,36 @@ func TestRemoveUIPlugin_NoDataRefsNoNote(t *testing.T) {
 	}
 	if !strings.Contains(msg, "removed") || strings.Contains(msg, "Note:") {
 		t.Errorf("expected a plain removal message with no orphan note, got %q", msg)
+	}
+}
+
+// A widget dragged to exactly the left/top edge (x:0, y:0) must keep that
+// position across the read-mutate-remarshal roundtrip updateUIPlugin does on
+// every content update. Before pluginMeta.X/Y switched to pointers (like Open
+// already was), `omitempty` on a plain float64 could not tell "explicitly 0"
+// apart from "never positioned" and silently dropped the "x"/"y" keys.
+func TestPluginMeta_ZeroPositionRoundTrips(t *testing.T) {
+	zero := 0.0
+	before, err := json.Marshal(pluginMeta{Title: "Corner", Cols: 1, Height: 200, X: &zero, Y: &zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(before), `"x":0`) || !strings.Contains(string(before), `"y":0`) {
+		t.Fatalf("marshal dropped the explicit zero position: %s", before)
+	}
+
+	// Simulate updateUIPlugin's own sequence: unmarshal the existing file,
+	// mutate an unrelated field, remarshal.
+	var m pluginMeta
+	if err := json.Unmarshal(before, &m); err != nil {
+		t.Fatal(err)
+	}
+	m.Title = "Corner Updated"
+	after, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), `"x":0`) || !strings.Contains(string(after), `"y":0`) {
+		t.Errorf("re-marshal after an unrelated field update dropped the zero position: %s", after)
 	}
 }

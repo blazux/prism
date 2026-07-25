@@ -12,19 +12,24 @@ import (
 )
 
 type pluginMeta struct {
-	Title  string  `json:"title"`
-	Cols   int     `json:"cols"`
-	Height int     `json:"height"`
-	Locked bool    `json:"locked,omitempty"`
+	Title  string `json:"title"`
+	Cols   int    `json:"cols"`
+	Height int    `json:"height"`
+	Locked bool   `json:"locked,omitempty"`
 	// Open is the window lifecycle flag. nil/absent means "open" (the default
 	// for freshly created widgets). false means the user minimized the window
 	// but kept the widget — it lives in the dock and can be reopened.
 	Open *bool `json:"open,omitempty"`
-	// Free-window geometry (pixels) persisted across reloads/devices.
-	X float64 `json:"x,omitempty"`
-	Y float64 `json:"y,omitempty"`
-	W float64 `json:"w,omitempty"`
-	H float64 `json:"h,omitempty"`
+	// Free-window geometry (pixels) persisted across reloads/devices. Pointers,
+	// like Open above and for the same reason: a widget dragged to exactly the
+	// left/top edge legitimately has X or Y == 0, which a plain float64 with
+	// omitempty cannot tell apart from "never positioned" — updateUIPlugin's
+	// unmarshal-mutate-remarshal roundtrip would then silently drop that "x"/"y"
+	// key on the widget's very next content update, losing the saved position.
+	X *float64 `json:"x,omitempty"`
+	Y *float64 `json:"y,omitempty"`
+	W *float64 `json:"w,omitempty"`
+	H *float64 `json:"h,omitempty"`
 }
 
 func (e *ToolExecutor) listUIPlugins() (string, error) {
