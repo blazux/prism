@@ -254,10 +254,9 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 			return fmt.Sprintf("crontab -r failed: %v", err), nil
 		}
 		// Keep the persisted mirror in sync with the now-empty live crontab —
-		// internal/server/cron_tasks.go's cronPendingJobTasks reads THIS file
-		// (not the live crontab) to render "cron:" entries in the Tasks list.
-		// Leaving stale content here after removing the last job produced
-		// ghost Tasks entries for jobs that no longer existed anywhere.
+		// Dockerfile.agent's CMD reinstalls it (`crontab /workspace/.crontab`)
+		// on every container restart. Leaving stale content here after
+		// removing the last job would resurrect it on the next restart.
 		persistPath := filepath.Join(e.workspaceDir, ".crontab")
 		if err := os.WriteFile(persistPath, nil, 0600); err != nil {
 			return fmt.Sprintf("cron_remove failed: %v", err), nil

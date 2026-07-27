@@ -172,10 +172,9 @@ func (s *Server) mutateJob(name string, fn func(line string) string) error {
 			return err
 		}
 		// Keep the persisted mirror in sync with the now-empty live crontab —
-		// cronPendingJobTasks reads THIS file (not the live crontab) to render
-		// "cron:" entries in the Tasks list. Leaving stale content here after
-		// removing the last job produced ghost entries for jobs that no
-		// longer existed anywhere.
+		// Dockerfile.agent's CMD reinstalls it (`crontab /workspace/.crontab`)
+		// on every container restart. Leaving stale content here after
+		// removing the last job would resurrect it on the next restart.
 		path := filepath.Join(s.cfg.WorkspaceDir, ".crontab")
 		return os.WriteFile(path, nil, 0600)
 	}
