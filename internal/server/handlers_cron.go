@@ -168,8 +168,16 @@ func (s *Server) mutateJob(name string, fn func(line string) string) error {
 	content := strings.Join(out, "\n")
 	content = strings.TrimRight(content, "\n") + "\n"
 	if strings.TrimSpace(content) == "" {
-		_, err := s.docker.Exec(context.Background(), "crontab -r 2>/dev/null || true", 10*time.Second)
-		return err
+		if _, err := s.docker.Exec(context.Background(), "crontab -r 2>/dev/null || true", 10*time.Second); err != nil {
+			return err
+		}
+		// Keep the persisted mirror in sync with the now-empty live crontab —
+		// cronPendingJobTasks reads THIS file (not the live crontab) to render
+		// "cron:" entries in the Tasks list. Leaving stale content here after
+		// removing the last job produced ghost entries for jobs that no
+		// longer existed anywhere.
+		path := filepath.Join(s.cfg.WorkspaceDir, ".crontab")
+		return os.WriteFile(path, nil, 0600)
 	}
 	return s.applyCrontab(content)
 }
