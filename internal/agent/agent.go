@@ -570,6 +570,10 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	// Explicit instruction: never output the date/time in responses.
 	fmt.Fprintf(&sb, "\n\nCurrent date and time: %s. Current session ID: `%s`. Use these only as internal context — never write them in your responses. When generating widget code that calls /api/tool/ or /api/notify, always append ?session=%s to the URL.", time.Now().In(agentLocation).Format("2006-01-02 15:04"), a.sessionID, a.sessionID)
 
+	// Grounding rule, near the end on purpose: late-prompt instructions are the
+	// ones this size of model actually follows (see systemPromptRole's measurements).
+	sb.WriteString(systemPromptGrounding)
+
 	// Channel layer (Vortex): the phone constrains the *form* of the answer, not
 	// who the agent is. Kept last so it wins over anything the personality says
 	// about formatting. Everything here is read aloud by a TTS.

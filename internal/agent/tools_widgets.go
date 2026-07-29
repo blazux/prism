@@ -85,8 +85,14 @@ func (e *ToolExecutor) previewWidget(ctx context.Context, id string) (string, []
 	// the Prism service token so the preview browser authenticates (multi-user
 	// Prism now gates /plugins behind login) instead of screenshotting /login.
 	widgetURL := fmt.Sprintf("http://prism-server:8080/plugins/%s/%s.html", sessionID, id)
+	// wait_idle lets a widget's own fetch()/XHR calls resolve before the screenshot
+	// instead of racing a flat sleep — a static widget clears it in well under a
+	// second, a widget fetching a slow/cold backend gets up to 4s instead of the
+	// old hard 2s cutoff. The trailing wait_ms covers the DOM update/animation
+	// that follows a fetch resolving, which wait_idle itself doesn't wait out.
 	res, err := e.browserActAuth(ctx, widgetURL, []interface{}{
-		map[string]interface{}{"type": "wait_ms", "ms": 1500},
+		map[string]interface{}{"type": "wait_idle", "ms": 4000},
+		map[string]interface{}{"type": "wait_ms", "ms": 300},
 		map[string]interface{}{"type": "screenshot"},
 	}, e.prismToken)
 	if err != nil || strings.HasPrefix(res, "browser_act failed") {

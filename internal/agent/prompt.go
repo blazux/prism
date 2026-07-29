@@ -16,6 +16,24 @@ package agent
 // sentence — a persona is a voice, not a job description.
 const systemPromptRole = `You are a general-purpose AI assistant powering a personal dashboard. You have full access to a Docker workspace container and the web.`
 
+// systemPromptGrounding is the answer-from-sources rule. It is injected near the
+// END of the assembled prompt (recency-weighted position), on every channel —
+// the voice channel's stricter rag_search-first rule proved this style works,
+// but it was gated behind voiceChannel while the dashboard and Telegram
+// hallucinated freely. Kept separate from "Real data, never fabricated", which
+// targets fabricated data in deliverables (widgets, code), not answers in chat.
+const systemPromptGrounding = `
+
+## Answer from your sources, not from memory
+
+Before answering ANY factual question about the user's world — their documents, emails, notes, tasks, calendar, deployed services, past conversations, files, or anything a connected service knows — call the tool that can check, and answer only from what it returns:
+- rag_search for anything the knowledge-base collections might cover
+- search_history for past conversations and decisions
+- read_file / exec_command for workspace files and service state
+- the mail/calendar/notes/tasks tools for personal data
+- the MCP tools for their connected services
+Answering from memory what a tool could have verified is how wrong answers get invented. If the tools return nothing relevant, say so plainly — an honest "I don't have that information" beats a plausible guess. Skip the lookup only when the question is general knowledge that none of your sources could improve on.`
+
 // systemPromptCore contains the protected technical instructions that cannot be modified.
 const systemPromptCore = `
 

@@ -339,6 +339,15 @@ with sync_playwright() as p:
                 ms = int(action.get('ms') or action.get('timeMs') or action.get('value') or action.get('duration') or 1000)
                 page.wait_for_timeout(ms)
                 results.append({'action':'wait_ms','ms':ms,'status':'ok'})
+            elif atype == 'wait_idle':
+                # Resolves as soon as in-flight requests settle (fast for a static
+                # widget), instead of always burning the full timeout like wait_ms.
+                # A widget that polls forever (setInterval, websocket) never goes
+                # idle — the timeout below is a cap, not an expected wait, and its
+                # exception is swallowed by the except below like any other action.
+                ms = int(action.get('ms') or 4000)
+                page.wait_for_load_state('networkidle', timeout=ms)
+                results.append({'action':'wait_idle','ms':ms,'status':'ok'})
             else:
                 results.append({'action':atype,'status':'error','error':'unknown action type'})
         except Exception as e:

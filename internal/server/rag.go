@@ -20,6 +20,39 @@ import (
 
 const maxUploadSize = 50 << 20 // 50 MB
 
+// ragContextFn returns the system-prompt callback that lists the RAG
+// collections visible under scope, or nil when RAG is unavailable. Single
+// source for every chat path (WS dashboard, headless/API) — the wording used
+// to live copy-pasted in each caller and the headless copy silently lost the
+// "don't guess, search first" sentence.
+func (s *Server) ragContextFn(scope string) func() string {
+	if s.ragStore == nil {
+		return nil
+	}
+	ragStore := s.ragStore
+	return func() string {
+		if s.ragPersonalFallbackBlocked(scope) {
+			return ""
+		}
+		cols, err := ragStore.ListCollections(context.Background(), scope)
+		if err != nil || len(cols) == 0 {
+			return ""
+		}
+		var sb strings.Builder
+		sb.WriteString("## Knowledge Base (RAG)\n\n")
+		sb.WriteString("You have access to document collections via `rag_search`. Call it whenever the user's question might be answered by these documents — don't guess, search first.\n\n")
+		for _, c := range cols {
+			name := unscopeCollection(scope, c.Name)
+			if c.Description != "" {
+				fmt.Fprintf(&sb, "- **%s** — %s (%d docs)\n", name, c.Description, c.DocCount)
+			} else {
+				fmt.Fprintf(&sb, "- **%s** (%d docs, %d chunks)\n", name, c.DocCount, c.ChunkCount)
+			}
+		}
+		return sb.String()
+	}
+}
+
 var ragInitStatus atomic.Value // stores string
 
 // initRAG initialises the embedder and store, retrying until success.

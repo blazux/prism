@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -207,7 +209,9 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		out <- StreamEvent{Err: fmt.Errorf("ollama returned %d", resp.StatusCode)}
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		log.Printf("[ollama] chat request failed: status=%d body=%s", resp.StatusCode, errBody)
+		out <- StreamEvent{Err: fmt.Errorf("ollama returned %d: %s", resp.StatusCode, errBody)}
 		return
 	}
 

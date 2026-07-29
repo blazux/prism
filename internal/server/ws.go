@@ -187,31 +187,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		cc.apply(executor)
 	}
 
-	var ragContextFn func() string
-	if s.ragStore != nil {
-		ragStore := s.ragStore
-		ragContextFn = func() string {
-			if s.ragPersonalFallbackBlocked(ragScope) {
-				return ""
-			}
-			cols, err := ragStore.ListCollections(context.Background(), ragScope)
-			if err != nil || len(cols) == 0 {
-				return ""
-			}
-			var sb strings.Builder
-			sb.WriteString("## Knowledge Base (RAG)\n\n")
-			sb.WriteString("You have access to document collections via `rag_search`. Call it whenever the user's question might be answered by these documents — don't guess, search first.\n\n")
-			for _, c := range cols {
-				name := unscopeCollection(ragScope, c.Name)
-				if c.Description != "" {
-					fmt.Fprintf(&sb, "- **%s** — %s (%d docs)\n", name, c.Description, c.DocCount)
-				} else {
-					fmt.Fprintf(&sb, "- **%s** (%d docs, %d chunks)\n", name, c.DocCount, c.ChunkCount)
-				}
-			}
-			return sb.String()
-		}
-	}
+	ragContextFn := s.ragContextFn(ragScope)
 
 	client := &Client{
 		conn: conn,
