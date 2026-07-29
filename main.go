@@ -47,8 +47,8 @@ func main() {
 		model = "qwen2.5-coder:7b"
 	}
 
-	// LLM backend: "ollama" (default) or "openai" for any OpenAI-compatible
-	// server (SGLang, vLLM, TGI, LM Studio, OpenRouter, …).
+	// LLM backend: "ollama" (default), "openai" for any OpenAI-compatible server
+	// (SGLang, vLLM, TGI, LM Studio, OpenRouter, …), or "anthropic" for Claude.
 	llmBackend := os.Getenv("LLM_BACKEND")
 	if llmBackend == "" {
 		llmBackend = "ollama"
@@ -59,6 +59,20 @@ func main() {
 	// the served-model-name can differ from the Ollama tag.
 	if llmBackend == "openai" {
 		if m := os.Getenv("OPENAI_MODEL"); m != "" {
+			model = m
+		}
+	}
+
+	// Anthropic. ANTHROPIC_API_KEY is optional: left unset the backend reads the
+	// OAuth token the Claude Code CLI keeps in its credentials file (mount it
+	// into the container), which is how a Pro/Max subscription is used instead of
+	// per-token API billing.
+	anthropicToken := os.Getenv("ANTHROPIC_API_KEY")
+	anthropicCreds := os.Getenv("ANTHROPIC_CREDENTIALS_FILE")
+	anthropicBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
+	anthropicCLIVersion := os.Getenv("ANTHROPIC_CLI_VERSION")
+	if llmBackend == "anthropic" {
+		if m := os.Getenv("ANTHROPIC_MODEL"); m != "" {
 			model = m
 		}
 	}
@@ -110,14 +124,20 @@ func main() {
 	multiUser := os.Getenv("MULTI_USER") == "1" || strings.EqualFold(os.Getenv("MULTI_USER"), "true")
 
 	cfg := server.Config{
-		Port:             port,
-		WorkspaceDir:     workspaceDir,
-		PluginDir:        pluginDir,
-		OllamaURL:        ollamaURL,
-		Model:            model,
-		LLMBackend:       llmBackend,
-		OpenAIBaseURL:    openAIBaseURL,
-		OpenAIAPIKey:     openAIAPIKey,
+		Port:          port,
+		WorkspaceDir:  workspaceDir,
+		PluginDir:     pluginDir,
+		OllamaURL:     ollamaURL,
+		Model:         model,
+		LLMBackend:    llmBackend,
+		OpenAIBaseURL: openAIBaseURL,
+		OpenAIAPIKey:  openAIAPIKey,
+
+		AnthropicToken:       anthropicToken,
+		AnthropicCredentials: anthropicCreds,
+		AnthropicBaseURL:     anthropicBaseURL,
+		AnthropicCLIVersion:  anthropicCLIVersion,
+
 		EmbedBackend:     embedBackend,
 		VisionModel:      visionModel,
 		ChatVision:       chatVision,
@@ -139,6 +159,6 @@ func main() {
 
 	srv := server.New(cfg)
 	log.Printf("Prism → http://localhost:%s", port)
-	log.Printf("Workspace: %s | Ollama: %s | Model: %s", workspaceDir, ollamaURL, model)
+	log.Printf("Workspace: %s | Backend: %s | Ollama: %s | Model: %s", workspaceDir, llmBackend, ollamaURL, model)
 	log.Fatal(srv.Start())
 }

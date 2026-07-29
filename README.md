@@ -36,7 +36,7 @@ Is this a great idea? Probably. Does it make you slightly nervous? It should. Th
 |---|---|
 | Backend | Go |
 | Frontend | Vanilla JS, custom free-floating window manager |
-| LLM | Ollama — or any OpenAI-compatible server (vLLM, SGLang, TGI, …) |
+| LLM | Ollama — or any OpenAI-compatible server (vLLM, SGLang, TGI, …), or Claude |
 | Embeddings | Ollama, or the same OpenAI-compatible server |
 | Vector store | PostgreSQL + pgvector |
 | Web search | SearXNG |
@@ -124,6 +124,10 @@ Point `VOX_URL` at a [PrismConnect](https://github.com/blazux/PrismConnect) inst
 
 Prism talks to **Ollama** by default, but it'll happily point at any **OpenAI-compatible** server — vLLM, SGLang, TGI, LM Studio, llama.cpp, even OpenRouter if you insist on sending your data to the cloud (we won't tell). Wire *both* at once and the model picker spans them: a fast local model for daily driving, a 120B reasoner for when you're feeling ambitious — switch per message from the dropdown. Embeddings can stay on Ollama while chat runs elsewhere, because not every inference server bothers to implement `/v1/embeddings`.
 
+There's also an **Anthropic** backend (`LLM_BACKEND=anthropic`) for driving Prism with Claude. Set `ANTHROPIC_API_KEY` and you pay per token like anyone else. Leave it empty and Prism instead picks up the OAuth token the `claude` CLI writes when you log in — your **Claude Pro/Max subscription**, no per-token bill — refreshing it as it expires. Claude models and your local ones share one picker, and RAG stays on Ollama automatically since Anthropic serves no embeddings.
+
+> **Read this before using the subscription path.** It works by presenting the request as Claude Code's own: the CLI's user-agent, its beta headers, its identity block at the head of the system prompt. That is outside Anthropic's terms of use, and the account carrying the subscription is the one at risk. The API-key path has none of that — it's the boring, sanctioned option.
+
 ---
 
 ## It remembers, and occasionally learns
@@ -141,10 +145,14 @@ All configuration is done via environment variables (set in `docker-compose.yml`
 | `OLLAMA_URL` | URL of your Ollama instance | `http://ollama:11434` |
 | `OLLAMA_MODEL` | LLM model to use | `qwen3.6:27b` |
 | `EMBED_MODEL` | Embedding model for RAG | `qwen3-embedding:8b` |
-| `LLM_BACKEND` | `ollama` (default) or `openai` for any OpenAI-compatible server | `openai` |
+| `LLM_BACKEND` | `ollama` (default), `openai` for any OpenAI-compatible server, or `anthropic` for Claude | `openai` |
 | `OPENAI_BASE_URL` | The `/v1` root, when `LLM_BACKEND=openai` | `http://host:8000/v1` |
 | `OPENAI_MODEL` | Chat model name for the openai backend (its `--served-model-name`) | `qwen` |
 | `OPENAI_API_KEY` | Key for the openai backend, if it needs one (local servers usually don't) | `sk-…` |
+| `ANTHROPIC_MODEL` | Chat model, when `LLM_BACKEND=anthropic` | `claude-sonnet-4-5` |
+| `ANTHROPIC_API_KEY` | Anthropic API key — pay per token. Omit it to use the Claude Code subscription token instead | `sk-ant-api03-…` |
+| `ANTHROPIC_CREDENTIALS_FILE` | Where the `claude` CLI keeps its OAuth token; mount it into the container read-write | `/root/.claude/.credentials.json` |
+| `ANTHROPIC_CLI_VERSION` | Claude Code version claimed on the subscription path — bump it if Anthropic starts rejecting requests | `2.1.74` |
 | `EMBED_BACKEND` | Set to `ollama` to keep RAG on Ollama while chat runs on an openai server with no `/v1/embeddings` | `ollama` |
 | `PRISM_TOKEN` | Login token — protects the dashboard (omit to disable auth) | `change-me` |
 | `MULTI_USER` | `1` to turn on accounts, groups, rooms and the admin console (default: personal, single-user) | `1` |
