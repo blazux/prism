@@ -285,15 +285,16 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 // Anthropic now bills those against extra usage rather than plan limits. Where
 // the tool names are bare it says so outright; where they carry the mcp__ prefix
 // that keeps them on plan billing, the refusal arrives disguised as
-// overloaded_error instead — measured 2026-07-29, where the same request
-// succeeded on eight of the eleven models offered and was refused on three. So
-// "Overloaded" on this path almost never means Anthropic is busy: it means this
-// model won't take tool calls on this plan, and another one will.
+// overloaded_error instead. Measured 2026-07-29: the refusal comes and goes for
+// the same model and the same request, so it is not a property of the model and
+// no setting avoids it. So "Overloaded" on this path is rarely Anthropic being
+// busy, and saying so would send the reader off waiting for capacity that was
+// never the problem.
 func explainStreamError(errType, msg string, oauth, hasTools bool, model string) error {
 	if oauth && hasTools && errType == "overloaded_error" {
 		return fmt.Errorf("anthropic refused tool use for model %q on this subscription "+
 			"(reported as %q: %s — third-party tool calls draw on extra usage, not plan limits). "+
-			"Another model will usually take it", model, errType, msg)
+			"This comes and goes: retrying may work, an API key always does", model, errType, msg)
 	}
 	return fmt.Errorf("anthropic stream error (%s): %s", errType, msg)
 }

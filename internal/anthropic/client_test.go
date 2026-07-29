@@ -321,7 +321,7 @@ func TestStreamErrorExplainsARefusalDisguisedAsOverload(t *testing.T) {
 	// verbatim sends the reader off waiting for capacity that was never the
 	// problem.
 	err := explainStreamError("overloaded_error", "Overloaded", true, true, "claude-sonnet-5")
-	for _, want := range []string{"claude-sonnet-5", "extra usage", "Another model"} {
+	for _, want := range []string{"claude-sonnet-5", "extra usage", "retrying may work"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the explanation should mention %q, got %v", want, err)
 		}
