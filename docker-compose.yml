@@ -18,6 +18,11 @@ services:
       # To connect a Markdown vault (Obsidian/Logseq) to the Notes app, mount it
       # here and set its path in Settings → Notes (e.g. /vault):
       # - /path/to/your/ObsidianVault:/vault
+      # LLM_BACKEND=anthropic without an API key runs on your Claude subscription:
+      # log in on the host with `claude`, then mount the token it stores. Prism
+      # refreshes that token, so the mount must be writable — no :ro. Add it in a
+      # local docker-compose.override.yml, since the host path is yours alone:
+      # - ~/.claude/.credentials.json:/root/.claude/.credentials.json
     environment:
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
@@ -26,6 +31,13 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Claude. Leave ANTHROPIC_API_KEY empty to run on a Claude subscription
+      # instead of per-token billing — see the credentials mount above.
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_CREDENTIALS_FILE=${ANTHROPIC_CREDENTIALS_FILE:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - ANTHROPIC_CLI_VERSION=${ANTHROPIC_CLI_VERSION:-}
       - EMBED_BACKEND=${EMBED_BACKEND:-}
       - VISION_MODEL=${VISION_MODEL:-}
       - CHAT_VISION=${CHAT_VISION:-}

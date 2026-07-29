@@ -314,3 +314,30 @@ func TestTokenSourceReportsMissingCredentialsClearly(t *testing.T) {
 		t.Errorf("the error should point at how to log in, got %v", err)
 	}
 }
+
+func TestStreamErrorExplainsARefusalDisguisedAsOverload(t *testing.T) {
+	// With tools on a subscription token, "Overloaded" is Anthropic refusing
+	// third-party tool use for that model, not a busy server. Reporting it
+	// verbatim sends the reader off waiting for capacity that was never the
+	// problem.
+	err := explainStreamError("overloaded_error", "Overloaded", true, true, "claude-sonnet-5")
+	for _, want := range []string{"claude-sonnet-5", "extra usage", "Another model"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the explanation should mention %q, got %v", want, err)
+		}
+	}
+
+	// Without tools, or on an API key, an overload really is an overload.
+	plain := explainStreamError("overloaded_error", "Overloaded", true, false, "claude-sonnet-5")
+	if strings.Contains(plain.Error(), "extra usage") {
+		t.Errorf("a tool-less turn should report the error as-is, got %v", plain)
+	}
+	onKey := explainStreamError("overloaded_error", "Overloaded", false, true, "claude-sonnet-5")
+	if strings.Contains(onKey.Error(), "extra usage") {
+		t.Errorf("an api-key turn should report the error as-is, got %v", onKey)
+	}
+	other := explainStreamError("api_error", "boom", true, true, "claude-sonnet-5")
+	if !strings.Contains(other.Error(), "boom") {
+		t.Errorf("other error types must pass through, got %v", other)
+	}
+}

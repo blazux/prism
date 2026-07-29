@@ -126,6 +126,8 @@ Prism talks to **Ollama** by default, but it'll happily point at any **OpenAI-co
 
 There's also an **Anthropic** backend (`LLM_BACKEND=anthropic`) for driving Prism with Claude. Set `ANTHROPIC_API_KEY` and you pay per token like anyone else. Leave it empty and Prism instead picks up the OAuth token the `claude` CLI writes when you log in — your **Claude Pro/Max subscription**, no per-token bill — refreshing it as it expires. Claude models and your local ones share one picker, and RAG stays on Ollama automatically since Anthropic serves no embeddings.
 
+> **Which models accept tools.** Measured 2026-07-29 on a Max plan: Anthropic classifies a tool-bearing request from anything that isn't Claude Code as a third-party app, and bills those to *extra usage* rather than plan limits. With no extra-usage credits the request is refused — outright when tool names are bare, and disguised as `overloaded_error` when they carry the `mcp__` prefix that keeps them on plan billing. Eight of the eleven models offered took Prism's real 47-tool request; `claude-sonnet-5`, `claude-opus-5` and `claude-opus-4-8` refused it. If a model answers plain chat but dies the moment it needs a tool, that's this — switch models. An API key has no such gate.
+
 > **Read this before using the subscription path.** It works by presenting the request as Claude Code's own: the CLI's user-agent, its beta headers, its identity block at the head of the system prompt. That is outside Anthropic's terms of use, and the account carrying the subscription is the one at risk. The API-key path has none of that — it's the boring, sanctioned option.
 
 ---

@@ -134,6 +134,42 @@ func TestTokenSourceRefreshesAnExpiredTokenAndPersistsTheRotation(t *testing.T) 
 	}
 }
 
+func TestWriteCredentialsFallsBackWhenRenameIsImpossible(t *testing.T) {
+	// Stands in for the bind-mounted file in Docker, where rename onto the mount
+	// point fails: the write must still land, or the rotation is lost.
+	dir := t.TempDir()
+	path := writeCredsFile(t, dir, "cc-old", "cc-old-refresh", 1)
+
+	// A directory where CreateTemp cannot work forces the atomic path to fail
+	// without making the target itself unwritable.
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Skipf("cannot make the directory read-only here: %v", err)
+	}
+	defer os.Chmod(dir, 0700)
+	if err := writeAtomic(path, []byte("{}")); err == nil {
+		t.Skip("this filesystem still allows the atomic path; nothing to assert")
+	}
+
+	if err := writeCredentials(path, credentials{AccessToken: "cc-new", RefreshToken: "cc-new-refresh", ExpiresAt: 2}); err != nil {
+		t.Fatalf("the fallback write should succeed: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("the file is no longer valid JSON: %v", err)
+	}
+	nested, _ := doc["claudeAiOauth"].(map[string]any)
+	if nested["accessToken"] != "cc-new" {
+		t.Errorf("the refreshed token did not land: %v", nested["accessToken"])
+	}
+	if nested["subscriptionType"] != "max" {
+		t.Error("fields we do not read must survive the fallback write too")
+	}
+}
+
 func TestTokenSourceReportsAnUnrefreshableExpiredToken(t *testing.T) {
 	dir := t.TempDir()
 	path := writeCredsFile(t, dir, "cc-expired", "", time.Now().Add(-time.Hour).UnixMilli())

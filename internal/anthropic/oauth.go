@@ -221,8 +221,13 @@ func readCredentials(path string) (credentials, error) {
 
 // writeCredentials updates the three OAuth fields in place, leaving every other
 // key in the file untouched — it is Claude Code's file, and it stores more than
-// we read (scopes, subscription type). The write is atomic so a crash mid-write
-// cannot leave the CLI without credentials.
+// we read (scopes, subscription type, organisation).
+//
+// The write prefers the atomic temp-file-and-rename dance, but falls back to
+// overwriting in place when that fails. The fallback is not paranoia: the
+// documented Docker setup bind-mounts this single file into the container, and
+// renaming onto a bind mount fails with EBUSY — every refresh would be lost, so
+// each restart would replay a refresh token Anthropic had already rotated away.
 func writeCredentials(path string, creds credentials) error {
 	if path == "" {
 		return fmt.Errorf("no credentials path configured")
@@ -246,6 +251,15 @@ func writeCredentials(path string, creds credentials) error {
 	if err != nil {
 		return err
 	}
+	if err := writeAtomic(path, out); err == nil {
+		return nil
+	}
+	// In place: the window where the file is truncated is one small write long,
+	// and losing the rotation outright is the worse outcome.
+	return os.WriteFile(path, out, 0600)
+}
+
+func writeAtomic(path string, out []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".credentials-*.tmp")
 	if err != nil {
 		return err

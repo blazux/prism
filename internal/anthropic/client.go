@@ -275,7 +275,27 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		return
 	}
 
-	c.readStream(ctx, resp.Body, oauth, req.Model, payload.MaxTokens, out)
+	c.readStream(ctx, resp.Body, oauth, len(payload.Tools) > 0, req.Model, payload.MaxTokens, out)
+}
+
+// explainStreamError turns Anthropic's mid-stream error into something a reader
+// can act on.
+//
+// A subscription token carrying tools is classified as a third-party app, and
+// Anthropic now bills those against extra usage rather than plan limits. Where
+// the tool names are bare it says so outright; where they carry the mcp__ prefix
+// that keeps them on plan billing, the refusal arrives disguised as
+// overloaded_error instead — measured 2026-07-29, where the same request
+// succeeded on eight of the eleven models offered and was refused on three. So
+// "Overloaded" on this path almost never means Anthropic is busy: it means this
+// model won't take tool calls on this plan, and another one will.
+func explainStreamError(errType, msg string, oauth, hasTools bool, model string) error {
+	if oauth && hasTools && errType == "overloaded_error" {
+		return fmt.Errorf("anthropic refused tool use for model %q on this subscription "+
+			"(reported as %q: %s — third-party tool calls draw on extra usage, not plan limits). "+
+			"Another model will usually take it", model, errType, msg)
+	}
+	return fmt.Errorf("anthropic stream error (%s): %s", errType, msg)
 }
 
 // ---- streaming response -------------------------------------------------
@@ -374,7 +394,7 @@ func (t *toolBuilder) result(oauth bool) []ollama.ToolCall {
 	return calls
 }
 
-func (c *Client) readStream(ctx context.Context, body io.Reader, oauth bool, model string, maxTokens int, out chan<- ollama.StreamEvent) {
+func (c *Client) readStream(ctx context.Context, body io.Reader, oauth, hasTools bool, model string, maxTokens int, out chan<- ollama.StreamEvent) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	tools := newToolBuilder()
@@ -429,7 +449,7 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, oauth bool, mod
 			if msg == "" {
 				msg = string(data)
 			}
-			out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic stream error (%s): %s", ev.Error.Type, msg)}
+			out <- ollama.StreamEvent{Err: explainStreamError(ev.Error.Type, msg, oauth, hasTools, model)}
 			return
 
 		case "message_stop":
