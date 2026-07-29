@@ -18,7 +18,7 @@ const anthropicModelPrefix = "claude-"
 
 // newChatBackend returns the chat backend selected by LLM_BACKEND. It defaults
 // to Ollama; "openai" targets any OpenAI-compatible server (SGLang, vLLM, …) and
-// "anthropic" targets Claude, on a subscription token or an API key.
+// "anthropic" targets Claude with a console API key.
 func (s *Server) newChatBackend() ollama.Backend {
 	switch s.cfg.LLMBackend {
 	case "anthropic":
@@ -29,15 +29,11 @@ func (s *Server) newChatBackend() ollama.Backend {
 	return ollama.NewClient(s.cfg.OllamaURL)
 }
 
-// newAnthropicBackend builds a Claude client over the server's single token
-// source. The token source is shared on purpose: it holds the OAuth token and
-// refreshes it, and Anthropic rotates the refresh token on each use — two
-// sources refreshing concurrently would invalidate each other's credential.
+// newAnthropicBackend builds a Claude client. cfg.Model is passed as the
+// fallback so the picker still offers the configured model when Anthropic
+// declines to enumerate them.
 func (s *Server) newAnthropicBackend() ollama.Backend {
-	s.anthropicOnce.Do(func() {
-		s.anthropicTokens = anthropic.NewTokenSource(s.cfg.AnthropicToken, s.cfg.AnthropicCredentials)
-	})
-	return anthropic.NewClient(s.cfg.AnthropicBaseURL, s.anthropicTokens, s.cfg.AnthropicCLIVersion, s.cfg.Model)
+	return anthropic.NewClient(s.cfg.AnthropicBaseURL, s.cfg.AnthropicToken, s.cfg.Model)
 }
 
 // dualBackend reports whether both an OpenAI-compatible server AND an Ollama

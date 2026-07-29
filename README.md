@@ -124,11 +124,9 @@ Point `VOX_URL` at a [PrismConnect](https://github.com/blazux/PrismConnect) inst
 
 Prism talks to **Ollama** by default, but it'll happily point at any **OpenAI-compatible** server — vLLM, SGLang, TGI, LM Studio, llama.cpp, even OpenRouter if you insist on sending your data to the cloud (we won't tell). Wire *both* at once and the model picker spans them: a fast local model for daily driving, a 120B reasoner for when you're feeling ambitious — switch per message from the dropdown. Embeddings can stay on Ollama while chat runs elsewhere, because not every inference server bothers to implement `/v1/embeddings`.
 
-There's also an **Anthropic** backend (`LLM_BACKEND=anthropic`) for driving Prism with Claude. Set `ANTHROPIC_API_KEY` and you pay per token like anyone else. Leave it empty and Prism instead picks up the OAuth token the `claude` CLI writes when you log in — your **Claude Pro/Max subscription**, no per-token bill — refreshing it as it expires. Claude models and your local ones share one picker, and RAG stays on Ollama automatically since Anthropic serves no embeddings.
+There's also an **Anthropic** backend (`LLM_BACKEND=anthropic`) for driving Prism with Claude: set `ANTHROPIC_API_KEY`, pick a model, and Claude sits in the same picker as your local ones. RAG stays on Ollama automatically, since Anthropic serves no embeddings.
 
-> **Tool calls on a subscription are not reliable, by Anthropic's design.** A tool-bearing request from anything that isn't Claude Code is classified as a third-party app, and Anthropic now bills those to *extra usage* rather than plan limits — with no such credits the request is refused. Bare tool names get an explicit `invalid_request_error` saying so; the `mcp__` prefix that keeps a request on plan billing turns the same refusal into a disguised `overloaded_error`. Measured 2026-07-29: the refusal comes and goes for the same model and the same request, so there is no set of models or settings that avoids it — [hermes-agent#31668](https://github.com/NousResearch/hermes-agent/issues/31668) is the same wall from the other side. Plain chat is unaffected; the agent loop is what breaks. **If you need tools to work every time, use `ANTHROPIC_API_KEY`** — the gate does not apply to API keys.
-
-> **Read this before using the subscription path.** It works by presenting the request as Claude Code's own: the CLI's user-agent, its beta headers, its identity block at the head of the system prompt. That is outside Anthropic's terms of use, and the account carrying the subscription is the one at risk. The API-key path has none of that — it's the boring, sanctioned option.
+> **A Claude Pro/Max subscription will not work, and this is deliberate.** The OAuth token the `claude` CLI stores does authenticate, and plain chat runs on it — but Anthropic classifies a tool-bearing request from anything that isn't Claude Code as a third-party app and bills it against *extra usage* rather than plan limits, so the agent loop is refused. The refusal is intermittent and no model or setting avoids it ([hermes-agent#31668](https://github.com/NousResearch/hermes-agent/issues/31668) is the same wall from the other side, closed with no fix). Prism is an agent, so a brain that drops tool calls at random is worse than no brain: it was implemented, measured, and taken out rather than shipped as a trap. Paste that token into `ANTHROPIC_API_KEY` and Prism tells you why it won't work instead of letting Anthropic answer `401`.
 
 ---
 
@@ -151,11 +149,8 @@ All configuration is done via environment variables (set in `docker-compose.yml`
 | `OPENAI_BASE_URL` | The `/v1` root, when `LLM_BACKEND=openai` | `http://host:8000/v1` |
 | `OPENAI_MODEL` | Chat model name for the openai backend (its `--served-model-name`) | `qwen` |
 | `OPENAI_API_KEY` | Key for the openai backend, if it needs one (local servers usually don't) | `sk-…` |
-| `ANTHROPIC_MODEL` | Chat model, when `LLM_BACKEND=anthropic` | `claude-sonnet-4-5` |
-| `ANTHROPIC_API_KEY` | Anthropic API key — pay per token. Omit it to use the Claude Code subscription token instead | `sk-ant-api03-…` |
-| `ANTHROPIC_CREDENTIALS_FILE` | Where the `claude` CLI keeps its OAuth token; mount it into the container read-write | `/root/.claude/.credentials.json` |
-| `ANTHROPIC_CLI_VERSION` | Claude Code version claimed on the subscription path — bump it if Anthropic starts rejecting requests | `2.1.74` |
-| `EMBED_BACKEND` | Set to `ollama` to keep RAG on Ollama while chat runs on an openai server with no `/v1/embeddings` | `ollama` |
+| `ANTHROPIC_MODEL` | Chat model, when `LLM_BACKEND=anthropic` | `claude-sonnet-5` |
+| `ANTHROPIC_API_KEY` | Anthropic API key from console.anthropic.com. A subscription token is not accepted — see above | `sk-ant-api03-…` |
 | `PRISM_TOKEN` | Login token — protects the dashboard (omit to disable auth) | `change-me` |
 | `MULTI_USER` | `1` to turn on accounts, groups, rooms and the admin console (default: personal, single-user) | `1` |
 | `VOX_URL` | A [PrismConnect](https://github.com/blazux/PrismConnect) instance — gives the agent a phone (empty = no telephony) | `http://prismconnect:7860` |

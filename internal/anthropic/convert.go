@@ -15,19 +15,6 @@ import (
 // about turning PRISM's Ollama-shaped pivot into that shape without ever
 // emitting a message Anthropic will reject.
 
-// oauthToolPrefix is prepended to every tool name on the subscription wire.
-// Anthropic's billing classifier reads a *single*-underscore "mcp_" prefix as a
-// third-party app and rejects the request ("Third-party apps now draw from extra
-// usage, not plan limits"); the double underscore is what Claude Code itself
-// sends, so it stays on the plan. Names come back prefixed and are stripped
-// again in the stream reader, so nothing downstream ever sees the wire name.
-const oauthToolPrefix = "mcp__"
-
-// claudeCodeSystemPrefix is the first system block Claude Code sends. Anthropic
-// routes subscription traffic on it; without it the request is not recognised as
-// coming from the CLI.
-const claudeCodeSystemPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
-
 type apiRequest struct {
 	Model       string       `json:"model"`
 	System      []textBlock  `json:"system,omitempty"`
@@ -77,24 +64,19 @@ type apiTool struct {
 	InputSchema ollama.ToolParameters `json:"input_schema"`
 }
 
-// buildTools converts the pivot tool list. oauth adds the wire prefix that keeps
-// the request on the subscription plan.
-func buildTools(in []ollama.Tool, oauth bool) []apiTool {
+// buildTools converts the pivot tool list.
+func buildTools(in []ollama.Tool) []apiTool {
 	if len(in) == 0 {
 		return nil
 	}
 	out := make([]apiTool, 0, len(in))
 	for _, t := range in {
-		name := t.Function.Name
-		if oauth {
-			name = toWireName(name)
-		}
 		schema := t.Function.Parameters
 		if schema.Type == "" {
 			schema.Type = "object" // Anthropic rejects a schema with no type
 		}
 		out = append(out, apiTool{
-			Name:        name,
+			Name:        t.Function.Name,
 			Description: t.Function.Description,
 			InputSchema: schema,
 		})
@@ -102,36 +84,10 @@ func buildTools(in []ollama.Tool, oauth bool) []apiTool {
 	return out
 }
 
-func toWireName(name string) string {
-	if strings.HasPrefix(name, oauthToolPrefix) {
-		return name
-	}
-	// A single-underscore mcp_ name is the one shape that trips the classifier,
-	// so promote it rather than prefixing it twice.
-	if strings.HasPrefix(name, "mcp_") {
-		return oauthToolPrefix + strings.TrimPrefix(name, "mcp_")
-	}
-	return oauthToolPrefix + name
-}
-
-// fromWireName reverses toWireName so the agent's dispatcher sees the tool name
-// it registered. Only the prefix we added is removed; a name that never carried
-// it is returned untouched.
-func fromWireName(name string) string {
-	if !strings.HasPrefix(name, oauthToolPrefix) {
-		return name
-	}
-	return strings.TrimPrefix(name, oauthToolPrefix)
-}
-
 // buildSystem extracts the system turns from the pivot history into the
-// top-level system field. On the subscription wire Claude Code's own identity
-// block comes first — PRISM's prompt follows it as a second block.
-func buildSystem(in []ollama.Message, oauth bool) []textBlock {
+// top-level system field, where this API expects them.
+func buildSystem(in []ollama.Message) []textBlock {
 	var blocks []textBlock
-	if oauth {
-		blocks = append(blocks, textBlock{Type: "text", Text: claudeCodeSystemPrefix})
-	}
 	for _, m := range in {
 		if m.Role != "system" {
 			continue
@@ -151,7 +107,7 @@ func buildSystem(in []ollama.Message, oauth bool) []textBlock {
 // tool result whose originating call was summarised out of the replayed history
 // has nothing to reference and is dropped — Anthropic rejects a tool_result
 // pointing at an unknown tool_use_id.
-func buildMessages(in []ollama.Message, oauth bool) []apiMessage {
+func buildMessages(in []ollama.Message) []apiMessage {
 	out := make([]apiMessage, 0, len(in))
 	var pending []string
 	seq := 0
@@ -184,10 +140,6 @@ func buildMessages(in []ollama.Message, oauth bool) []apiMessage {
 				seq++
 				id := fmt.Sprintf("toolu_%08d", seq)
 				pending = append(pending, id)
-				name := tc.Function.Name
-				if oauth {
-					name = toWireName(name)
-				}
 				input := json.RawMessage(tc.Function.Arguments)
 				if len(input) == 0 || !json.Valid(input) {
 					// A truncated turn can leave unparseable arguments in the
@@ -195,7 +147,7 @@ func buildMessages(in []ollama.Message, oauth bool) []apiMessage {
 					// turn after it, so fall back to an empty object.
 					input = json.RawMessage(`{}`)
 				}
-				blocks = append(blocks, apiBlock{Type: "tool_use", ID: id, Name: name, Input: input})
+				blocks = append(blocks, apiBlock{Type: "tool_use", ID: id, Name: tc.Function.Name, Input: input})
 			}
 			// An assistant turn with neither text nor tool calls has no valid
 			// representation — an empty content list is rejected.

@@ -2,32 +2,22 @@ package anthropic
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"prism/internal/ollama"
 )
 
-func TestBuildSystemHoistsPromptAndLeadsWithClaudeCodeIdentity(t *testing.T) {
+func TestBuildSystemHoistsThePromptOutOfTheHistory(t *testing.T) {
 	msgs := []ollama.Message{
 		{Role: "system", Content: "You are PRISM."},
 		{Role: "user", Content: "hi"},
+		{Role: "system", Content: "   "}, // an empty block is rejected by the API
 	}
 
-	oauth := buildSystem(msgs, true)
-	if len(oauth) != 2 {
-		t.Fatalf("expected the identity block plus PRISM's prompt, got %d blocks", len(oauth))
-	}
-	if oauth[0].Text != claudeCodeSystemPrefix {
-		t.Errorf("identity block must come first, got %q", oauth[0].Text)
-	}
-	if oauth[1].Text != "You are PRISM." {
-		t.Errorf("PRISM's prompt should follow it, got %q", oauth[1].Text)
-	}
-
-	// On an API key there is no subscription to route, so no identity block.
-	plain := buildSystem(msgs, false)
-	if len(plain) != 1 || plain[0].Text != "You are PRISM." {
-		t.Errorf("api-key path should carry PRISM's prompt alone, got %+v", plain)
+	got := buildSystem(msgs)
+	if len(got) != 1 || got[0].Text != "You are PRISM." {
+		t.Errorf("expected PRISM's prompt as the only system block, got %+v", got)
 	}
 }
 
@@ -36,7 +26,7 @@ func TestBuildMessagesDropsSystemTurns(t *testing.T) {
 		{Role: "system", Content: "prompt"},
 		{Role: "user", Content: "hi"},
 	}
-	got := buildMessages(msgs, false)
+	got := buildMessages(msgs)
 	if len(got) != 1 || got[0].Role != "user" {
 		t.Fatalf("system turns belong in the system field, got %+v", got)
 	}
@@ -51,7 +41,7 @@ func TestBuildMessagesPairsToolCallsWithResults(t *testing.T) {
 		{Role: "tool", Content: "12:00"},
 	}
 
-	got := buildMessages(msgs, false)
+	got := buildMessages(msgs)
 	if len(got) != 3 {
 		t.Fatalf("expected user/assistant/user, got %d messages: %+v", len(got), got)
 	}
@@ -81,7 +71,7 @@ func TestBuildMessagesDropsOrphanedToolResult(t *testing.T) {
 		{Role: "user", Content: "hi"},
 		{Role: "tool", Content: "stale output"},
 	}
-	got := buildMessages(msgs, false)
+	got := buildMessages(msgs)
 	if len(got) != 1 || len(got[0].Content) != 1 || got[0].Content[0].Type != "text" {
 		t.Fatalf("orphaned tool result should be dropped, got %+v", got)
 	}
@@ -99,7 +89,7 @@ func TestBuildMessagesMergesConsecutiveSameRoleTurns(t *testing.T) {
 		{Role: "tool", Content: "two"},
 	}
 
-	got := buildMessages(msgs, false)
+	got := buildMessages(msgs)
 	if len(got) != 3 {
 		t.Fatalf("expected the two results merged into one turn, got %d messages", len(got))
 	}
@@ -117,7 +107,7 @@ func TestBuildMessagesSkipsEmptyTurnsAndFillsEmptyToolResults(t *testing.T) {
 		{Role: "assistant", Content: "   "}, // nothing to say, nothing to call
 		{Role: "user", Content: "still there?"},
 	}
-	got := buildMessages(msgs, false)
+	got := buildMessages(msgs)
 	for _, m := range got {
 		if len(m.Content) == 0 {
 			t.Fatalf("an empty content list is rejected by the API: %+v", got)
@@ -136,7 +126,7 @@ func TestBuildMessagesSkipsEmptyTurnsAndFillsEmptyToolResults(t *testing.T) {
 		}},
 		{Role: "tool", Content: ""},
 	}
-	res := buildMessages(withEmptyResult, false)
+	res := buildMessages(withEmptyResult)
 	last := res[len(res)-1].Content[0]
 	if last.Content == "" {
 		t.Error("an empty tool result must be filled in, not sent empty")
@@ -152,7 +142,7 @@ func TestBuildMessagesRepairsInvalidToolArguments(t *testing.T) {
 			{Function: ollama.ToolCallFunction{Name: "a", Arguments: json.RawMessage(`{"path":"/tmp`)}},
 		}},
 	}
-	got := buildMessages(msgs, false)
+	got := buildMessages(msgs)
 	input := got[1].Content[0].Input
 	if !json.Valid(input) {
 		t.Fatalf("invalid arguments must be replaced, got %s", input)
@@ -164,7 +154,7 @@ func TestBuildMessagesOpensOnAUserTurn(t *testing.T) {
 		{Role: "assistant", Content: "resumed after compaction"},
 		{Role: "user", Content: "go on"},
 	}
-	got := buildMessages(msgs, false)
+	got := buildMessages(msgs)
 	if got[0].Role != "user" {
 		t.Fatalf("the conversation must open on a user turn, got %q", got[0].Role)
 	}
@@ -177,7 +167,7 @@ func TestBuildMessagesTrimsTrailingAssistantWhitespace(t *testing.T) {
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "partial answer\n\n"},
 	}
-	got := buildMessages(msgs, false)
+	got := buildMessages(msgs)
 	last := got[len(got)-1].Content[0].Text
 	if last != "partial answer" {
 		t.Errorf("expected trailing whitespace trimmed, got %q", last)
@@ -186,7 +176,7 @@ func TestBuildMessagesTrimsTrailingAssistantWhitespace(t *testing.T) {
 
 func TestBuildMessagesCarriesImages(t *testing.T) {
 	msgs := []ollama.Message{{Role: "user", Content: "what is this", Images: []string{"BASE64DATA"}}}
-	got := buildMessages(msgs, false)
+	got := buildMessages(msgs)
 	if len(got[0].Content) != 2 || got[0].Content[1].Type != "image" {
 		t.Fatalf("expected a text block and an image block, got %+v", got[0].Content)
 	}
@@ -195,53 +185,18 @@ func TestBuildMessagesCarriesImages(t *testing.T) {
 	}
 }
 
-func TestToolNamesRoundTripThroughTheOAuthWire(t *testing.T) {
-	// A single-underscore mcp_ name is what trips Anthropic's third-party
-	// classifier; everything must land on the double-underscore form.
-	cases := []struct{ registered, wire string }{
-		{"read_file", "mcp__read_file"},
-		{"mcp_linear_get_issue", "mcp__linear_get_issue"},
-		{"mcp__already_prefixed", "mcp__already_prefixed"},
-	}
-	for _, c := range cases {
-		if got := toWireName(c.registered); got != c.wire {
-			t.Errorf("toWireName(%q) = %q, want %q", c.registered, got, c.wire)
-		}
-		if got := fromWireName(c.wire); got == c.wire && c.wire != c.registered {
-			t.Errorf("fromWireName(%q) left the wire prefix in place", c.wire)
-		}
-	}
-}
-
-func TestBuildToolsPrefixesOnlyOnTheOAuthPath(t *testing.T) {
-	tools := []ollama.Tool{{Function: ollama.ToolFunction{Name: "read_file", Description: "d"}}}
-
-	oauth := buildTools(tools, true)
-	if oauth[0].Name != "mcp__read_file" {
-		t.Errorf("subscription wire needs the mcp__ prefix, got %q", oauth[0].Name)
-	}
-	if oauth[0].InputSchema.Type != "object" {
-		t.Errorf("a schema with no type is rejected, got %q", oauth[0].InputSchema.Type)
-	}
-
-	plain := buildTools(tools, false)
-	if plain[0].Name != "read_file" {
-		t.Errorf("api-key path must send the registered name, got %q", plain[0].Name)
-	}
-}
-
-func TestToolBuilderStripsWirePrefixFromStreamedCalls(t *testing.T) {
+func TestToolBuilderReassemblesStreamedCalls(t *testing.T) {
 	b := newToolBuilder()
-	b.start(0, "mcp__read_file")
+	b.start(0, "read_file")
 	b.addArgs(0, `{"path":`)
 	b.addArgs(0, `"/tmp/x"}`)
 
-	calls := b.result(true)
+	calls := b.result()
 	if len(calls) != 1 {
 		t.Fatalf("expected one call, got %d", len(calls))
 	}
 	if calls[0].Function.Name != "read_file" {
-		t.Errorf("the dispatcher must see the registered name, got %q", calls[0].Function.Name)
+		t.Errorf("expected the registered name, got %q", calls[0].Function.Name)
 	}
 	if string(calls[0].Function.Arguments) != `{"path":"/tmp/x"}` {
 		t.Errorf("fragments did not reassemble: %s", calls[0].Function.Arguments)
@@ -254,7 +209,7 @@ func TestToolBuilderRepairsTruncatedAndMissingArguments(t *testing.T) {
 	b.start(1, "truncated")       //
 	b.addArgs(1, `{"path":"/tmp`) // cut off mid-stream
 
-	calls := b.result(false)
+	calls := b.result()
 	for _, c := range calls {
 		if !json.Valid(c.Function.Arguments) {
 			t.Errorf("tool %q got unusable arguments %s", c.Function.Name, c.Function.Arguments)
@@ -262,18 +217,31 @@ func TestToolBuilderRepairsTruncatedAndMissingArguments(t *testing.T) {
 	}
 }
 
-func TestIsOAuthTokenSeparatesSubscriptionTokensFromAPIKeys(t *testing.T) {
-	cases := map[string]bool{
-		"sk-ant-api03-xxxx": false, // console API key → x-api-key, no CLI fingerprint
-		"sk-ant-oat01-xxxx": true,  // setup-token
-		"cc-xxxx":           true,  // Claude Code access token
-		"eyJhbGciOi":        true,  // OAuth JWT
-		"":                  false,
-		"some-other-key":    false,
+func TestValidateKeyRejectsASubscriptionTokenWithAnActionableMessage(t *testing.T) {
+	// sk-ant-api… and sk-ant-oat… differ by three characters, and the wrong one
+	// earns an opaque 401 from Anthropic. Say what is actually wrong instead.
+	oauthShaped := []string{
+		"sk-ant-oat01-xxxx", // `claude setup-token`
+		"cc-xxxx",           // Claude Code access token
+		"eyJhbGciOi",        // OAuth JWT
 	}
-	for token, want := range cases {
-		if got := isOAuthToken(token); got != want {
-			t.Errorf("isOAuthToken(%q) = %v, want %v", token, got, want)
+	for _, token := range oauthShaped {
+		err := ValidateKey(token)
+		if err == nil {
+			t.Errorf("ValidateKey(%q) accepted a subscription token", token)
+			continue
 		}
+		for _, want := range []string{"OAuth token", "sk-ant-api", "console.anthropic.com", "extra"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("ValidateKey(%q) message is missing %q: %v", token, want, err)
+			}
+		}
+	}
+
+	if err := ValidateKey("sk-ant-api03-xxxx"); err != nil {
+		t.Errorf("a console key must be accepted, got %v", err)
+	}
+	if err := ValidateKey(""); err == nil {
+		t.Error("an unset key must be reported, not sent as an empty header")
 	}
 }

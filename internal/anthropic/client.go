@@ -1,15 +1,9 @@
 // Package anthropic implements a chat backend for Anthropic's Messages API,
-// usable either with a console API key or — and this is why it exists — with the
-// OAuth token a Claude Pro/Max subscription hands to the Claude Code CLI. It
-// satisfies ollama.Backend by translating PRISM's wire-neutral ollama.* types to
-// and from the Messages wire format. PRISM keeps the ollama.* types as the
-// canonical pivot.
+// authenticated with a console API key. It satisfies ollama.Backend by
+// translating PRISM's wire-neutral ollama.* types to and from the Messages wire
+// format. PRISM keeps the ollama.* types as the canonical pivot.
 //
-// On the subscription path the request has to look like it came from Claude Code
-// itself: bearer auth, the CLI's user-agent and beta headers, its identity block
-// at the head of the system prompt, and tool names carrying the mcp__ prefix.
-// Anthropic routes and bills on that fingerprint. See oauth.go for the terms-of-
-// service caveat that comes with it.
+// See credential.go for why a Claude Pro/Max subscription is not an option here.
 package anthropic
 
 import (
@@ -21,9 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	"prism/internal/ollama"
@@ -45,59 +37,17 @@ const defaultMaxTokens = 16384
 // body — the SSE stream may then run as long as it likes.
 const responseHeaderTimeout = 3 * time.Minute
 
-// Betas Claude Code sends. The first two are ordinary feature betas; the last
-// two are what mark the request as subscription traffic and are sent on the
-// OAuth path only.
-var (
-	commonBetas = []string{
-		"interleaved-thinking-2025-05-14",
-		"fine-grained-tool-streaming-2025-05-14",
-	}
-	oauthBetas = []string{
-		"claude-code-20250219",
-		"oauth-2025-04-20",
-	}
-)
-
-// claudeCodeVersionFallback is used when the CLI isn't installed next to PRISM —
-// which is the normal case inside the container. Anthropic validates the version
-// in the user-agent and rejects OAuth requests claiming one that is far behind
-// the current release, so ANTHROPIC_CLI_VERSION exists to bump this without a
-// rebuild when that day comes.
-const claudeCodeVersionFallback = "2.1.74"
-
-var (
-	versionOnce   sync.Once
-	cachedVersion string
-)
-
-// claudeCodeVersion reports the version to claim in the user-agent: the locally
-// installed CLI's if there is one, the configured override, else the fallback.
-func claudeCodeVersion(override string) string {
-	if v := strings.TrimSpace(override); v != "" {
-		return v
-	}
-	versionOnce.Do(func() {
-		cachedVersion = claudeCodeVersionFallback
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		out, err := exec.CommandContext(ctx, "claude", "--version").Output()
-		if err != nil {
-			return
-		}
-		// Output looks like "2.1.74 (Claude Code)", or just the version.
-		fields := strings.Fields(string(out))
-		if len(fields) > 0 && len(fields[0]) > 0 && fields[0][0] >= '0' && fields[0][0] <= '9' {
-			cachedVersion = fields[0]
-		}
-	})
-	return cachedVersion
-}
+// betas requested on every call. Fine-grained tool streaming is the only one
+// that changes what this backend sees: tool arguments arrive as fragments
+// without being buffered to completion first, which is what toolBuilder
+// reassembles. It can leave the JSON truncated if the stream dies mid-call —
+// toolBuilder handles that. GA on current models, kept for older ones that
+// still gate on the header.
+var betas = []string{"fine-grained-tool-streaming-2025-05-14"}
 
 type Client struct {
-	baseURL    string
-	tokens     *TokenSource
-	cliVersion string
+	baseURL string
+	apiKey  string
 	// fallbackModel is offered by ListModels when Anthropic won't enumerate
 	// models for this credential, so the picker still shows what is configured.
 	fallbackModel string
@@ -105,10 +55,9 @@ type Client struct {
 }
 
 // NewClient builds an Anthropic backend. baseURL may be empty for the public
-// API. cliVersion overrides the Claude Code version claimed in the user-agent.
-// fallbackModel is the configured chat model, used when model enumeration is
-// unavailable.
-func NewClient(baseURL string, tokens *TokenSource, cliVersion, fallbackModel string) *Client {
+// API. fallbackModel is the configured chat model, used when model enumeration
+// is unavailable.
+func NewClient(baseURL, apiKey, fallbackModel string) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
@@ -117,46 +66,25 @@ func NewClient(baseURL string, tokens *TokenSource, cliVersion, fallbackModel st
 	tr.ResponseHeaderTimeout = responseHeaderTimeout
 	return &Client{
 		baseURL:       strings.TrimRight(baseURL, "/"),
-		tokens:        tokens,
-		cliVersion:    cliVersion,
+		apiKey:        strings.TrimSpace(apiKey),
 		fallbackModel: fallbackModel,
 		// No client-wide timeout: it would also cap the streamed body.
 		httpClient: &http.Client{Timeout: 0, Transport: tr},
 	}
 }
 
-// auth sets the credential and, on the subscription path, the Claude Code
-// fingerprint. It reports whether the request went out as OAuth, which decides
-// the tool-name and system-prompt handling upstream.
-func (c *Client) auth(ctx context.Context, req *http.Request) (bool, error) {
-	token, err := c.tokens.Token(ctx)
-	if err != nil {
-		return false, err
+// auth sets the credential and the headers every Messages request needs. It
+// refuses a credential this backend cannot use rather than letting Anthropic
+// answer with an opaque 401 — see ValidateKey.
+func (c *Client) auth(req *http.Request) error {
+	if err := ValidateKey(c.apiKey); err != nil {
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", apiVersion)
-
-	oauth := isOAuthToken(token)
-	if oauth {
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("anthropic-beta", strings.Join(append(append([]string{}, commonBetas...), oauthBetas...), ","))
-		req.Header.Set("User-Agent", "claude-code/"+claudeCodeVersion(c.cliVersion)+" (external, cli)")
-		req.Header.Set("x-app", "cli")
-	} else {
-		req.Header.Set("x-api-key", token)
-		req.Header.Set("anthropic-beta", strings.Join(commonBetas, ","))
-	}
-	return oauth, nil
-}
-
-// isOAuth reports whether the resolved credential is a subscription token,
-// without issuing a request.
-func (c *Client) isOAuth(ctx context.Context) (bool, error) {
-	token, err := c.tokens.Token(ctx)
-	if err != nil {
-		return false, err
-	}
-	return isOAuthToken(token), nil
+	req.Header.Set("anthropic-beta", strings.Join(betas, ","))
+	req.Header.Set("x-api-key", c.apiKey)
+	return nil
 }
 
 // ---- request ------------------------------------------------------------
@@ -181,7 +109,7 @@ func (c *Client) postMessages(ctx context.Context, body []byte) (*http.Response,
 		if err != nil {
 			return nil, err
 		}
-		if _, err := c.auth(ctx, req); err != nil {
+		if err := c.auth(req); err != nil {
 			return nil, err
 		}
 
@@ -220,8 +148,7 @@ func (c *Client) postMessages(ctx context.Context, body []byte) (*http.Response,
 }
 
 func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
-	oauth, err := c.isOAuth(ctx)
-	if err != nil {
+	if err := ValidateKey(c.apiKey); err != nil {
 		out <- ollama.StreamEvent{Err: err}
 		return
 	}
@@ -234,9 +161,9 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	// asking for them would break the very next tool turn.
 	payload := apiRequest{
 		Model:     req.Model,
-		System:    buildSystem(req.Messages, oauth),
-		Messages:  buildMessages(req.Messages, oauth),
-		Tools:     buildTools(req.Tools, oauth),
+		System:    buildSystem(req.Messages),
+		Messages:  buildMessages(req.Messages),
+		Tools:     buildTools(req.Tools),
 		MaxTokens: req.Options.NumPredict,
 		Stream:    true,
 	}
@@ -275,28 +202,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		return
 	}
 
-	c.readStream(ctx, resp.Body, oauth, len(payload.Tools) > 0, req.Model, payload.MaxTokens, out)
-}
-
-// explainStreamError turns Anthropic's mid-stream error into something a reader
-// can act on.
-//
-// A subscription token carrying tools is classified as a third-party app, and
-// Anthropic now bills those against extra usage rather than plan limits. Where
-// the tool names are bare it says so outright; where they carry the mcp__ prefix
-// that keeps them on plan billing, the refusal arrives disguised as
-// overloaded_error instead. Measured 2026-07-29: the refusal comes and goes for
-// the same model and the same request, so it is not a property of the model and
-// no setting avoids it. So "Overloaded" on this path is rarely Anthropic being
-// busy, and saying so would send the reader off waiting for capacity that was
-// never the problem.
-func explainStreamError(errType, msg string, oauth, hasTools bool, model string) error {
-	if oauth && hasTools && errType == "overloaded_error" {
-		return fmt.Errorf("anthropic refused tool use for model %q on this subscription "+
-			"(reported as %q: %s — third-party tool calls draw on extra usage, not plan limits). "+
-			"This comes and goes: retrying may work, an API key always does", model, errType, msg)
-	}
-	return fmt.Errorf("anthropic stream error (%s): %s", errType, msg)
+	c.readStream(ctx, resp.Body, req.Model, payload.MaxTokens, out)
 }
 
 // ---- streaming response -------------------------------------------------
@@ -357,9 +263,7 @@ func (t *toolBuilder) addArgs(idx int, fragment string) {
 	}
 }
 
-// result returns the accumulated calls, translating wire names back to the ones
-// the agent registered.
-func (t *toolBuilder) result(oauth bool) []ollama.ToolCall {
+func (t *toolBuilder) result() []ollama.ToolCall {
 	if len(t.order) == 0 {
 		return nil
 	}
@@ -381,13 +285,9 @@ func (t *toolBuilder) result(oauth bool) []ollama.ToolCall {
 			log.Printf("[anthropic] tool call %q got invalid JSON arguments, discarding: %s", p.name, snippet)
 			args = "{}"
 		}
-		name := p.name
-		if oauth {
-			name = fromWireName(name)
-		}
 		calls = append(calls, ollama.ToolCall{
 			Function: ollama.ToolCallFunction{
-				Name:      name,
+				Name:      p.name,
 				Arguments: json.RawMessage(args),
 			},
 		})
@@ -395,7 +295,7 @@ func (t *toolBuilder) result(oauth bool) []ollama.ToolCall {
 	return calls
 }
 
-func (c *Client) readStream(ctx context.Context, body io.Reader, oauth, hasTools bool, model string, maxTokens int, out chan<- ollama.StreamEvent) {
+func (c *Client) readStream(ctx context.Context, body io.Reader, model string, maxTokens int, out chan<- ollama.StreamEvent) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	tools := newToolBuilder()
@@ -450,13 +350,13 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, oauth, hasTools
 			if msg == "" {
 				msg = string(data)
 			}
-			out <- ollama.StreamEvent{Err: explainStreamError(ev.Error.Type, msg, oauth, hasTools, model)}
+			out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic stream error (%s): %s", ev.Error.Type, msg)}
 			return
 
 		case "message_stop":
 			// Anthropic closes the body right after; stop reading rather than
 			// wait on a scanner that has nothing left to yield.
-			out <- ollama.StreamEvent{ToolCalls: tools.result(oauth), Done: true}
+			out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true}
 			c.logStop(stopReason, model, maxTokens)
 			return
 		}
@@ -469,7 +369,7 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, oauth, hasTools
 
 	// The stream ended without message_stop (upstream closed early). Everything
 	// accumulated so far is still worth delivering.
-	out <- ollama.StreamEvent{ToolCalls: tools.result(oauth), Done: true}
+	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true}
 	c.logStop(stopReason, model, maxTokens)
 }
 
@@ -502,7 +402,7 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.auth(ctx, req); err != nil {
+	if err := c.auth(req); err != nil {
 		return nil, err
 	}
 
@@ -557,7 +457,7 @@ func (c *Client) fallbackModels() []string {
 // send a Messages request: on a subscription every call draws down the plan's
 // usage window, and a health check is not worth a slice of it.
 func (c *Client) Ping(ctx context.Context) error {
-	if _, err := c.tokens.Token(ctx); err != nil {
+	if err := ValidateKey(c.apiKey); err != nil {
 		return err
 	}
 
@@ -568,7 +468,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.auth(ctx, req); err != nil {
+	if err := c.auth(req); err != nil {
 		return err
 	}
 	resp, err := c.httpClient.Do(req)
@@ -579,7 +479,7 @@ func (c *Client) Ping(ctx context.Context) error {
 
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
-		return fmt.Errorf("anthropic rejected the credential (401) — log in again with `claude`")
+		return fmt.Errorf("anthropic rejected the API key (401) — check ANTHROPIC_API_KEY")
 	case resp.StatusCode == http.StatusForbidden:
 		// The token authenticates but isn't scoped to enumerate models, which
 		// says nothing about whether inference works. Treat it as healthy.

@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"prism/internal/anthropic"
 	"prism/internal/customtools"
 	"prism/internal/docker"
 	"prism/internal/mcp"
@@ -28,27 +27,23 @@ type Config struct {
 	PluginDir     string
 	OllamaURL     string
 	Model         string
-	LLMBackend    string // "ollama" (default), "openai" (SGLang/vLLM/…) or "anthropic" (Claude subscription/API)
+	LLMBackend    string // "ollama" (default), "openai" (SGLang/vLLM/…) or "anthropic" (Claude, API key)
 	OpenAIBaseURL string // /v1 root, used when LLMBackend == "openai"
 	OpenAIAPIKey  string // optional bearer token for the openai backend
-	// Anthropic* configure the Claude backend. AnthropicToken is optional: left
-	// empty the backend reads (and refreshes) the OAuth token the Claude Code CLI
-	// stores in AnthropicCredentials, which is how a Pro/Max subscription is used
-	// instead of per-token API billing.
-	AnthropicToken       string // explicit API key or setup-token; empty = read the credentials file
-	AnthropicCredentials string // path to Claude Code's .credentials.json; empty = ~/.claude/.credentials.json
-	AnthropicBaseURL     string // API root; empty = https://api.anthropic.com
-	AnthropicCLIVersion  string // Claude Code version claimed in the user-agent; empty = detect, else fallback
-	EmbedBackend         string // "" (follow LLMBackend), "ollama" or "openai": backend for RAG embeddings + captioning
-	VisionModel          string // optional override model for RAG vision captioning (needed when captioning ≠ chat backend)
-	ChatVision           bool   // chat model can see images (default true); false → caption widget previews as text for a text-only model
-	AgentContainer       string
-	SearxngURL           string
-	ServicePortStart     int
-	ServicePortEnd       int
-	PostgresURL          string
-	EmbedModel           string
-	AuthToken            string
+	// AnthropicToken is the console API key for the Claude backend. A Pro/Max
+	// subscription token is not an option — see internal/anthropic/credential.go.
+	AnthropicToken   string
+	AnthropicBaseURL string // API root; empty = https://api.anthropic.com
+	EmbedBackend     string // "" (follow LLMBackend), "ollama" or "openai": backend for RAG embeddings + captioning
+	VisionModel      string // optional override model for RAG vision captioning (needed when captioning ≠ chat backend)
+	ChatVision       bool   // chat model can see images (default true); false → caption widget previews as text for a text-only model
+	AgentContainer   string
+	SearxngURL       string
+	ServicePortStart int
+	ServicePortEnd   int
+	PostgresURL      string
+	EmbedModel       string
+	AuthToken        string
 	// MultiUser turns Prism from a personal dashboard into a shared one: accounts,
 	// groups, rooms, per-user scoping and a login page. Off by default — at home
 	// there is one user, and AuthToken is the whole of authentication. It is read
@@ -86,10 +81,6 @@ type Server struct {
 	chanCancel     context.CancelFunc // cancels the running channel receive loops
 	oauthStates    sync.Map           // CSRF state → oauthState (pending OAuth authorizations)
 	rooms          *roomHub           // shared group chat rooms (Phase 4)
-	// anthropicTokens is built once and shared by every Claude client — see
-	// newAnthropicBackend for why it must not be per-request.
-	anthropicOnce   sync.Once
-	anthropicTokens *anthropic.TokenSource
 }
 
 func New(cfg Config) *Server {

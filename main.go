@@ -8,6 +8,7 @@ import (
 	"strings"
 	_ "time/tzdata" // embed IANA timezone database so TZ env var works without tzdata installed
 
+	"prism/internal/anthropic"
 	"prism/internal/server"
 )
 
@@ -63,17 +64,18 @@ func main() {
 		}
 	}
 
-	// Anthropic. ANTHROPIC_API_KEY is optional: left unset the backend reads the
-	// OAuth token the Claude Code CLI keeps in its credentials file (mount it
-	// into the container), which is how a Pro/Max subscription is used instead of
-	// per-token API billing.
+	// Anthropic needs a console API key; a Claude Pro/Max subscription token does
+	// not work here (internal/anthropic/credential.go says why). Validate it now
+	// so the reason lands in the logs rather than as an opaque 401 mid-chat — but
+	// only warn: email, calendar and widgets work fine without a chat model.
 	anthropicToken := os.Getenv("ANTHROPIC_API_KEY")
-	anthropicCreds := os.Getenv("ANTHROPIC_CREDENTIALS_FILE")
 	anthropicBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
-	anthropicCLIVersion := os.Getenv("ANTHROPIC_CLI_VERSION")
 	if llmBackend == "anthropic" {
 		if m := os.Getenv("ANTHROPIC_MODEL"); m != "" {
 			model = m
+		}
+		if err := anthropic.ValidateKey(anthropicToken); err != nil {
+			log.Printf("WARNING: %v", err)
 		}
 	}
 
@@ -133,10 +135,8 @@ func main() {
 		OpenAIBaseURL: openAIBaseURL,
 		OpenAIAPIKey:  openAIAPIKey,
 
-		AnthropicToken:       anthropicToken,
-		AnthropicCredentials: anthropicCreds,
-		AnthropicBaseURL:     anthropicBaseURL,
-		AnthropicCLIVersion:  anthropicCLIVersion,
+		AnthropicToken:   anthropicToken,
+		AnthropicBaseURL: anthropicBaseURL,
 
 		EmbedBackend:     embedBackend,
 		VisionModel:      visionModel,
