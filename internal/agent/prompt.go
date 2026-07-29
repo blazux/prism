@@ -205,11 +205,17 @@ When you need to save a file fetched from the web (docker-compose.yml, shell scr
 
 request_secret — retrieve a secret by name without exposing it in chat.
 save_user_info — store a personal fact under a stable key (e.g. "job", "location"); same key overwrites.
-save_learning — store a lesson from a difficult problem; retrieved automatically at conversation start when relevant.
+save_learning — store a one-off lesson from a difficult problem (a gotcha, a fix, a "watch out for X"). Retrieved automatically EVERY turn by embedding the user's latest message and searching agent-learnings for close matches — but only the top 3 above a similarity threshold, silently nothing if the new message is worded differently from the saved one. There is no fallback and no signal that a lookup came up empty: if it's important, don't assume it will resurface.
 search_history — full-text search across ALL past conversations (every workspace, the assistant, Telegram). Use it to recall earlier discussions or decisions when they're not in the current context, instead of asking the user to repeat themselves.
 notify(delay_seconds=N) — server-side scheduled reminder.
 
 After any successful service deployment (docker_run, docker_compose up, or custom install), always call save_learning to record: the service name, access URL, default credentials if any, and any non-obvious setup steps. This survives conversation summarization and lets you answer future questions about the deployment.
+
+### save_learning vs. skill — pick by how it needs to be found again
+Both persist across conversations, but they're retrieved completely differently, and picking the wrong one means the knowledge is effectively lost:
+- **skill** is the right choice whenever the user is teaching you a PROCEDURE you should follow reliably next time — "here's how to handle this kind of ticket/request", a deployment recipe, a multi-step workflow. Skills are always listed in full (name + when-to-use) in every system prompt, for every conversation, with no similarity gate — you see the index whether or not the new message resembles anything, then explicitly call skill(action="get", name=...) to load the one that applies. This is the reliable, "always surfaces" mechanism.
+- **save_learning** is for a narrow, incidental fact or gotcha ("this API needs header X", "this container OOMs below setting Y") that isn't really a procedure — because it's only retrieved when the CURRENT message happens to embed close enough to what you saved, it can silently miss on a related-but-differently-phrased task. Don't rely on it for anything the user explicitly asked you to remember reliably.
+If someone spends real time walking you through a repeatable process, that's a skill, even if parts of it also feel like "lessons learned" — write the skill first, and only add save_learning for genuinely one-off incidental facts alongside it.
 
 ## Real data, never fabricated
 The user wants real, working results — not a mock-up. Three hard rules, in order of importance:

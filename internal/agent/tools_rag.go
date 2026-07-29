@@ -33,7 +33,7 @@ func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, 
 		return fmt.Sprintf("ERROR embedding query: %v", err), nil, nil
 	}
 
-	results, err := e.ragStore.Search(ctx, e.col(collection), embedding, limit)
+	results, err := e.ragStore.Search(ctx, e.resolveCollection(collection), embedding, limit)
 	if err != nil {
 		return fmt.Sprintf("ERROR searching: %v", err), nil, nil
 	}
@@ -66,7 +66,8 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 	}
 	// Scope the collection to this tenant; keep the plain name for messages.
 	displayCol := collection
-	collection = e.col(collection)
+	scope := e.resolveScope(collection)
+	collection = e.resolveCollection(collection)
 
 	var chunks []string
 	var pageNums []int
@@ -147,7 +148,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 		return "Content produced no chunks after splitting.", nil
 	}
 
-	if err := e.ragStore.EnsureCollection(ctx, collection, e.ragScope); err != nil {
+	if err := e.ragStore.EnsureCollection(ctx, collection, scope); err != nil {
 		return fmt.Sprintf("ERROR registering collection: %v", err), nil
 	}
 
@@ -217,7 +218,7 @@ func (e *ToolExecutor) ragListDocuments(ctx context.Context, collection string) 
 		return "", fmt.Errorf("collection is required")
 	}
 	displayCol := collection
-	collection = e.col(collection)
+	collection = e.resolveCollection(collection)
 
 	docs, err := e.ragStore.ListDocuments(ctx, collection)
 	if err != nil {
@@ -247,7 +248,7 @@ func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document strin
 		return "", fmt.Errorf("collection is required")
 	}
 	displayCol := collection
-	collection = e.col(collection)
+	collection = e.resolveCollection(collection)
 
 	if document == "" {
 		if err := e.ragStore.DeleteCollection(ctx, collection); err != nil {
@@ -269,6 +270,28 @@ func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document strin
 		}
 	}
 	return fmt.Sprintf("Document %q not found in collection %q", document, displayCol), nil
+}
+
+// resolveCollection maps a user-facing collection name to its storage name.
+// agent-learnings and user-profile are always personal (pcol/personalScope),
+// even when called through the generic rag_search/rag_ingest/rag_delete
+// tools — save_learning and save_user_info always write there, so an agent
+// that falls back to a manual rag_search on "agent-learnings" (e.g. after the
+// automatic per-turn lookup came back empty) must land on the same physical
+// collection, not the group's same-named one via col()/ragScope.
+func (e *ToolExecutor) resolveCollection(name string) string {
+	if name == learningsCollection || name == userProfileCollection {
+		return e.pcol(name)
+	}
+	return e.col(name)
+}
+
+// resolveScope is resolveCollection's scope counterpart, for EnsureCollection.
+func (e *ToolExecutor) resolveScope(name string) string {
+	if name == learningsCollection || name == userProfileCollection {
+		return e.personalScope()
+	}
+	return e.ragScope
 }
 
 // ─── Learnings tool ───────────────────────────────────────────────────────────

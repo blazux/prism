@@ -272,7 +272,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "skill",
-			Description: "Reusable skills library. Save a procedure you worked out (action=add) so you can recall it later; an index of saved skills (name + when-to-use) is always in your system prompt. action=get loads a skill's full steps; action=list / delete also available. Save a skill after solving something non-trivial you may need again.",
+			Description: "Reusable skills library. Save a procedure you worked out OR that the user walked you through (action=add) so you can recall it reliably later; an index of every saved skill (name + when-to-use) is always in your system prompt, every conversation, with no similarity matching — unlike save_learning, which only surfaces when the new message happens to embed close to what you saved. action=get loads a skill's full steps; action=list / delete also available. If the user spends real time teaching you how to handle a kind of task, save it here, not (only) as a learning.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -454,7 +454,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "save_learning",
-			Description: "Save a lesson learned from this conversation to the permanent agent-learnings knowledge base. Call this when the user confirms that something complex finally worked, or when a non-obvious solution was found. The lesson will be automatically retrieved in future conversations when relevant.",
+			Description: "Save a one-off lesson or gotcha to the permanent agent-learnings knowledge base. Call this when the user confirms that something complex finally worked, or a non-obvious solution was found. Retrieval is NOT reliable: it's a per-turn similarity search against the new message, top 3 above a threshold, nothing if the wording doesn't match closely — no fallback, no signal on a miss. For a repeatable PROCEDURE the user is teaching you (how to handle a kind of ticket/task), use the `skill` tool instead — skills are always listed in full every conversation, with no similarity gate.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
