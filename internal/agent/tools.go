@@ -168,7 +168,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "widget",
-			Description: "Manage dashboard widgets — self-contained HTML/JS panels displayed in iframes (see the widget guidelines in the system prompt). Actions: add (title+content required; id optional, auto-derived by slugifying the title if omitted), update (id + any of title/content/cols/height; only provided fields change), remove (id), list. add/update return a screenshot of the rendered widget plus console errors — inspect them and fix any problem before telling the user the widget is ready.",
+			Description: "Manage dashboard widgets — self-contained HTML/JS panels displayed in iframes (see the widget guidelines in the system prompt). Actions: add (title+content required; id optional, auto-derived by slugifying the title if omitted), update (id + any of title/content/cols/height; only provided fields change), remove (id), list. Before update/remove, call list and copy the exact id from its output — never guess an id from memory; remove ONLY when the user explicitly asked for that widget to go. add/update return a screenshot of the rendered widget plus console errors — inspect them and fix any problem before telling the user the widget is ready.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -290,7 +290,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "note",
-			Description: "Personal notes, shared across the dashboard. action=add|list|update|delete. Notes have a title, body (Markdown) and comma-separated tags. Use to remember free-form information the user wants kept — and proactively offer to save substantial outputs (deep_research reports, summaries, drafts) as a note so they persist in the Notes app. To embed an image (from a URL, or a file already in the workspace): save/download it under workspace/data/... (wget's path param, e.g. \"data/notes/photo.png\") — NOT elsewhere, /api/file forces text/plain and breaks images — then reference it in the body as Markdown ![alt](/data/notes/photo.png) (the /data/ prefix is what makes it a real, browsable URL).",
+			Description: "Personal notes, shared across the dashboard. action=add|list|update|delete. update/delete: copy the exact id from a fresh list call — never guess or recall one. delete ONLY the note the user explicitly asked to delete, never as cleanup or preparation for another task. Notes have a title, body (Markdown) and comma-separated tags. Use to remember free-form information the user wants kept — and proactively offer to save substantial outputs (deep_research reports, summaries, drafts) as a note so they persist in the Notes app. To embed an image (from a URL, or a file already in the workspace): save/download it under workspace/data/... (wget's path param, e.g. \"data/notes/photo.png\") — NOT elsewhere, /api/file forces text/plain and breaks images — then reference it in the body as Markdown ![alt](/data/notes/photo.png) (the /data/ prefix is what makes it a real, browsable URL).",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{

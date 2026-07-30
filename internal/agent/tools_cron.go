@@ -211,8 +211,9 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 	// Authorize: the job must exist and belong to this user (legacy owner-less
 	// jobs stay removable by anyone).
 	owner := e.cronOwner()
+	jobs := ParseCronJobs(current)
 	var target *CronJob
-	for _, j := range ParseCronJobs(current) {
+	for _, j := range jobs {
 		if j.Name == name {
 			jj := j
 			target = &jj
@@ -220,7 +221,11 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 		}
 	}
 	if target == nil {
-		return fmt.Sprintf("no job named %q found", name), nil
+		names := make([]string, len(jobs))
+		for i, j := range jobs {
+			names[i] = j.Name
+		}
+		return fmt.Sprintf("no job named %q found. Existing jobs: %s — use one of these names verbatim", name, strings.Join(names, ", ")), nil
 	}
 	if target.Owner != "" && target.Owner != owner {
 		return fmt.Sprintf("job %q belongs to another user; you can only remove your own scheduled tasks", name), nil

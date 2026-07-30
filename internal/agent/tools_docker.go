@@ -33,9 +33,30 @@ func (e *ToolExecutor) dockerStop(ctx context.Context, name string) (string, err
 		return "", fmt.Errorf("name is required")
 	}
 	if err := e.docker.StopService(ctx, name); err != nil {
-		return fmt.Sprintf("ERROR: %v", err), nil
+		return fmt.Sprintf("ERROR: %v%s", err, e.noSuchContainerHint(ctx, err)), nil
 	}
 	return fmt.Sprintf("Service %q stopped and removed.", name), nil
+}
+
+// noSuchContainerHint appends the actual service names to a "No such container"
+// error, so the model corrects a guessed name on the next call instead of
+// retrying blind variations.
+func (e *ToolExecutor) noSuchContainerHint(ctx context.Context, err error) string {
+	if !strings.Contains(strings.ToLower(err.Error()), "no such container") {
+		return ""
+	}
+	services, lerr := e.docker.ListServices(ctx)
+	if lerr != nil {
+		return ""
+	}
+	if len(services) == 0 {
+		return "\nNo service containers exist."
+	}
+	names := make([]string, len(services))
+	for i, s := range services {
+		names[i] = s.Name
+	}
+	return "\nExisting services: " + strings.Join(names, ", ") + " — use one of these names verbatim."
 }
 
 func (e *ToolExecutor) dockerPS(ctx context.Context) (string, error) {
@@ -84,7 +105,7 @@ func (e *ToolExecutor) dockerLogs(ctx context.Context, name string, tail int) (s
 	}
 	out, err := e.docker.ServiceLogs(ctx, name, tail)
 	if err != nil {
-		return fmt.Sprintf("ERROR: %v", err), nil
+		return fmt.Sprintf("ERROR: %v%s", err, e.noSuchContainerHint(ctx, err)), nil
 	}
 	if strings.TrimSpace(out) == "" {
 		return fmt.Sprintf("No logs for service %q.", name), nil
@@ -101,7 +122,7 @@ func (e *ToolExecutor) dockerExecService(ctx context.Context, name, command stri
 	}
 	out, err := e.docker.ExecService(ctx, name, command, 2*time.Minute)
 	if err != nil {
-		return fmt.Sprintf("ERROR: %v", err), nil
+		return fmt.Sprintf("ERROR: %v%s", err, e.noSuchContainerHint(ctx, err)), nil
 	}
 	if strings.TrimSpace(out) == "" {
 		return fmt.Sprintf("Command executed in container %q (no output).", name), nil
