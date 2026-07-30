@@ -220,6 +220,22 @@ func TestChatRetriesOverloaded(t *testing.T) {
 	}
 }
 
+func TestListModelsReportsADeadKeyRatherThanOfferingModels(t *testing.T) {
+	// Serving the fallback list on 401 would fill the picker with Claude models
+	// that cannot answer. The caller skips an erroring backend, so Claude is
+	// simply absent instead.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":{"message":"invalid x-api-key"}}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "sk-ant-api03-dead", "claude-configured")
+	if _, err := c.ListModels(context.Background()); err == nil {
+		t.Fatal("a 401 must be reported, not papered over with a fallback list")
+	}
+}
+
 func TestListModelsFallsBackWhenEnumerationIsRefused(t *testing.T) {
 	// A subscription token is scoped for inference and may not list models. An
 	// empty picker would look like a broken backend.

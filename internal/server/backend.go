@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log"
 	"strings"
 	"time"
 
@@ -29,11 +30,31 @@ func (s *Server) newChatBackend() ollama.Backend {
 	return ollama.NewClient(s.cfg.OllamaURL)
 }
 
-// newAnthropicBackend builds a Claude client. cfg.Model is passed as the
-// fallback so the picker still offers the configured model when Anthropic
-// declines to enumerate them.
+// newAnthropicBackend builds a Claude client, seeded with the configured Claude
+// model so the picker still offers it when Anthropic declines to enumerate.
 func (s *Server) newAnthropicBackend() ollama.Backend {
-	return anthropic.NewClient(s.cfg.AnthropicBaseURL, s.cfg.AnthropicToken, s.cfg.Model)
+	return anthropic.NewClient(s.cfg.AnthropicBaseURL, s.cfg.AnthropicToken, s.anthropicModel())
+}
+
+// anthropicConfigured reports whether Claude is reachable at all. It is a
+// separate question from which backend is the default: with a key set, Claude
+// belongs in the picker even when the fleet or Ollama is the everyday brain.
+func (s *Server) anthropicConfigured() bool {
+	return strings.TrimSpace(s.cfg.AnthropicToken) != ""
+}
+
+// anthropicModel is the Claude model to offer. ANTHROPIC_MODEL holds it whether
+// or not Anthropic is the primary backend — when it is, it has already been
+// promoted to cfg.Model, and seeding the fallback list with cfg.Model in any
+// other case would offer a local model name as if Anthropic served it.
+func (s *Server) anthropicModel() string {
+	if s.cfg.AnthropicModel != "" {
+		return s.cfg.AnthropicModel
+	}
+	if s.cfg.LLMBackend == "anthropic" {
+		return s.cfg.Model
+	}
+	return ""
 }
 
 // dualBackend reports whether both an OpenAI-compatible server AND an Ollama
@@ -44,9 +65,8 @@ func (s *Server) dualBackend() bool {
 }
 
 // otherChatBackends returns every configured chat backend that is not the
-// primary, so one picker can span them all. With Claude as the primary that
-// matters more than before: Ollama is wired anyway for RAG, and its models stay
-// worth offering next to Claude's.
+// primary, so one picker can span them all: the everyday local model, the
+// heavyweight on the other server, and Claude, each one click away.
 func (s *Server) otherChatBackends() []ollama.Backend {
 	var others []ollama.Backend
 	switch s.cfg.LLMBackend {
@@ -61,9 +81,15 @@ func (s *Server) otherChatBackends() []ollama.Backend {
 		if s.dualBackend() {
 			others = append(others, ollama.NewClient(s.cfg.OllamaURL))
 		}
+		if s.anthropicConfigured() {
+			others = append(others, s.newAnthropicBackend())
+		}
 	default:
 		if s.dualBackend() {
 			others = append(others, openai.NewClient(s.cfg.OpenAIBaseURL, s.cfg.OpenAIAPIKey))
+		}
+		if s.anthropicConfigured() {
+			others = append(others, s.newAnthropicBackend())
 		}
 	}
 	return others
@@ -85,6 +111,10 @@ func (s *Server) chatModels(ctx context.Context) ([]string, error) {
 	for _, backend := range s.otherChatBackends() {
 		extra, e := backend.ListModels(ctx)
 		if e != nil {
+			// Say so rather than silently shortening the picker: a configured
+			// backend whose models never appear, with nothing in the log, reads as
+			// Prism ignoring the config instead of the server refusing us.
+			log.Printf("[models] %T unavailable, its models are not offered: %v", backend, e)
 			continue
 		}
 		for _, m := range extra {
@@ -106,6 +136,13 @@ func (s *Server) chatBackendFor(model string) ollama.Backend {
 			return s.newAnthropicBackend()
 		}
 		return s.localBackendFor(model) // a local model chosen alongside Claude
+	}
+	// Claude picked alongside a local default. Routing it needs no round-trip to
+	// ask each server what it holds, and it must not fall through to
+	// localBackendFor: a claude-* id is not served there, so it would end up at
+	// Ollama and 404.
+	if s.anthropicConfigured() && strings.HasPrefix(model, anthropicModelPrefix) {
+		return s.newAnthropicBackend()
 	}
 	if model == "" || !s.dualBackend() {
 		return s.newChatBackend()

@@ -124,7 +124,7 @@ Point `VOX_URL` at a [PrismConnect](https://github.com/blazux/PrismConnect) inst
 
 Prism talks to **Ollama** by default, but it'll happily point at any **OpenAI-compatible** server — vLLM, SGLang, TGI, LM Studio, llama.cpp, even OpenRouter if you insist on sending your data to the cloud (we won't tell). Wire *both* at once and the model picker spans them: a fast local model for daily driving, a 120B reasoner for when you're feeling ambitious — switch per message from the dropdown. Embeddings can stay on Ollama while chat runs elsewhere, because not every inference server bothers to implement `/v1/embeddings`.
 
-There's also an **Anthropic** backend (`LLM_BACKEND=anthropic`) for driving Prism with Claude: set `ANTHROPIC_API_KEY`, pick a model, and Claude sits in the same picker as your local ones. RAG stays on Ollama automatically, since Anthropic serves no embeddings.
+There's also an **Anthropic** backend for driving Prism with Claude. Set `ANTHROPIC_API_KEY` and Claude's models join the same picker as your local ones — you don't have to make it the default: keep your fleet or Ollama as the everyday brain and reach for Claude per message, and only those messages are billed. Set `LLM_BACKEND=anthropic` if you'd rather it answer by default. RAG stays on Ollama automatically, since Anthropic serves no embeddings.
 
 > **A Claude Pro/Max subscription will not work, and this is deliberate.** The OAuth token the `claude` CLI stores does authenticate, and plain chat runs on it — but Anthropic classifies a tool-bearing request from anything that isn't Claude Code as a third-party app and bills it against *extra usage* rather than plan limits, so the agent loop is refused. The refusal is intermittent and no model or setting avoids it ([hermes-agent#31668](https://github.com/NousResearch/hermes-agent/issues/31668) is the same wall from the other side, closed with no fix). Prism is an agent, so a brain that drops tool calls at random is worse than no brain: it was implemented, measured, and taken out rather than shipped as a trap. Paste that token into `ANTHROPIC_API_KEY` and Prism tells you why it won't work instead of letting Anthropic answer `401`.
 
@@ -149,7 +149,7 @@ All configuration is done via environment variables (set in `docker-compose.yml`
 | `OPENAI_BASE_URL` | The `/v1` root, when `LLM_BACKEND=openai` | `http://host:8000/v1` |
 | `OPENAI_MODEL` | Chat model name for the openai backend (its `--served-model-name`) | `qwen` |
 | `OPENAI_API_KEY` | Key for the openai backend, if it needs one (local servers usually don't) | `sk-…` |
-| `ANTHROPIC_MODEL` | Chat model, when `LLM_BACKEND=anthropic` | `claude-sonnet-5` |
+| `ANTHROPIC_MODEL` | Claude model to offer — read whether or not Anthropic is the default backend | `claude-sonnet-5` |
 | `ANTHROPIC_API_KEY` | Anthropic API key from console.anthropic.com. A subscription token is not accepted — see above | `sk-ant-api03-…` |
 | `PRISM_TOKEN` | Login token — protects the dashboard (omit to disable auth) | `change-me` |
 | `MULTI_USER` | `1` to turn on accounts, groups, rooms and the admin console (default: personal, single-user) | `1` |
@@ -168,7 +168,7 @@ All configuration is done via environment variables (set in `docker-compose.yml`
 
 > **The only required changes are `OLLAMA_URL` and the model names** — everything else works out of the box with the default Docker Compose setup.
 
-> **Two models, one menu:** set `LLM_BACKEND` to whichever is your default, but fill in *both* `OLLAMA_URL` and `OPENAI_BASE_URL` and the model picker will list models from both servers, routing each pick to the one that serves it. Handy for a fast local default with a heavyweight reasoner kept one click away.
+> **Every model, one menu:** set `LLM_BACKEND` to whichever is your default, then fill in whatever else you have — `OLLAMA_URL`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY` — and the picker lists all of them, routing each pick to the server that holds it. A fast local default for daily driving, a heavyweight reasoner and Claude both one click away.
 
 > **Note on embedding models:** the vector dimension is detected automatically at startup by probing the model. If you change the embedding model, you need to reset the RAG database (the vector dimension is fixed per table).
 

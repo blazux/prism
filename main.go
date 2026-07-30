@@ -70,10 +70,14 @@ func main() {
 	// only warn: email, calendar and widgets work fine without a chat model.
 	anthropicToken := os.Getenv("ANTHROPIC_API_KEY")
 	anthropicBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
-	if llmBackend == "anthropic" {
-		if m := os.Getenv("ANTHROPIC_MODEL"); m != "" {
-			model = m
-		}
+	// Read unconditionally: setting a key is enough to put Claude in the picker
+	// next to a local default, so the model is needed even when another backend
+	// is primary.
+	anthropicModel := os.Getenv("ANTHROPIC_MODEL")
+	if llmBackend == "anthropic" && anthropicModel != "" {
+		model = anthropicModel
+	}
+	if llmBackend == "anthropic" || anthropicToken != "" {
 		if err := anthropic.ValidateKey(anthropicToken); err != nil {
 			log.Printf("WARNING: %v", err)
 		}
@@ -137,6 +141,7 @@ func main() {
 
 		AnthropicToken:   anthropicToken,
 		AnthropicBaseURL: anthropicBaseURL,
+		AnthropicModel:   anthropicModel,
 
 		EmbedBackend:     embedBackend,
 		VisionModel:      visionModel,

@@ -412,10 +412,17 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		// The key is dead or wrong. Serving the fallback list here would put Claude
+		// models in the picker that cannot answer — better to report it and let the
+		// caller leave Claude out. Matches Ping's reading of 401 vs 403.
+		b, _ := readLimited(resp.Body)
+		return nil, fmt.Errorf("anthropic rejected the API key (401): %s", strings.TrimSpace(string(b)))
+	}
 	if resp.StatusCode != http.StatusOK {
-		// A subscription token is scoped for inference and may not be allowed to
-		// enumerate models. That is not a broken backend, so serve the fallback
-		// rather than leaving the picker empty.
+		// A key can authenticate without being allowed to enumerate models (403).
+		// That is not a broken backend, so serve the fallback rather than leaving
+		// the picker empty.
 		log.Printf("[anthropic] /v1/models returned %d — using the fallback model list", resp.StatusCode)
 		return c.fallbackModels(), nil
 	}

@@ -34,6 +34,10 @@ type Config struct {
 	// subscription token is not an option — see internal/anthropic/credential.go.
 	AnthropicToken   string
 	AnthropicBaseURL string // API root; empty = https://api.anthropic.com
+	// AnthropicModel is the Claude model to use, held separately from Model so
+	// Claude can sit in the picker alongside a local default rather than only as
+	// the primary backend.
+	AnthropicModel   string
 	EmbedBackend     string // "" (follow LLMBackend), "ollama" or "openai": backend for RAG embeddings + captioning
 	VisionModel      string // optional override model for RAG vision captioning (needed when captioning ≠ chat backend)
 	ChatVision       bool   // chat model can see images (default true); false → caption widget previews as text for a text-only model
