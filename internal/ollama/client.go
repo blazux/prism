@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
+	"sync"
 	"time"
 )
 
@@ -156,8 +158,10 @@ type ChatRequest struct {
 	Stream   bool      `json:"stream"`
 	Options  Options   `json:"options,omitempty"`
 	// NoThinking asks the model to skip extended reasoning for this turn. Set on
-	// the voice channel, where a caller waits in silence while the model thinks.
-	// Wire-neutral (each backend translates it); not sent to Ollama as-is.
+	// the voice channel, where a caller waits in silence while the model thinks,
+	// and on the compaction call, whose 300-token budget reasoning would eat
+	// whole. Wire-neutral: each backend spells it its own way (Ollama "think",
+	// OpenAI-compatible chat_template_kwargs.enable_thinking).
 	NoThinking bool `json:"-"`
 }
 
@@ -189,13 +193,76 @@ type StreamEvent struct {
 	Err       error
 }
 
+// chatWire is ChatRequest as Ollama actually wants it. Think is kept out of the
+// pivot type because it is Ollama's spelling of NoThinking and nobody else's.
+type chatWire struct {
+	ChatRequest
+	// Think=false tells a reasoning model to answer directly. Pointer so it is
+	// only ever on the wire when we mean it: Ollama rejects the field outright
+	// for a model without the capability.
+	Think *bool `json:"think,omitempty"`
+}
+
+// thinkCap caches, per baseURL+model, whether Ollama reports the "thinking"
+// capability. It is package-level on purpose: callers build a fresh Client per
+// turn (see server.newChatBackend), so a per-client cache would never hit.
+var thinkCap sync.Map
+
+// supportsThinking reports whether this model can be told to skip reasoning.
+//
+// Asking costs a round trip, so it is only ever asked when a caller actually
+// wants silence — an ordinary chat turn never reaches here. Anything unknown or
+// unreachable answers false, which sends no `think` field at all: the behaviour
+// Prism had before, rather than a 400 on the very turns that asked for silence.
+func (c *Client) supportsThinking(ctx context.Context, model string) bool {
+	key := c.baseURL + "|" + model
+	if v, ok := thinkCap.Load(key); ok {
+		return v.(bool)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	body, _ := json.Marshal(map[string]string{"model": model})
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/show", bytes.NewReader(body))
+	if err != nil {
+		return false // not cached: a transient failure should not stick
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var show struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&show); err != nil {
+		return false
+	}
+	ok := slices.Contains(show.Capabilities, "thinking")
+	thinkCap.Store(key, ok)
+	return ok
+}
+
 func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEvent) {
 	req.Stream = true
 	if req.Options.NumPredict == 0 {
 		req.Options.NumPredict = DefaultNumPredict
 	}
 
-	body, err := json.Marshal(req)
+	// Until now NoThinking was silently dropped here: the field is json:"-" and
+	// only the OpenAI-compatible client acted on it, so a voice turn on an Ollama
+	// model reasoned anyway while the caller waited in silence.
+	wire := chatWire{ChatRequest: req}
+	if req.NoThinking && c.supportsThinking(ctx, req.Model) {
+		no := false
+		wire.Think = &no
+	}
+
+	body, err := json.Marshal(wire)
 	if err != nil {
 		out <- StreamEvent{Err: fmt.Errorf("marshal: %w", err)}
 		return
