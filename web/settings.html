@@ -360,6 +360,9 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
       <div class="nav-item" data-tab="channels">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></span> Channels
       </div>
+      <div class="nav-item" data-tab="webhooks">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 16.98h-5.99c-1.66 0-3.01-1.34-3.01-3s1.34-3 3.01-3H18"/><path d="m7 8-4 4 4 4"/><circle cx="18" cy="17" r="3"/></svg></span> Webhooks
+      </div>
       <div class="nav-item" data-tab="mcp">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></span> MCP
       </div>
@@ -473,6 +476,7 @@ function renderTab(tab) {
   else if (tab === 'agent') renderAgentTab(content)
   else if (tab === 'channels') renderChannelsTab(content)
   else if (tab === 'mcp')     renderMCPTab(content)
+  else if (tab === 'webhooks') renderWebhooksTab(content)
   else if (tab === 'secrets') renderSecretsTab(content)
   else if (tab === 'email') renderEmailTab(content)
   else if (tab === 'notes') renderNotesTab(content)
@@ -1193,6 +1197,161 @@ async function renderToolsTab(container) {
 }
 
 // ── MCP tab ───────────────────────────────────────────────────────────────────
+
+// ── Webhooks: an inbound HTTP call becomes an agent turn ──────────────────────
+// The payload is wrapped in the stored prompt and handed to the agent with its
+// full toolset, so a sender needs to know nothing about Prism beyond a URL.
+async function renderWebhooksTab(container) {
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  container.appendChild(page)
+
+  let hooks = []
+  try { hooks = await fetch('/api/webhooks').then(r => r.json()) || [] } catch (e) { hooks = [] }
+
+  const list = document.createElement('div')
+  page.appendChild(list)
+
+  const fullURL = h => location.origin + h.url
+
+  function renderList() {
+    list.innerHTML = ''
+    if (!hooks.length) {
+      list.innerHTML = '<div style="color:var(--text3);font-size:12.5px;margin-bottom:10px">No webhook yet. Create one below, then point anything that can make an HTTP call at its URL.</div>'
+      return
+    }
+    for (const h of hooks) {
+      const row = document.createElement('div')
+      row.className = 'mcp-add-form'
+      const last = h.last_call_at
+        ? escHtml(h.last_call_at.replace('T', ' ').slice(0, 16)) + ' — ' + escHtml(h.last_status || '')
+        : 'never called'
+      row.innerHTML = `
+        <div class="mcp-add-title">${escHtml(h.name)} ${h.enabled ? '' : '<span style="color:var(--text3);font-weight:400">(disabled)</span>'}</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+          <input class="mcp-input" readonly value="${escHtml(fullURL(h))}" style="flex:1;font-family:monospace;font-size:11.5px">
+          <button class="mcp-add-submit" data-copy="${escHtml(fullURL(h))}">Copy</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--text3);line-height:1.6">
+          ${h.call_count} call(s) · last: ${last}<br>
+          session <code>${escHtml(h.session_id || ('webhook-' + h.id))}</code>${h.model ? ' · model <code>' + escHtml(h.model) + '</code>' : ''}${h.deliver ? ' · delivers to <b>' + escHtml(h.deliver) + '</b>' : ''}${h.respond ? ' · <b>synchronous</b>' : ''}
+        </div>
+        <div style="margin-top:8px;display:flex;gap:6px">
+          <button class="mcp-add-submit" data-edit="${escHtml(h.id)}">Edit</button>
+          <button class="mcp-add-submit" data-del="${escHtml(h.id)}" style="background:var(--bg3)">Delete</button>
+        </div>`
+      list.appendChild(row)
+    }
+    list.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
+      navigator.clipboard.writeText(b.dataset.copy)
+      b.textContent = 'Copied'
+      setTimeout(() => { b.textContent = 'Copy' }, 1200)
+    }))
+    list.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('Delete this webhook? Callers using its URL will start getting 401.')) return
+      await fetch('/api/webhooks/' + encodeURIComponent(b.dataset.del), { method: 'DELETE' })
+      hooks = hooks.filter(x => x.id !== b.dataset.del)
+      renderList()
+    }))
+    list.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => fill(hooks.find(x => x.id === b.dataset.edit))))
+  }
+
+  const form = document.createElement('div')
+  form.className = 'mcp-add-form'
+  form.innerHTML = `
+    <div class="mcp-add-title">Add a webhook</div>
+    <div class="mcp-add-fields">
+      <input id="wh-name" class="mcp-input" type="text" placeholder="Name (e.g. Grafana alerts)" autocomplete="off">
+      <input id="wh-session" class="mcp-input" type="text" placeholder="Chat session (optional — default: its own)" autocomplete="off">
+      <input id="wh-model" class="mcp-input" type="text" placeholder="Model (optional — default: deployment model)" autocomplete="off">
+      <select id="wh-deliver" class="mcp-input">
+        <option value="">— Don't push the answer anywhere —</option>
+        <option value="telegram">Also send the answer to Telegram</option>
+        <option value="slack">Also send the answer to Slack</option>
+        <option value="webex">Also send the answer to Webex</option>
+      </select>
+    </div>
+    <textarea id="wh-prompt" class="mcp-input" rows="5" placeholder="Prompt wrapped around the payload. Put {{content}} where the payload goes." style="width:100%;margin-top:8px;font-family:inherit"></textarea>
+    <label style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:12px;color:var(--text2)">
+      <input id="wh-respond" type="checkbox"> Wait for the agent and return its answer in the HTTP response
+    </label>
+    <label style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px;color:var(--text2)">
+      <input id="wh-enabled" type="checkbox" checked> Enabled
+    </label>
+    <input id="wh-id" type="hidden">
+    <div style="margin-top:10px;display:flex;gap:6px">
+      <button id="wh-save" class="mcp-add-submit">Create</button>
+      <button id="wh-reset" class="mcp-add-submit" style="background:var(--bg3);display:none">Cancel</button>
+    </div>
+    <div id="wh-status" class="mcp-add-status"></div>
+    <div style="margin-top:8px;font-size:11.5px;color:var(--text3);line-height:1.5">
+      The URL carries its own secret token — anyone holding it can make the agent run, so treat it like a password.
+      Calls return <code>202</code> immediately and the agent works in the background, unless you tick the box above.
+      JSON payloads are pretty-printed before reaching the agent.
+    </div>`
+  page.appendChild(form)
+
+  function fill(h) {
+    if (!h) return
+    document.getElementById('wh-id').value = h.id
+    document.getElementById('wh-name').value = h.name || ''
+    document.getElementById('wh-session').value = h.session_id || ''
+    document.getElementById('wh-model').value = h.model || ''
+    document.getElementById('wh-deliver').value = h.deliver || ''
+    document.getElementById('wh-prompt').value = h.prompt || ''
+    document.getElementById('wh-respond').checked = !!h.respond
+    document.getElementById('wh-enabled').checked = !!h.enabled
+    document.getElementById('wh-save').textContent = 'Save'
+    document.getElementById('wh-reset').style.display = ''
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+
+  function reset() {
+    for (const id of ['wh-id', 'wh-name', 'wh-session', 'wh-model', 'wh-prompt']) document.getElementById(id).value = ''
+    document.getElementById('wh-deliver').value = ''
+    document.getElementById('wh-respond').checked = false
+    document.getElementById('wh-enabled').checked = true
+    document.getElementById('wh-save').textContent = 'Create'
+    document.getElementById('wh-reset').style.display = 'none'
+    document.getElementById('wh-status').textContent = ''
+  }
+
+  document.getElementById('wh-reset').addEventListener('click', reset)
+
+  document.getElementById('wh-save').addEventListener('click', async () => {
+    const status = document.getElementById('wh-status')
+    const body = {
+      id: document.getElementById('wh-id').value,
+      name: document.getElementById('wh-name').value.trim(),
+      session_id: document.getElementById('wh-session').value.trim(),
+      model: document.getElementById('wh-model').value.trim(),
+      deliver: document.getElementById('wh-deliver').value,
+      prompt: document.getElementById('wh-prompt').value,
+      respond: document.getElementById('wh-respond').checked,
+      enabled: document.getElementById('wh-enabled').checked,
+    }
+    status.textContent = 'Saving…'
+    try {
+      const res = await fetch('/api/webhooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) { status.textContent = 'Error: ' + (await res.text()); return }
+      const saved = await res.json()
+      const i = hooks.findIndex(x => x.id === saved.id)
+      if (i >= 0) hooks[i] = saved
+      else hooks.push(saved)
+      status.textContent = 'Saved.'
+      reset()
+      renderList()
+    } catch (e) {
+      status.textContent = 'Error: ' + e
+    }
+  })
+
+  renderList()
+}
 
 async function renderMCPTab(container) {
   await computeRagManage() // same predicate as RAG: group members get read-only

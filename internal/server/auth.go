@@ -91,7 +91,15 @@ func authPublicPath(p string) bool {
 	case "/login", "/signup", "/api/login", "/api/signup", "/api/me":
 		return true
 	}
-	return false
+	return webhookPublicPath(p)
+}
+
+// webhookPublicPath exempts inbound webhook calls from the dashboard's
+// authentication in BOTH modes. The caller is a machine with no login and no
+// PRISM_TOKEN; it presents the per-webhook token, which handleWebhookIncoming
+// checks. Only the inbound prefix is public — /api/webhooks (the CRUD) is not.
+func webhookPublicPath(p string) bool {
+	return strings.HasPrefix(p, webhookIncomingPrefix)
 }
 
 // userFromCookie resolves the session cookie to its user, or nil.
