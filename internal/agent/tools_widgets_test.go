@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -125,5 +126,36 @@ func TestPluginMeta_ZeroPositionRoundTrips(t *testing.T) {
 	}
 	if !strings.Contains(string(after), `"x":0`) || !strings.Contains(string(after), `"y":0`) {
 		t.Errorf("re-marshal after an unrelated field update dropped the zero position: %s", after)
+	}
+}
+
+// A "not found" on update/remove must list the widgets that DO exist: the
+// model routinely guesses ids instead of calling list first, and a bare
+// "not found" just sends it guessing again — the real ids in the error let
+// it self-correct on the next call.
+func TestUpdateUIPlugin_NotFoundListsExistingWidgets(t *testing.T) {
+	e, _, pluginDir := newTestExecutorWithPlugins(t)
+	writeWidget(t, pluginDir, "ipam-viewer", `<div></div>`)
+	writeWidget(t, pluginDir, "sys-monitor", `<div></div>`)
+
+	_, _, err := e.updateUIPlugin(context.Background(), "ipam-view", "", "<p>x</p>", 0, 0)
+	if err == nil {
+		t.Fatal("expected an error for an unknown widget id")
+	}
+	if !strings.Contains(err.Error(), "ipam-viewer") || !strings.Contains(err.Error(), "sys-monitor") {
+		t.Errorf("not-found error should list existing widget ids, got %q", err)
+	}
+}
+
+func TestRemoveUIPlugin_NotFoundListsExistingWidgets(t *testing.T) {
+	e, _, pluginDir := newTestExecutorWithPlugins(t)
+	writeWidget(t, pluginDir, "ipam-viewer", `<div></div>`)
+
+	_, err := e.removeUIPlugin("ipamviewer")
+	if err == nil {
+		t.Fatal("expected an error for an unknown widget id")
+	}
+	if !strings.Contains(err.Error(), "ipam-viewer") {
+		t.Errorf("not-found error should list existing widget ids, got %q", err)
 	}
 }

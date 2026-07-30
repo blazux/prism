@@ -104,6 +104,31 @@ Connecting an account is a one-time OAuth click or an app password in **Settings
 
 ---
 
+## Webhooks: let anything talk to the agent
+
+Point any system that can make an HTTP call at a webhook URL and its payload
+becomes an agent turn, wrapped in a prompt you write. Grafana fires an alert, a
+form gets submitted, CI goes red, a sensor trips — the agent receives it with its
+whole toolset and does whatever the prompt says: triage it, chart it, file a
+task, wake you on Telegram.
+
+```bash
+curl -X POST "https://your-prism/api/webhook/<id>?token=<token>" \
+     -d '{"alert":"disk","host":"gx10","pct":97}'
+```
+
+Configure them in **Settings → Webhooks**: the prompt (with `{{content}}` where
+the payload goes), which chat session it runs in, an optional model, and whether
+to push the answer to Telegram/Slack/Webex. Calls return `202` immediately and
+the agent works in the background — tick a box if you'd rather wait for its
+reply in the response.
+
+> The URL carries its own token and sits outside the dashboard login, because
+> senders are machines with no account. Anyone holding it can make your agent
+> run — treat it like a password.
+
+---
+
 ## Personal, or shared
 
 Prism is a personal dashboard by default: one user, and `PRISM_TOKEN` is the whole of authentication. But the same binary runs a shared deployment — set `MULTI_USER=1` and it grows accounts, a login and signup page, groups, per-user scoping for every integration, an admin console, and **Rooms** (shared chat spaces where several people talk to the same agent). The first person to sign up becomes the global admin.

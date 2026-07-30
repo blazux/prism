@@ -67,7 +67,7 @@ func (e *ToolExecutor) skillTool(action, name, description, whenToUse, body stri
 			return "", err
 		}
 		if !ok {
-			return fmt.Sprintf("No skill named %q.", name), nil
+			return fmt.Sprintf("No skill named %q. %s", name, skillNamesHint(mgr)), nil
 		}
 		var sb strings.Builder
 		fmt.Fprintf(&sb, "# %s\n", s.Name)
@@ -81,6 +81,9 @@ func (e *ToolExecutor) skillTool(action, name, description, whenToUse, body stri
 		return sb.String(), nil
 
 	case "delete", "remove":
+		if _, ok, err := mgr.Get(name); err == nil && !ok {
+			return fmt.Sprintf("No skill named %q. %s", name, skillNamesHint(mgr)), nil
+		}
 		if err := mgr.Delete(name); err != nil {
 			return "", err
 		}
@@ -89,4 +92,18 @@ func (e *ToolExecutor) skillTool(action, name, description, whenToUse, body stri
 	default:
 		return "", fmt.Errorf("skill: unknown action %q (expected add, list, get, delete)", action)
 	}
+}
+
+// skillNamesHint lists the saved skill names for "not found" replies, so a
+// guessed name gets corrected from the real index instead of re-guessed.
+func skillNamesHint(mgr *skills.Manager) string {
+	list, err := mgr.List()
+	if err != nil || len(list) == 0 {
+		return "No skills are saved."
+	}
+	names := make([]string, len(list))
+	for i, s := range list {
+		names[i] = s.Name
+	}
+	return "Existing skills: " + strings.Join(names, ", ") + " — use one of these names verbatim."
 }

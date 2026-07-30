@@ -53,6 +53,41 @@ func parseTimePtr(s string) *time.Time {
 	return nil
 }
 
+// pimHint formats an "Existing <kind>: id ("title"), …" line for embedding in
+// not-found errors, so a bad id teaches the model the valid ones instead of
+// leaving it to guess again (or, worse, silently no-op: the DB UPDATE/DELETE
+// statements match zero rows without complaint).
+func pimHint(kind string, ids, titles []string) string {
+	if len(ids) == 0 {
+		return "There are no " + kind + "."
+	}
+	parts := make([]string, len(ids))
+	for i := range ids {
+		parts[i] = fmt.Sprintf("%s (%q)", ids[i], titles[i])
+	}
+	return "Existing " + kind + ": " + strings.Join(parts, ", ") + " — use one of these ids verbatim."
+}
+
+// noteLookup finds a note by id. Found → (item, ""). Not found → (nil, hint)
+// with the hint listing what actually exists. If the provider can't list
+// (nil, "") — the caller proceeds unguarded rather than blocking the action.
+func noteLookup(ctx context.Context, prov notes.Provider, id string) (*notes.Item, string) {
+	items, err := prov.List(ctx)
+	if err != nil {
+		return nil, ""
+	}
+	want := strings.TrimSpace(id)
+	ids := make([]string, len(items))
+	titles := make([]string, len(items))
+	for i := range items {
+		if items[i].ID == want {
+			return &items[i], ""
+		}
+		ids[i], titles[i] = items[i].ID, items[i].Title
+	}
+	return nil, pimHint("notes", ids, titles)
+}
+
 // ─── note ─────────────────────────────────────────────────────────────────────
 
 func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body, tags string) (string, error) {
@@ -107,6 +142,9 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body,
 		if strings.TrimSpace(idStr) == "" {
 			return "", fmt.Errorf("update requires an id")
 		}
+		if item, hint := noteLookup(ctx, prov, idStr); item == nil && hint != "" {
+			return "", fmt.Errorf("note %q not found. %s", idStr, hint)
+		}
 		if _, err := prov.Save(ctx, idStr, title, body, tags); err != nil {
 			return "", err
 		}
@@ -115,13 +153,42 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body,
 		if strings.TrimSpace(idStr) == "" {
 			return "", fmt.Errorf("delete requires an id")
 		}
+		item, hint := noteLookup(ctx, prov, idStr)
+		if item == nil && hint != "" {
+			return "", fmt.Errorf("note %q not found. %s", idStr, hint)
+		}
 		if err := prov.Delete(ctx, idStr); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Note %q deleted.", idStr), nil
+		msg := fmt.Sprintf("Note %q deleted.", idStr)
+		if item != nil {
+			// Echo what was destroyed: if this delete was a mistake, the content
+			// stays in the conversation and the agent can recreate it itself.
+			msg += fmt.Sprintf(" Deleted content (recreate it with 'add' if this was a mistake) — title: %q, tags: %q, body:\n%s", item.Title, item.Tags, item.Body)
+		}
+		return msg, nil
 	default:
 		return "", fmt.Errorf("note: unknown action %q (add, list, update, delete)", action)
 	}
+}
+
+// taskLookup is noteLookup for tasks (includes completed tasks, so re-marking
+// a done task or deleting one still resolves).
+func taskLookup(ctx context.Context, prov tasks.Provider, id string) (*tasks.Item, string) {
+	items, err := prov.List(ctx, true)
+	if err != nil {
+		return nil, ""
+	}
+	want := strings.TrimSpace(id)
+	ids := make([]string, len(items))
+	titles := make([]string, len(items))
+	for i := range items {
+		if items[i].ID == want {
+			return &items[i], ""
+		}
+		ids[i], titles[i] = items[i].ID, items[i].Title
+	}
+	return nil, pimHint("tasks", ids, titles)
 }
 
 // ─── task ─────────────────────────────────────────────────────────────────────
@@ -151,6 +218,9 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 		if strings.TrimSpace(idStr) == "" {
 			return "", fmt.Errorf("done requires an id")
 		}
+		if item, hint := taskLookup(ctx, prov, idStr); item == nil && hint != "" {
+			return "", fmt.Errorf("task %q not found. %s", idStr, hint)
+		}
 		if err := prov.SetDone(ctx, idStr, true); err != nil {
 			return "", err
 		}
@@ -158,6 +228,9 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 	case "reopen", "undone":
 		if strings.TrimSpace(idStr) == "" {
 			return "", fmt.Errorf("reopen requires an id")
+		}
+		if item, hint := taskLookup(ctx, prov, idStr); item == nil && hint != "" {
+			return "", fmt.Errorf("task %q not found. %s", idStr, hint)
 		}
 		if err := prov.SetDone(ctx, idStr, false); err != nil {
 			return "", err
@@ -167,10 +240,18 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 		if strings.TrimSpace(idStr) == "" {
 			return "", fmt.Errorf("delete requires an id")
 		}
+		item, hint := taskLookup(ctx, prov, idStr)
+		if item == nil && hint != "" {
+			return "", fmt.Errorf("task %q not found. %s", idStr, hint)
+		}
 		if err := prov.Delete(ctx, idStr); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Task %q deleted.", idStr), nil
+		msg := fmt.Sprintf("Task %q deleted.", idStr)
+		if item != nil {
+			msg += fmt.Sprintf(" Deleted task was: %q (priority %s).", item.Title, item.Priority)
+		}
+		return msg, nil
 	default:
 		return "", fmt.Errorf("task: unknown action %q (add, list, done, reopen, delete)", action)
 	}
@@ -207,10 +288,35 @@ func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, d
 		if strings.TrimSpace(idStr) == "" {
 			return "", fmt.Errorf("delete requires an id")
 		}
+		// Guard local events only: an unbounded List against an external
+		// provider (Google/CalDAV) can be truncated, which would turn a real
+		// event into a false "not found" and block a legitimate delete.
+		var deleted *calendar.Item
+		if prov.Kind() == "local" {
+			if items, err := prov.List(ctx, nil, nil); err == nil {
+				want := strings.TrimSpace(idStr)
+				ids := make([]string, len(items))
+				titles := make([]string, len(items))
+				for i := range items {
+					if items[i].ID == want {
+						deleted = &items[i]
+						break
+					}
+					ids[i], titles[i] = items[i].ID, items[i].Title
+				}
+				if deleted == nil {
+					return "", fmt.Errorf("event %q not found. %s", idStr, pimHint("events", ids, titles))
+				}
+			}
+		}
 		if err := prov.Delete(ctx, idStr); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Event %q deleted.", idStr), nil
+		msg := fmt.Sprintf("Event %q deleted.", idStr)
+		if deleted != nil {
+			msg += fmt.Sprintf(" Deleted event was: %q at %s.", deleted.Title, deleted.StartAt.Format("2006-01-02 15:04"))
+		}
+		return msg, nil
 	default:
 		return "", fmt.Errorf("calendar: unknown action %q (add, list, delete)", action)
 	}

@@ -220,6 +220,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/cron", s.handleCron)
+	mux.HandleFunc("/api/webhooks", s.handleWebhooks)
+	mux.HandleFunc("/api/webhooks/", s.handleWebhookByID)
+	// Inbound webhook calls come from machines with no Prism login; they are
+	// authenticated by the per-webhook token instead (see webhookPublicPath).
+	mux.HandleFunc("/api/webhook/", s.handleWebhookIncoming)
 	mux.HandleFunc("/api/personality", s.handlePersonality)
 	mux.HandleFunc("/api/agent/name", s.handleAgentName)
 	mux.HandleFunc("/api/agent/personality", s.handleAgentPersonality)

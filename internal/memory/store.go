@@ -381,6 +381,26 @@ func (s *Store) initSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS usage_events_ts_idx ON usage_events(ts DESC)`,
 		`CREATE INDEX IF NOT EXISTS usage_events_kind_idx ON usage_events(kind, ts DESC)`,
+		// Inbound webhooks: an external HTTP call becomes an agent turn wrapped in a
+		// stored prompt. The id is the URL segment and must be unique on its own —
+		// the inbound request cannot tell us which scope to look in.
+		`CREATE TABLE IF NOT EXISTS webhooks (
+			id           TEXT PRIMARY KEY,
+			scope        TEXT NOT NULL DEFAULT 'global',
+			name         TEXT NOT NULL DEFAULT '',
+			token        TEXT NOT NULL,
+			prompt       TEXT NOT NULL DEFAULT '',
+			session_id   TEXT NOT NULL DEFAULT '',
+			model        TEXT NOT NULL DEFAULT '',
+			deliver      TEXT NOT NULL DEFAULT '',
+			respond      BOOLEAN NOT NULL DEFAULT FALSE,
+			enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_call_at TIMESTAMPTZ,
+			last_status  TEXT NOT NULL DEFAULT '',
+			call_count   BIGINT NOT NULL DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS webhooks_scope_idx ON webhooks(scope)`,
 		// Reply/quote + emoji reactions for room messages.
 		`ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS reply_to BIGINT`,
 		`CREATE TABLE IF NOT EXISTS room_reactions (

@@ -34,7 +34,7 @@ func (s *Server) singleUserAuth(next http.Handler, w http.ResponseWriter, r *htt
 	// The OAuth callback is a cross-site top-level redirect from the provider, so the
 	// SameSite cookie may not ride along — and it doesn't need to: the one-time
 	// `state` protects it. Let it through so the token exchange can run.
-	if s.cfg.AuthToken == "" || r.URL.Path == "/api/auth" || isOAuthCallback(r.URL.Path) {
+	if s.cfg.AuthToken == "" || r.URL.Path == "/api/auth" || isOAuthCallback(r.URL.Path) || webhookPublicPath(r.URL.Path) {
 		next.ServeHTTP(w, withUser(r, serviceUser))
 		return
 	}

@@ -73,6 +73,35 @@ func (e *ToolExecutor) listUIPlugins() (string, error) {
 	return string(out), nil
 }
 
+// existingWidgetsHint lists the dashboard's widget ids and titles, for embedding
+// in "not found" errors: the model routinely guesses widget ids instead of
+// calling list first, and a bare "not found" sends it guessing again — putting
+// the real ids in the error lets it self-correct on the next call.
+func (e *ToolExecutor) existingWidgetsHint() string {
+	entries, err := os.ReadDir(e.pluginDir)
+	if err != nil {
+		return "No widgets exist on the dashboard."
+	}
+	var parts []string
+	for _, entry := range entries {
+		fname := entry.Name()
+		if !strings.HasSuffix(fname, ".meta.json") {
+			continue
+		}
+		id := strings.TrimSuffix(fname, ".meta.json")
+		var m pluginMeta
+		if b, err := os.ReadFile(filepath.Join(e.pluginDir, fname)); err == nil {
+			json.Unmarshal(b, &m)
+		}
+		parts = append(parts, fmt.Sprintf("%s (%q)", id, m.Title))
+	}
+	if len(parts) == 0 {
+		return "No widgets exist on the dashboard."
+	}
+	sort.Strings(parts)
+	return "Existing widgets: " + strings.Join(parts, ", ") + " — use one of these ids verbatim."
+}
+
 // previewWidget renders the saved widget in the headless browser and returns a
 // report (console errors) plus the screenshot as base64 images, so the vision
 // model can verify its own rendering before telling the user the widget works.
@@ -226,7 +255,7 @@ func (e *ToolExecutor) updateUIPlugin(ctx context.Context, id, title, content st
 
 	b, err := os.ReadFile(metaPath)
 	if err != nil {
-		return "", nil, fmt.Errorf("widget '%s' not found", id)
+		return "", nil, fmt.Errorf("widget '%s' not found. %s", id, e.existingWidgetsHint())
 	}
 	var m pluginMeta
 	if err := json.Unmarshal(b, &m); err != nil {
@@ -275,7 +304,7 @@ func (e *ToolExecutor) removeUIPlugin(id string) (string, error) {
 	_, metaErr := os.Stat(metaPath)
 	_, htmlErr := os.Stat(htmlPath)
 	if os.IsNotExist(metaErr) && os.IsNotExist(htmlErr) {
-		return "", fmt.Errorf("widget '%s' does not exist", id)
+		return "", fmt.Errorf("widget '%s' does not exist. %s", id, e.existingWidgetsHint())
 	}
 
 	if b, err := os.ReadFile(metaPath); err == nil {
