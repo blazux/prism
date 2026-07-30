@@ -8,6 +8,7 @@ import (
 	"strings"
 	_ "time/tzdata" // embed IANA timezone database so TZ env var works without tzdata installed
 
+	"prism/internal/anthropic"
 	"prism/internal/server"
 )
 
@@ -47,8 +48,8 @@ func main() {
 		model = "qwen2.5-coder:7b"
 	}
 
-	// LLM backend: "ollama" (default) or "openai" for any OpenAI-compatible
-	// server (SGLang, vLLM, TGI, LM Studio, OpenRouter, …).
+	// LLM backend: "ollama" (default), "openai" for any OpenAI-compatible server
+	// (SGLang, vLLM, TGI, LM Studio, OpenRouter, …), or "anthropic" for Claude.
 	llmBackend := os.Getenv("LLM_BACKEND")
 	if llmBackend == "" {
 		llmBackend = "ollama"
@@ -60,6 +61,25 @@ func main() {
 	if llmBackend == "openai" {
 		if m := os.Getenv("OPENAI_MODEL"); m != "" {
 			model = m
+		}
+	}
+
+	// Anthropic needs a console API key; a Claude Pro/Max subscription token does
+	// not work here (internal/anthropic/credential.go says why). Validate it now
+	// so the reason lands in the logs rather than as an opaque 401 mid-chat — but
+	// only warn: email, calendar and widgets work fine without a chat model.
+	anthropicToken := os.Getenv("ANTHROPIC_API_KEY")
+	anthropicBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
+	// Read unconditionally: setting a key is enough to put Claude in the picker
+	// next to a local default, so the model is needed even when another backend
+	// is primary.
+	anthropicModel := os.Getenv("ANTHROPIC_MODEL")
+	if llmBackend == "anthropic" && anthropicModel != "" {
+		model = anthropicModel
+	}
+	if llmBackend == "anthropic" || anthropicToken != "" {
+		if err := anthropic.ValidateKey(anthropicToken); err != nil {
+			log.Printf("WARNING: %v", err)
 		}
 	}
 
@@ -110,14 +130,19 @@ func main() {
 	multiUser := os.Getenv("MULTI_USER") == "1" || strings.EqualFold(os.Getenv("MULTI_USER"), "true")
 
 	cfg := server.Config{
-		Port:             port,
-		WorkspaceDir:     workspaceDir,
-		PluginDir:        pluginDir,
-		OllamaURL:        ollamaURL,
-		Model:            model,
-		LLMBackend:       llmBackend,
-		OpenAIBaseURL:    openAIBaseURL,
-		OpenAIAPIKey:     openAIAPIKey,
+		Port:          port,
+		WorkspaceDir:  workspaceDir,
+		PluginDir:     pluginDir,
+		OllamaURL:     ollamaURL,
+		Model:         model,
+		LLMBackend:    llmBackend,
+		OpenAIBaseURL: openAIBaseURL,
+		OpenAIAPIKey:  openAIAPIKey,
+
+		AnthropicToken:   anthropicToken,
+		AnthropicBaseURL: anthropicBaseURL,
+		AnthropicModel:   anthropicModel,
+
 		EmbedBackend:     embedBackend,
 		VisionModel:      visionModel,
 		ChatVision:       chatVision,
@@ -139,6 +164,6 @@ func main() {
 
 	srv := server.New(cfg)
 	log.Printf("Prism → http://localhost:%s", port)
-	log.Printf("Workspace: %s | Ollama: %s | Model: %s", workspaceDir, ollamaURL, model)
+	log.Printf("Workspace: %s | Backend: %s | Ollama: %s | Model: %s", workspaceDir, llmBackend, ollamaURL, model)
 	log.Fatal(srv.Start())
 }

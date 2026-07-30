@@ -22,14 +22,22 @@ import (
 )
 
 type Config struct {
-	Port             string
-	WorkspaceDir     string
-	PluginDir        string
-	OllamaURL        string
-	Model            string
-	LLMBackend       string // "ollama" (default) or "openai" (SGLang/vLLM/…)
-	OpenAIBaseURL    string // /v1 root, used when LLMBackend == "openai"
-	OpenAIAPIKey     string // optional bearer token for the openai backend
+	Port          string
+	WorkspaceDir  string
+	PluginDir     string
+	OllamaURL     string
+	Model         string
+	LLMBackend    string // "ollama" (default), "openai" (SGLang/vLLM/…) or "anthropic" (Claude, API key)
+	OpenAIBaseURL string // /v1 root, used when LLMBackend == "openai"
+	OpenAIAPIKey  string // optional bearer token for the openai backend
+	// AnthropicToken is the console API key for the Claude backend. A Pro/Max
+	// subscription token is not an option — see internal/anthropic/credential.go.
+	AnthropicToken   string
+	AnthropicBaseURL string // API root; empty = https://api.anthropic.com
+	// AnthropicModel is the Claude model to use, held separately from Model so
+	// Claude can sit in the picker alongside a local default rather than only as
+	// the primary backend.
+	AnthropicModel   string
 	EmbedBackend     string // "" (follow LLMBackend), "ollama" or "openai": backend for RAG embeddings + captioning
 	VisionModel      string // optional override model for RAG vision captioning (needed when captioning ≠ chat backend)
 	ChatVision       bool   // chat model can see images (default true); false → caption widget previews as text for a text-only model

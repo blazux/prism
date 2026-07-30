@@ -18,6 +18,7 @@ services:
       # To connect a Markdown vault (Obsidian/Logseq) to the Notes app, mount it
       # here and set its path in Settings → Notes (e.g. /vault):
       # - /path/to/your/ObsidianVault:/vault
+      # LLM_BACKEND=anthropic without an API key runs on your Claude subscription:
     environment:
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
@@ -26,6 +27,11 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Claude, with LLM_BACKEND=anthropic. Needs a console API key — a Pro/Max
+      # subscription token does not work (see the README).
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
       - EMBED_BACKEND=${EMBED_BACKEND:-}
       - VISION_MODEL=${VISION_MODEL:-}
       - CHAT_VISION=${CHAT_VISION:-}
