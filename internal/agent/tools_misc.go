@@ -157,7 +157,7 @@ func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret s
 	if name == "" || url == "" {
 		return "", fmt.Errorf("name and url are required")
 	}
-	tools, err := e.mcpMgr.Connect(ctx, e.personalScope(), name, url, authSecret)
+	tools, err := e.mcpMgr.Connect(ctx, e.mcpStorageScope(), name, url, authSecret)
 	if err != nil {
 		return fmt.Sprintf("Failed to connect MCP server '%s': %v", name, err), nil
 	}
@@ -179,7 +179,7 @@ func (e *ToolExecutor) mcpRemoveServer(ctx context.Context, name string) (string
 	if e.mcpMgr == nil {
 		return "MCP not available", nil
 	}
-	if err := e.mcpMgr.Remove(ctx, e.personalScope(), name); err != nil {
+	if err := e.mcpMgr.Remove(ctx, e.mcpStorageScope(), name); err != nil {
 		return fmt.Sprintf("Error: %v", err), nil
 	}
 	if e.onMCPReload != nil {
@@ -199,7 +199,7 @@ func (e *ToolExecutor) mcpListServers(ctx context.Context) (string, error) {
 	var servers []mcp.ServerConfig
 	if !e.multiUser {
 		var err error
-		servers, err = e.mcpMgr.List(ctx, e.personalScope())
+		servers, err = e.mcpMgr.List(ctx, e.mcpStorageScope())
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), nil
 		}

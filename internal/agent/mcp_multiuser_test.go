@@ -15,8 +15,8 @@ func TestMcpFallbackScopes(t *testing.T) {
 		override  string
 		want      []string
 	}{
-		{"single-user: personal then group", false, "g1", "u5", []string{"u5", "g1"}},
-		{"single-user: personal then empty ragScope", false, "", "u5", []string{"u5", ""}},
+		{"single-user: personal, group, then global fallback", false, "g1", "u5", []string{"u5", "g1", "global"}},
+		{"single-user: personal then empty ragScope, global fallback", false, "", "u5", []string{"u5", "", "global"}},
 		{"multi-user: group only, personal tier dropped", true, "g1", "u5", []string{"g1"}},
 		{"multi-user, groupless: only the (empty) rag scope", true, "", "u5", []string{""}},
 	}

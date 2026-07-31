@@ -716,6 +716,13 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 		// Execute tools; each result becomes a "tool" message in history
 		for _, tc := range toolCalls {
+			// Some backends leak template markers into the function name (measured:
+			// gpt-oss harmony via vLLM's openai parser emits "widget<|channel|>commentary").
+			// The pollution is deterministic, so without this the model retries the
+			// same unknown tool until the loop detector kills the turn.
+			if i := strings.Index(tc.Function.Name, "<|"); i >= 0 {
+				tc.Function.Name = strings.TrimSpace(tc.Function.Name[:i])
+			}
 			a.histMu.Lock()
 			a.toolSeq++
 			toolID := fmt.Sprintf("tool_%d", a.toolSeq)

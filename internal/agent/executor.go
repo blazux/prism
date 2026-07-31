@@ -298,7 +298,22 @@ func (e *ToolExecutor) mcpFallbackScopes() []string {
 	if e.multiUser {
 		return []string{e.ragScope}
 	}
-	return []string{e.personalScope(), e.ragScope}
+	// PIMScope last: token-authenticated executors (Vox dock, /api/builtin) have
+	// no user prefix, so personalScope() is empty and their MCP servers land in
+	// the "global" scope (see mcpStorageScope) — without this tier those servers
+	// register successfully but never surface in any session's toolset.
+	return []string{e.personalScope(), e.ragScope, PIMScope}
+}
+
+// mcpStorageScope is where this executor's mcp add/remove persists servers:
+// the user's personal scope, or the "global" scope when there is none (token
+// auth). Mirrors pimSessionScope's fallback so the write side and the read
+// side (mcpFallbackScopes) can never miss each other.
+func (e *ToolExecutor) mcpStorageScope() string {
+	if s := e.personalScope(); s != "" {
+		return s
+	}
+	return PIMScope
 }
 
 func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
