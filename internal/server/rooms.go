@@ -323,7 +323,10 @@ func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, co
 			var sb strings.Builder
 			sb.WriteString("Messages posted in the room since your last reply (context — do not answer these directly):\n")
 			for _, m := range missed {
-				sb.WriteString(fmt.Sprintf("[%s]: %s\n", m.AuthorName, m.Content))
+				// Send time included so the agent can tell a minute-old reply
+				// from an hour-old aside (the triggering message is timestamped
+				// by Agent.Chat itself).
+				sb.WriteString(fmt.Sprintf("[%s] [%s]: %s\n", m.CreatedAt.In(time.Local).Format("2006-01-02 15:04"), m.AuthorName, m.Content))
 			}
 			sb.WriteString("\nNow reply to the message addressed to you:\n")
 			message = sb.String() + message

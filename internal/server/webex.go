@@ -68,6 +68,85 @@ type webexChannel struct {
 	botID   string // set at the start of each connection; used to ignore own posts + detect mentions
 	botName string
 	wsMu    sync.Mutex // serializes JSON writes (pings, acks) on the Mercury socket
+
+	// peopleCache maps personId → displayName so sender attribution costs one
+	// people-API call per member, not per message. Lazily initialized: the
+	// channel is built as a struct literal in several places.
+	peopleMu    sync.Mutex
+	peopleCache map[string]string
+
+	// missed buffers, per space, the group messages the bot saw but was not
+	// @mentioned in. They are replayed (attributed + timestamped) as context on
+	// the next @mention, then dropped — the Webex mirror of runRoomAgent's
+	// missed-messages delta for in-app rooms. Best-effort by design: the buffer
+	// dies with the connection, like the in-app delta resets on restart.
+	missedMu sync.Mutex
+	missed   map[string][]missedWebexMsg
+}
+
+type missedWebexMsg struct {
+	at   time.Time
+	name string
+	text string
+}
+
+// webexMissedCap bounds the replayed room-chatter context per space — enough to
+// carry a conversation, small enough to never crowd out the actual prompt.
+const webexMissedCap = 20
+
+func (c *webexChannel) rememberMissed(roomID string, mm missedWebexMsg) {
+	c.missedMu.Lock()
+	defer c.missedMu.Unlock()
+	if c.missed == nil {
+		c.missed = map[string][]missedWebexMsg{}
+	}
+	q := append(c.missed[roomID], mm)
+	if len(q) > webexMissedCap {
+		q = q[len(q)-webexMissedCap:]
+	}
+	c.missed[roomID] = q
+}
+
+func (c *webexChannel) drainMissed(roomID string) []missedWebexMsg {
+	c.missedMu.Lock()
+	defer c.missedMu.Unlock()
+	q := c.missed[roomID]
+	delete(c.missed, roomID)
+	return q
+}
+
+// senderName resolves who wrote a message, for attribution in the agent's
+// context. Falls back to the email's local part when the people API fails —
+// an approximate name still beats an anonymous message, which is how the
+// agent ended up answering the wrong person in multi-user spaces.
+func (c *webexChannel) senderName(ctx context.Context, m webexMessage) string {
+	c.peopleMu.Lock()
+	if c.peopleCache == nil {
+		c.peopleCache = map[string]string{}
+	}
+	if n, ok := c.peopleCache[m.PersonID]; ok {
+		c.peopleMu.Unlock()
+		return n
+	}
+	c.peopleMu.Unlock()
+
+	name := ""
+	if p, err := c.getPerson(ctx, c.token(), m.PersonID); err == nil {
+		name = strings.TrimSpace(p.DisplayName)
+	}
+	if name == "" {
+		name = m.PersonEmail
+		if i := strings.Index(name, "@"); i > 0 {
+			name = name[:i]
+		}
+	}
+	if name == "" {
+		name = "unknown member"
+	}
+	c.peopleMu.Lock()
+	c.peopleCache[m.PersonID] = name
+	c.peopleMu.Unlock()
+	return name
 }
 
 func (c *webexChannel) Name() string { return "webex" }
@@ -365,8 +444,18 @@ func (c *webexChannel) handleMessage(ctx context.Context, m webexMessage) {
 	if m.PersonID == c.botID {
 		return
 	}
-	// Group spaces: only respond when explicitly @mentioned.
+	sentAt := time.Now()
+	if t, err := time.Parse(time.RFC3339, m.Created); err == nil {
+		sentAt = t
+	}
+	// Group spaces: only respond when explicitly @mentioned — but keep the
+	// chatter (attributed + timestamped) for the next @mention's context
+	// instead of dropping it, so the agent knows the conversation it wasn't
+	// addressed in. Mirrors runRoomAgent's missed-messages delta.
 	if m.RoomType == "group" && !contains(m.MentionedPeople, c.botID) {
+		if txt := strings.TrimSpace(m.Text); txt != "" {
+			c.rememberMissed(m.RoomID, missedWebexMsg{at: sentAt, name: c.senderName(ctx, m), text: txt})
+		}
 		return
 	}
 	text := stripLeadingMention(m.Text, c.botName)
@@ -394,6 +483,21 @@ func (c *webexChannel) handleMessage(ctx context.Context, m webexMessage) {
 	// Apply the group admin's configured shared-agent system prompt for this space.
 	if cfg.AgentPrompt != "" {
 		ms.SetConfig(ctx, memory.KeyPersonality+"_"+sessionID, cfg.AgentPrompt)
+	}
+
+	// Label the speaker so the agent knows WHO addressed it — in a multi-user
+	// space, anonymous user messages made it answer the wrong person. The
+	// current time is stamped by Agent.Chat itself; the replayed room chatter
+	// below carries each message's own send time.
+	text = fmt.Sprintf("[%s]: %s", c.senderName(ctx, m), text)
+	if missed := c.drainMissed(m.RoomID); len(missed) > 0 {
+		var sb strings.Builder
+		sb.WriteString("Messages posted in the space since your last reply (context — do not answer these directly):\n")
+		for _, mm := range missed {
+			sb.WriteString(fmt.Sprintf("[%s] [%s]: %s\n", mm.at.In(time.Local).Format("2006-01-02 15:04"), mm.name, mm.text))
+		}
+		sb.WriteString("\nNow reply to the message addressed to you:\n")
+		text = sb.String() + text
 	}
 
 	// Two gates in series: the group's tool policy AND the per-sender Webex
@@ -488,7 +592,8 @@ type webexMessage struct {
 	PersonID        string   `json:"personId"`
 	PersonEmail     string   `json:"personEmail"`
 	MentionedPeople []string `json:"mentionedPeople"`
-	Files           []string `json:"files"` // content URLs; fetched with the bot token
+	Files           []string `json:"files"`   // content URLs; fetched with the bot token
+	Created         string   `json:"created"` // RFC3339 send time, for the missed-context timestamps
 }
 
 func (c *webexChannel) getPerson(ctx context.Context, token, id string) (webexPerson, error) {
