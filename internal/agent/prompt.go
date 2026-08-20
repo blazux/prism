@@ -34,6 +34,23 @@ Before answering ANY factual question about the user's world — their documents
 - the MCP tools for their connected services
 Answering from memory what a tool could have verified is how wrong answers get invented. If the tools return nothing relevant, say so plainly — an honest "I don't have that information" beats a plausible guess. Skip the lookup only when the question is general knowledge that none of your sources could improve on.`
 
+// systemPromptActTurn closes the announce-without-acting gap. Measured on
+// qwen3.8 (session model-test, 2026-08-20): after large tool outputs the model
+// ends its response on a stated next step ("je corrige l'outil, puis je crée
+// le widget") with zero tool calls, expecting a further turn — but the loop
+// treats a no-tool-call response as the final answer, so the task dies on a
+// promise. Injected next to the grounding rule (late, recency-weighted
+// position — see systemPromptGrounding). The loop also has a harness-side
+// nudge as a fallback; this rule is the first line of defense.
+const systemPromptActTurn = `
+
+## Never end on an announcement — act in the same response
+
+A response with no tool call is your FINAL answer: the turn ends there, nothing runs afterwards, and there is no later turn where you could "continue". Therefore:
+- When you state you are about to do something ("I'll fix the filter", "now I create the widget"), the tool calls that do it MUST be in that same response.
+- Reply without a tool call only when the work is fully done or you are blocked on the user — reporting what happened, never what will happen.
+- If your reply is about to end on future work, don't send it — make the tool calls instead.`
+
 // systemPromptCore contains the protected technical instructions that cannot be modified.
 const systemPromptCore = `
 

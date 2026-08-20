@@ -9,10 +9,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"prism/internal/memory"
 	"prism/internal/ollama"
@@ -434,6 +436,45 @@ func stripThinkingBlocks(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// Announce-without-acting guard. Measured on qwen3.8 (session model-test,
+// 2026-08-20): the model ends a response on a stated next step ("je corrige
+// l'outil", "je crée le widget") with zero tool calls, expecting a further
+// turn — but a no-tool-call response ends the turn, so the task dies on a
+// promise. systemPromptActTurn forbids it; this nudge is the harness-side
+// fallback, gated on the reply *ending* with first-person intent so turns
+// that close on a genuine report pay nothing.
+const maxIntentNudges = 2
+
+const intentNudgeMsg = "Your previous reply announced an action but contained no tool calls, so nothing ran and nothing will: a reply without tool calls ends the turn. Do the work now — make the tool calls. If the task is actually complete, reply with a brief summary of what was done instead."
+
+// announceTailRe matches first-person intent phrasings ("je corrige…", "I'll…")
+// in the tail of a reply. French first (the fleet's working language), then
+// English. Deliberately conservative: past-tense reports ("je viens de créer",
+// "widget created") must not match.
+var announceTailRe = regexp.MustCompile(`(?i)\b(je (vais|m'en occupe|m'y mets|m'attaque|continue|commence|reprends|relance|corrige|crée|génère|lance|passe|termine|finis|fais|remets|resserre|répare|modifie|change|déploie|installe|configure|vérifie|teste|récupère|télécharge|écris|prépare|construis|patche?)|on (va|s'y met)|maintenant je|i('ll| will| am going to|'m going to)|let me|now i|next i)\b`)
+
+// replyTail returns the last 200 runes of a reply — enough to hold the closing
+// sentence or two where the announcement pattern shows up, without letting an
+// intent phrase quoted early in a long final report trigger the nudge.
+func replyTail(s string) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) > 200 {
+		r = r[len(r)-200:]
+	}
+	return string(r)
+}
+
+// sanitizeForDB makes a string safe for Postgres TEXT columns: replaces
+// invalid UTF-8 sequences (e.g. raw gzip bytes leaked into a tool result)
+// and strips NUL bytes, both of which Postgres rejects at insert time.
+func sanitizeForDB(s string) string {
+	if utf8.ValidString(s) && !strings.ContainsRune(s, 0) {
+		return s
+	}
+	s = strings.ToValidUTF8(s, "�")
+	return strings.ReplaceAll(s, "\x00", "")
+}
+
 // saveMessageToDB persists a single message to the DB (best-effort).
 func (a *Agent) saveMessageToDB(ctx context.Context, msg ollama.Message) {
 	if a.memStore == nil {
@@ -444,7 +485,7 @@ func (a *Agent) saveMessageToDB(ctx context.Context, msg ollama.Message) {
 		b, _ := json.Marshal(msg.ToolCalls)
 		toolCallsJSON = b
 	}
-	if err := a.memStore.AppendMessage(ctx, a.sessionID, msg.Role, msg.Content, toolCallsJSON); err != nil {
+	if err := a.memStore.AppendMessage(ctx, a.sessionID, msg.Role, sanitizeForDB(msg.Content), toolCallsJSON); err != nil {
 		log.Printf("[agent] save message: %v", err)
 	}
 }
@@ -573,6 +614,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	// Grounding rule, near the end on purpose: late-prompt instructions are the
 	// ones this size of model actually follows (see systemPromptRole's measurements).
 	sb.WriteString(systemPromptGrounding)
+	sb.WriteString(systemPromptActTurn)
 
 	// Channel layer (Vortex): the phone constrains the *form* of the answer, not
 	// who the agent is. Kept last so it wins over anything the personality says
@@ -652,6 +694,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	)
 
 	var emptyRetried bool
+	intentNudges := 0
 	for iter := 0; iter < maxIterations; iter++ {
 		select {
 		case <-ctx.Done():
@@ -706,6 +749,16 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		a.saveMessageToDB(ctx, dbMsg)
 
 		if len(toolCalls) == 0 {
+			// Reply ends on an announced action with nothing to run it: nudge
+			// the model to act instead of ending the turn (see announceTailRe).
+			if intentNudges < maxIntentNudges && announceTailRe.MatchString(replyTail(stripThinkingBlocks(fullContent))) {
+				intentNudges++
+				log.Printf("[agent] reply ends on an announcement with no tool calls — nudging to act (%d/%d)", intentNudges, maxIntentNudges)
+				a.histMu.Lock()
+				a.history = append(a.history, ollama.Message{Role: "user", Content: intentNudgeMsg})
+				a.histMu.Unlock()
+				continue
+			}
 			events <- Event{Type: "stream_end"}
 			// Trigger summarization asynchronously after the turn completes
 			if a.memStore != nil {
