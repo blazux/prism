@@ -66,6 +66,24 @@ var liveContextCharBudget = func() int {
 	return 150_000
 }()
 
+// ollamaNumCtx is the context window (tokens) requested when the backend is a
+// local Ollama. Left unset, Ollama loads the model at its own default (8192 for
+// qwen3.8) — far below liveContextCharBudget (~37k tokens), so a long agentic
+// session overflows the loaded context long before compaction ever fires: the
+// prompt crowds out the generation room, and a THINKING model then spends what
+// little is left on reasoning tokens and emits an empty final message, which the
+// loop reads as "empty response" and gives up mid-task. 32768 gives thinking
+// models room to reason AND answer on long sessions; override via OLLAMA_NUM_CTX.
+// Ignored by the OpenAI backend (that server owns its own context sizing).
+var ollamaNumCtx = func() int {
+	if v := os.Getenv("OLLAMA_NUM_CTX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 32768
+}()
+
 type Agent struct {
 	ollama          ollama.Backend
 	executor        *ToolExecutor
@@ -928,6 +946,10 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 		// On the phone the caller waits in silence while the model reasons, so the
 		// thinking budget is pure dead air. Turn it off for voice turns.
 		NoThinking: a.channel == voiceChannel,
+		// Load a context wide enough for long agentic sessions on a thinking
+		// model (see ollamaNumCtx). Harmless on the OpenAI backend, which
+		// ignores num_ctx.
+		Options: ollama.Options{NumCtx: ollamaNumCtx},
 	}
 
 	log.Printf("[agent] → ollama: %d messages, %d tools, prompt_len=%d", len(messages), len(tools), len(prompt))
