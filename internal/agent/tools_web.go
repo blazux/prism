@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -38,6 +39,24 @@ func isPrivateHost(host string) bool {
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
 }
 
+// httpRequestError turns a raw transport error into one the model can act on.
+// Go's default message for a non-existent host — "dial tcp: lookup HOST on
+// 127.0.0.11:53: no such host" — names the Docker internal resolver, which
+// reads as a DNS-server fault; models then blame "flaky internal DNS" and
+// thrash on workarounds (measured 2026-08-21) instead of noticing they guessed
+// a hostname that doesn't exist. Name the real cause and the fix instead.
+func httpRequestError(host string, err error) error {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+		return fmt.Errorf("the hostname %q does not exist (DNS NXDOMAIN — this is NOT a network or DNS-server problem). You most likely guessed the URL: find the real endpoint with web_search instead of retrying variants.", host)
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return fmt.Errorf("%q resolved but did not respond within the timeout — the remote server is slow or blocking automated requests (this is the site, not your network/DNS). Try another source or endpoint, not the same host again.", host)
+	}
+	return fmt.Errorf("request failed: %w", err)
+}
+
 func (e *ToolExecutor) httpRequest(ctx context.Context, method, rawURL string, headers map[string]string, body string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
@@ -70,7 +89,7 @@ func (e *ToolExecutor) httpRequest(ctx context.Context, method, rawURL string, h
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
+		return "", httpRequestError(u.Hostname(), err)
 	}
 	defer resp.Body.Close()
 
@@ -164,37 +183,62 @@ url = sys.argv[1]
 js_expr = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
 ignore_https_errors = len(sys.argv) > 3 and sys.argv[3] == '1'
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(
-        headless=True,
-        args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-    )
-    page = browser.new_page(ignore_https_errors=ignore_https_errors)
-    page.goto(url, wait_until='domcontentloaded', timeout=30000)
-    page.wait_for_timeout(800)
+# A failure must say WHY on stdout (not a bare exit-1 traceback that the caller
+# may never see): the diagnostic reaches the agent so it can act, instead of
+# blaming the tool. Playwright's goto errors already name the real cause.
+def load_error(url, e):
+    msg = str(e).splitlines()[0] if str(e) else type(e).__name__
+    hint = ""
+    if "ERR_NAME_NOT_RESOLVED" in msg:
+        hint = " — the hostname does not exist (you likely guessed the URL; find the real one with web_search, do not retry variants)"
+    elif "Timeout" in msg or "timeout" in msg:
+        hint = " — the page did not load in time; the site is slow or blocking automated browsers, not a problem on your side"
+    elif "ERR_CONNECTION_REFUSED" in msg:
+        hint = " — nothing is listening at that address"
+    elif "ERR_CERT" in msg or "SSL" in msg:
+        hint = " — TLS/certificate problem"
+    return "browser could not load %s: %s%s" % (url, msg, hint)
 
-    if js_expr:
-        result = page.evaluate(js_expr)
-        if result is None:
-            # Playwright turns undefined into None, so a typo in a global name or a
-            # function body without a return both come back as a silent "null".
-            print("[script returned null/undefined. If you expected data: check the "
-                  "global exists (evaluate 'Object.keys(window)') and that an arrow "
-                  "function body returns a value.]")
-        else:
-            print(json.dumps(result, default=str))
-    else:
-        page.evaluate(
-            "() => document.querySelectorAll('script,style,nav,footer,header,aside,noscript').forEach(e=>e.remove())"
+try:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         )
+        page = browser.new_page(ignore_https_errors=ignore_https_errors)
         try:
-            text = page.inner_text('body')
-        except Exception:
-            text = page.content()
-        text = re.sub(r'\n{3,}', '\n\n', text).strip()
-        print(text[:8000])
+            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+        except Exception as e:
+            print(load_error(url, e))
+            browser.close()
+            sys.exit(1)
+        page.wait_for_timeout(800)
 
-    browser.close()
+        if js_expr:
+            result = page.evaluate(js_expr)
+            if result is None:
+                # Playwright turns undefined into None, so a typo in a global name or a
+                # function body without a return both come back as a silent "null".
+                print("[script returned null/undefined. If you expected data: check the "
+                      "global exists (evaluate 'Object.keys(window)') and that an arrow "
+                      "function body returns a value.]")
+            else:
+                print(json.dumps(result, default=str))
+        else:
+            page.evaluate(
+                "() => document.querySelectorAll('script,style,nav,footer,header,aside,noscript').forEach(e=>e.remove())"
+            )
+            try:
+                text = page.inner_text('body')
+            except Exception:
+                text = page.content()
+            text = re.sub(r'\n{3,}', '\n\n', text).strip()
+            print(text[:8000])
+
+        browser.close()
+except Exception as e:
+    print("browser error: %s: %s" % (type(e).__name__, (str(e).splitlines()[0] if str(e) else "")))
+    sys.exit(1)
 `
 
 // validateBrowserURL accepts http/https, plus file:// URLs that stay inside the
@@ -252,7 +296,7 @@ func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (
 	return out, nil
 }
 
-const browserActScript = `import json, os, time
+const browserActScript = `import json, os, sys, time
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
@@ -296,7 +340,22 @@ with sync_playwright() as p:
     page.on('pageerror', lambda err: console_msgs.append({'level': 'error', 'text': str(err)}))
 
     if start_url:
-        page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
+        try:
+            page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
+        except Exception as e:
+            # Surface WHY the initial load failed (in the JSON result shape) rather
+            # than a bare exit-1 the caller may render empty — see browserScript.
+            m = str(e).splitlines()[0] if str(e) else type(e).__name__
+            hint = ""
+            if "ERR_NAME_NOT_RESOLVED" in m:
+                hint = " — hostname does not exist (likely a guessed URL; find the real one with web_search, do not retry variants)"
+            elif "Timeout" in m or "timeout" in m:
+                hint = " — page did not load in time; the site is slow or blocking automated browsers"
+            elif "ERR_CONNECTION_REFUSED" in m:
+                hint = " — nothing is listening at that address"
+            print(json.dumps([{'action':'navigate','status':'error','url':start_url,'error': m + hint}], indent=2))
+            browser.close()
+            sys.exit(1)
         page.wait_for_timeout(500)
         results.append({'action':'navigate','status':'ok','url':page.url})
 

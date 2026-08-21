@@ -39,7 +39,9 @@ func (e *ToolExecutor) downloadFile(ctx context.Context, rawURL, path string) (s
 	client := &http.Client{Timeout: 2 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("download failed: %w", err)
+		// Same transport-error rewrite as http_request: a guessed non-existent
+		// host must read as NXDOMAIN, not as a flaky Docker DNS resolver.
+		return "", httpRequestError(u.Hostname(), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

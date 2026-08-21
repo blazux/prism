@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,5 +232,28 @@ func TestToolFilename(t *testing.T) {
 	}
 	if got := toolFilename("Fetch RT Tickets"); got != "fetch_rt_tickets.py" {
 		t.Errorf("toolFilename(%q) = %q, want %q", "Fetch RT Tickets", got, "fetch_rt_tickets.py")
+	}
+}
+
+// httpRequestError must rewrite the two errors that misled the model: a
+// non-existent host (NXDOMAIN — the raw "...on 127.0.0.11:53: no such host"
+// read as a DNS-server fault) and a timeout (a slow/blocking remote read as a
+// network problem). Anything else stays a generic "request failed".
+func TestHTTPRequestError(t *testing.T) {
+	nx := &net.DNSError{Err: "no such host", Name: "marees.shom.fr", IsNotFound: true}
+	got := httpRequestError("marees.shom.fr", nx).Error()
+	if !strings.Contains(got, "does not exist") || !strings.Contains(got, "web_search") || strings.Contains(got, "127.0.0.11") {
+		t.Errorf("NXDOMAIN rewrite wrong: %q", got)
+	}
+
+	to := &net.DNSError{Err: "i/o timeout", Name: "www.meteo-france.fr", IsTimeout: true}
+	got = httpRequestError("www.meteo-france.fr", to).Error()
+	if !strings.Contains(got, "did not respond") || !strings.Contains(got, "not your network") {
+		t.Errorf("timeout rewrite wrong: %q", got)
+	}
+
+	other := errors.New("connection reset by peer")
+	if got = httpRequestError("x", other).Error(); !strings.Contains(got, "request failed") {
+		t.Errorf("generic error should stay generic: %q", got)
 	}
 }
