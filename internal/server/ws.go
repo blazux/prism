@@ -782,21 +782,29 @@ func (s *Server) handleChat(ctx context.Context, client *Client, content string,
 
 	outChars := 0
 	for ev := range events {
-		client.sendJSON(ev)
+		// "stream" deltas are high-frequency and individually disposable — a
+		// dropped one loses a few characters. Everything else carries UI STATE
+		// (tool_use/tool_result, plugin add/remove, attachment, stream_end,
+		// error…): dropping one strands the UI — e.g. a tool_result lost to a
+		// full send buffer leaves its "Running…" spinner up forever, the exact
+		// "I never see tool results" bug. So deliver those reliably.
 		if ev.Type == "stream" {
+			client.sendJSON(ev)
 			outChars += len(ev.Content)
+		} else {
+			client.sendJSONReliable(ev)
 		}
 
 		// After file changes, refresh tree
 		if ev.Type == "file_changed" {
 			tree := s.buildFileTree(s.cfg.WorkspaceDir)
-			client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
+			client.sendJSONReliable(map[string]interface{}{"type": "file_tree", "files": tree})
 		}
 	}
 
 	// Deterministic end-of-turn marker for non-browser clients (the Vortex voice
 	// dock reads this to know Cortex's reply is complete). The browser ignores it.
-	client.sendJSON(map[string]interface{}{"type": "turn_complete"})
+	client.sendJSONReliable(map[string]interface{}{"type": "turn_complete"})
 
 	// Usage: one chat turn, tokens estimated (chars/4 in+out) until backend
 	// counters are wired.
@@ -819,6 +827,24 @@ func (c *Client) sendJSON(v interface{}) {
 	case c.send <- data:
 	default:
 		log.Printf("client send buffer full, dropping message")
+	}
+}
+
+// sendJSONReliable is sendJSON for messages that carry UI state rather than a
+// disposable stream delta: it applies backpressure (blocks until the writePump
+// drains the buffer) instead of dropping on a transient burst — a burst of
+// large tool_result payloads must not strand the UI. It still bounds the wait so
+// a genuinely dead/stuck client can't hang the turn forever; the write deadline
+// in writePump tears such a connection down anyway.
+func (c *Client) sendJSONReliable(v interface{}) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	select {
+	case c.send <- data:
+	case <-time.After(10 * time.Second):
+		log.Printf("client send buffer full for 10s — dropping state message (client stuck?)")
 	}
 }
 
