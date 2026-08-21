@@ -157,12 +157,28 @@ func (e *ToolExecutor) webSearch(ctx context.Context, query string) (string, err
 			URL     string `json:"url"`
 			Content string `json:"content"`
 		} `json:"results"`
+		// SearXNG reports engines it couldn't reach as ["name","reason"] pairs.
+		UnresponsiveEngines [][]string `json:"unresponsive_engines"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("parse response: %w", err)
 	}
 	if len(result.Results) == 0 {
-		return "No results found", nil
+		// Distinguish "the web genuinely has nothing" from "every search engine
+		// is currently rate-limited/CAPTCHA'd" — SearXNG's public engines block
+		// self-hosted instances constantly. Returning a bare "No results found"
+		// makes the model think its QUERY was bad and go guess URLs by hand (the
+		// endpoint-guessing thrash); naming the real cause stops that.
+		if len(result.UnresponsiveEngines) > 0 {
+			var names []string
+			for _, e := range result.UnresponsiveEngines {
+				if len(e) > 0 {
+					names = append(names, e[0])
+				}
+			}
+			return fmt.Sprintf("Web search is unavailable right now: every search engine is rate-limited or CAPTCHA-blocked (%s). This is a TEMPORARY infrastructure problem, NOT a bad query — rephrasing will not help, and you must NOT guess URLs/endpoints by hand. Tell the user web search is down, or work from sources/APIs you already know.", strings.Join(names, ", ")), nil
+		}
+		return "No results found (the search ran fine — the web genuinely returned nothing for this query; try different terms).", nil
 	}
 
 	var sb strings.Builder

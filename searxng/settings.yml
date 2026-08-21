@@ -13,3 +13,50 @@ search:
   formats:
     - html
     - json
+
+# Outgoing tuning: self-hosted engines get rate-limited/CAPTCHA'd and SearXNG
+# suspends them temporarily. Retries ride out transient failures; the wider
+# timeout lets slower engines still contribute rather than being dropped.
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 12.0
+  retries: 2
+  pool_connections: 100
+  pool_maxsize: 20
+
+# The default general set leans on engines that CAPTCHA self-hosted instances
+# (brave, duckduckgo, google, startpage…). Their suspensions are temporary and
+# rotate, so we keep them AND enable a broad, diverse pool of independent /
+# regional engines: at any moment the union has responders. bing was disabled
+# by default but works reliably here; the rest add resilience. Names taken from
+# this instance's /config — all real engines, not guessed.
+engines:
+  - name: bing
+    disabled: false
+    weight: 2
+  - name: mojeek
+    disabled: false
+  - name: qwant
+    disabled: false
+  - name: yahoo
+    disabled: false
+  - name: yandex
+    disabled: false
+  - name: presearch
+    disabled: false
+  - name: mwmbl
+    disabled: false
+  - name: wiby
+    disabled: false
+  - name: searchmysite
+    disabled: false
+  - name: crowdview
+    disabled: false
+  - name: yep
+    disabled: false
+  - name: ask
+    disabled: false
+  - name: encyclosearch
+    disabled: false
+  - name: seznam
+    disabled: false
