@@ -97,3 +97,20 @@ func TestPimHint(t *testing.T) {
 		t.Errorf("hint = %q", got)
 	}
 }
+
+// The truncation detector must span the three backends' finish-reason
+// vocabularies (Ollama/OpenAI "length", Anthropic "max_tokens") and never
+// misfire on a clean stop — an empty turn that stopped cleanly is a chosen
+// silence (nudge with 'continue'), while a truncated one needs compaction.
+func TestIsTruncation(t *testing.T) {
+	for _, r := range []string{"length", "max_tokens"} {
+		if !isTruncation(r) {
+			t.Errorf("isTruncation(%q) = false, want true", r)
+		}
+	}
+	for _, r := range []string{"stop", "end_turn", "tool_use", "", "tool_calls"} {
+		if isTruncation(r) {
+			t.Errorf("isTruncation(%q) = true, want false", r)
+		}
+	}
+}

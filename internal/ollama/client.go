@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -72,6 +74,12 @@ type Backend interface {
 	Chat(ctx context.Context, req ChatRequest, out chan<- StreamEvent)
 	Ping(ctx context.Context) error
 	ListModels(ctx context.Context) ([]string, error)
+	// ContextBudgetChars reports how many chars of replayed history this backend
+	// can safely hold, so live-context compaction fits the assembled prompt to
+	// the backend's real context window. 0 means "no hard limit the caller must
+	// enforce" — used by servers that own their own (large) context sizing, i.e.
+	// the OpenAI-compatible and Anthropic backends.
+	ContextBudgetChars() int
 }
 
 // DefaultNumPredict caps the tokens generated for one turn when the caller asks for
@@ -81,6 +89,33 @@ type Backend interface {
 // chat ends up never answering. Generous enough for a whole widget or a long note;
 // hitting it truncates the turn instead of hanging it.
 const DefaultNumPredict = 16384
+
+// NumCtx is the context window (tokens) this backend loads models at. Ollama
+// otherwise defaults to 8192 for qwen3.8 — far too small once a long agentic
+// session's prompt (system prompt + tool schemas + history) is assembled: the
+// prompt crowds out the generation room, and a THINKING model spends what's
+// left on reasoning tokens and emits an empty final message. 32768 leaves room
+// to reason AND answer; override via OLLAMA_NUM_CTX.
+var NumCtx = func() int {
+	if v := os.Getenv("OLLAMA_NUM_CTX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 32768
+}()
+
+// contextReserveTokens is what NumCtx budgets for things that are NOT replayed
+// history but still occupy the loaded context every turn: the generation window
+// (thinking + answer) plus the freshly-assembled system prompt and tool schemas.
+// ContextBudgetChars subtracts it so the compaction threshold keeps the whole
+// assembled prompt inside NumCtx — the history budget is only what's left.
+const contextReserveTokens = 18000 // ~8k generation + ~10k system prompt & tools
+
+// charsPerToken is a rough conversion for the char-based size caps used
+// throughout the agent (no tokenizer dependency anywhere). Mixed FR/EN/code
+// runs ~3.5 chars/token; kept slightly low so the derived budget errs small.
+const charsPerToken = 3.5
 
 // responseHeaderTimeout bounds the wait for the response head only, never the body —
 // a streamed answer may take as long as it likes. It covers the window where the
@@ -176,9 +211,10 @@ type Options struct {
 }
 
 type ChatChunk struct {
-	Model   string  `json:"model"`
-	Message Message `json:"message"`
-	Done    bool    `json:"done"`
+	Model      string  `json:"model"`
+	Message    Message `json:"message"`
+	Done       bool    `json:"done"`
+	DoneReason string  `json:"done_reason"` // "stop" | "length" | …; "length" = truncated
 }
 
 type StreamEvent struct {
@@ -186,13 +222,31 @@ type StreamEvent struct {
 	Thinking  string
 	ToolCalls []ToolCall
 	Done      bool
-	Err       error
+	// DoneReason carries the backend's finish reason on the terminal event
+	// ("length" = the model was cut off at the token cap / context edge, so an
+	// empty result means truncation, not a chosen silence). Empty otherwise.
+	DoneReason string
+	Err        error
+}
+
+// ContextBudgetChars derives the safe history-content budget from NumCtx, minus
+// the reserve for generation + system prompt + tool schemas (contextReserveTokens).
+// This is what keeps a long session's assembled prompt inside the loaded context.
+func (c *Client) ContextBudgetChars() int {
+	usable := NumCtx - contextReserveTokens
+	if usable < 4000 {
+		usable = 4000 // never compact so hard the model can't see recent turns
+	}
+	return int(float64(usable) * charsPerToken)
 }
 
 func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEvent) {
 	req.Stream = true
 	if req.Options.NumPredict == 0 {
 		req.Options.NumPredict = DefaultNumPredict
+	}
+	if req.Options.NumCtx == 0 {
+		req.Options.NumCtx = NumCtx
 	}
 
 	body, err := json.Marshal(req)
@@ -237,10 +291,11 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 		}
 
 		ev := StreamEvent{
-			Content:   chunk.Message.Content,
-			Thinking:  chunk.Message.Thinking,
-			ToolCalls: chunk.Message.ToolCalls,
-			Done:      chunk.Done,
+			Content:    chunk.Message.Content,
+			Thinking:   chunk.Message.Thinking,
+			ToolCalls:  chunk.Message.ToolCalls,
+			Done:       chunk.Done,
+			DoneReason: chunk.DoneReason,
 		}
 		out <- ev
 

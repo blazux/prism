@@ -66,23 +66,9 @@ var liveContextCharBudget = func() int {
 	return 150_000
 }()
 
-// ollamaNumCtx is the context window (tokens) requested when the backend is a
-// local Ollama. Left unset, Ollama loads the model at its own default (8192 for
-// qwen3.8) — far below liveContextCharBudget (~37k tokens), so a long agentic
-// session overflows the loaded context long before compaction ever fires: the
-// prompt crowds out the generation room, and a THINKING model then spends what
-// little is left on reasoning tokens and emits an empty final message, which the
-// loop reads as "empty response" and gives up mid-task. 32768 gives thinking
-// models room to reason AND answer on long sessions; override via OLLAMA_NUM_CTX.
-// Ignored by the OpenAI backend (that server owns its own context sizing).
-var ollamaNumCtx = func() int {
-	if v := os.Getenv("OLLAMA_NUM_CTX"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
-	}
-	return 32768
-}()
+// num_ctx now lives with the Ollama client (ollama.NumCtx), which both sets it
+// on requests and derives the history budget from it via ContextBudgetChars —
+// see effectiveHistoryBudget below.
 
 type Agent struct {
 	ollama          ollama.Backend
@@ -319,20 +305,54 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 // from the assistant message that requested them — this also means it can
 // never discard the CURRENT task's own working data, only completed older
 // turns.
+// effectiveHistoryBudget is the char cap live compaction enforces: the backend's
+// own context-derived budget when it has one (Ollama, from num_ctx), otherwise
+// the large configured default (OpenAI/Anthropic size their own context). This
+// is what keeps a long session's assembled prompt inside a small-context local
+// model without needlessly over-compacting a large-context backend.
+func (a *Agent) effectiveHistoryBudget() int {
+	if a.ollama != nil {
+		if b := a.ollama.ContextBudgetChars(); b > 0 && b < liveContextCharBudget {
+			return b
+		}
+	}
+	return liveContextCharBudget
+}
+
 func (a *Agent) compactLiveContextIfNeeded(ctx context.Context, events chan<- Event) {
+	budget := a.effectiveHistoryBudget()
 	a.histMu.Lock()
 	total := 0
 	for _, m := range a.history {
 		total += len(m.Content)
 	}
-	if total <= liveContextCharBudget {
-		a.histMu.Unlock()
-		return
+	over := total > budget
+	a.histMu.Unlock()
+	if over {
+		a.compactLiveContextTo(ctx, events, budget/2)
 	}
-	// Walk forward from the start until the KEPT tail is back under half the
-	// budget (so compaction doesn't immediately re-trigger next iteration),
+}
+
+// forceCompactLiveContext compacts even when the live history is nominally under
+// budget — the recovery path when a turn came back truncated (empty output at
+// done_reason=length): shrink toward half the effective budget to free
+// generation room before retrying. A no-op when there's nothing older safe to
+// drop (a single huge in-progress turn), in which case the caller surfaces the
+// "start a new chat" notice.
+func (a *Agent) forceCompactLiveContext(ctx context.Context, events chan<- Event) {
+	a.compactLiveContextTo(ctx, events, a.effectiveHistoryBudget()/2)
+}
+
+// compactLiveContextTo replaces the oldest completed turns with a summary until
+// the kept tail is under `target` chars, cutting only at a "user" boundary.
+func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, target int) {
+	a.histMu.Lock()
+	total := 0
+	for _, m := range a.history {
+		total += len(m.Content)
+	}
+	// Walk forward from the start until the KEPT tail is back under the target,
 	// then advance to the next "user" boundary for safety.
-	target := liveContextCharBudget / 2
 	cut, kept := 0, total
 	for cut < len(a.history) && kept > target {
 		kept -= len(a.history[cut].Content)
@@ -724,7 +744,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		// bloat accumulating within one long multi-tool-call turn.
 		a.compactLiveContextIfNeeded(ctx, events)
 
-		fullContent, toolCalls, err := a.callOllama(ctx, learningsCtx, events)
+		fullContent, toolCalls, doneReason, err := a.callOllama(ctx, learningsCtx, events)
 		if err != nil {
 			// Intentional cancel (user clicked stop, sent new message, or closed tab):
 			// close the bubble cleanly without showing an error message.
@@ -736,8 +756,28 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			return
 		}
 
-		// Empty response: don't save the ghost message; retry once with a nudge.
+		// Empty response: nothing usable came back. WHY it's empty decides the fix.
 		if strings.TrimSpace(fullContent) == "" && len(toolCalls) == 0 {
+			// Truncation (done_reason=length/max_tokens): the model was cut off —
+			// typically it spent the whole generation window on reasoning and never
+			// reached a final message. Appending "continue" only makes the prompt
+			// longer and reproduces the cutoff, so instead compact the live context
+			// to free generation room, then retry once. If it's already as compact
+			// as it gets, tell the user plainly rather than stop in silence.
+			if isTruncation(doneReason) {
+				if !emptyRetried {
+					log.Printf("[agent] truncated empty response (done_reason=%q) — compacting and retrying", doneReason)
+					emptyRetried = true
+					a.forceCompactLiveContext(ctx, events)
+					continue
+				}
+				log.Printf("[agent] truncated empty response again after compaction — stopping")
+				events <- Event{Type: "stream", Content: "\n\n_(Réponse interrompue : le contexte de cette session est trop long pour le modèle. Démarre un nouveau chat pour repartir sur une base propre.)_"}
+				events <- Event{Type: "stream_end"}
+				return
+			}
+			// Genuine empty (clean stop with no content): the model chose silence.
+			// A single "continue" nudge is the right prod here.
 			if !emptyRetried {
 				log.Printf("[agent] empty response from model — retrying with 'continue'")
 				emptyRetried = true
@@ -929,7 +969,7 @@ func (a *Agent) handleUpdateSystemPrompt(ctx context.Context, rawArgs json.RawMe
 	return "System prompt personality updated successfully. Changes take effect on the next message."
 }
 
-func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan<- Event) (string, []ollama.ToolCall, error) {
+func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan<- Event) (string, []ollama.ToolCall, string, error) {
 	prompt := a.buildSystemPrompt(ctx, learningsCtx)
 
 	a.histMu.Lock()
@@ -946,11 +986,9 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 		// On the phone the caller waits in silence while the model reasons, so the
 		// thinking budget is pure dead air. Turn it off for voice turns.
 		NoThinking: a.channel == voiceChannel,
-		// Load a context wide enough for long agentic sessions on a thinking
-		// model (see ollamaNumCtx). Harmless on the OpenAI backend, which
-		// ignores num_ctx.
-		Options: ollama.Options{NumCtx: ollamaNumCtx},
 	}
+	// num_ctx is filled in by the Ollama client (ollama.NumCtx); the OpenAI and
+	// Anthropic backends ignore it and size their own context.
 
 	log.Printf("[agent] → ollama: %d messages, %d tools, prompt_len=%d", len(messages), len(tools), len(prompt))
 
@@ -963,10 +1001,14 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 	var contentBuilder strings.Builder
 	var toolCalls []ollama.ToolCall
 	var inThinking bool
+	var doneReason string
 
 	for ev := range ch {
 		if ev.Err != nil {
-			return contentBuilder.String(), nil, ev.Err
+			return contentBuilder.String(), nil, "", ev.Err
+		}
+		if ev.DoneReason != "" {
+			doneReason = ev.DoneReason
 		}
 		if ev.Thinking != "" {
 			if !inThinking {
@@ -992,11 +1034,18 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 	}
 
 	content := contentBuilder.String()
-	log.Printf("[agent] iter response: content=%q tool_calls=%d", truncate(content, 120), len(toolCalls))
+	log.Printf("[agent] iter response: content=%q tool_calls=%d done_reason=%q", truncate(content, 120), len(toolCalls), doneReason)
 	for i, tc := range toolCalls {
 		log.Printf("[agent]   tool[%d] %s %s", i, tc.Function.Name, truncate(string(tc.Function.Arguments), 200))
 	}
-	return content, toolCalls, nil
+	return content, toolCalls, doneReason, nil
+}
+
+// isTruncation reports whether a finish reason means the model was cut off at
+// the token cap / context edge (as opposed to a clean stop). Spans the three
+// backends' vocabularies: Ollama "length", OpenAI "length", Anthropic "max_tokens".
+func isTruncation(doneReason string) bool {
+	return doneReason == "length" || doneReason == "max_tokens"
 }
 
 func truncate(s string, n int) string {

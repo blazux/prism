@@ -356,7 +356,7 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, model string, m
 		case "message_stop":
 			// Anthropic closes the body right after; stop reading rather than
 			// wait on a scanner that has nothing left to yield.
-			out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true}
+			out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: stopReason}
 			c.logStop(stopReason, model, maxTokens)
 			return
 		}
@@ -369,7 +369,7 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, model string, m
 
 	// The stream ended without message_stop (upstream closed early). Everything
 	// accumulated so far is still worth delivering.
-	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true}
+	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: stopReason}
 	c.logStop(stopReason, model, maxTokens)
 }
 
@@ -393,6 +393,11 @@ var knownModels = []string{
 	"claude-sonnet-4-5",
 	"claude-haiku-4-5",
 }
+
+// ContextBudgetChars returns 0: Claude owns its own (very large) context window
+// and truncates server-side, so the agent's live compaction need not enforce a
+// token-derived cap on this backend's behalf.
+func (c *Client) ContextBudgetChars() int { return 0 }
 
 func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

@@ -24,6 +24,7 @@ func (f *fakeSummarizeBackend) Chat(ctx context.Context, req ollama.ChatRequest,
 }
 func (f *fakeSummarizeBackend) Ping(ctx context.Context) error                   { return nil }
 func (f *fakeSummarizeBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }
+func (f *fakeSummarizeBackend) ContextBudgetChars() int                          { return 0 }
 
 // historyMutatingBackend simulates something else (the WS read pump calling
 // InjectNote/ResetHistory/SetSession) mutating history WHILE
@@ -41,6 +42,7 @@ func (f *historyMutatingBackend) Chat(ctx context.Context, req ollama.ChatReques
 }
 func (f *historyMutatingBackend) Ping(ctx context.Context) error                   { return nil }
 func (f *historyMutatingBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }
+func (f *historyMutatingBackend) ContextBudgetChars() int                          { return 0 }
 
 // Below budget: no-op, no event, history untouched.
 func TestCompactLiveContext_BelowBudget_NoOp(t *testing.T) {

@@ -417,8 +417,13 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		log.Printf("openai: generation hit the %d-token cap (truncated turn) — model %q", payload.MaxTokens, req.Model)
 	}
 
-	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true}
+	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: finish}
 }
+
+// ContextBudgetChars returns 0: an OpenAI-compatible server (vLLM/SGLang/LiteLLM)
+// owns its own context sizing and truncates server-side, so the agent's live
+// compaction need not enforce a token-derived cap on this backend's behalf.
+func (c *Client) ContextBudgetChars() int { return 0 }
 
 // ---- models / health -----------------------------------------------------
 
