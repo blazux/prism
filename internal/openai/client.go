@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -27,6 +28,25 @@ import (
 // itself; hitting this cap instead ends the turn with finish_reason "length",
 // which surfaces as a truncated answer rather than a dead chat.
 const defaultMaxTokens = 16384
+
+// reasoningEffort is sent as `reasoning_effort` on every request. gpt-oss (and
+// other harmony/o-series-style models) otherwise default to heavy reasoning and
+// can burn the ENTIRE max_tokens budget in the reasoning channel without ever
+// emitting a final message — the request comes back with finish_reason "length"
+// and empty content, which reads as a dead turn (measured 2026-08-22: gpt-oss
+// on a 6k-token prompt, so NOT a context problem — pure reasoning overflow).
+// "medium" makes it reason briefly (~500 chars) and answer within ~1.3k tokens.
+// Empty or "none" omits the field (for backends that reject it; LiteLLM's
+// drop_params also drops it harmlessly for models that don't know it).
+var reasoningEffort = func() string {
+	if v, ok := os.LookupEnv("OPENAI_REASONING_EFFORT"); ok {
+		if v == "none" {
+			return ""
+		}
+		return v
+	}
+	return "medium"
+}()
 
 // No penalty is applied by default, and this is not an oversight.
 //
@@ -90,6 +110,8 @@ type chatRequest struct {
 	// Qwen/SGLang convention for turning extended reasoning off. Passes through
 	// LiteLLM unharmed; ignored by backends that don't know it.
 	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
+	// gpt-oss/o-series reasoning budget ("low"|"medium"|"high"). See reasoningEffort.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type chatMsg struct {
@@ -336,6 +358,10 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	}
 	if req.NoThinking {
 		payload.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+	} else if reasoningEffort != "" {
+		// Cap reasoning so the model can't spend the whole generation budget
+		// thinking and return empty content. Not set for voice/no-thinking turns.
+		payload.ReasoningEffort = reasoningEffort
 	}
 	for _, t := range req.Tools {
 		payload.Tools = append(payload.Tools, chatTool{Type: "function", Function: t.Function})

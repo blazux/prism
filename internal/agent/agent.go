@@ -758,21 +758,38 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 		// Empty response: nothing usable came back. WHY it's empty decides the fix.
 		if strings.TrimSpace(fullContent) == "" && len(toolCalls) == 0 {
-			// Truncation (done_reason=length/max_tokens): the model was cut off —
-			// typically it spent the whole generation window on reasoning and never
-			// reached a final message. Appending "continue" only makes the prompt
-			// longer and reproduces the cutoff, so instead compact the live context
-			// to free generation room, then retry once. If it's already as compact
-			// as it gets, tell the user plainly rather than stop in silence.
+			// Truncation (done_reason=length/max_tokens): the model was cut off at
+			// the token cap with nothing to show. TWO very different causes, told
+			// apart by how big the live context actually is:
+			//   - context genuinely huge → the prompt crowds out generation room →
+			//     compacting frees room, and "start a new chat" is honest advice.
+			//   - context small → the model spent its whole generation budget in
+			//     the reasoning channel and never answered (heavy reasoner). This
+			//     is NOT a context problem; compacting/new-chat won't help — the
+			//     lever is capping reasoning_effort (see openai.reasoningEffort).
+			// Reporting "context too long" when it's 6k tokens is a false diagnosis.
 			if isTruncation(doneReason) {
+				a.histMu.Lock()
+				histChars := 0
+				for _, m := range a.history {
+					histChars += len(m.Content)
+				}
+				a.histMu.Unlock()
+				contextBound := histChars > a.effectiveHistoryBudget()/2
 				if !emptyRetried {
-					log.Printf("[agent] truncated empty response (done_reason=%q) — compacting and retrying", doneReason)
+					log.Printf("[agent] truncated empty response (done_reason=%q, hist=%dc, context-bound=%v) — retrying", doneReason, histChars, contextBound)
 					emptyRetried = true
-					a.forceCompactLiveContext(ctx, events)
+					if contextBound {
+						a.forceCompactLiveContext(ctx, events)
+					}
 					continue
 				}
-				log.Printf("[agent] truncated empty response again after compaction — stopping")
-				events <- Event{Type: "stream", Content: "\n\n_(Réponse interrompue : le contexte de cette session est trop long pour le modèle. Démarre un nouveau chat pour repartir sur une base propre.)_"}
+				log.Printf("[agent] truncated empty response again — stopping (context-bound=%v)", contextBound)
+				msg := "\n\n_(Réponse interrompue : le modèle a épuisé son budget de génération en raisonnement sans produire de réponse. Reformule plus simplement, ou découpe la demande.)_"
+				if contextBound {
+					msg = "\n\n_(Réponse interrompue : le contexte de cette session est trop long pour le modèle. Démarre un nouveau chat pour repartir sur une base propre.)_"
+				}
+				events <- Event{Type: "stream", Content: msg}
 				events <- Event{Type: "stream_end"}
 				return
 			}
