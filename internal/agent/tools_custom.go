@@ -76,10 +76,25 @@ func (e *ToolExecutor) listTools() (string, error) {
 	if len(tools) == 0 {
 		return "No custom tools registered yet. Use register_tool to create one.", nil
 	}
+	// The tools live in customMgr.Dir() (an absolute host path); the file tools
+	// (read_file/write_file/edit) take workspace-relative paths, so surface the
+	// dir's basename — e.g. "agent_tools" — which they accept as-is via
+	// NormalizeWorkspacePath. Derived, not hardcoded, so it can't drift from
+	// where server.go actually puts the dir.
+	toolsRel := filepath.Base(e.customMgr.Dir())
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Custom tools (%d):\n", len(tools))
 	for _, t := range tools {
+		if t.Protected {
+			// Shipped with Prism (e.g. pcap.py, re-materialized from the binary).
+			// The agent may call it, but write_file has NO overwrite guard — so
+			// don't hand out an editable source path that would invite clobbering
+			// a built-in tool. Label it instead.
+			fmt.Fprintf(&sb, "  - %s (%s) [shipped with Prism — do not edit]: %s\n", t.Name, t.Filename, t.Description)
+			continue
+		}
 		fmt.Fprintf(&sb, "  - %s (%s): %s\n", t.Name, t.Filename, t.Description)
+		fmt.Fprintf(&sb, "      source: %s/%s — inspect or edit with read_file, write_file, edit\n", toolsRel, t.Filename)
 	}
 	return sb.String(), nil
 }

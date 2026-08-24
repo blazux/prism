@@ -503,7 +503,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "list_tools",
-			Description: "List all custom tools you have created via register_tool.",
+			Description: "List all custom tools in this workspace, each with its source-file path so you can inspect or edit it directly with read_file/write_file/edit. Tools shipped with Prism are labelled and must not be edited.",
 			Parameters: ollama.ToolParameters{
 				Type:       "object",
 				Properties: map[string]ollama.ToolProperty{},
