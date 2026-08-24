@@ -291,10 +291,12 @@
 
   // Wrap an agent-authored widget document with the active theme tokens, the
   // shared widget stylesheet and the live-update bootstrap.
-  function composeWidgetDoc(content) {
+  function composeWidgetDoc(content, sessionID) {
     const head =
       '<style id="prism-theme-vars">' + varsToCSS(activeVars()) + '</style>' +
       '<link rel="stylesheet" href="/widget-base.css">' +
+      '<script>window.PRISM_SESSION=' + JSON.stringify(sessionID || '') + ';<\/script>' +
+      '<script src="/prism-widget.js"><\/script>' +
       '<script>' + WIDGET_BOOTSTRAP + '<\/script>';
     let m = content.match(/<head[^>]*>/i);
     if (m) { const i = m.index + m[0].length; return content.slice(0, i) + head + content.slice(i); }

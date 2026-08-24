@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -143,21 +144,26 @@ const widgetThemeHead = `<style id="prism-theme-vars">:root{` +
 	`--radius:8px;--mono:'Fira Code',ui-monospace,monospace}</style>` +
 	`<link rel="stylesheet" href="/widget-base.css">`
 
-// injectWidgetTheme inserts widgetThemeHead into a widget document, tolerating
-// fragments without <head>/<html> (it falls back to prepending).
-func injectWidgetTheme(html string) string {
+// injectWidgetTheme inserts the theme tokens, the widget session, and the shared
+// prism-widget.js helper (prismTool/prismChat) into a widget document, tolerating
+// fragments without <head>/<html> (it falls back to prepending). The session lets
+// the injected helper reach tools/chat without the widget hard-coding it.
+func injectWidgetTheme(html, session string) string {
+	head := widgetThemeHead +
+		`<script>window.PRISM_SESSION=` + strconv.Quote(session) + `;</script>` +
+		`<script src="/prism-widget.js"></script>`
 	lower := strings.ToLower(html)
 	if i := strings.Index(lower, "<head>"); i >= 0 {
 		at := i + len("<head>")
-		return html[:at] + widgetThemeHead + html[at:]
+		return html[:at] + head + html[at:]
 	}
 	if i := strings.Index(lower, "<html"); i >= 0 {
 		if j := strings.Index(lower[i:], ">"); j >= 0 {
 			at := i + j + 1
-			return html[:at] + "<head>" + widgetThemeHead + "</head>" + html[at:]
+			return html[:at] + "<head>" + head + "</head>" + html[at:]
 		}
 	}
-	return widgetThemeHead + html
+	return head + html
 }
 
 // servePluginHTML serves /plugins/<session>/<id>.html with the widget theme
@@ -167,8 +173,14 @@ func (s *Server) servePluginHTML(next http.Handler) http.Handler {
 		if strings.HasSuffix(r.URL.Path, ".html") {
 			full := filepath.Join(s.cfg.PluginDir, filepath.Clean("/"+r.URL.Path))
 			if b, err := os.ReadFile(full); err == nil {
+				// The path is <session>/<id>.html; the leading segment is the
+				// session, so the injected helper can call tools/chat as this widget.
+				session := ""
+				if parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2); len(parts) == 2 {
+					session = parts[0]
+				}
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.Write([]byte(injectWidgetTheme(string(b))))
+				w.Write([]byte(injectWidgetTheme(string(b), session)))
 				return
 			}
 		}

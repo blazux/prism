@@ -149,12 +149,40 @@ already styled. Layout knobs you still pass to the widget tool: cols (1=small,
 
 ### Widget data sources
 
+**Talking to tools and the agent from a widget — use these two helpers, always.** Every widget you build has two globals injected for free. Use them instead of hand-writing fetch: they remove the four things that used to break widget↔tool wiring every time (choosing the endpoint, passing the session, guessing the response shape, handling errors).
+
+  const result = await prismTool('<name>', { ...args })   // run ANY tool and get its result back
+  prismChat('<message>')                                   // send a message into this dashboard's chat
+
+How they behave — this is the whole contract, you don't need to know more:
+- **prismTool(name, args)** runs the tool called <name> and returns its result. It works for ANY tool — a custom Python tool you registered, a built-in, or an MCP tool — through one universal endpoint, so you NEVER pick between /api/tool and /api/builtin and you never get a 404 from choosing wrong. The current widget's session is already wired in: do NOT append ?session=, do NOT hard-code a session id, do NOT set an Authorization header.
+- The result comes back **already parsed**: a tool that prints JSON hands you the array/object directly (no JSON.parse), and plain text comes back as a string. If the tool errors, prismTool **throws** with that message — so wrap calls in try/catch and show the message rather than letting the widget die silently.
+- **prismChat(message)** drops a message into this dashboard's chat — e.g. an "Analyse" button that hands the agent a ticket to work on. It returns immediately (the agent's reply streams into the chat panel), so it never blocks the button.
+
+Full pattern — a list that refreshes, plus a per-row button that asks the agent to act on one item:
+
+  async function load() {
+    try {
+      const tickets = await prismTool('rt_dbs_tickets');              // an array, already parsed
+      render(tickets);
+    } catch (e) {
+      showError(e.message);                                           // always handle it — no silent failures
+    }
+  }
+  async function analyse(id) {
+    try {
+      const ticket = await prismTool('get_ticket', { ticket_id: id }); // fine even if get_ticket is an MCP tool
+      prismChat('Analyse le ticket RT #' + id + ' et propose des actions de résolution :\n' + JSON.stringify(ticket));
+    } catch (e) { showError(e.message); }
+  }
+  load();
+  setInterval(load, 60000);
+
+That is the normal way to connect a widget to a tool. Only reach for the **polling-file** pattern (below) instead when the widget is pure display with no interaction — a cron writes data/<name>.json and the widget reads it back — since it survives refreshes with zero requests per view.
+
 **Browser vs server URLs — CRITICAL.** Widget JS runs in the user's BROWSER. There you MUST use RELATIVE URLs only: /api/…, /data/…. NEVER use $PRISM_URL, http://prism-server:8080, or an "Authorization: Bearer" header inside widget code — those are the docker-internal host + token, valid ONLY server-side (custom tools, cron). From the browser they are cross-origin and fail with 401. Same-origin relative requests are authenticated automatically by the session cookie, so no token is needed. For live data prefer the **polling-file** pattern below (a cron/tool writes JSON, the widget reads it back) — it needs no auth and survives refreshes; reach for it before wiring a widget to call /api/ directly.
 
-**Custom tool** — Python script with a "# TOOL: {...}" header, registered via register_tool. Call from widget JS:
-  fetch('/api/tool/<name>?session=SESSION_ID', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(args)})
-    .then(r => r.json()) // returns the tool's dict verbatim; .error field on crash. Hard 2-min timeout.
-Tools get $PRISM_URL, $PRISM_SESSION, $PRISM_TOKEN injected. Can write to data/, POST to /api/notify, POST to /api/chat.
+**Custom tool** — Python script with a "# TOOL: {...}" header, registered via register_tool. From a widget, call it with prismTool('<name>', args) (the helper above) — never a raw fetch to /api/tool. Hard 2-min timeout. Tools get $PRISM_URL, $PRISM_SESSION, $PRISM_TOKEN injected server-side; they can write to data/, POST to /api/notify, POST to /api/chat.
 
 **Polling file** — the classic public/static-folder pattern: a cron/tool writes data/<name>.json (a plain file in your workspace, same as any write_file call), and the widget's browser JS fetches it back at the identical path, /data/<name>.json. One name, no translation.
 
@@ -173,7 +201,7 @@ Call any built-in tool from a custom tool or cron script (SERVER-SIDE only — u
   POST $PRISM_URL/api/builtin/<tool>?session=$PRISM_SESSION
   Authorization: Bearer $PRISM_TOKEN · Content-Type: application/json · Body: JSON args
   Returns: {"result":"...","images":[...],"error":"..."}
-From a WIDGET you almost never need this — fetch a custom tool (/api/tool, relative) or read a /data/<name>.json polling file instead. If you truly must hit a builtin from the browser, use the RELATIVE form with NO token: POST /api/builtin/<tool>?session=SESSION_ID (the session cookie authenticates it).
+From a WIDGET, do NOT hand-write this fetch — call prismTool('<tool>', args) (the helper at the top of Widget data sources); it reaches this same dispatcher with the session wired in and the response parsed for you. The raw POST form shown here is for SERVER-SIDE callers only (custom tools, cron).
 Works for ANY tool you can call in chat — not just a fixed list: every built-in (docker_run, docker_manage, docker_compose, cron, web_search, deep_research, browser_get, browser_act, rag_search, rag_ingest, rag_manage, notify, save_user_info, save_learning, register_tool, list_tools, secrets, mcp, widget, ...), every tool an MCP server provides (e.g. list_tickets), and every custom tool you registered. If it works when you call it directly, it works through /api/builtin/<name> too — the name is just passed straight through to the same dispatcher.
 Reachable ≠ the right choice for an MCP tool, though. An MCP server is usually a thin client for some other API, and its tool's output is shaped for chat (prose summaries), not for a script/widget to parse back apart — that's a fragile foundation to build on. If you need programmatic/structured data from the same underlying service (e.g. a ticket queue), write your custom tool against that service's own API directly instead of proxying through the MCP tool. Reserve calling an MCP tool from a custom tool/cron script for when the MCP genuinely does non-trivial work worth reusing (real auth flows, multi-source aggregation) rather than just being a wrapper.
 

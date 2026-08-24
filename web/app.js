@@ -268,7 +268,7 @@ function mountWindow(rec) {
   body.className = 'widget-body'
 
   const iframe = document.createElement('iframe')
-  iframe.srcdoc = window.PrismTheme.composeWidgetDoc(rec.content)
+  iframe.srcdoc = window.PrismTheme.composeWidgetDoc(rec.content, currentSessionID)
   iframe.setAttribute('sandbox', WIDGET_SANDBOX)
   body.appendChild(iframe)
 
