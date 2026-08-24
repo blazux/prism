@@ -48,3 +48,22 @@ func TestListToolsShowsSourcePath(t *testing.T) {
 		t.Errorf("must NOT expose an editable path for a shipped tool, got:\n%s", out)
 	}
 }
+
+// TestRegisterToolReturnsSourcePath verifies register_tool tells the agent where
+// the new tool's source lives, so it can edit it without a follow-up list_tools.
+func TestRegisterToolReturnsSourcePath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent_tools")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	e := &ToolExecutor{}
+	e.SetCustomTools(customtools.NewManager(dir), nil)
+
+	msg, err := e.registerTool("# TOOL: {\"name\": \"my_tool\", \"description\": \"d\"}\nprint('ok')\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(msg, "Source: agent_tools/my_tool.py") {
+		t.Errorf("expected source path in register message, got: %s", msg)
+	}
+}

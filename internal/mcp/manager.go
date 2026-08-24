@@ -308,6 +308,7 @@ func toOllamaTool(t Tool) ollama.Tool {
 			params.Properties[propName] = ollama.ToolProperty{
 				Type:        resolveSchemaType(raw),
 				Description: prop.Description,
+				Enum:        extractEnumValues(raw),
 			}
 		}
 	}
@@ -350,6 +351,30 @@ func resolveSchemaType(raw json.RawMessage) string {
 		}
 	}
 	return "string"
+}
+
+// extractEnumValues pulls a property's "enum" allowed-values list out of its
+// JSON-Schema so the model sees the constraint instead of guessing at a bare
+// "string". Enums are usually strings; any non-string entries (numbers, bools)
+// are stringified best-effort so nothing is silently dropped. Returns nil when
+// there is no enum, so the field omitempty's away for unconstrained params.
+func extractEnumValues(raw json.RawMessage) []string {
+	var p struct {
+		Enum []json.RawMessage `json:"enum"`
+	}
+	if json.Unmarshal(raw, &p) != nil || len(p.Enum) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(p.Enum))
+	for _, e := range p.Enum {
+		var s string
+		if json.Unmarshal(e, &s) == nil {
+			out = append(out, s) // string enum entry, unquoted
+		} else {
+			out = append(out, strings.TrimSpace(string(e))) // number/bool/null: raw JSON literal
+		}
+	}
+	return out
 }
 
 // firstSchemaType reads a JSON-Schema "type" that may be a string or an array of

@@ -64,7 +64,8 @@ func (e *ToolExecutor) registerTool(code string) (string, error) {
 		e.onToolsReload()
 	}
 
-	return fmt.Sprintf("Tool '%s' registered from %s — it now appears in the admin panel and is immediately callable.", name, base), nil
+	source := filepath.Join(filepath.Base(e.customMgr.Dir()), base)
+	return fmt.Sprintf("Tool '%s' registered — it now appears in the admin panel and is immediately callable. Source: %s (inspect or edit later with read_file/write_file/edit).", name, source), nil
 }
 
 func (e *ToolExecutor) listTools() (string, error) {

@@ -182,6 +182,11 @@ type ToolParameters struct {
 type ToolProperty struct {
 	Type        string `json:"type"`
 	Description string `json:"description"`
+	// Enum carries a parameter's allowed values through to the model. Omitted
+	// when empty so unconstrained params serialize unchanged. Without it a tool
+	// whose schema constrains a field (e.g. status ∈ {open,closed}) reaches the
+	// model as a bare "string" and it guesses — a failed call the enum prevents.
+	Enum []string `json:"enum,omitempty"`
 }
 
 type ChatRequest struct {

@@ -58,3 +58,31 @@ func TestToOllamaTool_OptionalParamHasType(t *testing.T) {
 		t.Fatalf("cluster_name type = %q, want string", prop.Type)
 	}
 }
+
+// TestToOllamaTool_EnumPassthrough ensures a constrained parameter's allowed
+// values reach the model instead of being dropped to a bare "string" it must
+// guess at.
+func TestToOllamaTool_EnumPassthrough(t *testing.T) {
+	tool := Tool{
+		Name: "set_status",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"status":{"type":"string","enum":["open","closed","pending"]},
+				"priority":{"type":"integer","enum":[1,2,3]},
+				"note":{"type":"string"}
+			}
+		}`),
+	}
+	props := toOllamaTool(tool).Function.Parameters.Properties
+
+	if got := props["status"].Enum; len(got) != 3 || got[0] != "open" || got[2] != "pending" {
+		t.Errorf("status enum = %v, want [open closed pending]", got)
+	}
+	if got := props["priority"].Enum; len(got) != 3 || got[0] != "1" || got[2] != "3" {
+		t.Errorf("priority enum (non-string) = %v, want [1 2 3] stringified", got)
+	}
+	if got := props["note"].Enum; got != nil {
+		t.Errorf("unconstrained param should have no enum, got %v", got)
+	}
+}

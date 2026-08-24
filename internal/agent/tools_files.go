@@ -3,12 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -138,6 +140,9 @@ func (e *ToolExecutor) readFile(path string) (string, error) {
 	fullPath := filepath.Join(e.workspaceDir, path)
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "", e.notFoundHint(path, fullPath)
+		}
 		return "", err
 	}
 	content := string(data)
@@ -145,6 +150,105 @@ func (e *ToolExecutor) readFile(path string) (string, error) {
 		content = content[:10000] + "\n...[file truncated at 10000 chars]..."
 	}
 	return content, nil
+}
+
+// notFoundHint turns a bare "no such file" into an error that teaches: it lists
+// the sibling files in the target directory and suggests the closest name, so a
+// typo or a wrong-directory guess costs the agent one message instead of several
+// probing round-trips (the "errors that teach" pattern). path is the
+// workspace-relative path the agent passed; fullPath is the resolved host path.
+func (e *ToolExecutor) notFoundHint(path, fullPath string) error {
+	dir := filepath.Dir(fullPath)
+	relDir := filepath.Dir(path)
+	entries, derr := os.ReadDir(dir)
+	if derr != nil {
+		return fmt.Errorf("file not found: %s — its directory %q does not exist either; check the path", path, relDir)
+	}
+	names := make([]string, 0, len(entries))
+	for _, ent := range entries {
+		if ent.IsDir() {
+			names = append(names, ent.Name()+"/")
+		} else {
+			names = append(names, ent.Name())
+		}
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("file not found: %s — directory %q is empty", path, relDir)
+	}
+	sort.Strings(names)
+
+	msg := "file not found: " + path
+	if best := closestName(filepath.Base(path), names); best != "" {
+		msg += fmt.Sprintf(" — did you mean %s?", filepath.Join(relDir, best))
+	}
+	const maxList = 40
+	extra := 0
+	if len(names) > maxList {
+		extra = len(names) - maxList
+		names = names[:maxList]
+	}
+	msg += fmt.Sprintf("\nFiles in %q: %s", relDir, strings.Join(names, ", "))
+	if extra > 0 {
+		msg += fmt.Sprintf(" (+%d more)", extra)
+	}
+	return errors.New(msg)
+}
+
+// closestName returns the directory entry closest to target by edit distance,
+// but only when it's a plausible typo (distance within 3 and half the name
+// length) — otherwise "" so we never suggest an unrelated file.
+func closestName(target string, names []string) string {
+	target = strings.ToLower(target)
+	best, bestDist := "", 1<<30
+	for _, n := range names {
+		if d := levenshtein(strings.ToLower(strings.TrimSuffix(n, "/")), target); d < bestDist {
+			best, bestDist = strings.TrimSuffix(n, "/"), d
+		}
+	}
+	limit := len(target) / 2
+	if limit > 3 {
+		limit = 3
+	}
+	if best == "" || bestDist > limit {
+		return ""
+	}
+	return best
+}
+
+func levenshtein(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = minInt(prev[j]+1, minInt(cur[j-1]+1, prev[j-1]+cost))
+		}
+		prev = cur
+	}
+	return prev[len(b)]
+}
+
+func minInt(a, b int) int {
+	if b < a {
+		return b
+	}
+	return a
 }
 
 // isProtectedToolPath reports whether fullPath points directly at a custom
