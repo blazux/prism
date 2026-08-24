@@ -302,12 +302,11 @@ func toOllamaTool(t Tool) ollama.Tool {
 		params.Required = schema.Required
 		for propName, raw := range schema.Properties {
 			var prop struct {
-				Type        string `json:"type"`
 				Description string `json:"description"`
 			}
 			_ = json.Unmarshal(raw, &prop)
 			params.Properties[propName] = ollama.ToolProperty{
-				Type:        prop.Type,
+				Type:        resolveSchemaType(raw),
 				Description: prop.Description,
 			}
 		}
@@ -320,6 +319,61 @@ func toOllamaTool(t Tool) ollama.Tool {
 			Parameters:  params,
 		},
 	}
+}
+
+// resolveSchemaType extracts a single JSON-Schema primitive type from a property
+// schema. MCP servers (e.g. FastMCP for an Optional[...] parameter) emit the type
+// as a plain string, an array like ["string","null"], or an anyOf/oneOf union.
+// Ollama's minimal tool format carries only one type string, and strict backends
+// (llama.cpp, used by Qwopus) reject an empty type with a 400 that kills the whole
+// turn — so we pick the first non-"null" type and fall back to "string".
+func resolveSchemaType(raw json.RawMessage) string {
+	var p struct {
+		Type  json.RawMessage   `json:"type"`
+		AnyOf []json.RawMessage `json:"anyOf"`
+		OneOf []json.RawMessage `json:"oneOf"`
+	}
+	if json.Unmarshal(raw, &p) != nil {
+		return "string"
+	}
+	if t := firstSchemaType(p.Type); t != "" {
+		return t
+	}
+	for _, u := range append(p.AnyOf, p.OneOf...) {
+		var m struct {
+			Type json.RawMessage `json:"type"`
+		}
+		if json.Unmarshal(u, &m) == nil {
+			if t := firstSchemaType(m.Type); t != "" {
+				return t
+			}
+		}
+	}
+	return "string"
+}
+
+// firstSchemaType reads a JSON-Schema "type" that may be a string or an array of
+// strings, returning the first non-"null" entry (or "" if none applies).
+func firstSchemaType(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if s != "null" {
+			return s
+		}
+		return ""
+	}
+	var arr []string
+	if json.Unmarshal(raw, &arr) == nil {
+		for _, t := range arr {
+			if t != "" && t != "null" {
+				return t
+			}
+		}
+	}
+	return ""
 }
 
 func slugify(s string) string {
