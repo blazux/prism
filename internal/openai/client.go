@@ -146,7 +146,33 @@ func buildMessages(in []ollama.Message) []chatMsg {
 	var pending []string // tool_call ids awaiting a tool result, FIFO
 	seq := 0
 
+	// The OpenAI wire format only allows images on user/system messages, never on
+	// tool results — so a tool that returns a screenshot (e.g. the widget
+	// auto-preview) would silently lose its image and the model would "inspect" a
+	// picture that never arrived. Collect any tool-result images and flush them as
+	// one following user message, emitted only once a run of tool results ends, so
+	// the image message never splits a batch of parallel tool_call answers (which
+	// strict servers reject).
+	var toolImages []string
+	flushToolImages := func() {
+		if len(toolImages) == 0 {
+			return
+		}
+		parts := []contentPart{{Type: "text", Text: "[Image output from the tool call(s) above:]"}}
+		for _, img := range toolImages {
+			parts = append(parts, contentPart{
+				Type:     "image_url",
+				ImageURL: &imageURLField{URL: "data:image/jpeg;base64," + img},
+			})
+		}
+		out = append(out, chatMsg{Role: "user", Content: parts})
+		toolImages = nil
+	}
+
 	for _, m := range in {
+		if m.Role != "tool" {
+			flushToolImages() // close out buffered tool-result images before any non-tool message
+		}
 		switch m.Role {
 		case "assistant":
 			cm := chatMsg{Role: "assistant"}
@@ -183,6 +209,7 @@ func buildMessages(in []ollama.Message) []chatMsg {
 			id := pending[0]
 			pending = pending[1:]
 			out = append(out, chatMsg{Role: "tool", Content: m.Content, ToolCallID: id})
+			toolImages = append(toolImages, m.Images...) // re-attached as a user message once this run of tool results ends
 		default: // system, user
 			if len(m.Images) > 0 {
 				parts := []contentPart{{Type: "text", Text: m.Content}}
@@ -198,6 +225,7 @@ func buildMessages(in []ollama.Message) []chatMsg {
 			}
 		}
 	}
+	flushToolImages() // history may end on a tool result carrying a screenshot (the live turn's own preview)
 	return out
 }
 
