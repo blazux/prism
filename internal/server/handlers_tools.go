@@ -114,18 +114,29 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	out, execErr := s.docker.ExecWithStdin(ctx, cmd, body, 2*time.Minute, env)
-	// If the tool printed valid JSON, return it directly so widgets don't need a double-parse.
-	// Otherwise wrap in {"output": "..."} for plain-text results.
-	var resp map[string]interface{}
-	if execErr == nil && json.Unmarshal([]byte(strings.TrimSpace(out)), &resp) == nil {
-		// valid JSON — resp is already set
-	} else {
-		resp = map[string]interface{}{"output": out}
-		if execErr != nil {
-			resp["error"] = execErr.Error()
-		}
+	w.Write(toolResponseBody(out, execErr))
+}
+
+// toolResponseBody shapes a custom tool's stdout into the HTTP response body a
+// widget receives. Any valid JSON — object OR array — is returned verbatim so
+// the widget consumes it directly without a double-parse. Anything else (plain
+// text, or a failed exec) is wrapped in {"output":...,"error":...}.
+//
+// The array case is the fix for a real trap: a tool that prints a top-level JSON
+// array (e.g. a list of tickets) used to fail json.Unmarshal into a map and got
+// stringified into {"output":"[...]"}, so a widget iterating the list silently
+// saw nothing — while the same tool called from chat (raw stdout) looked fine.
+func toolResponseBody(out string, execErr error) []byte {
+	trimmed := strings.TrimSpace(out)
+	if execErr == nil && json.Valid([]byte(trimmed)) {
+		return []byte(trimmed)
 	}
-	json.NewEncoder(w).Encode(resp)
+	resp := map[string]interface{}{"output": out}
+	if execErr != nil {
+		resp["error"] = execErr.Error()
+	}
+	b, _ := json.Marshal(resp)
+	return b
 }
 
 func (s *Server) broadcastTools() {
