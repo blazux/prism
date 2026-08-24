@@ -85,18 +85,20 @@ type Server struct {
 	chanCancel     context.CancelFunc // cancels the running channel receive loops
 	oauthStates    sync.Map           // CSRF state → oauthState (pending OAuth authorizations)
 	rooms          *roomHub           // shared group chat rooms (Phase 4)
+	toolLimiter    *toolLimiter       // caps concurrent tool execs so a runaway widget can't OOM the host
 }
 
 func New(cfg Config) *Server {
 	customToolsDir := filepath.Join(cfg.WorkspaceDir, "agent_tools")
 	s := &Server{
-		cfg:       cfg,
-		docker:    docker.NewManager(cfg.AgentContainer, cfg.WorkspaceDir, cfg.ServicePortStart, cfg.ServicePortEnd),
-		clients:   make(map[*Client]struct{}),
-		customMgr: customtools.NewManager(customToolsDir),
-		mcpMgr:    mcp.NewManager(nil),
-		rooms:     newRoomHub(),
-		ingest:    newIngestTracker(),
+		cfg:         cfg,
+		docker:      docker.NewManager(cfg.AgentContainer, cfg.WorkspaceDir, cfg.ServicePortStart, cfg.ServicePortEnd),
+		clients:     make(map[*Client]struct{}),
+		customMgr:   customtools.NewManager(customToolsDir),
+		mcpMgr:      mcp.NewManager(nil),
+		rooms:       newRoomHub(),
+		ingest:      newIngestTracker(),
+		toolLimiter: newToolLimiter(),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,

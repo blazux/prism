@@ -96,6 +96,16 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = "default"
 	}
+
+	// Shed load before spawning a docker exec: a widget with a button stuck in a
+	// fetch() loop would otherwise launch unbounded execs and OOM the host.
+	release, ok := s.toolLimiter.acquire(sessionID)
+	if !ok {
+		http.Error(w, "too many concurrent tool calls — slow down", http.StatusTooManyRequests)
+		return
+	}
+	defer release()
+
 	env := map[string]string{
 		"PRISM_SESSION": sessionID,
 		"PRISM_URL":     "http://prism-server:8080",
@@ -190,6 +200,15 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = "default"
 	}
+
+	// Same load-shedding as /api/tool: don't let a runaway caller spawn unbounded
+	// tool executions and OOM the host.
+	release, ok := s.toolLimiter.acquire(sessionID)
+	if !ok {
+		http.Error(w, "too many concurrent tool calls — slow down", http.StatusTooManyRequests)
+		return
+	}
+	defer release()
 
 	s.mu.RLock()
 	ms := s.memStore
