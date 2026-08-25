@@ -156,7 +156,7 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 
 	marker := "# agent-job: " + name
 	if strings.Contains(current, marker) {
-		return "", fmt.Errorf("a job named %q already exists; use cron_remove first", name)
+		return "", fmt.Errorf("a job named %q already exists; remove it first with cron action=remove", name)
 	}
 
 	session := e.sessionID

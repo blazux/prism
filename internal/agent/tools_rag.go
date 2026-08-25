@@ -38,6 +38,26 @@ func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, 
 		return fmt.Sprintf("ERROR searching: %v", err), nil, nil
 	}
 	if len(results) == 0 {
+		// Distinguish "collection exists but matched nothing" from "no such
+		// collection" (a guessed/misspelled name) — the latter otherwise reads
+		// as an empty knowledge base and dead-ends the agent on a mandated search.
+		if cols, cerr := e.ragStore.ListCollections(ctx, e.ragScope); cerr == nil {
+			want := e.resolveCollection(collection)
+			found := false
+			var names []string
+			for _, c := range cols {
+				names = append(names, e.uncol(c.Name))
+				if c.Name == want {
+					found = true
+				}
+			}
+			if !found {
+				if len(names) == 0 {
+					return fmt.Sprintf("Collection %q does not exist — there are no collections yet (use rag_ingest to create one).", collection), nil, nil
+				}
+				return fmt.Sprintf("Collection %q does not exist. Available collections: %s (rag_manage action=list shows them). Re-run rag_search against the right name.", collection, strings.Join(names, ", ")), nil, nil
+			}
+		}
 		return fmt.Sprintf("No results found in collection %q for query: %s", collection, query), nil, nil
 	}
 
@@ -76,6 +96,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 
 	if sourcePath != "" {
 		// File-based ingestion — resolve and safety-check the path.
+		sourcePath = NormalizeWorkspacePath(sourcePath) // absorb an echoed /workspace/ prefix — else it double-joins
 		fullPath := filepath.Join(e.workspaceDir, sourcePath)
 		rel, err := filepath.Rel(e.workspaceDir, fullPath)
 		if err != nil || strings.HasPrefix(rel, "..") {
@@ -84,6 +105,9 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
+			if os.IsNotExist(err) {
+				return e.notFoundHint(sourcePath, fullPath).Error(), nil // teach: siblings + closest name
+			}
 			return fmt.Sprintf("ERROR reading file: %v", err), nil
 		}
 		sum := sha256.Sum256(data)
@@ -251,6 +275,24 @@ func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document strin
 	collection = e.resolveCollection(collection)
 
 	if document == "" {
+		// Verify the collection exists so a typo'd name reports honestly instead
+		// of a fake "deleted" — else the agent's model of the KB silently diverges.
+		if cols, cerr := e.ragStore.ListCollections(ctx, e.ragScope); cerr == nil {
+			found := false
+			var names []string
+			for _, c := range cols {
+				names = append(names, e.uncol(c.Name))
+				if c.Name == collection {
+					found = true
+				}
+			}
+			if !found {
+				if len(names) == 0 {
+					return fmt.Sprintf("Collection %q does not exist — nothing deleted (no collections yet).", displayCol), nil
+				}
+				return fmt.Sprintf("Collection %q does not exist — nothing deleted. Available: %s.", displayCol, strings.Join(names, ", ")), nil
+			}
+		}
 		if err := e.ragStore.DeleteCollection(ctx, collection); err != nil {
 			return fmt.Sprintf("ERROR: %v", err), nil
 		}

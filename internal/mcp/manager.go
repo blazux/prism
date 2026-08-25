@@ -301,15 +301,7 @@ func toOllamaTool(t Tool) ollama.Tool {
 		}
 		params.Required = schema.Required
 		for propName, raw := range schema.Properties {
-			var prop struct {
-				Description string `json:"description"`
-			}
-			_ = json.Unmarshal(raw, &prop)
-			params.Properties[propName] = ollama.ToolProperty{
-				Type:        resolveSchemaType(raw),
-				Description: prop.Description,
-				Enum:        extractEnumValues(raw),
-			}
+			params.Properties[propName] = schemaToProperty(raw)
 		}
 	}
 	return ollama.Tool{
@@ -328,6 +320,28 @@ func toOllamaTool(t Tool) ollama.Tool {
 // Ollama's minimal tool format carries only one type string, and strict backends
 // (llama.cpp, used by Qwopus) reject an empty type with a 400 that kills the whole
 // turn — so we pick the first non-"null" type and fall back to "string".
+// schemaToProperty converts one JSON-Schema property node to the model's tool
+// format — type, description, enum — and recurses into an array's `items` so the
+// model knows the element type. Without it an array param arrives as a bare
+// "array" and the model guesses whether elements are strings, numbers or objects.
+func schemaToProperty(raw json.RawMessage) ollama.ToolProperty {
+	var meta struct {
+		Description string          `json:"description"`
+		Items       json.RawMessage `json:"items"`
+	}
+	_ = json.Unmarshal(raw, &meta)
+	p := ollama.ToolProperty{
+		Type:        resolveSchemaType(raw),
+		Description: meta.Description,
+		Enum:        extractEnumValues(raw),
+	}
+	if len(meta.Items) > 0 {
+		item := schemaToProperty(meta.Items)
+		p.Items = &item
+	}
+	return p
+}
+
 func resolveSchemaType(raw json.RawMessage) string {
 	var p struct {
 		Type  json.RawMessage   `json:"type"`

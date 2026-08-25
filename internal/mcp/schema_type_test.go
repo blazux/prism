@@ -86,3 +86,30 @@ func TestToOllamaTool_EnumPassthrough(t *testing.T) {
 		t.Errorf("unconstrained param should have no enum, got %v", got)
 	}
 }
+
+// TestToOllamaTool_ArrayItems ensures an array param's element type reaches the
+// model instead of arriving as a bare "array" it must guess the shape of.
+func TestToOllamaTool_ArrayItems(t *testing.T) {
+	tool := Tool{
+		Name: "run",
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"ports":{"type":"array","items":{"type":"integer"}},
+				"actions":{"type":"array","items":{"type":"object"}},
+				"tags":{"type":"array","items":{"type":"string","enum":["a","b"]}}
+			}
+		}`),
+	}
+	props := toOllamaTool(tool).Function.Parameters.Properties
+
+	if it := props["ports"].Items; it == nil || it.Type != "integer" {
+		t.Errorf("ports.items type = %v, want integer", props["ports"].Items)
+	}
+	if it := props["actions"].Items; it == nil || it.Type != "object" {
+		t.Errorf("actions.items type = %v, want object", props["actions"].Items)
+	}
+	if it := props["tags"].Items; it == nil || len(it.Enum) != 2 || it.Enum[0] != "a" {
+		t.Errorf("tags.items enum = %v, want [a b]", props["tags"].Items)
+	}
+}

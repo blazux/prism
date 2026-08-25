@@ -521,6 +521,56 @@ func (e *ToolExecutor) SetCallbacks(
 	e.onFileChange = onChange
 }
 
+// knownToolNames lists every tool the model could legitimately call right now:
+// built-ins, this session's custom tools, and its MCP tools.
+func (e *ToolExecutor) knownToolNames() []string {
+	names := make([]string, 0, len(ToolDefinitions))
+	for _, t := range ToolDefinitions {
+		names = append(names, t.Function.Name)
+	}
+	if e.customMgr != nil {
+		for _, t := range e.customMgr.All() {
+			names = append(names, t.Name)
+		}
+	}
+	if e.mcpMgr != nil {
+		for _, t := range e.mcpMgr.ToOllamaTools(e.sessionID) {
+			names = append(names, t.Function.Name)
+		}
+	}
+	return names
+}
+
+// toolNameHint suggests close known tool names for an unknown one, so a typo or a
+// plausible-but-wrong name (rag_query → rag_search) costs one message, not a blind
+// retry. Prefers names sharing the first token (rag_*), else the closest by edit
+// distance. Returns "" when nothing is close.
+func (e *ToolExecutor) toolNameHint(name string) string {
+	names := e.knownToolNames()
+	prefix := name
+	if i := strings.IndexByte(name, '_'); i > 0 {
+		prefix = name[:i]
+	}
+	var near []string
+	for _, n := range names {
+		if n != name && strings.HasPrefix(n, prefix+"_") {
+			near = append(near, n)
+		}
+	}
+	if len(near) == 0 {
+		if best := closestName(name, names); best != "" {
+			near = append(near, best)
+		}
+	}
+	if len(near) == 0 {
+		return ""
+	}
+	if len(near) > 3 {
+		near = near[:3]
+	}
+	return " — did you mean: " + strings.Join(near, ", ") + "?"
+}
+
 func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, []string, error) {
 	var args map[string]interface{}
 	if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -868,7 +918,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		if sess, ok := e.mcpSessionFor(name); ok {
 			return wrap(e.mcpMgr.CallTool(ctx, sess, name, rawArgs))
 		}
-		return "", nil, fmt.Errorf("unknown tool: %s", name)
+		return "", nil, fmt.Errorf("unknown tool: %s%s", name, e.toolNameHint(name))
 	}
 }
 

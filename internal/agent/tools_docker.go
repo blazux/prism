@@ -134,6 +134,7 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 	if file == "" {
 		return "", fmt.Errorf("file is required")
 	}
+	file = NormalizeWorkspacePath(file) // absorb an echoed /workspace/ prefix — else it double-joins
 	hostPath := filepath.Join(e.workspaceDir, filepath.Clean("/"+file))
 	rel, err := filepath.Rel(e.workspaceDir, hostPath)
 	if err != nil || strings.HasPrefix(rel, "..") {

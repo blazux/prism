@@ -147,7 +147,7 @@ func (e *ToolExecutor) readFile(path string) (string, error) {
 	}
 	content := string(data)
 	if len(content) > 10000 {
-		content = content[:10000] + "\n...[file truncated at 10000 chars]..."
+		content = content[:10000] + fmt.Sprintf("\n...[truncated at 10000 chars — read the rest with exec_command, e.g. `sed -n '200,400p' %s`]", path)
 	}
 	return content, nil
 }
@@ -378,6 +378,9 @@ func (e *ToolExecutor) addAttachment(path string) (string, []string, error) {
 	}
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return e.notFoundHint(path, fullPath).Error(), nil, nil // teach: siblings + closest name
+		}
 		return fmt.Sprintf("ERROR: could not read %q: %v", path, err), nil, nil
 	}
 	ext := strings.ToLower(filepath.Ext(path))

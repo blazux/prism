@@ -187,6 +187,10 @@ type ToolProperty struct {
 	// whose schema constrains a field (e.g. status ∈ {open,closed}) reaches the
 	// model as a bare "string" and it guesses — a failed call the enum prevents.
 	Enum []string `json:"enum,omitempty"`
+	// Items describes an array parameter's element type. Without it an array
+	// reaches the model as a bare "array" and it guesses whether the elements are
+	// strings, numbers or objects — a failed call the item schema prevents.
+	Items *ToolProperty `json:"items,omitempty"`
 }
 
 type ChatRequest struct {
