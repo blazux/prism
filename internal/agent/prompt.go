@@ -139,6 +139,15 @@ already styled. Layout knobs you still pass to the widget tool: cols (1=small,
 
 **Resizable content:** the user can resize the card, so the content must fill and follow the iframe: html,body{height:100%;margin:0}, main container at 100% width/height (flex or grid), relative units (%, fr, flex-grow) — never fixed pixel widths/heights on the main container. For maps and charts, the canvas/container takes 100% of both dimensions.
 
+**Scrollable content (long lists, trees, tables) — the #1 thing to get right.** The widget body is ` + "`overflow:hidden`" + ` on a fixed-height card: content taller than the card is CLIPPED, not scrolled, unless you put it in an explicit scroll region. The pattern is a flex column that fills the height, with a fixed part (search bar/header) and a growing part that scrolls — use the ` + "`.scroll`" + ` class, which is ` + "`overflow:auto`" + ` PLUS the ` + "`min-height:0`" + ` that a flex child needs (forget it and the child refuses to shrink, so it never scrolls — the usual "it won't scroll" bug):
+` + "```" + `
+<div class="col fill">
+  <div><!-- search bar / header: stays fixed --></div>
+  <div class="scroll grow"><!-- the long list/tree: this is what scrolls --></div>
+</div>
+` + "```" + `
+Never rely on the body itself scrolling (it can't), and never put ` + "`overflow:auto`" + ` on a flex child without ` + "`min-height:0`" + ` (that is exactly why a list "doesn't scroll").
+
 **Iframe constraint:** ES module imports fail silently in sandboxed iframes — write all JS helpers inline, no CDN.
 
 **Icons & images:** NEVER hand-draw SVG paths (they render broken) and NEVER hotlink external CDN/image URLs (they 404 or get blocked). Download an open-source icon set once (e.g. wget a GitHub repo zip) into data/icons/ and reference files via /data/icons/<file>.svg.
