@@ -44,15 +44,16 @@
     return r;
   };
 
-  // prismChat(message) → send a message to the agent in this dashboard's chat
-  // (e.g. from an "Analyse" button). Fire-and-forget: it returns immediately and
-  // the agent's reply streams into the chat panel, so the button never blocks.
+  // prismChat(message) → send a message to the agent in THIS dashboard's live
+  // chat (e.g. from an "Analyse" button): it lands in the chat input, opens the
+  // panel, and sends — exactly as if the user typed it — so the agent's reply
+  // streams into the panel where the user sees it. Routed via the parent
+  // dashboard (postMessage), NOT a direct /api/chat POST — that runs a headless
+  // turn whose answer never reaches the visible chat. Fire-and-forget.
   window.prismChat = function (message) {
-    fetch('/api/chat?session=' + encodeURIComponent(session()), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: String(message) }),
-    }).catch(function () {});
+    try {
+      window.parent.postMessage({ type: 'sendChat', text: String(message) }, '*');
+    } catch (_) {}
     return Promise.resolve();
   };
 })();
