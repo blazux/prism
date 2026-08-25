@@ -56,4 +56,47 @@
     } catch (_) {}
     return Promise.resolve();
   };
+
+  // prismToolRaw(name, args?) → the full { result, images } a tool returns, for
+  // the rare tool that produces images (screenshot / vision / browser). prismTool
+  // gives you just the parsed result; use this when you also need the images.
+  window.prismToolRaw = async function (name, args) {
+    const res = await fetch(
+      '/api/builtin/' + encodeURIComponent(name) + '?session=' + encodeURIComponent(session()),
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args || {}) }
+    );
+    let data;
+    try { data = await res.json(); } catch (_) { throw new Error('tool ' + name + ' failed: HTTP ' + res.status); }
+    if (data && data.error) throw new Error(data.error);
+    let r = data ? data.result : undefined;
+    if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_) {} }
+    return { result: r, images: (data && data.images) || [] };
+  };
+
+  // toParent posts a message to the dashboard — the affordance helpers below wrap
+  // it so a widget never hand-writes window.parent.postMessage (wrong type string,
+  // wrong field name, or a forgotten '*' target used to break silently).
+  function toParent(msg) { try { window.parent.postMessage(msg, '*'); } catch (_) {} }
+
+  // prismNotify(message, {title, level}) → a dashboard toast + bell entry.
+  window.prismNotify = function (message, opts) {
+    opts = opts || {};
+    toParent({ type: 'notify', title: opts.title, message: String(message == null ? '' : message), level: opts.level || 'info' });
+  };
+  // prismSuggest(items) → suggestion chips under the chat input. Each item is
+  // { label, prompt, send? } — send:true fires it immediately when clicked.
+  window.prismSuggest = function (items) { toParent({ type: 'suggest', items: Array.isArray(items) ? items : [] }); };
+  // prismContext(text) → attach text as context for the agent's next message.
+  window.prismContext = function (text) { toParent({ type: 'context', text: String(text == null ? '' : text) }); };
+  // prismOpenFile(path) → open a workspace file in the editor pane.
+  window.prismOpenFile = function (path) { toParent({ type: 'openFile', path: String(path) }); };
+
+  // prismOnData(cb) → run cb() whenever the agent changes shared data (notes,
+  // tasks, events) from elsewhere, so a widget refreshes on real change instead
+  // of a blind setInterval. Returns an unsubscribe function.
+  window.prismOnData = function (cb) {
+    function h(e) { if (e && e.data && e.data.type === 'data-changed') cb(); }
+    window.addEventListener('message', h);
+    return function () { window.removeEventListener('message', h); };
+  };
 })();

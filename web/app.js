@@ -141,6 +141,9 @@ function maybeRefreshApp(msg) {
   if (currentView?.type === 'app' && currentView.name === app) {
     document.getElementById('app-frame')?.contentWindow?.postMessage({ type: 'data-changed', app }, '*')
   }
+  // Also notify board widgets so a notes/tasks/calendar widget refreshes on a real
+  // change instead of forcing a blind setInterval poll (prismOnData listens for it).
+  document.querySelectorAll('.widget-body iframe').forEach(f => f.contentWindow?.postMessage({ type: 'data-changed', app }, '*'))
 }
 
 // ─── Server messages ──────────────────────────────────────────────────────────
@@ -1925,21 +1928,21 @@ window.addEventListener('message', e => {
     document.getElementById('chat-input').value = d.text
     if (!chatOpen) toggleChat()
     sendChat()
-  } else if (d.type === 'notify' && d.message) {
+  } else if (d.type === 'notify' && (d.title || d.message)) {
     fetch('/api/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         session: currentSessionID,
         title: d.title || 'Widget',
-        message: d.message,
+        message: d.message || '',
         level: d.level || 'info'
       })
     }).then(r => r.json()).then(data => {
       receiveNotification({
         id: data.id,
         title: d.title || 'Widget',
-        message: d.message,
+        message: d.message || '',
         level: d.level || 'info',
         read: false,
         createdAt: new Date().toISOString()
