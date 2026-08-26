@@ -23,7 +23,7 @@ let AGENT_NAME = 'Agent'
 // Apps disabled platform-wide by the global admin (Admin → Platform).
 let DISABLED_APPS = new Set()
 async function loadIdentity() {
-  try { const p = await fetch('/api/profile').then(r => r.json()); ME.uid = p.userId || ''; ME.name = p.displayName || p.email || 'You' } catch (_) {}
+  try { const p = await fetch('/api/profile').then(r => r.json()); ME.uid = p.userId ?? ''; ME.name = p.displayName || p.email || 'You' } catch (_) {}
   // Global admin, or admin of any group. This only decides what the UI offers:
   // /api/terminal and /api/exec check the role themselves.
   try { ME.isAdmin = !!(await fetch('/api/me').then(r => r.json())).isAdmin } catch (_) {}
@@ -53,8 +53,8 @@ function avatarChip(scope, name, size) {
   const px = size || 24, fs = Math.round(px * 0.42)
   return `<span class="chat-avatar" style="position:relative;display:inline-flex;width:${px}px;height:${px}px;border-radius:50%;overflow:hidden;background:var(--accent);color:#fff;align-items:center;justify-content:center;font-weight:600;font-size:${fs}px;flex:0 0 auto;vertical-align:middle">${escHtml(avatarInitials(name))}<img src="/api/avatar?scope=${encodeURIComponent(scope)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover" onerror="this.remove()"></span>`
 }
-const userChip = () => ME.uid ? avatarChip('u' + ME.uid, ME.name, 22) : ''
-const agentChip = () => ME.uid ? avatarChip('agent-u' + ME.uid, AGENT_NAME, 22) : ''
+const userChip = () => ME.uid !== '' ? avatarChip('u' + ME.uid, ME.name, 22) : ''
+const agentChip = () => ME.uid !== '' ? avatarChip('agent-u' + ME.uid, AGENT_NAME, 22) : ''
 
 function updateSettingsLink() {
   const link = document.getElementById('settings-link')

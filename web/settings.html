@@ -829,7 +829,7 @@ async function renderAgentTab(container) {
   try { name = (await fetch('/api/agent/name', NO_CACHE).then(r => r.json())).name || '' } catch (_) {}
   try { base = (await fetch('/api/agent/personality', NO_CACHE).then(r => r.json())).personality || '' } catch (_) {}
   try { sessions = (await fetch('/api/sessions', NO_CACHE).then(r => r.json())).sessions || [] } catch (_) {}
-  try { uid = (await fetch('/api/profile').then(r => r.json())).userId || '' } catch (_) {}
+  try { uid = (await fetch('/api/profile').then(r => r.json())).userId || 0 } catch (_) {}
   const agScope = 'agent-u' + uid
 
   agWrap.innerHTML = `
@@ -2257,7 +2257,7 @@ async function renderProfileTab(container) {
     <h2 style="margin:0 0 4px;font-size:17px">Profile</h2>
     <p style="color:var(--text3);font-size:12.5px;margin:0 0 20px">Your identity across Prism — shown in group chat and next to your messages.</p>
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:22px">
-      <div id="pf-avatar">${avatarMarkup('u' + (p.userId || ''), p.avatarVer, p.displayName || p.email, 72)}</div>
+      <div id="pf-avatar">${avatarMarkup('u' + (p.userId || 0), p.avatarVer, p.displayName || p.email, 72)}</div>
       <div style="display:flex;flex-direction:column;gap:8px">
         <div style="display:flex;gap:8px">
           <button class="btn btn-primary" id="pf-av-btn">Upload photo</button>
@@ -2284,7 +2284,7 @@ async function renderProfileTab(container) {
       <span id="pf-status" style="font-size:12.5px;color:var(--text3)"></span>
     </div>`
 
-  const uScope = 'u' + (p.userId || '')
+  const uScope = 'u' + (p.userId || 0)
   $('pf-av-btn').onclick = () => $('pf-av-file').click()
   $('pf-av-file').onchange = async e => {
     const f = e.target.files[0]; if (!f) return

@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"prism/internal/memory"
 )
 
 const maxAvatarBytes = 1 << 20 // 1 MiB — clients downscale to ~256px before upload
@@ -36,8 +38,10 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 		p, err := ms.GetProfile(r.Context(), u.ID)
 		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
+			// No profile row yet — the single-user service identity (id 0), or a
+			// brand-new user — must not 500: return a default so the profile page
+			// and the avatar scope (u<id>) still work.
+			p = memory.Profile{UserID: u.ID, DisplayName: u.DisplayName}
 		}
 		writeJSON(w, p)
 	case "POST":
