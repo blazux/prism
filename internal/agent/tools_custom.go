@@ -55,6 +55,26 @@ func (e *ToolExecutor) registerTool(code string) (string, error) {
 		return "", fmt.Errorf("a tool named %q is shipped with Prism and cannot be overwritten — pick a different name", name)
 	}
 
+	// A custom tool must not collide with a built-in or an MCP tool's name.
+	// Execute() matches built-ins first, then custom, then MCP — so a colliding
+	// name SILENTLY SHADOWS the other tool: a built-in name leaves the new custom
+	// tool dead (unreachable), and an MCP name makes the *MCP* tool unreachable
+	// (the agent registers "get_ticket" and the MCP "get_ticket" vanishes with no
+	// warning). Refuse at creation, like the protected-tool guard, so the shadow
+	// never happens. Re-registering an existing custom tool of the same name is
+	// still fine (that is how the agent edits one) — only names owned by a
+	// built-in or an MCP server are blocked.
+	for _, t := range ToolDefinitions {
+		if t.Function.Name == name {
+			return "", fmt.Errorf("%q is a built-in Prism tool — a custom tool with that name would never run (built-ins take priority). Pick a different name.", name)
+		}
+	}
+	if e.mcpMgr != nil {
+		if _, ok := e.mcpSessionFor(name); ok {
+			return "", fmt.Errorf("%q is already provided by a connected MCP server — a custom tool with that name would hide the MCP tool and make it unreachable. Pick a different name.", name)
+		}
+	}
+
 	path := filepath.Join(e.customMgr.Dir(), base)
 	if err := os.WriteFile(path, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("write script: %w", err)

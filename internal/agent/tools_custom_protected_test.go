@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"prism/internal/customtools"
@@ -75,6 +76,32 @@ func TestRegisterTool_RefusesOverwritingProtectedTool(t *testing.T) {
 	// A brand-new, unrelated tool name is unaffected.
 	if _, err := e.registerTool(`# TOOL: {"name":"weather","description":"d"}` + "\nprint('ok')\n"); err != nil {
 		t.Fatalf("expected registering a new, unprotected tool to succeed: %v", err)
+	}
+}
+
+// register_tool must refuse a name that collides with a built-in tool: the
+// dispatcher matches built-ins before custom tools, so such a custom tool would
+// never run. (The MCP branch of the same guard is what stops a custom tool from
+// silently hiding an MCP tool of the same name — Execute tries custom before
+// MCP, so without this the MCP tool becomes unreachable.)
+func TestRegisterTool_RefusesBuiltinName(t *testing.T) {
+	e, dir := newTestExecutorWithTools(t)
+	toolsDir := filepath.Join(dir, "agent_tools")
+
+	msg, err := e.registerTool(`# TOOL: {"name":"read_file","description":"shadow attempt"}` + "\nprint('x')\n")
+	if err == nil {
+		t.Fatalf("expected register_tool to refuse a built-in name, got success: %q", msg)
+	}
+	if !strings.Contains(err.Error(), "built-in") {
+		t.Errorf("error should explain the built-in collision, got: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(toolsDir, "read_file.py")); !os.IsNotExist(statErr) {
+		t.Error("no file should have been written for a rejected built-in name")
+	}
+
+	// An unrelated name still registers fine.
+	if _, err := e.registerTool(`# TOOL: {"name":"my_unique_tool","description":"d"}` + "\nprint('ok')\n"); err != nil {
+		t.Fatalf("a non-colliding custom tool must still register: %v", err)
 	}
 }
 
