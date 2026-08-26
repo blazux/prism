@@ -21,6 +21,9 @@ html, body { height: 100%; overflow: hidden; margin: 0; }
 .ag-label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); margin-bottom: 14px; }
 .ag-label input, .ag-label textarea { text-transform: none; letter-spacing: 0; background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
 .ag-label textarea { resize: vertical; line-height: 1.5; }
+.pf-field { background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 9px; font: inherit; font-size: 13px; box-sizing: border-box; outline: none; transition: border-color .15s; }
+.pf-field:focus { border-color: var(--accent); }
+.pf-field::placeholder { color: var(--text3); }
 .ag-status { font-size: 12px; color: var(--accent); }
 .ag-ws { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: var(--bg1); }
 .ag-ws > summary { padding: 10px 12px; cursor: pointer; font-weight: 600; color: var(--text); font-size: 13px; user-select: none; }
@@ -2269,15 +2272,15 @@ async function renderProfileTab(container) {
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:520px">
       <label style="grid-column:1/3;font-size:12px;color:var(--text2)">Display name
-        <input id="pf-display" class="mcp-input" type="text" value="${escHtml(p.displayName || '')}" placeholder="How you appear in chat" style="width:100%;margin-top:4px"></label>
+        <input id="pf-display" class="pf-field" type="text" value="${escHtml(p.displayName || '')}" placeholder="How you appear in chat" style="width:100%;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--text2)">First name
-        <input id="pf-first" class="mcp-input" type="text" value="${escHtml(p.firstName || '')}" style="width:100%;margin-top:4px"></label>
+        <input id="pf-first" class="pf-field" type="text" value="${escHtml(p.firstName || '')}" style="width:100%;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--text2)">Last name
-        <input id="pf-last" class="mcp-input" type="text" value="${escHtml(p.lastName || '')}" style="width:100%;margin-top:4px"></label>
+        <input id="pf-last" class="pf-field" type="text" value="${escHtml(p.lastName || '')}" style="width:100%;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--text2)">Email (login)
-        <input class="mcp-input" type="email" value="${escHtml(p.email || '')}" readonly style="width:100%;margin-top:4px;opacity:.6"></label>
+        <input class="pf-field" type="email" value="${escHtml(p.email || '')}" readonly style="width:100%;margin-top:4px;opacity:.6"></label>
       <label style="font-size:12px;color:var(--text2)">Phone
-        <input id="pf-phone" class="mcp-input" type="tel" value="${escHtml(p.phone || '')}" placeholder="+33…" style="width:100%;margin-top:4px"></label>
+        <input id="pf-phone" class="pf-field" type="tel" value="${escHtml(p.phone || '')}" placeholder="+33…" style="width:100%;margin-top:4px"></label>
     </div>
     <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
       <button class="btn btn-primary" id="pf-save">Save</button>
