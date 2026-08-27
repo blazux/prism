@@ -571,7 +571,33 @@ func (e *ToolExecutor) toolNameHint(name string) string {
 	return " — did you mean: " + strings.Join(near, ", ") + "?"
 }
 
+// Execute runs one tool call. Every failure is audited as usage kind "audit",
+// item "tool_error" (next to the existing "tool_denied"), so the deployment can
+// see which tools actually trip the model up — the evidence the agent-comfort
+// work is prioritised on. The model sees exactly the same result and error as
+// before; this is observation, not behaviour.
 func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, []string, error) {
+	res, images, err := e.execute(ctx, name, rawArgs)
+	if err != nil && e.memStore != nil {
+		e.memStore.AddUsage(ctx, 0, e.sessionID, "audit", "tool_error",
+			1, map[string]interface{}{"tool": name, "error": truncateForAudit(err.Error())})
+	}
+	return res, images, err
+}
+
+// truncateForAudit keeps audit rows small: the first line of an error is what
+// classifies it; a 40 KB stack of output is not.
+func truncateForAudit(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 300 {
+		s = s[:300] + "…"
+	}
+	return s
+}
+
+func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, []string, error) {
 	var args map[string]interface{}
 	if err := json.Unmarshal(rawArgs, &args); err != nil {
 		return "", nil, fmt.Errorf("invalid args: %w", err)

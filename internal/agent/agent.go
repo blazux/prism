@@ -32,6 +32,7 @@ type Event struct {
 	Cols    int             `json:"cols,omitempty"`
 	Height  int             `json:"height,omitempty"`
 	Images  []string        `json:"images,omitempty"`
+	IsError bool            `json:"is_error,omitempty"` // tool_result: the tool failed (Output holds the error text)
 }
 
 const (
@@ -865,6 +866,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 			var result string
 			var toolImages []string
+			toolFailed := false
 			if tc.Function.Name == "update_system_prompt" {
 				result = a.handleUpdateSystemPrompt(ctx, tc.Function.Arguments)
 			} else {
@@ -872,15 +874,17 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				result, toolImages, execErr = a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
 				if execErr != nil {
 					result = fmt.Sprintf("Error: %v", execErr)
+					toolFailed = true
 				}
 				a.emitToolSideEffects(tc.Function.Name, tc.Function.Arguments, events)
 			}
 
 			events <- Event{
-				Type:   "tool_result",
-				ID:     toolID,
-				Output: result,
-				Images: toolImages,
+				Type:    "tool_result",
+				ID:      toolID,
+				Output:  result,
+				Images:  toolImages,
+				IsError: toolFailed,
 			}
 			if tc.Function.Name == "add_attachment" && len(toolImages) > 0 {
 				events <- Event{Type: "attachment", Images: toolImages}

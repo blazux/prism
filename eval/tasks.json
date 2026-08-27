@@ -1,0 +1,224 @@
+[
+  {
+    "name": "file-write-read",
+    "tags": ["files", "core"],
+    "prompt": "Create a file eval/hello.txt whose content is exactly the line: hello from prism eval",
+    "checks": [
+      { "tool": "read_file", "args": { "path": "eval/hello.txt" }, "contains": "hello from prism eval", "no_error": true }
+    ],
+    "max_tool_calls": 3,
+    "cleanup": [ { "tool": "exec_command", "args": { "command": "rm -rf eval" } } ]
+  },
+  {
+    "name": "file-list-count",
+    "tags": ["files", "core"],
+    "prompt": "Create a directory eval/tree containing three empty files named a.txt, b.txt and c.txt, then tell me how many files it contains.",
+    "checks": [
+      { "tool": "list_files", "args": { "path": "eval/tree" }, "contains_all": ["a.txt", "b.txt", "c.txt"], "no_error": true },
+      { "response": true, "regex": "\\b(3|three)\\b" }
+    ],
+    "max_tool_calls": 4,
+    "cleanup": [ { "tool": "exec_command", "args": { "command": "rm -rf eval" } } ]
+  },
+  {
+    "name": "exec-python-compute",
+    "tags": ["exec", "core"],
+    "prompt": "Using Python in the workspace, compute the 20th Fibonacci number (F(1)=F(2)=1) and write just the number to eval/fib.txt. Then tell me the number.",
+    "checks": [
+      { "tool": "read_file", "args": { "path": "eval/fib.txt" }, "contains": "6765", "no_error": true },
+      { "response": true, "contains": "6765" }
+    ],
+    "max_tool_calls": 4,
+    "cleanup": [ { "tool": "exec_command", "args": { "command": "rm -rf eval" } } ]
+  },
+  {
+    "name": "exec-fix-broken-script",
+    "tags": ["exec", "recovery"],
+    "prompt": "The script eval/broken.py should print the sum of the integers from 1 to 10 inclusive, but it is broken. Run it, fix the bug in place, run it again and tell me what it prints.",
+    "setup": [
+      { "tool": "write_file", "args": { "path": "eval/broken.py", "content": "total = 0\nfor i in range(1, 10)\n    total += i\nprint(total)\n" } }
+    ],
+    "checks": [
+      { "tool": "exec_command", "args": { "command": "python3 eval/broken.py" }, "regex": "^\\s*55\\s*$", "no_error": true },
+      { "response": true, "contains": "55" }
+    ],
+    "max_tool_calls": 6,
+    "cleanup": [ { "tool": "exec_command", "args": { "command": "rm -rf eval" } } ]
+  },
+  {
+    "name": "exec-large-output",
+    "tags": ["exec", "context"],
+    "prompt": "Run a command that prints the numbers 1 to 20000, one per line, then tell me the last number printed. Do not write any file.",
+    "checks": [
+      { "response": true, "contains": "20000" }
+    ],
+    "max_tool_calls": 3
+  },
+  {
+    "name": "widget-static",
+    "tags": ["widgets", "core"],
+    "prompt": "Add a dashboard widget titled 'Eval Clock' that shows the current time, updating every second. Keep it simple.",
+    "checks": [
+      { "tool": "widget", "args": { "action": "list" }, "contains": "Eval Clock", "no_error": true }
+    ],
+    "max_tool_calls": 4,
+    "cleanup": [ { "tool": "widget", "args": { "action": "remove", "id": "eval-clock" } } ]
+  },
+  {
+    "name": "widget-polling-file",
+    "tags": ["widgets", "pattern"],
+    "prompt": "Write a JSON file data/eval-status.json containing {\"status\":\"green\",\"count\":42}. Then add a dashboard widget titled 'Eval Status' that fetches that file every 10 seconds and displays the status and the count.",
+    "checks": [
+      { "tool": "read_file", "args": { "path": "data/eval-status.json" }, "contains": "42", "no_error": true },
+      { "tool": "widget", "args": { "action": "list" }, "contains": "Eval Status", "no_error": true }
+    ],
+    "max_tool_calls": 5,
+    "cleanup": [
+      { "tool": "widget", "args": { "action": "remove", "id": "eval-status" } },
+      { "tool": "delete_file", "args": { "path": "data/eval-status.json" } }
+    ]
+  },
+  {
+    "name": "widget-update-existing",
+    "tags": ["widgets"],
+    "prompt": "There is a widget called 'Eval Counter' on the dashboard. Change its title to 'Eval Counter v2' without recreating it.",
+    "setup": [
+      { "tool": "widget", "args": { "action": "add", "id": "eval-counter", "title": "Eval Counter", "content": "<div style=\"padding:12px\">count: 1</div>" } }
+    ],
+    "checks": [
+      { "tool": "widget", "args": { "action": "list" }, "contains": "Eval Counter v2", "no_error": true }
+    ],
+    "max_tool_calls": 3,
+    "cleanup": [ { "tool": "widget", "args": { "action": "remove", "id": "eval-counter" } } ]
+  },
+  {
+    "name": "custom-tool-register-and-use",
+    "tags": ["tools", "core"],
+    "prompt": "Create a custom tool named eval_double that takes an integer argument n and returns n*2 as JSON. Then use it to compute the double of 21 and tell me the result.",
+    "checks": [
+      { "tool": "list_tools", "contains": "eval_double", "no_error": true },
+      { "tool": "eval_double", "args": { "n": 5 }, "contains": "10", "no_error": true },
+      { "response": true, "contains": "42" }
+    ],
+    "max_tool_calls": 5,
+    "cleanup": [ { "tool": "exec_command", "args": { "command": "rm -f agent_tools/eval_double.py" } } ]
+  },
+  {
+    "name": "cron-add-and-list",
+    "tags": ["cron", "core"],
+    "prompt": "Schedule a cron job named eval-heartbeat that runs every 5 minutes and appends the current date to eval/heartbeat.log. Then confirm it is scheduled.",
+    "checks": [
+      { "tool": "cron", "args": { "action": "list" }, "contains": "eval-heartbeat", "no_error": true }
+    ],
+    "max_tool_calls": 3,
+    "cleanup": [
+      { "tool": "cron", "args": { "action": "remove", "name": "eval-heartbeat" } },
+      { "tool": "exec_command", "args": { "command": "rm -rf eval" } }
+    ]
+  },
+  {
+    "name": "cron-remove",
+    "tags": ["cron"],
+    "prompt": "Remove the scheduled job called eval-stale.",
+    "setup": [
+      { "tool": "cron", "args": { "action": "add", "name": "eval-stale", "schedule": "*/30 * * * *", "command": "echo stale", "description": "eval fixture" } }
+    ],
+    "checks": [
+      { "tool": "cron", "args": { "action": "list" }, "not_contains": "eval-stale", "no_error": true }
+    ],
+    "max_tool_calls": 3
+  },
+  {
+    "name": "task-add",
+    "tags": ["pim", "core"],
+    "prompt": "Add a high-priority task: 'Eval: review the quarterly report'.",
+    "checks": [
+      { "tool": "task", "args": { "action": "list" }, "contains": "Eval: review the quarterly report", "no_error": true }
+    ],
+    "max_tool_calls": 2,
+    "cleanup": [ { "tool": "exec_command", "args": { "command": "true" } } ]
+  },
+  {
+    "name": "note-add-and-recall",
+    "tags": ["pim"],
+    "prompt": "Save a note titled 'Eval WiFi' with the body 'Guest network password: pelican-42'. Then, in a second step, list my notes and tell me the guest password from the note.",
+    "checks": [
+      { "tool": "note", "args": { "action": "list" }, "contains": "Eval WiFi", "no_error": true },
+      { "response": true, "contains": "pelican-42" }
+    ],
+    "max_tool_calls": 4
+  },
+  {
+    "name": "rag-ingest-and-search",
+    "tags": ["rag", "core"],
+    "prompt": "Remember this in the knowledge base under a collection called eval-kb: 'The Prism eval mascot is a purple axolotl named Tofu.' Then search the knowledge base for the mascot's name and tell me.",
+    "checks": [
+      { "tool": "rag_search", "args": { "query": "eval mascot name", "collection": "eval-kb" }, "contains": "Tofu", "no_error": true },
+      { "response": true, "contains": "Tofu" }
+    ],
+    "max_tool_calls": 4,
+    "cleanup": [ { "tool": "rag_manage", "args": { "action": "delete", "collection": "eval-kb" } } ]
+  },
+  {
+    "name": "web-search-fact",
+    "tags": ["web"],
+    "prompt": "Search the web to find out in which year the Go programming language was first publicly announced, and answer with the year.",
+    "checks": [
+      { "response": true, "contains": "2009" }
+    ],
+    "max_tool_calls": 4
+  },
+  {
+    "name": "wget-save-remote",
+    "tags": ["web", "files"],
+    "prompt": "Download https://raw.githubusercontent.com/golang/go/master/LICENSE into eval/go-license.txt as-is, then tell me the first line of the file.",
+    "checks": [
+      { "tool": "read_file", "args": { "path": "eval/go-license.txt" }, "contains": "Copyright", "no_error": true }
+    ],
+    "max_tool_calls": 4,
+    "cleanup": [ { "tool": "exec_command", "args": { "command": "rm -rf eval" } } ]
+  },
+  {
+    "name": "docker-run-and-embed",
+    "tags": ["docker", "slow"],
+    "prompt": "Start an nginx container named eval-nginx (image nginx:alpine, port 80) and add a dashboard widget titled 'Eval Nginx' that embeds it.",
+    "checks": [
+      { "tool": "docker_manage", "args": { "action": "ps" }, "contains": "eval-nginx", "no_error": true },
+      { "tool": "widget", "args": { "action": "list" }, "contains": "Eval Nginx", "no_error": true }
+    ],
+    "max_tool_calls": 5,
+    "timeout_sec": 900,
+    "cleanup": [
+      { "tool": "widget", "args": { "action": "remove", "id": "eval-nginx" } },
+      { "tool": "docker_manage", "args": { "action": "stop", "name": "eval-nginx" } }
+    ]
+  },
+  {
+    "name": "notify-delayed",
+    "tags": ["misc"],
+    "prompt": "Send me a dashboard notification titled 'Eval ping' with the message 'harness alive'.",
+    "checks": [
+      { "response": true, "min_len": 1 }
+    ],
+    "max_tool_calls": 2
+  },
+  {
+    "name": "refuse-unknown-tool-gracefully",
+    "tags": ["recovery"],
+    "prompt": "Use the tool called frobnicate_widget to frobnicate the dashboard. If that tool does not exist, say so plainly and do not try anything else.",
+    "checks": [
+      { "response": true, "regex": "(does not exist|doesn't exist|no such tool|not available|isn't available|unavailable|no tool)" }
+    ],
+    "max_tool_calls": 2
+  },
+  {
+    "name": "skill-save",
+    "tags": ["memory"],
+    "prompt": "Save a reusable skill named 'eval-deploy-check' describing this procedure: 1) run the tests, 2) build the image, 3) restart the compose stack. Use it when I ask to verify a deployment.",
+    "checks": [
+      { "tool": "skill", "args": { "action": "list" }, "contains": "eval-deploy-check", "no_error": true }
+    ],
+    "max_tool_calls": 3,
+    "cleanup": [ { "tool": "skill", "args": { "action": "delete", "name": "eval-deploy-check" } } ]
+  }
+]

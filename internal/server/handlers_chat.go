@@ -146,7 +146,8 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "you are not allowed to use model "+body.Model)
 		return
 	}
-	resp, err := s.runHeadlessChat(ctx, sessionID, body.Message, body.Model, s.callerContextForUser(ctx, user, sessionID))
+	stats := newTurnStats()
+	resp, err := s.runHeadlessChatTap(ctx, sessionID, body.Message, body.Model, s.callerContextForUser(ctx, user, sessionID), stats.tap)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -163,7 +164,44 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		"response":  resp,
 		"session":   sessionID,
 		"delivered": delivered,
+		"stats":     stats.finish(),
 	})
+}
+
+// turnStats counts what one headless turn cost the agent — tool calls, tool
+// failures, loop/backend errors, wall time. Returned under "stats" by /api/chat
+// so the eval harness (cmd/prism-eval) can score a change on the agent's own
+// terms: not just "did it succeed" but "how many tries did it take".
+type turnStats struct {
+	started    time.Time
+	ToolCalls  int            `json:"tool_calls"`
+	ToolErrors int            `json:"tool_errors"`
+	Errors     []string       `json:"errors,omitempty"`
+	Tools      map[string]int `json:"tools,omitempty"`
+	DurationMS int64          `json:"duration_ms"`
+}
+
+func newTurnStats() *turnStats {
+	return &turnStats{started: time.Now(), Tools: map[string]int{}}
+}
+
+func (t *turnStats) tap(ev agent.Event) {
+	switch ev.Type {
+	case "tool_use":
+		t.ToolCalls++
+		t.Tools[ev.Tool]++
+	case "tool_result":
+		if ev.IsError {
+			t.ToolErrors++
+		}
+	case "error":
+		t.Errors = append(t.Errors, ev.Content)
+	}
+}
+
+func (t *turnStats) finish() *turnStats {
+	t.DurationMS = time.Since(t.started).Milliseconds()
+	return t
 }
 
 // runHeadlessChat runs a single agent turn for a session outside the WebSocket
