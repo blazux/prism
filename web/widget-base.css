@@ -6,8 +6,17 @@ html,body{height:100%;margin:0}
 body{
   font-family:var(--mono,'Fira Code',ui-monospace,monospace);
   font-size:13px;line-height:1.45;color:var(--text);
-  background:var(--bg1);padding:10px;overflow:hidden;
+  background:var(--bg1);padding:10px;
+  /* Content taller/wider than the widget scrolls instead of clipping and
+   * bleeding over the layout below it (the classic overlapping-text widget).
+   * overflow-wrap keeps a long unbroken token from forcing a horizontal
+   * overflow of the whole body. */
+  overflow:auto;overflow-wrap:break-word;
 }
+img,svg,canvas,video{max-width:100%;height:auto}
+pre{overflow:auto;max-width:100%}
+/* Any element the agent marks as a self-contained scroll region. */
+.scroll-x{overflow-x:auto;max-width:100%}
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
 ::-webkit-scrollbar-track{background:transparent}
