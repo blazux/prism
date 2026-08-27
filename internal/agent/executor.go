@@ -571,6 +571,32 @@ func (e *ToolExecutor) toolNameHint(name string) string {
 	return " — did you mean: " + strings.Join(near, ", ") + "?"
 }
 
+// legacyToolAliases maps every retained alias to the consolidated tool it is
+// part of. The alias still dispatches (and runs) under its own name in the
+// switch below, so old cron scripts, widgets and /api/builtin callers keep
+// working — but policy, hidden-set and audit decisions must use the primary
+// name, or disabling "docker_manage" for a group would silently leave
+// "docker_exec" open (server-review finding: aliases bypass tool policies).
+var legacyToolAliases = map[string]string{
+	"docker_stop": "docker_manage", "docker_ps": "docker_manage",
+	"docker_logs": "docker_manage", "docker_list": "docker_manage",
+	"docker_exec": "docker_manage",
+	"apt_install": "install_packages", "pip_install": "install_packages",
+	"cron_list": "cron", "cron_add": "cron", "cron_remove": "cron",
+	"rag_list": "rag_manage", "rag_delete": "rag_manage",
+	"list_secrets": "secrets", "delete_secret": "secrets",
+	"mcp_add_server": "mcp", "mcp_remove_server": "mcp", "mcp_list_servers": "mcp",
+}
+
+// canonicalToolName returns the primary tool name a call should be authorized
+// and audited under. A non-alias name is returned unchanged.
+func canonicalToolName(name string) string {
+	if primary, ok := legacyToolAliases[name]; ok {
+		return primary
+	}
+	return name
+}
+
 // Execute runs one tool call. Every failure is audited as usage kind "audit",
 // item "tool_error" (next to the existing "tool_denied"), so the deployment can
 // see which tools actually trip the model up — the evidence the agent-comfort
@@ -582,7 +608,52 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		e.memStore.AddUsage(ctx, 0, e.sessionID, "audit", "tool_error",
 			1, map[string]interface{}{"tool": name, "error": truncateForAudit(err.Error())})
 	}
-	return res, images, err
+	return capToolResult(res), images, err
+}
+
+// maxToolResultBytes is the safety net for tool results that don't cap
+// themselves. exec_command, read_file, browser_* and custom tools already
+// truncate to their own (smaller) limits, so this only ever bites a genuinely
+// huge result — a chatty MCP tool, a big rag_search, list_files on a massive
+// tree — which would otherwise overflow the backend context and kill the whole
+// turn ("start a new chat"). Capping keeps the turn alive; the hint tells the
+// model how to get the rest. Set well above every self-truncation so those
+// results pass through untouched.
+const maxToolResultBytes = 24000
+
+func capToolResult(s string) string {
+	if len(s) <= maxToolResultBytes {
+		return s
+	}
+	half := maxToolResultBytes / 2
+	return s[:half] +
+		"\n\n…[truncated: result exceeded " + itoa(maxToolResultBytes) + " chars. Narrow it — filter/grep the command, pass a limit, or read a specific slice — rather than requesting the whole thing again]…\n\n" +
+		s[len(s)-half:]
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// Authorize runs the same hidden-set and guard checks Execute does, without
+// running the tool. It exists for tools dispatched outside Execute
+// (update_system_prompt, handled in agent.go), so they cannot skip a policy a
+// group admin set. Returns nil when the call is allowed.
+func (e *ToolExecutor) Authorize(name string, rawArgs json.RawMessage) error {
+	var args map[string]interface{}
+	_ = json.Unmarshal(rawArgs, &args)
+	policyName := canonicalToolName(name)
+	if e.hiddenTools[policyName] {
+		return fmt.Errorf("tool %q is not available in this context (disabled by policy or preferences)", policyName)
+	}
+	if e.toolGuard != nil {
+		if err := e.toolGuard(policyName, args); err != nil {
+			if e.memStore != nil {
+				e.memStore.AddUsage(context.Background(), 0, e.sessionID, "audit", "tool_denied",
+					1, map[string]interface{}{"tool": policyName, "error": err.Error()})
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // truncateForAudit keeps audit rows small: the first line of an error is what
@@ -603,26 +674,31 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		return "", nil, fmt.Errorf("invalid args: %w", err)
 	}
 
+	// Authorize, hide and audit under the consolidated name so a legacy alias
+	// (docker_exec, cron_add, …) can never slip past a policy set on its primary
+	// (docker_manage, cron, …). Dispatch below still switches on the raw name.
+	policyName := canonicalToolName(name)
+
 	// Hidden tools (group-disabled, admin-only for this caller, user opt-outs)
 	// are denied outright — same message whoever asks.
-	if e.hiddenTools[name] {
-		return "", nil, fmt.Errorf("tool %q is not available in this context (disabled by policy or preferences)", name)
+	if e.hiddenTools[policyName] {
+		return "", nil, fmt.Errorf("tool %q is not available in this context (disabled by policy or preferences)", policyName)
 	}
 	// Authorization gate: block unauthorized tool calls (e.g. a Webex sender who
 	// lacks the required permission). The error is surfaced to the model as the
 	// tool result, so it explains the refusal to the user. Denials are audited.
 	if e.toolGuard != nil {
-		if err := e.toolGuard(name, args); err != nil {
+		if err := e.toolGuard(policyName, args); err != nil {
 			if e.memStore != nil {
 				e.memStore.AddUsage(ctx, 0, e.sessionID, "audit", "tool_denied",
-					1, map[string]interface{}{"tool": name, "error": err.Error()})
+					1, map[string]interface{}{"tool": policyName, "error": err.Error()})
 			}
 			return "", nil, err
 		}
 	}
 	// Usage: one event per tool call (fire-and-forget).
 	if e.memStore != nil {
-		e.memStore.AddUsage(ctx, 0, e.sessionID, "tool_call", name, 1, nil)
+		e.memStore.AddUsage(ctx, 0, e.sessionID, "tool_call", policyName, 1, nil)
 	}
 
 	// Telephony tools are performed by Vox, not here: relay and return its result

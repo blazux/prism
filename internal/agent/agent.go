@@ -868,7 +868,15 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			var toolImages []string
 			toolFailed := false
 			if tc.Function.Name == "update_system_prompt" {
-				result = a.handleUpdateSystemPrompt(ctx, tc.Function.Arguments)
+				// Route the special-cased tool through the same policy checks as
+				// every other tool, or a group with update_system_prompt disabled
+				// (or a Webex sender without it) could still call it.
+				if err := a.executor.Authorize(tc.Function.Name, tc.Function.Arguments); err != nil {
+					result = fmt.Sprintf("Error: %v", err)
+					toolFailed = true
+				} else {
+					result = a.handleUpdateSystemPrompt(ctx, tc.Function.Arguments)
+				}
 			} else {
 				var execErr error
 				result, toolImages, execErr = a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
