@@ -6,7 +6,17 @@ import (
 	"strings"
 )
 
+// Team-shared secrets live unscoped; per-user/group ones are "u<id>:name" /
+// "name:g<id>" rows in the same table. Both handlers below talk to the
+// unscoped store, so without a gate any signed-in member could read or delete
+// another user's mailbox password by asking for it by its full name. Admins
+// only (a nil user — single-user or the service identity — passes, as for
+// /api/files), and a name carrying a scope separator is refused outright:
+// scoped secrets are managed through /api/user/secrets, which scopes itself.
 func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminUser(w, r) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
@@ -44,6 +54,10 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "name and value required", 400)
 			return
 		}
+		if strings.Contains(body.Name, ":") {
+			http.Error(w, "invalid secret name", 400)
+			return
+		}
 		if err := ms.SetSecret(r.Context(), body.Name, body.Value); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -57,9 +71,16 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSecretByName(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if !s.requireAdminUser(w, r) {
+		return
+	}
 	name := strings.TrimPrefix(r.URL.Path, "/api/secrets/")
 	if name == "" {
 		http.Error(w, "missing name", 400)
+		return
+	}
+	if strings.Contains(name, ":") {
+		http.Error(w, "secret not found", 404)
 		return
 	}
 

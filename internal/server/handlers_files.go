@@ -103,13 +103,51 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 
 // safeWorkspacePath joins workspaceDir with untrusted user-supplied path and
 // returns an error if the result escapes the workspace directory.
+//
+// Two things beyond the lexical check: the AES key that encrypts every secret
+// in Postgres lives at <workspace>/.secret_key and is never a legitimate editor
+// target; and the workspace is also mounted in the sandbox, where the agent can
+// `ln -s / esc` — so the path is re-checked after resolving symlinks on the
+// deepest existing ancestor.
 func safeWorkspacePath(workspaceDir, untrustedPath string) (string, error) {
 	full := filepath.Join(workspaceDir, filepath.Clean(untrustedPath))
 	rel, err := filepath.Rel(workspaceDir, full)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("invalid path")
+	}
+	if filepath.Base(full) == ".secret_key" {
+		return "", fmt.Errorf("invalid path")
+	}
+	if !withinResolved(workspaceDir, full) {
 		return "", fmt.Errorf("invalid path")
 	}
 	return full, nil
+}
+
+// withinResolved reports whether full still lies under root once symlinks are
+// resolved. Missing trailing components (a file about to be created) are
+// tolerated: resolution walks up to the deepest ancestor that exists.
+func withinResolved(root, full string) bool {
+	rootReal, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		rootReal = root
+	}
+	probe := full
+	var tail []string
+	for {
+		if real, err := filepath.EvalSymlinks(probe); err == nil {
+			parts := append([]string{real}, tail...)
+			resolved := filepath.Join(parts...)
+			rel, err := filepath.Rel(rootReal, resolved)
+			return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return false
+		}
+		tail = append([]string{filepath.Base(probe)}, tail...)
+		probe = parent
+	}
 }
 
 type FileNode struct {

@@ -1715,7 +1715,9 @@ function renderMarkdown(text) {
 
   // Extract math blocks before marked so it doesn't mangle underscores/stars in LaTeX
   const mathBlocks = []
-  const placeholder = (i) => `\x00MATH${i}\x00`
+  // Private-use chars, not \x00: the HTML parser DOMPurify runs would turn a
+  // null byte into U+FFFD and the placeholders would never be found again.
+  const placeholder = (i) => `\uE000MATH${i}\uE000`
   text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => {
     mathBlocks.push({ inner, display: true })
     return placeholder(mathBlocks.length - 1)
@@ -1726,9 +1728,12 @@ function renderMarkdown(text) {
   })
 
   let html = marked.parse(text, { breaks: true, gfm: true })
+  // marked passes raw HTML through. Model output quotes web pages, emails and
+  // RAG chunks verbatim, so an <img onerror> in any of those would run here.
+  if (window.DOMPurify) html = DOMPurify.sanitize(html)
 
   // Restore math blocks as KaTeX-rendered HTML
-  html = html.replace(/\x00MATH(\d+)\x00/g, (_, i) => {
+  html = html.replace(/\uE000MATH(\d+)\uE000/g, (_, i) => {
     const { inner, display } = mathBlocks[parseInt(i)]
     try {
       return katex.renderToString(inner, { displayMode: display, throwOnError: false, output: 'html' })
@@ -1912,6 +1917,10 @@ function editorOnSaved(path) {
 
 // Listen for postMessage calls from widget iframes (Dashboard API)
 window.addEventListener('message', e => {
+  // Only our own frames (widgets, apps, settings) may drive the dashboard. A
+  // third-party page embedded inside a widget can postMessage(…, '*') to
+  // window.top just as easily, and 'sendChat' would hand it the agent.
+  if (e.origin !== location.origin) return
   const d = e.data
   if (!d || !d.type) return
   if (d.type === 'openFile' && d.path) {

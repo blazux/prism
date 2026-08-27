@@ -18,7 +18,7 @@ EXPOSE 8080
 ENV PORT=8080
 ENV WORKSPACE_DIR=/workspace
 ENV OLLAMA_URL=http://ollama:11434
-ENV OLLAMA_MODEL=qwen2.5-coder:7b
+ENV OLLAMA_MODEL=qwen3.6:27b
 ENV AGENT_CONTAINER=prism-workspace
 
 CMD ["./prism"]

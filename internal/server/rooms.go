@@ -61,6 +61,21 @@ func (h *roomHub) remove(c *roomClient) {
 	h.mu.Unlock()
 }
 
+// sendJSON queues a frame for this client through the writer pump. gorilla's
+// Conn panics on concurrent writes, and the pump is already running by the
+// time the join handler wants to send history — so the handler must never
+// call conn.WriteJSON itself.
+func (c *roomClient) sendJSON(payload interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	select {
+	case c.send <- data:
+	default: // slow client: drop rather than block
+	}
+}
+
 // broadcast delivers a payload to every client connected to a group's room.
 func (h *roomHub) broadcast(groupID int64, payload interface{}) {
 	data, err := json.Marshal(payload)
@@ -154,13 +169,13 @@ func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
 	// Send recent history + config + who's here to the newcomer, then announce join.
 	if ms := s.store(); ms != nil {
 		if msgs, err := ms.RecentRoomMessages(r.Context(), groupID, 50); err == nil {
-			conn.WriteJSON(map[string]interface{}{"type": "history", "messages": msgs})
+			c.sendJSON(map[string]interface{}{"type": "history", "messages": msgs})
 		}
 		if cfg, err := ms.GetRoomConfig(r.Context(), groupID); err == nil {
-			conn.WriteJSON(map[string]interface{}{"type": "room_config", "agentName": cfg.AgentName, "groupId": groupID})
+			c.sendJSON(map[string]interface{}{"type": "room_config", "agentName": cfg.AgentName, "groupId": groupID})
 		}
 	}
-	conn.WriteJSON(map[string]interface{}{"type": "presence", "users": s.rooms.presence(groupID)})
+	c.sendJSON(map[string]interface{}{"type": "presence", "users": s.rooms.presence(groupID)})
 	s.pushPresence(groupID)
 
 	// Read pump.

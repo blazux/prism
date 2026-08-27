@@ -32,6 +32,14 @@ type Client struct {
 	viewContext     string       // what the user is currently looking at (UI -> agent)
 }
 
+// wsFileOpsAllowed mirrors requireAdminUser for the editor's WebSocket file
+// commands. /api/files and /api/file are admin-only because they expose the
+// whole shared workspace (including .secret_key); the same three operations
+// over /ws were not gated, which made the REST gate theatre.
+func (s *Server) wsFileOpsAllowed(c *Client) bool {
+	return c.user == nil || s.isAdminUser(context.Background(), c.user)
+}
+
 // cancelActive cancels the in-flight agent turn (if any) under the client mutex.
 func (c *Client) cancelActive() {
 	c.mu.Lock()
@@ -587,6 +595,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.cancelActive()
 
 		case "file_open":
+			if !s.wsFileOpsAllowed(client) {
+				client.sendJSON(map[string]interface{}{"type": "error", "content": "forbidden: administrators only"})
+				continue
+			}
 			fullPath, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
 			if err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": "invalid path"})
@@ -602,6 +614,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "file_save":
+			if !s.wsFileOpsAllowed(client) {
+				client.sendJSON(map[string]interface{}{"type": "error", "content": "forbidden: administrators only"})
+				continue
+			}
 			fullPath, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
 			if err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": "invalid path"})
@@ -621,6 +637,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "file_delete":
+			if !s.wsFileOpsAllowed(client) {
+				client.sendJSON(map[string]interface{}{"type": "error", "content": "forbidden: administrators only"})
+				continue
+			}
 			fullPath, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
 			if err != nil {
 				continue

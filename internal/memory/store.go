@@ -582,7 +582,11 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM conversation_history WHERE session_id = $1`, id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM agent_config WHERE key LIKE $1`, "%_"+id); err != nil {
+	// Explicit per-session keys. The previous `LIKE '%_' || id` treated `_` as a
+	// single-char wildcard: deleting a session named "id" also wiped
+	// oauth_google_client_id, and "b" took system_prompt_personality_ab with it.
+	if _, err := tx.Exec(ctx, `DELETE FROM agent_config WHERE key = ANY($1)`,
+		[]string{KeyPersonality + "_" + id, summaryKey(id)}); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM mcp_servers WHERE session_id = $1`, id); err != nil {
