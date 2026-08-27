@@ -150,6 +150,20 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		// Capability token (the agent's own $PRISM_TOKEN self-calls): binds to
+		// one user + session, so it grants only what that member already has —
+		// never the global admin the deployment token would. See captoken.go.
+		if tok := capTokenFromRequest(r); tok != "" {
+			if uid, _, ok := s.verifyCapToken(tok); ok {
+				if u := s.userForCapToken(r.Context(), uid); u != nil {
+					next.ServeHTTP(w, withUser(r, u))
+					return
+				}
+				s.deny(w, r)
+				return
+			}
+		}
+
 		// Real user session.
 		if u := s.userFromCookie(r, ms); u != nil {
 			next.ServeHTTP(w, withUser(r, u))

@@ -116,7 +116,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	ollamaClient := s.newChatBackend()
 
-	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
+	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
 	executor.SetLLM(ollamaClient, s.cfg.Model)
 	executor.SetChatBlind(!s.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked

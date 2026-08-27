@@ -24,7 +24,14 @@ the contract that keeps that true. Every change to `main` must respect it.
    renamed or removed; a new variable is optional with a sensible default.
    `docker-compose.yml` keeps every existing service, volume and port.
 
-4. **The agent's world is stable.** Tool names (including legacy aliases),
+4. **The agent's world is stable.** `$PRISM_TOKEN` keeps its name and its
+   `Bearer`/cookie usage; it is now a per-session capability token
+   (`internal/server/captoken.go`) rather than the deployment token, but the
+   deployment token itself is still accepted, so cron jobs and operator
+   scripts that baked in the old value keep working. Capability tokens are a
+   stateless HMAC of the deployment token, so a cron's baked token still
+   verifies after a restart; rotating `PRISM_TOKEN` invalidates both, exactly
+   as it already did for hand-written crons. Tool names (including legacy aliases),
    the widget runtime API (`prismTool`, `prismChat`, `prismNotify`,
    `prismSuggest`, `prismContext`, `prismOpenFile`), the variables injected
    into cron/custom tools (`$PRISM_URL`, `$PRISM_SESSION`, `$PRISM_TOKEN`)

@@ -42,6 +42,12 @@ func (s *Server) singleUserAuth(next http.Handler, w http.ResponseWriter, r *htt
 		next.ServeHTTP(w, withUser(r, serviceUser))
 		return
 	}
+	if tok := capTokenFromRequest(r); tok != "" {
+		if _, _, ok := s.verifyCapToken(tok); ok {
+			next.ServeHTTP(w, withUser(r, serviceUser))
+			return
+		}
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)

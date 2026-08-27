@@ -231,7 +231,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	os.MkdirAll(sessionPluginDir, 0755)
 
 	ollamaClient := s.chatBackendFor(model)
-	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
+	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
 	executor.SetLLM(ollamaClient, model)
 	executor.SetChatBlind(!s.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
