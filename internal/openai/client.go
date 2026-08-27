@@ -418,6 +418,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	tools := newToolAccumulator()
 	finish := ""
+	streamed := false // set once any chunk arrives, so a later read error is a mid-stream cut, not a failure to start
 
 	for scanner.Scan() {
 		select {
@@ -444,6 +445,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 			continue
 		}
 		ch := chunk.Choices[0]
+		streamed = true
 		if think := ch.Delta.ReasoningContent; think != "" {
 			out <- ollama.StreamEvent{Thinking: think}
 		} else if ch.Delta.Reasoning != "" {
@@ -461,7 +463,19 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	}
 
 	if err := scanner.Err(); err != nil {
-		out <- ollama.StreamEvent{Err: fmt.Errorf("scan: %w", err)}
+		// A mid-stream cut (a proxy's idle/response timeout, a dropped connection, a
+		// network reset) surfaces here as "unexpected EOF". If tokens already arrived
+		// they were emitted above, so finalize the turn with that partial content plus
+		// any accumulated tool calls instead of failing it: the partial answer stays in
+		// history (so a follow-up "continue" has the context) and the user sees it,
+		// rather than a cryptic "scan: unexpected EOF" that discards the whole turn.
+		// A cut *before* any chunk is a genuine failure the caller/retry must still see.
+		if !streamed {
+			out <- ollama.StreamEvent{Err: fmt.Errorf("scan: %w", err)}
+			return
+		}
+		log.Printf("[openai] stream cut mid-response (%v) — finalizing partial turn, model %q", err, req.Model)
+		out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: "interrupted"}
 		return
 	}
 	// "length" means the model was still going when it hit the cap: either a

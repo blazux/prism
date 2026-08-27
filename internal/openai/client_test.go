@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,6 +67,49 @@ func TestChat_ContentAndReasoning(t *testing.T) {
 	}
 	if len(calls) != 0 {
 		t.Errorf("unexpected tool calls: %v", calls)
+	}
+}
+
+// A stream cut mid-response (a proxy idle/response timeout, a dropped connection)
+// after tokens have started must degrade gracefully: the partial content is kept
+// and NO error is surfaced, so the truncated answer stays in history (a follow-up
+// "continue" then has the context) instead of the whole turn dying on an
+// "unexpected EOF".
+func TestChat_MidStreamCut_KeepsPartialNoError(t *testing.T) {
+	// Hijack the connection to send a valid chunked response with content, then
+	// close abruptly WITHOUT the terminating 0-length chunk — the client's chunked
+	// reader then yields io.ErrUnexpectedEOF, exactly like a proxy killing the stream.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Error("ResponseWriter is not a Hijacker")
+			return
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		defer conn.Close()
+		fmt.Fprint(bufrw, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+		body := `data: {"choices":[{"delta":{"content":"partial "}}]}` + "\n" +
+			`data: {"choices":[{"delta":{"content":"answer"}}]}` + "\n"
+		fmt.Fprintf(bufrw, "%x\r\n%s\r\n", len(body), body) // one complete chunk
+		bufrw.Flush()
+		// return without the closing "0\r\n\r\n" -> connection drops mid-stream
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "")
+	ch := make(chan ollama.StreamEvent, 50)
+	go func() { c.Chat(context.Background(), ollama.ChatRequest{Model: "m"}, ch); close(ch) }()
+
+	content, _, _, err := drain(ch)
+	if err != nil {
+		t.Fatalf("mid-stream cut should degrade gracefully, got err: %v", err)
+	}
+	if content != "partial answer" {
+		t.Errorf("partial content lost: got %q, want %q", content, "partial answer")
 	}
 }
 
