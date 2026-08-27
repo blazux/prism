@@ -20,6 +20,8 @@ require (
 	golang.org/x/sync v0.19.0
 )
 
+require github.com/kr/text v0.2.0 // indirect
+
 require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -33,4 +35,5 @@ require (
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	golang.org/x/text v0.34.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1
 )

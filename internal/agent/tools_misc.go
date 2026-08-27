@@ -157,6 +157,15 @@ func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret s
 	if name == "" || url == "" {
 		return "", fmt.Errorf("name and url are required")
 	}
+	// auth_secret is sent verbatim as a Bearer token to `url`. A reserved name
+	// (email_password, telegram_bot_token, an mcp_oauth_* / webex token…) is an
+	// integration credential — handing it to an arbitrary MCP endpoint would
+	// exfiltrate it (agent-review finding #4). Only secrets the agent created
+	// for this purpose via request_secret may be used.
+	if authSecret != "" && isReservedSecretName(authSecret) {
+		return fmt.Sprintf("Refused: %q is a reserved integration credential and cannot be sent to an MCP server. "+
+			"If this server needs a token, create a dedicated one with request_secret and pass that name as auth_secret.", authSecret), nil
+	}
 	tools, err := e.mcpMgr.Connect(ctx, e.mcpStorageScope(), name, url, authSecret)
 	if err != nil {
 		return fmt.Sprintf("Failed to connect MCP server '%s': %v", name, err), nil

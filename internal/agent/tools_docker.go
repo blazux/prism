@@ -152,6 +152,9 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 
 	switch action {
 	case "up":
+		if err := validateComposeSafety(hostPath); err != nil {
+			return fmt.Sprintf("Refused: %v", err), nil
+		}
 		out, err := e.docker.ComposeUp(ctx, hostPath, project)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v\n%s", err, out), nil
