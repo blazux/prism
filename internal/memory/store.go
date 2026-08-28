@@ -381,6 +381,19 @@ func (s *Store) initSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS usage_events_ts_idx ON usage_events(ts DESC)`,
 		`CREATE INDEX IF NOT EXISTS usage_events_kind_idx ON usage_events(kind, ts DESC)`,
+		// Shared widgets/dashboards: a group member publishes a widget (or a whole
+		// board) to their group; other members add it to their own dashboard.
+		`CREATE TABLE IF NOT EXISTS shared_items (
+			id         BIGSERIAL PRIMARY KEY,
+			group_id   BIGINT NOT NULL,
+			kind       TEXT NOT NULL,
+			title      TEXT NOT NULL DEFAULT '',
+			owner_id   BIGINT NOT NULL DEFAULT 0,
+			owner_name TEXT NOT NULL DEFAULT '',
+			payload    JSONB NOT NULL DEFAULT '{}',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS shared_items_group_idx ON shared_items(group_id, id DESC)`,
 		// Inbound webhooks: an external HTTP call becomes an agent turn wrapped in a
 		// stored prompt. The id is the URL segment and must be unique on its own —
 		// the inbound request cannot tell us which scope to look in.
