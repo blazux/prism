@@ -10,6 +10,19 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// SharedWidget is one widget inside a shared item's payload.
+type SharedWidget struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
+	Cols    int    `json:"cols"`
+	Height  int    `json:"height"`
+}
+
+// SharedPayload is the JSON stored in shared_items.payload.
+type SharedPayload struct {
+	Widgets []SharedWidget `json:"widgets"`
+}
+
 // SharedItem is a widget or a whole dashboard a member published to one of
 // their groups. Payload holds the actual widget content(s):
 // {"widgets":[{"title","content","cols","height"}, ...]} — one entry for a

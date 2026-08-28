@@ -18,17 +18,6 @@ import (
 // other teams with different subjects. Multi-user only — there are no groups
 // to share within in single-user mode.
 
-type sharedWidget struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	Cols    int    `json:"cols"`
-	Height  int    `json:"height"`
-}
-
-type sharedPayload struct {
-	Widgets []sharedWidget `json:"widgets"`
-}
-
 // shareSlug reduces a title to a filesystem/id-safe slug (server-side twin of
 // the agent's slugify).
 func shareSlug(s string) string {
@@ -53,14 +42,14 @@ func shareSlug(s string) string {
 
 // sessionWidgets returns the widgets of a session: all of them, or just the one
 // with id==only when only is non-empty.
-func (s *Server) sessionWidgets(session, only string) []sharedWidget {
+func (s *Server) sessionWidgets(session, only string) []memory.SharedWidget {
 	dir := filepath.Join(s.cfg.PluginDir, session)
-	var out []sharedWidget
+	var out []memory.SharedWidget
 	for _, p := range s.loadPlugins(dir) {
 		if only != "" && p.id != only {
 			continue
 		}
-		out = append(out, sharedWidget{Title: p.title, Content: p.content, Cols: p.cols, Height: p.height})
+		out = append(out, memory.SharedWidget{Title: p.title, Content: p.content, Cols: p.cols, Height: p.height})
 	}
 	return out
 }
@@ -173,7 +162,7 @@ func (s *Server) handleShared(w http.ResponseWriter, r *http.Request) {
 				title = sessionDisplayName(body.Session) + " dashboard"
 			}
 		}
-		payload, _ := json.Marshal(sharedPayload{Widgets: widgets})
+		payload, _ := json.Marshal(memory.SharedPayload{Widgets: widgets})
 		id, err := ms.ShareItem(r.Context(), memory.SharedItem{
 			GroupID: body.GroupID, Kind: kind, Title: title,
 			OwnerID: u.ID, OwnerName: u.DisplayName, Payload: payload,
@@ -229,7 +218,7 @@ func (s *Server) handleSharedItem(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusForbidden, "not your session")
 			return
 		}
-		var p sharedPayload
+		var p memory.SharedPayload
 		if json.Unmarshal(item.Payload, &p) != nil || len(p.Widgets) == 0 {
 			writeErr(w, http.StatusInternalServerError, "shared item has no widgets")
 			return

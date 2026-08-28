@@ -42,6 +42,8 @@ type ToolExecutor struct {
 	headless              bool            // no dashboard UI (room/Webex/Telegram/cron) → widget tools refuse
 	hiddenTools           map[string]bool // tools hidden from and denied to this session
 	onPluginAdd           func(id, title, content string, cols, height int)
+	sharingGroups         []memory.Membership // groups this session can share widgets within
+	actingUserID          int64               // the real user behind this session (for share ownership)
 	onPluginRem           func(id string)
 	onOpenFile            func(path string)
 	onFileChange          func()
@@ -854,8 +856,14 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			return wrap(e.removeUIPlugin(str("id")))
 		case "list":
 			return wrap(e.listUIPlugins())
+		case "list_shared":
+			return wrap(e.sharedList(ctx, str("kind")))
+		case "add_shared":
+			return wrap(e.sharedAdd(ctx, str("id")))
+		case "share":
+			return wrap(e.sharePublish(ctx, str("id"), str("kind"), str("group")))
 		default:
-			return "", nil, fmt.Errorf("widget: unknown action %q (expected add, update, remove, list)", str("action"))
+			return "", nil, fmt.Errorf("widget: unknown action %q (expected add, update, remove, list, list_shared, add_shared, share)", str("action"))
 		}
 	case "add_widget": // legacy alias
 		colsFloat, _ := args["cols"].(float64)

@@ -23,7 +23,9 @@ type CallerContext struct {
 	RAGScope      string
 	PersonalScope string // "" = let the executor derive it from the session id itself
 	HiddenTools   map[string]bool
-	MultiUser     bool // MULTI_USER: retires the personal RAG/MCP fallback in the executor
+	MultiUser     bool                // MULTI_USER: retires the personal RAG/MCP fallback in the executor
+	Groups        []memory.Membership // groups this caller can share widgets within
+	ActingUserID  int64               // the real user behind the session (share ownership)
 }
 
 // apply sets every field this bundles onto an executor in one call, instead
@@ -36,6 +38,7 @@ func (cc CallerContext) apply(e *agent.ToolExecutor) {
 	}
 	e.SetHiddenTools(cc.HiddenTools)
 	e.SetMultiUserMode(cc.MultiUser)
+	e.SetSharingContext(cc.ActingUserID, cc.Groups)
 }
 
 // callerContextForUser builds the standard per-user CallerContext — the
@@ -70,11 +73,21 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 			scope = gscope
 		}
 	}
+	var groups []memory.Membership
+	if ms := s.store(); ms != nil && scopeUser != nil && scopeUser.ID > 0 {
+		groups, _ = ms.UserGroups(ctx, scopeUser.ID)
+	}
+	aid := int64(0)
+	if scopeUser != nil {
+		aid = scopeUser.ID
+	}
 	return CallerContext{
-		Guard:       s.buildUserGuard(ctx, u),
-		RAGScope:    scope,
-		HiddenTools: s.hiddenToolsFor(ctx, sessionID, scope),
-		MultiUser:   s.cfg.MultiUser,
+		Guard:        s.buildUserGuard(ctx, u),
+		RAGScope:     scope,
+		HiddenTools:  s.hiddenToolsFor(ctx, sessionID, scope),
+		MultiUser:    s.cfg.MultiUser,
+		Groups:       groups,
+		ActingUserID: aid,
 	}
 }
 
@@ -89,6 +102,7 @@ func (s *Server) callerContextForGroup(ctx context.Context, groupID int64) Calle
 		Guard:     s.buildGroupAgentGuard(ctx, groupID),
 		RAGScope:  fmt.Sprintf("g%d", groupID),
 		MultiUser: s.cfg.MultiUser,
+		Groups:    []memory.Membership{{GroupID: groupID, Role: "member"}},
 	}
 }
 

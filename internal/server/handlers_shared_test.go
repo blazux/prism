@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"testing"
+
+	"prism/internal/memory"
 )
 
 func TestShareSlug(t *testing.T) {
@@ -22,12 +24,12 @@ func TestShareSlug(t *testing.T) {
 }
 
 func TestSharedPayloadRoundTrip(t *testing.T) {
-	in := sharedPayload{Widgets: []sharedWidget{
+	in := memory.SharedPayload{Widgets: []memory.SharedWidget{
 		{Title: "A", Content: "<div>a</div>", Cols: 2, Height: 300},
 		{Title: "B", Content: "<div>b</div>", Cols: 1, Height: 280},
 	}}
 	b, _ := json.Marshal(in)
-	var out sharedPayload
+	var out memory.SharedPayload
 	if json.Unmarshal(b, &out) != nil || len(out.Widgets) != 2 {
 		t.Fatalf("roundtrip failed: %s", b)
 	}
