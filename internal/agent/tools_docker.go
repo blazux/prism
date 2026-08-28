@@ -25,6 +25,12 @@ func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port i
 	fmt.Fprintf(&sb, "\nIframe URL (preferred):  http://%s.localhost/", name)
 	fmt.Fprintf(&sb, "\nDirect host URL:         http://<hostname>:%d/", hostPorts[0])
 	fmt.Fprintf(&sb, "\nInternal URL (scripts):  http://prism-svc-%s:%d/", name, port)
+	// Give it a moment to crash and tell the agent if it did, instead of
+	// reporting "started" for a container that immediately exits or crash-loops
+	// (the silent-zombie case — a one-shot script run as a service).
+	if verdict := e.docker.CheckStartup(ctx, name, 2*time.Second); verdict != "" {
+		fmt.Fprintf(&sb, "\n\n%s", verdict)
+	}
 	return sb.String(), nil
 }
 
