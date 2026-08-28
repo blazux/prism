@@ -1288,6 +1288,119 @@ function editWorkspace(sess) {
   setTimeout(() => dlg.querySelector('#ws-name').focus(), 50)
 }
 
+// ─── Shared widgets gallery (multi-user groups) ──────────────────────────────
+function sharedFieldCss() {
+  return 'width:100%;box-sizing:border-box;padding:8px 10px;font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--border2);border-radius:8px'
+}
+
+function openSharedGallery() {
+  if (!window.PrismModal) return
+  PrismModal.ensureStyle()
+  let tab = 'add'
+  PrismModal.open({
+    onEscape: undefined,
+    render(box, done) {
+      box.style.maxWidth = '640px'
+      box.style.width = 'min(640px, 94vw)'
+      const head = document.createElement('div')
+      head.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px'
+      const title = document.createElement('div')
+      title.className = 'pm-title'; title.style.margin = '0'; title.style.flex = '1'
+      title.textContent = 'Shared widgets'
+      const tabAdd = PrismModal.btn('Add', '', () => { tab = 'add'; renderBody() })
+      const tabShare = PrismModal.btn('Share', '', () => { tab = 'share'; renderBody() })
+      head.append(title, tabAdd, tabShare)
+      box.appendChild(head)
+      const body = document.createElement('div')
+      body.style.cssText = 'max-height:60vh;overflow:auto'
+      box.appendChild(body)
+      const foot = document.createElement('div'); foot.className = 'pm-foot'
+      foot.appendChild(PrismModal.btn('Close', '', () => done(undefined)))
+      box.appendChild(foot)
+      function renderBody() {
+        tabAdd.className = 'pm-btn' + (tab === 'add' ? ' pm-primary' : '')
+        tabShare.className = 'pm-btn' + (tab === 'share' ? ' pm-primary' : '')
+        body.innerHTML = '<div style="color:var(--text3);padding:24px;text-align:center">Loading…</div>'
+        if (tab === 'add') renderSharedAdd(body); else renderSharedShare(body)
+      }
+      renderBody()
+    },
+  })
+}
+
+async function renderSharedAdd(body) {
+  let items = []
+  try { items = (await fetch('/api/shared').then(r => r.json())).items || [] } catch (_) {}
+  if (!items.length) {
+    body.innerHTML = '<div style="color:var(--text3);padding:28px;text-align:center">Nothing shared in your group yet.</div>'
+    return
+  }
+  body.innerHTML = ''
+  const sel = new Set()
+  const addBtn = document.createElement('button')
+  addBtn.className = 'pm-btn pm-primary'; addBtn.style.marginTop = '6px'
+  addBtn.textContent = 'Add selected (0)'; addBtn.disabled = true
+  for (const it of items) {
+    const row = document.createElement('label')
+    row.style.cssText = 'display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer'
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.marginTop = '3px'
+    cb.onchange = () => { cb.checked ? sel.add(it.id) : sel.delete(it.id); addBtn.textContent = `Add selected (${sel.size})`; addBtn.disabled = !sel.size }
+    const info = document.createElement('div'); info.style.flex = '1'
+    const badge = it.kind === 'dashboard'
+      ? `<span style="font-size:10px;color:var(--accent);background:var(--accent-dim);padding:1px 7px;border-radius:999px;margin-left:6px">dashboard · ${it.count}</span>` : ''
+    info.innerHTML = `<div style="font-weight:600">${escHtml(it.title)}${badge}</div>` +
+      `<div style="font-size:11.5px;color:var(--text3)">by ${escHtml(it.ownerName || '—')} · ${escHtml(it.groupName || '')}</div>`
+    row.append(cb, info)
+    body.appendChild(row)
+  }
+  addBtn.onclick = async () => {
+    addBtn.disabled = true; let n = 0
+    for (const id of sel) {
+      try { const r = await fetch(`/api/shared/${id}/add?session=${encodeURIComponent(currentSessionID)}`, { method: 'POST' }).then(r => r.json()); n += r.added || 0 } catch (_) {}
+    }
+    showToast({ title: 'Added', message: `${n} widget(s) added to this board`, level: 'success' })
+    addBtn.textContent = 'Added ✓'
+  }
+  body.appendChild(addBtn)
+}
+
+async function renderSharedShare(body) {
+  body.innerHTML = ''
+  let groups = []
+  try { groups = (await fetch('/api/my/groups').then(r => r.json())).groups || [] } catch (_) {}
+  if (!groups.length) {
+    body.innerHTML = '<div style="color:var(--text3);padding:28px;text-align:center">You are not in any group.</div>'
+    return
+  }
+  const wsel = document.createElement('select'); wsel.style.cssText = sharedFieldCss()
+  wsel.innerHTML = '<option value="__all__">Whole dashboard (all widgets)</option>' +
+    [...widgets.values()].map(r => `<option value="${escHtml(r.id)}">${escHtml(r.title)}</option>`).join('')
+  const gsel = document.createElement('select'); gsel.style.cssText = sharedFieldCss()
+  gsel.innerHTML = groups.map(g => `<option value="${g.groupId}">${escHtml(g.groupName)}</option>`).join('')
+  const field = (t, el) => {
+    const w = document.createElement('div'); w.style.margin = '10px 0 0'
+    const l = document.createElement('label'); l.style.cssText = 'display:block;font-size:11.5px;color:var(--text3);margin-bottom:4px'; l.textContent = t
+    w.append(l, el); return w
+  }
+  body.append(field('What to share', wsel), field('Share with group', gsel))
+  const shareBtn = document.createElement('button')
+  shareBtn.className = 'pm-btn pm-primary'; shareBtn.style.marginTop = '14px'; shareBtn.textContent = 'Share'
+  shareBtn.onclick = async () => {
+    shareBtn.disabled = true
+    const kind = wsel.value === '__all__' ? 'dashboard' : 'widget'
+    const b = { kind, groupId: parseInt(gsel.value, 10), session: currentSessionID }
+    if (kind === 'widget') b.widgetId = wsel.value
+    try {
+      const r = await fetch('/api/shared', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json())
+      if (r && r.id) showToast({ title: 'Shared', message: `${r.count} widget(s) shared with the group`, level: 'success' })
+      else showToast({ title: 'Share failed', message: (r && r.error) || '', level: 'error' })
+    } catch (_) { showToast({ title: 'Share failed', message: '', level: 'error' }) }
+    shareBtn.disabled = false
+  }
+  body.appendChild(shareBtn)
+}
+window.openSharedGallery = openSharedGallery
+
 // ─── Command palette (Ctrl/⌘-K) ─────────────────────────────────────────────────
 function openCmdK() {
   if (document.getElementById('cmdk')) return

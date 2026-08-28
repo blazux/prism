@@ -155,5 +155,8 @@
     },
   }
 
+  PrismModal.open = open
+  PrismModal.btn = btn
+  PrismModal.ensureStyle = ensureStyle
   window.PrismModal = PrismModal
 })()
