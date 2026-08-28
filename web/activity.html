@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Activity — Prism</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/theme.js"></script>
+<style>
+  body { background: var(--bg); color: var(--text); margin: 0; }
+  #act { max-width: 900px; margin: 0 auto; padding: 22px 20px 80px; }
+  .head { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+  .head a.back { color: var(--text3); text-decoration: none; font-size: 13px; }
+  .head a.back:hover { color: var(--accent); }
+  h1 { font-size: 20px; margin: 0; }
+  .sub { color: var(--text2); font-size: 13px; margin: 2px 0 18px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 16px; }
+  .tab { font: inherit; font-size: 12.5px; cursor: pointer; border: 1px solid var(--border2);
+         background: var(--bg2); color: var(--text2); padding: 5px 12px; border-radius: 999px; }
+  .tab:hover { border-color: var(--accent); color: var(--text); }
+  .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .bar .spacer { flex: 1; }
+  .bar .toggle { font-size: 12px; color: var(--text3); display: none; align-items: center; gap: 5px; cursor: pointer; }
+  .feed { display: flex; flex-direction: column; }
+  .ev { display: grid; grid-template-columns: 74px 12px 1fr; gap: 10px; padding: 9px 0;
+        border-bottom: 1px solid var(--border); align-items: baseline; }
+  .ev:last-child { border-bottom: none; }
+  .ev .time { color: var(--text3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ev .rail { position: relative; align-self: stretch; }
+  .ev .dot { width: 8px; height: 8px; border-radius: 50%; position: absolute; top: 5px; left: 2px; background: var(--text3); }
+  .ev.err .dot { background: var(--red); } .ev.warn .dot { background: var(--yellow); }
+  .ev.ok .dot { background: var(--green); } .ev.info .dot { background: var(--accent); }
+  .ev .body { min-width: 0; }
+  .ev .line { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .ev .item { font-weight: 600; font-size: 13.5px; }
+  .ev .badge { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+               padding: 1px 7px; border-radius: 999px; background: var(--bg3); color: var(--text2); }
+  .ev.err .badge { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
+  .ev.warn .badge { background: color-mix(in srgb, var(--yellow) 20%, transparent); color: var(--yellow); }
+  .ev .sess { font-size: 11px; color: var(--text3); }
+  .ev .detail { font-family: var(--mono, monospace); font-size: 12px; color: var(--text2);
+                margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+  .more { margin: 20px auto 0; display: block; font: inherit; font-size: 13px; cursor: pointer;
+          border: 1px solid var(--border2); background: var(--bg2); color: var(--text);
+          padding: 7px 18px; border-radius: 8px; }
+  .more:hover { border-color: var(--accent); }
+  .empty, .load { text-align: center; color: var(--text3); padding: 50px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="act">
+  <div class="head">
+    <a class="back" href="/">← Dashboard</a>
+    <h1>Activity</h1>
+  </div>
+  <p class="sub">What the agent and its automations have been doing — tool calls, errors, chat turns and webhook fires.</p>
+  <div class="bar" id="tabs">
+    <button class="tab on" data-view="">All</button>
+    <button class="tab" data-view="errors">Errors</button>
+    <button class="tab" data-view="tools">Tools</button>
+    <button class="tab" data-view="chat">Chat</button>
+    <button class="tab" data-view="webhooks">Webhooks</button>
+    <span class="spacer"></span>
+    <label class="toggle" id="scopeWrap"><input type="checkbox" id="scopeAll"> everyone</label>
+  </div>
+  <div class="feed" id="feed"></div>
+  <div class="load" id="status">Loading…</div>
+  <button class="more" id="more" style="display:none">Load more</button>
+</div>
+
+<script>
+const feed = document.getElementById('feed');
+const statusEl = document.getElementById('status');
+const moreBtn = document.getElementById('more');
+let view = '', before = 0, loading = false;
+
+// Show the "everyone" toggle only to admins (harmless for others — the server
+// ignores scope=all unless you're an admin — but no reason to show it).
+fetch('/api/me').then(r => r.json()).then(me => {
+  if (me && me.user && (me.user.role === 'global_admin')) {
+    document.getElementById('scopeWrap').style.display = 'inline-flex';
+  }
+}).catch(() => {});
+
+const KIND = {
+  tool_call: { badge: 'tool', cls: 'info' },
+  chat_turn: { badge: 'chat', cls: 'info' },
+  webhook:   { badge: 'webhook', cls: 'ok' },
+};
+const AUDIT = {
+  tool_error:  { badge: 'error', cls: 'err' },
+  tool_denied: { badge: 'denied', cls: 'warn' },
+};
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+function relTime(iso) {
+  const t = new Date(iso), s = (Date.now() - t.getTime()) / 1000;
+  if (s < 60) return Math.floor(s) + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return t.toLocaleDateString();
+}
+
+function classify(ev) {
+  let meta = {};
+  try { meta = ev.meta ? (typeof ev.meta === 'string' ? JSON.parse(ev.meta) : ev.meta) : {}; } catch (_) {}
+  if (ev.kind === 'audit') {
+    const a = AUDIT[ev.item] || { badge: ev.item || 'audit', cls: '' };
+    return { badge: a.badge, cls: a.cls, item: meta.tool || ev.item, detail: meta.error || '' };
+  }
+  const k = KIND[ev.kind] || { badge: ev.kind, cls: '' };
+  let detail = '';
+  if (ev.kind === 'webhook') { detail = meta.status && meta.status !== 'ok' ? meta.status : ''; }
+  return { badge: k.badge, cls: (ev.kind === 'webhook' && detail) ? 'err' : k.cls, item: ev.item || k.badge, detail };
+}
+
+function row(ev) {
+  const c = classify(ev);
+  const el = document.createElement('div');
+  el.className = 'ev ' + (c.cls || '');
+  el.innerHTML =
+    '<div class="time" title="' + esc(new Date(ev.ts).toLocaleString()) + '">' + esc(relTime(ev.ts)) + '</div>' +
+    '<div class="rail"><span class="dot"></span></div>' +
+    '<div class="body"><div class="line">' +
+      '<span class="badge">' + esc(c.badge) + '</span>' +
+      '<span class="item">' + esc(c.item) + '</span>' +
+      (ev.session ? '<span class="sess">' + esc(ev.session) + '</span>' : '') +
+    '</div>' +
+    (c.detail ? '<div class="detail">' + esc(c.detail) + '</div>' : '') +
+    '</div>';
+  return el;
+}
+
+async function load(reset) {
+  if (loading) return;
+  loading = true;
+  if (reset) { feed.innerHTML = ''; before = 0; }
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Loading…';
+  moreBtn.style.display = 'none';
+  const p = new URLSearchParams();
+  if (view) p.set('view', view);
+  if (before) p.set('before', before);
+  if (document.getElementById('scopeAll').checked) p.set('scope', 'all');
+  try {
+    const d = await fetch('/api/activity?' + p.toString()).then(r => r.json());
+    const events = d.events || [];
+    for (const ev of events) feed.appendChild(row(ev));
+    if (!feed.children.length) { statusEl.textContent = 'Nothing here yet.'; }
+    else { statusEl.style.display = 'none'; }
+    before = d.nextBefore || 0;
+    moreBtn.style.display = before ? 'block' : 'none';
+  } catch (e) {
+    statusEl.textContent = 'Failed to load activity.';
+  } finally { loading = false; }
+}
+
+document.getElementById('tabs').addEventListener('click', e => {
+  const b = e.target.closest('.tab'); if (!b) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === b));
+  view = b.dataset.view; load(true);
+});
+document.getElementById('scopeAll').addEventListener('change', () => load(true));
+moreBtn.addEventListener('click', () => load(false));
+load(true);
+</script>
+</body>
+</html>

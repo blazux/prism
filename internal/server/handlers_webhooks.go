@@ -375,6 +375,10 @@ func (s *Server) runWebhook(ctx context.Context, hook memory.WebhookRow, message
 			status = "error: " + err.Error()
 		}
 		ms.WebhookRecordCall(context.Background(), hook.ID, status)
+		// Surface the fire in the activity feed so a human can see what their
+		// agent did on an inbound trigger, not just the webhook's own LastCallAt.
+		ms.AddUsage(context.Background(), 0, session, "webhook", hook.Name, 1,
+			map[string]interface{}{"id": hook.ID, "status": status})
 	}
 	if err != nil {
 		return "", fmt.Errorf("webhook %s: %w", hook.ID, err)

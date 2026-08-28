@@ -103,8 +103,8 @@ func isHostMode(v string) bool {
 // outside the project (an absolute path or ~), or "" for a named volume or a
 // project-relative path. Handles both compose volume syntaxes:
 //
-//	- "/var/run/docker.sock:/var/run/docker.sock"   (short string)
-//	- { type: bind, source: /etc, target: /etc }    (long map)
+//   - "/var/run/docker.sock:/var/run/docker.sock"   (short string)
+//   - { type: bind, source: /etc, target: /etc }    (long map)
 func bindHostSource(v interface{}) string {
 	switch vv := v.(type) {
 	case string:

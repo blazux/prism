@@ -218,6 +218,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/platform", s.handlePlatform)
 	mux.HandleFunc("/api/admin/platform", s.handleAdminPlatform)
 	mux.HandleFunc("/api/admin/usage", s.handleAdminUsage)
+	mux.HandleFunc("/api/activity", s.handleActivity)
 	mux.HandleFunc("/api/admin/logs", s.handleAdminLogs)
 	mux.HandleFunc("/api/notes", s.handleNotes)
 	mux.HandleFunc("/api/notes/share", s.handleNoteShare)
