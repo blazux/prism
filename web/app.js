@@ -1426,33 +1426,40 @@ async function renderSharedAdd(body) {
 
 async function renderSharedShare(body) {
   body.innerHTML = ''
-  let groups = []
-  try { groups = (await fetch('/api/my/groups').then(r => r.json())).groups || [] } catch (_) {}
-  if (!groups.length) {
+  // Groups come from the already-loaded MY_GROUPS (same source as the widget
+  // share button) — no re-fetch, so it can't come back empty on a slow call.
+  if (!MY_GROUPS.length) {
     body.innerHTML = '<div style="color:var(--text3);padding:28px;text-align:center">You are not in any group.</div>'
     return
   }
   const wsel = document.createElement('select'); wsel.style.cssText = sharedFieldCss()
   wsel.innerHTML = '<option value="__all__">Whole dashboard (all widgets)</option>' +
     [...widgets.values()].map(r => `<option value="${escHtml(r.id)}">${escHtml(r.title)}</option>`).join('')
-  const gsel = document.createElement('select'); gsel.style.cssText = sharedFieldCss()
-  gsel.innerHTML = groups.map(g => `<option value="${g.groupId}">${escHtml(g.groupName)}</option>`).join('')
-  const field = (t, el) => {
-    const w = document.createElement('div'); w.style.margin = '10px 0 0'
-    const l = document.createElement('label'); l.style.cssText = 'display:block;font-size:11.5px;color:var(--text3);margin-bottom:4px'; l.textContent = t
-    w.append(l, el); return w
-  }
-  body.append(field('What to share', wsel), field('Share with group', gsel))
+  const w = document.createElement('div'); w.style.margin = '4px 0 0'
+  const l = document.createElement('label'); l.style.cssText = 'display:block;font-size:11.5px;color:var(--text3);margin-bottom:4px'; l.textContent = 'What to share'
+  w.append(l, wsel); body.appendChild(w)
+  // No group picker: you share with the group you belong to. Only when you are
+  // in several is a choice offered (below, on click).
+  const note = document.createElement('div')
+  note.style.cssText = 'font-size:11.5px;color:var(--text3);margin-top:10px'
+  note.textContent = MY_GROUPS.length === 1 ? `Shared with your group “${MY_GROUPS[0].groupName}”.` : 'You will be asked which of your groups to share with.'
+  body.appendChild(note)
   const shareBtn = document.createElement('button')
-  shareBtn.className = 'pm-btn pm-primary'; shareBtn.style.marginTop = '14px'; shareBtn.textContent = 'Share'
+  shareBtn.className = 'pm-btn pm-primary'; shareBtn.style.marginTop = '14px'
+  shareBtn.textContent = MY_GROUPS.length === 1 ? `Share with ${MY_GROUPS[0].groupName}` : 'Share…'
   shareBtn.onclick = async () => {
     shareBtn.disabled = true
+    let groupId = MY_GROUPS[0].groupId
+    if (MY_GROUPS.length > 1) {
+      groupId = await pickShareGroup(wsel.value === '__all__' ? 'this dashboard' : 'this widget')
+      if (!groupId) { shareBtn.disabled = false; return }
+    }
     const kind = wsel.value === '__all__' ? 'dashboard' : 'widget'
-    const b = { kind, groupId: parseInt(gsel.value, 10), session: currentSessionID }
+    const b = { kind, groupId, session: currentSessionID }
     if (kind === 'widget') b.widgetId = wsel.value
     try {
       const r = await fetch('/api/shared', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json())
-      if (r && r.id) showToast({ title: 'Shared', message: `${r.count} widget(s) shared with the group`, level: 'success' })
+      if (r && r.id) showToast({ title: 'Shared', message: `${r.count} widget(s) added to your group's gallery`, level: 'success' })
       else showToast({ title: 'Share failed', message: (r && r.error) || '', level: 'error' })
     } catch (_) { showToast({ title: 'Share failed', message: '', level: 'error' }) }
     shareBtn.disabled = false
