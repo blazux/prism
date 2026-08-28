@@ -19,6 +19,7 @@ let currentSessionID = lastWorkspace
 
 // Identity for chat avatars: the current user + their personal agent.
 let ME = { uid: '', name: 'You', isAdmin: false }
+let MY_GROUPS = [] // groups the user can share widgets within (multi-user)
 let AGENT_NAME = 'Agent'
 // Apps disabled platform-wide by the global admin (Admin → Platform).
 let DISABLED_APPS = new Set()
@@ -29,6 +30,17 @@ async function loadIdentity() {
   try { ME.isAdmin = !!(await fetch('/api/me').then(r => r.json())).isAdmin } catch (_) {}
   try { AGENT_NAME = (await fetch('/api/agent/name', { cache: 'no-store' }).then(r => r.json())).name || 'Agent' } catch (_) {}
   try { DISABLED_APPS = new Set((await fetch('/api/platform').then(r => r.json())).disabledApps || []) } catch (_) {}
+  try { MY_GROUPS = (await fetch('/api/my/groups').then(r => r.json())).groups || [] } catch (_) {}
+  refreshShareAffordances()
+}
+
+// Show the per-widget share button (and the header gallery button) only when
+// the user belongs to a group — sharing is a multi-user, group-scoped feature.
+function refreshShareAffordances() {
+  const on = MY_GROUPS.length > 0
+  document.querySelectorAll('.widget-share').forEach(b => { b.style.display = on ? '' : 'none' })
+  const sb = document.getElementById('shared-btn')
+  if (sb) { sb.style.display = on ? 'flex' : 'none'; sb.onclick = () => openSharedGallery() }
 }
 function applyDisabledApps() {
   for (const a of DISABLED_APPS) {
@@ -259,13 +271,20 @@ function mountWindow(rec) {
   titleEl.className = 'widget-title'
   titleEl.textContent = rec.title
 
+  const shareBtn = document.createElement('button')
+  shareBtn.className = 'widget-min widget-share'
+  shareBtn.textContent = '⤴'
+  shareBtn.title = 'Share this widget with a group'
+  shareBtn.style.display = MY_GROUPS.length ? '' : 'none'
+  shareBtn.addEventListener('click', (e) => { e.stopPropagation(); shareWidget(rec.id, rec.title) })
+
   const minBtn = document.createElement('button')
   minBtn.className = 'widget-min'
   minBtn.textContent = '–'
   minBtn.title = 'Minimize (keep in dock)'
   minBtn.addEventListener('click', () => minimizeWidget(rec.id))
 
-  hdr.append(titleEl, minBtn)
+  hdr.append(titleEl, shareBtn, minBtn)
 
   const body = document.createElement('div')
   body.className = 'widget-body'
@@ -1286,6 +1305,47 @@ function editWorkspace(sess) {
     }
   }
   setTimeout(() => dlg.querySelector('#ws-name').focus(), 50)
+}
+
+// shareWidget publishes one widget to a group, straight from its window header —
+// the intuitive "this widget is good, share it" affordance (the gallery modal's
+// Share tab does the same, plus whole-dashboard).
+async function shareWidget(id, title) {
+  if (!MY_GROUPS.length) return
+  let groupId = MY_GROUPS[0].groupId
+  if (MY_GROUPS.length > 1) {
+    groupId = await pickShareGroup(title)
+    if (!groupId) return
+  } else {
+    const ok = await PrismModal.confirm(`Share "${title}" with the group "${MY_GROUPS[0].groupName}"? Members can then add it to their own dashboard.`, { title: 'Share widget', okLabel: 'Share' })
+    if (!ok) return
+  }
+  try {
+    const r = await fetch('/api/shared', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'widget', widgetId: id, groupId, session: currentSessionID }) }).then(r => r.json())
+    if (r && r.id) showToast({ title: 'Shared', message: `"${title}" is now in your group's gallery`, level: 'success' })
+    else showToast({ title: 'Share failed', message: (r && r.error) || '', level: 'error' })
+  } catch (_) { showToast({ title: 'Share failed', message: '', level: 'error' }) }
+}
+
+// pickShareGroup asks which group to publish to (only used when the user is in
+// several). Resolves the chosen groupId, or null on cancel.
+function pickShareGroup(title) {
+  if (!window.PrismModal) return Promise.resolve(null)
+  PrismModal.ensureStyle()
+  return PrismModal.open({
+    onEscape: null,
+    render(box, done) {
+      const t = document.createElement('div'); t.className = 'pm-title'; t.textContent = `Share "${title}"`
+      box.appendChild(t)
+      const sel = document.createElement('select'); sel.style.cssText = sharedFieldCss(); sel.style.marginTop = '10px'
+      sel.innerHTML = MY_GROUPS.map(g => `<option value="${g.groupId}">${escHtml(g.groupName)}</option>`).join('')
+      box.appendChild(sel)
+      const foot = document.createElement('div'); foot.className = 'pm-foot'
+      foot.appendChild(PrismModal.btn('Cancel', '', () => done(null)))
+      foot.appendChild(PrismModal.btn('Share', 'pm-primary', () => done(parseInt(sel.value, 10))))
+      box.appendChild(foot)
+    },
+  })
 }
 
 // ─── Shared widgets gallery (multi-user groups) ──────────────────────────────
