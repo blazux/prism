@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Activity</title>
+<link rel="stylesheet" href="/widget-base.css">
+<script src="/theme.js"></script>
+<script>
+  addEventListener('message', e => {
+    if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
+      const r = document.documentElement.style;
+      for (const k in e.data.vars) r.setProperty(k, e.data.vars[k]);
+    }
+  });
+</script>
+<style>
+  html, body { height: 100%; }
+  body { padding: 0; overflow: hidden; }
+  .app { display: flex; flex-direction: column; height: 100%; }
+  .head { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .head h1 { font-size: 16px; color: var(--text); margin: 0; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { background: none; border: none; color: var(--text2); padding: 6px 12px; border-radius: 7px; cursor: pointer; font: inherit; font-size: 13px; }
+  .tab:hover { color: var(--text); }
+  .tab.active { background: var(--bg3); color: var(--accent); }
+  .head .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .scope { display: none; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); cursor: pointer; }
+  .refresh { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 15px; padding: 4px 6px; border-radius: 6px; }
+  .refresh:hover { color: var(--text); background: var(--bg3); }
+
+  .view { flex: 1; overflow-y: auto; min-height: 0; }
+  .row { display: grid; grid-template-columns: 68px 14px 1fr; gap: 10px; padding: 11px 18px;
+         border-bottom: 1px solid var(--border); align-items: baseline; }
+  .row:hover { background: var(--bg2); }
+  .row .time { color: var(--text3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+  .row .rail { position: relative; align-self: stretch; }
+  .row .dot { width: 8px; height: 8px; border-radius: 50%; position: absolute; top: 5px; left: 3px; background: var(--text3); }
+  .row.err .dot { background: var(--red); }
+  .row.warn .dot { background: var(--yellow); }
+  .row.ok .dot { background: var(--green); }
+  .row.info .dot { background: var(--accent); }
+  .body { min-width: 0; }
+  .line { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .item { font-weight: 600; color: var(--text); font-size: 13.5px; }
+  .badge { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600;
+           padding: 2px 8px; border-radius: 999px; background: var(--bg4); color: var(--text2); }
+  .row.err .badge { background: color-mix(in srgb, var(--red) 20%, transparent); color: var(--red); }
+  .row.warn .badge { background: color-mix(in srgb, var(--yellow) 22%, transparent); color: var(--yellow); }
+  .row.ok .badge { background: var(--accent-dim); color: var(--accent); }
+  .sess { font-size: 11px; color: var(--text3); }
+  .detail { font-family: var(--mono, monospace); font-size: 12px; color: var(--text2);
+            margin-top: 4px; white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+
+  .more { margin: 16px auto; display: block; font: inherit; font-size: 13px; cursor: pointer;
+          border: 1px solid var(--border2); background: var(--bg2); color: var(--text);
+          padding: 7px 18px; border-radius: 8px; }
+  .more:hover { border-color: var(--accent); }
+  .empty, .load { display: flex; flex-direction: column; align-items: center; justify-content: center;
+                  gap: 8px; color: var(--text3); padding: 60px 20px; text-align: center; font-size: 14px; }
+  .empty .big { font-size: 40px; opacity: .3; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="head">
+    <h1>Activity</h1>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-view="">All</button>
+      <button class="tab" data-view="errors">Errors</button>
+      <button class="tab" data-view="tools">Tools</button>
+      <button class="tab" data-view="chat">Chat</button>
+      <button class="tab" data-view="webhooks">Webhooks</button>
+    </div>
+    <div class="right">
+      <label class="scope" id="scopeWrap"><input type="checkbox" id="scopeAll"> everyone</label>
+      <button class="refresh" id="refresh" title="Refresh">⟳</button>
+    </div>
+  </div>
+  <div class="view" id="view">
+    <div class="feed" id="feed"></div>
+    <div class="load" id="status">Loading…</div>
+    <button class="more" id="more" style="display:none">Load more</button>
+  </div>
+</div>
+
+<script>
+const feed = document.getElementById('feed');
+const statusEl = document.getElementById('status');
+const moreBtn = document.getElementById('more');
+let view = '', before = 0, loading = false;
+
+fetch('/api/me').then(r => r.json()).then(me => {
+  if (me && me.user && me.user.role === 'global_admin') {
+    document.getElementById('scopeWrap').style.display = 'inline-flex';
+  }
+}).catch(() => {});
+
+const KIND = {
+  tool_call: { badge: 'tool', cls: 'info' },
+  chat_turn: { badge: 'chat', cls: 'info' },
+  webhook:   { badge: 'webhook', cls: 'ok' },
+};
+const AUDIT = {
+  tool_error:  { badge: 'error', cls: 'err' },
+  tool_denied: { badge: 'denied', cls: 'warn' },
+};
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+function relTime(iso) {
+  const t = new Date(iso), s = (Date.now() - t.getTime()) / 1000;
+  if (s < 60) return Math.max(0, Math.floor(s)) + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h';
+  return t.toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
+}
+
+function classify(ev) {
+  let meta = {};
+  try { meta = ev.meta ? (typeof ev.meta === 'string' ? JSON.parse(ev.meta) : ev.meta) : {}; } catch (_) {}
+  if (ev.kind === 'audit') {
+    const a = AUDIT[ev.item] || { badge: ev.item || 'audit', cls: '' };
+    return { badge: a.badge, cls: a.cls, item: meta.tool || ev.item, detail: meta.error || '' };
+  }
+  const k = KIND[ev.kind] || { badge: ev.kind, cls: '' };
+  let detail = '';
+  if (ev.kind === 'webhook') detail = (meta.status && meta.status !== 'ok') ? meta.status : '';
+  return { badge: k.badge, cls: (ev.kind === 'webhook' && detail) ? 'err' : k.cls, item: ev.item || k.badge, detail };
+}
+
+function row(ev) {
+  const c = classify(ev);
+  const el = document.createElement('div');
+  el.className = 'row ' + (c.cls || '');
+  el.innerHTML =
+    '<div class="time" title="' + esc(new Date(ev.ts).toLocaleString()) + '">' + esc(relTime(ev.ts)) + '</div>' +
+    '<div class="rail"><span class="dot"></span></div>' +
+    '<div class="body"><div class="line">' +
+      '<span class="badge">' + esc(c.badge) + '</span>' +
+      '<span class="item">' + esc(c.item) + '</span>' +
+      (ev.session ? '<span class="sess">' + esc(ev.session) + '</span>' : '') +
+    '</div>' +
+    (c.detail ? '<div class="detail">' + esc(c.detail) + '</div>' : '') +
+    '</div>';
+  return el;
+}
+
+async function load(reset) {
+  if (loading) return;
+  loading = true;
+  if (reset) { feed.innerHTML = ''; before = 0; }
+  statusEl.style.display = 'flex';
+  statusEl.innerHTML = 'Loading…';
+  moreBtn.style.display = 'none';
+  const p = new URLSearchParams();
+  if (view) p.set('view', view);
+  if (before) p.set('before', before);
+  if (document.getElementById('scopeAll').checked) p.set('scope', 'all');
+  try {
+    const d = await fetch('/api/activity?' + p.toString()).then(r => r.json());
+    const events = d.events || [];
+    for (const ev of events) feed.appendChild(row(ev));
+    if (!feed.children.length) { statusEl.innerHTML = '<div class="big">≋</div><div>Nothing here yet.</div>'; }
+    else { statusEl.style.display = 'none'; }
+    before = d.nextBefore || 0;
+    moreBtn.style.display = before ? 'block' : 'none';
+  } catch (e) {
+    statusEl.innerHTML = 'Failed to load activity.';
+  } finally { loading = false; }
+}
+
+document.getElementById('tabs').addEventListener('click', e => {
+  const b = e.target.closest('.tab'); if (!b) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === b));
+  view = b.dataset.view; load(true);
+});
+document.getElementById('scopeAll').addEventListener('change', () => load(true));
+document.getElementById('refresh').addEventListener('click', () => load(true));
+moreBtn.addEventListener('click', () => load(false));
+load(true);
+</script>
+</body>
+</html>

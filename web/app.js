@@ -1029,7 +1029,7 @@ window.handleSecretKey = function(e) {
 
 // ─── View router (rail: apps + boards) ─────────────────────────────────────────
 
-const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar', room: 'Room' }
+const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar', activity: 'Activity', room: 'Room' }
 const ASSISTANT = 'assistant'            // reserved session: the global super-agent
 let currentView = { type: 'board' }      // { type:'board', workspace } | { type:'app', name }
 let allSessions = []
