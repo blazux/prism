@@ -30,7 +30,12 @@ async function loadIdentity() {
   try { ME.isAdmin = !!(await fetch('/api/me').then(r => r.json())).isAdmin } catch (_) {}
   try { AGENT_NAME = (await fetch('/api/agent/name', { cache: 'no-store' }).then(r => r.json())).name || 'Agent' } catch (_) {}
   try { DISABLED_APPS = new Set((await fetch('/api/platform').then(r => r.json())).disabledApps || []) } catch (_) {}
-  try { MY_GROUPS = (await fetch('/api/my/groups').then(r => r.json())).groups || [] } catch (_) {}
+  // /api/my/groups returns two shapes: {groupId,groupName} for a member,
+  // {id,name} for a global admin (ListGroups). Normalize to one.
+  try {
+    const raw = (await fetch('/api/my/groups').then(r => r.json())).groups || []
+    MY_GROUPS = raw.map(g => ({ groupId: g.groupId ?? g.id, groupName: g.groupName ?? g.name }))
+  } catch (_) {}
   refreshShareAffordances()
 }
 

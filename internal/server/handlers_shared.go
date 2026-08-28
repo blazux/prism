@@ -130,7 +130,7 @@ func (s *Server) handleShared(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "invalid JSON")
 			return
 		}
-		if !s.userInGroup(r.Context(), u.ID, body.GroupID) {
+		if !u.IsGlobalAdmin() && !s.userInGroup(r.Context(), u.ID, body.GroupID) {
 			writeErr(w, http.StatusForbidden, "you are not a member of that group")
 			return
 		}
@@ -209,7 +209,7 @@ func (s *Server) handleSharedItem(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case r.Method == http.MethodPost && action == "add":
-		if !s.userInGroup(r.Context(), u.ID, item.GroupID) {
+		if !u.IsGlobalAdmin() && !s.userInGroup(r.Context(), u.ID, item.GroupID) {
 			writeErr(w, http.StatusForbidden, "you are not a member of that group")
 			return
 		}
