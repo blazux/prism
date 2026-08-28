@@ -1350,7 +1350,7 @@ function pickShareGroup(title) {
 
 // ─── Shared widgets gallery (multi-user groups) ──────────────────────────────
 function sharedFieldCss() {
-  return 'width:100%;box-sizing:border-box;padding:8px 10px;font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--border2);border-radius:8px'
+  return 'width:100%;box-sizing:border-box;padding:8px 10px;font:inherit;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:8px'
 }
 
 function openSharedGallery() {
