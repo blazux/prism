@@ -30,6 +30,120 @@ Is this a great idea? Probably. Does it make you slightly nervous? It should. Th
 
 ---
 
+## Quick start
+
+Three things and you're in: a model server, a `.env`, and `docker compose up`.
+
+**1. Have a model server.** The default is [Ollama](https://ollama.com), local or on another box, with a chat model and an embedding model pulled:
+
+```bash
+ollama pull qwen3.6:27b          # chat — anything with tool calling works
+ollama pull qwen3-embedding:8b   # embeddings, for the knowledge base
+```
+
+Not on Ollama? vLLM, LM Studio, llama.cpp or Claude all work too — see [Choosing your backend](#choosing-your-backend) below and come back.
+
+**2. Configure.**
+
+```bash
+git clone https://github.com/blazux/prism
+cd prism
+cp .env.example .env
+```
+
+Open `.env` and set the three lines that matter — everything else works out of the box:
+
+```dotenv
+OLLAMA_URL=http://host-gateway:11434   # host-gateway = the machine running Docker
+OLLAMA_MODEL=qwen3.6:27b
+EMBED_MODEL=qwen3-embedding:8b
+```
+
+Set `TZ` to your timezone while you're there, and `PRISM_TOKEN` if anyone but you can reach the port.
+
+**3. Run.**
+
+```bash
+docker compose up -d
+```
+
+Open [http://localhost:48080](http://localhost:48080), type your `PRISM_TOKEN` if you set one, and say hi. The first message takes a moment — the model is loading. Something off? [First run & troubleshooting](#first-run--troubleshooting) has the usual suspects.
+
+> Docker + Docker Compose are the only host requirements. PostgreSQL (pgvector), SearXNG and Traefik are bundled in the compose file — nothing else to install.
+
+---
+
+## Choosing your backend
+
+Prism speaks three dialects. Pick one as the default with `LLM_BACKEND`, or configure several — every model from every configured backend shows up in the same picker, and each message goes to the server that holds the model you chose.
+
+| | **Ollama** (default) | **OpenAI-compatible** | **Anthropic / Claude** |
+|---|---|---|---|
+| Talks to | Ollama | vLLM, SGLang, TGI, LM Studio, llama.cpp, LiteLLM, OpenRouter… | api.anthropic.com |
+| Chat + tools | ✅ | ✅ | ✅ |
+| Embeddings (RAG) | ✅ | ✅ if the server exposes `/v1/embeddings` — else `EMBED_BACKEND=ollama` | ❌ — RAG stays on Ollama automatically |
+| Vision (looks at widgets) | ✅ with a vision model | ✅ with a vision model | ✅ |
+| Reasoning on/off toggle | ✅ | ✅ (`enable_thinking`) | — never requested |
+| Runs on your hardware | ✅ | ✅ (or not, your call) | ❌ |
+| Costs | electricity | electricity | **tokens** — see below |
+
+### Ollama — the everyday setup
+
+```dotenv
+OLLAMA_URL=http://host-gateway:11434
+OLLAMA_MODEL=qwen3.6:27b
+EMBED_MODEL=qwen3-embedding:8b
+```
+
+That's the whole thing. `host-gateway` resolves to the Docker host; use a plain URL for a remote box.
+
+### OpenAI-compatible — your own inference server
+
+```dotenv
+LLM_BACKEND=openai
+OPENAI_BASE_URL=http://host-gateway:8000/v1   # the /v1 root
+OPENAI_MODEL=qwen                             # the server's --served-model-name
+# OPENAI_API_KEY=                             # only if the server asks for one
+EMBED_MODEL=qwen3-embedding:8b
+# EMBED_BACKEND=ollama                        # if the server has no /v1/embeddings
+```
+
+Chat-only servers are common (a 120B on vLLM rarely bothers with embeddings) — keep `OLLAMA_URL` set and `EMBED_BACKEND=ollama` and RAG carries on quietly over there. Heavy reasoners (gpt-oss and friends) get `reasoning_effort=medium` by default so they don't spend the whole token budget thinking and forget to answer; `OPENAI_REASONING_EFFORT=low|high|none` overrides it.
+
+### Anthropic — Claude, for when local isn't enough
+
+```dotenv
+ANTHROPIC_API_KEY=sk-ant-api03-…
+# ANTHROPIC_MODEL=claude-sonnet-5     # the default if you make it LLM_BACKEND=anthropic
+```
+
+You don't have to make Claude the default. Set the key alongside your local backend and its models simply join the picker: local model for daily driving, Claude for the hard stuff, switched per message. Only the messages where you pick Claude are billed. Embeddings stay on Ollama (Anthropic serves none), so keep `OLLAMA_URL` and `EMBED_MODEL` set.
+
+> **On the subject of billing.** Prism is an *agent*, not a chatbot. A single "check my server and fix the disk alert" is fifteen model calls, each one carrying the system prompt, the tool schemas, the conversation so far and whatever `ls -la` returned. Now multiply by a widget-building session and a cron job that runs every hour. Claude is excellent at this, and it will bill you for every token of that excellence — with the same cheerful thoroughness it applies to everything else. Set a spending limit on console.anthropic.com *before* the first "make me a dashboard", not after the invoice. A local model is slower and dumber and costs you nothing per iteration; that trade-off is the whole reason the picker exists.
+
+<details>
+<summary><b>Why a Claude Pro/Max subscription won't work (and this is deliberate)</b></summary>
+
+The OAuth token the `claude` CLI stores does authenticate, and plain chat runs on it — but Anthropic classifies a tool-bearing request from anything that isn't Claude Code as a third-party app and bills it against *extra usage* rather than plan limits, so the agent loop is refused. The refusal is intermittent and no model or setting avoids it ([hermes-agent#31668](https://github.com/NousResearch/hermes-agent/issues/31668) is the same wall from the other side, closed with no fix). Prism is an agent, so a brain that drops tool calls at random is worse than no brain: it was implemented, measured, and taken out rather than shipped as a trap. Paste that token into `ANTHROPIC_API_KEY` and Prism tells you why it won't work instead of letting Anthropic answer `401`.
+
+</details>
+
+### All of them at once
+
+```dotenv
+LLM_BACKEND=ollama                          # the default brain
+OLLAMA_URL=http://host-gateway:11434
+OLLAMA_MODEL=qwen3.6:27b
+EMBED_MODEL=qwen3-embedding:8b
+OPENAI_BASE_URL=http://gpu-box:8000/v1      # the heavyweight
+OPENAI_MODEL=qwen3-235b
+ANTHROPIC_API_KEY=sk-ant-api03-…            # the expensive one
+```
+
+One picker, three servers, per-message choice. Webhooks and rooms can each pin their own model too.
+
+---
+
 ## Stack
 
 | Layer | Tech |
@@ -46,26 +160,6 @@ Is this a great idea? Probably. Does it make you slightly nervous? It should. Th
 | Voice | Optional phone line via [PrismConnect](https://github.com/blazux/PrismConnect) — the agent answers and places calls |
 | Modes | Personal (single user) or shared (accounts, groups, rooms) — one flag |
 | Runtime | Docker / Docker Compose |
-
----
-
-## Requirements
-
-- Docker + Docker Compose
-- An [Ollama](https://ollama.com) instance (local or remote) with at least one model and one embedding model pulled — or any OpenAI-compatible server for chat, with Ollama still handling embeddings
-
----
-
-## Quick start
-
-```bash
-git clone https://github.com/blazux/prism
-cd prism
-cp .env.example .env   # edit to point at your Ollama instance
-docker compose up -d
-```
-
-Open [http://localhost:48080](http://localhost:48080).
 
 ---
 
@@ -145,16 +239,6 @@ Point `VOX_URL` at a [PrismConnect](https://github.com/blazux/PrismConnect) inst
 
 ---
 
-## Bring your own model
-
-Prism talks to **Ollama** by default, but it'll happily point at any **OpenAI-compatible** server — vLLM, SGLang, TGI, LM Studio, llama.cpp, even OpenRouter if you insist on sending your data to the cloud (we won't tell). Wire *both* at once and the model picker spans them: a fast local model for daily driving, a 120B reasoner for when you're feeling ambitious — switch per message from the dropdown. Embeddings can stay on Ollama while chat runs elsewhere, because not every inference server bothers to implement `/v1/embeddings`.
-
-There's also an **Anthropic** backend for driving Prism with Claude. Set `ANTHROPIC_API_KEY` and Claude's models join the same picker as your local ones — you don't have to make it the default: keep your fleet or Ollama as the everyday brain and reach for Claude per message, and only those messages are billed. Set `LLM_BACKEND=anthropic` if you'd rather it answer by default. RAG stays on Ollama automatically, since Anthropic serves no embeddings.
-
-> **A Claude Pro/Max subscription will not work, and this is deliberate.** The OAuth token the `claude` CLI stores does authenticate, and plain chat runs on it — but Anthropic classifies a tool-bearing request from anything that isn't Claude Code as a third-party app and bills it against *extra usage* rather than plan limits, so the agent loop is refused. The refusal is intermittent and no model or setting avoids it ([hermes-agent#31668](https://github.com/NousResearch/hermes-agent/issues/31668) is the same wall from the other side, closed with no fix). Prism is an agent, so a brain that drops tool calls at random is worse than no brain: it was implemented, measured, and taken out rather than shipped as a trap. Paste that token into `ANTHROPIC_API_KEY` and Prism tells you why it won't work instead of letting Anthropic answer `401`.
-
----
-
 ## It remembers, and occasionally learns
 
 Prism keeps a memory of who you are and how you work, records lessons from problems it stumbled through, and saves multi-step jobs as reusable **skills** — so the second time you ask, it doesn't reinvent the wheel. Long conversations get summarized automatically, and it can full-text search everything you've ever discussed, which means it (mostly) stops asking you to repeat yourself. Secrets you hand it are stored **AES-256-GCM encrypted**, not in a plaintext file it'll cheerfully commit to Git.
@@ -163,41 +247,62 @@ Prism keeps a memory of who you are and how you work, records lessons from probl
 
 ## Configuration
 
-All configuration is done via environment variables (set in `docker-compose.yml` or a `.env` file):
+Everything is an environment variable, set in `.env` (the annotated [`.env.example`](.env.example) follows the same sections). Docker Compose reads it on `up`.
 
-| Variable | Description | Example |
+### Required
+
+| Variable | What | Example |
 |---|---|---|
-| `OLLAMA_URL` | URL of your Ollama instance | `http://ollama:11434` |
-| `OLLAMA_MODEL` | LLM model to use | `qwen3.6:27b` |
-| `EMBED_MODEL` | Embedding model for RAG | `qwen3-embedding:8b` |
-| `LLM_BACKEND` | `ollama` (default), `openai` for any OpenAI-compatible server, or `anthropic` for Claude | `openai` |
-| `OPENAI_BASE_URL` | The `/v1` root, when `LLM_BACKEND=openai` | `http://host:8000/v1` |
-| `OPENAI_MODEL` | Chat model name for the openai backend (its `--served-model-name`) | `qwen` |
-| `OPENAI_API_KEY` | Key for the openai backend, if it needs one (local servers usually don't) | `sk-…` |
-| `ANTHROPIC_MODEL` | Claude model to offer — read whether or not Anthropic is the default backend | `claude-sonnet-5` |
-| `ANTHROPIC_API_KEY` | Anthropic API key from console.anthropic.com. A subscription token is not accepted — see above | `sk-ant-api03-…` |
-| `PRISM_TOKEN` | Login token — protects the dashboard (omit to disable auth) | `change-me` |
-| `MULTI_USER` | `1` to turn on accounts, groups, rooms and the admin console (default: personal, single-user) | `1` |
-| `VOX_URL` | A [PrismConnect](https://github.com/blazux/PrismConnect) instance — gives the agent a phone (empty = no telephony) | `http://prismconnect:7860` |
-| `VOX_USER` / `VOX_PASSWORD` | Credentials for the PrismConnect instance, if it's protected | `agent` / `…` |
-| `POSTGRES_URL` | PostgreSQL connection string | `postgres://rag:rag@postgres:5432/rag` |
-| `SEARXNG_URL` | SearXNG instance URL (optional) | `http://searxng:8080` |
-| `AGENT_CONTAINER` | Name of the workspace container the agent runs code in | `prism-workspace` |
-| `WORKSPACE_DIR` | Agent workspace directory | `/workspace` |
-| `PLUGIN_DIR` | Widget storage directory | `/workspace/.plugins` |
-| `CHAT_VISION` | `false` if the chat model is text-only (e.g. MiniMax) — widget previews are captioned to text instead of shown | `false` |
-| `VISION_MODEL` | Override the model used to caption widget previews (defaults to the chat model) | `qwen3-vl` |
-| `TZ` | Timezone for the agent and cron jobs | `America/New_York`, `Europe/Paris` |
-| `SERVICE_PORT_START` | First host port in the auto-allocation range | `20000` |
-| `SERVICE_PORT_END` | Last host port in the auto-allocation range | `20999` |
+| `OLLAMA_URL` | Your Ollama instance | `http://host-gateway:11434` |
+| `OLLAMA_MODEL` | Chat model (pulled) | `qwen3.6:27b` |
+| `EMBED_MODEL` | Embedding model (pulled) | `qwen3-embedding:8b` |
 
-> **The only required changes are `OLLAMA_URL` and the model names** — everything else works out of the box with the default Docker Compose setup.
+### Backends
 
-> **Every model, one menu:** set `LLM_BACKEND` to whichever is your default, then fill in whatever else you have — `OLLAMA_URL`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY` — and the picker lists all of them, routing each pick to the server that holds it. A fast local default for daily driving, a heavyweight reasoner and Claude both one click away.
+| Variable | What | Default |
+|---|---|---|
+| `LLM_BACKEND` | Default chat backend: `ollama`, `openai` or `anthropic` | `ollama` |
+| `OPENAI_BASE_URL` | `/v1` root of an OpenAI-compatible server | — |
+| `OPENAI_MODEL` | Its chat model (`--served-model-name`) | — |
+| `OPENAI_API_KEY` | Bearer token, if the server wants one | — |
+| `OPENAI_REASONING_EFFORT` | `low` / `medium` / `high` / `none` for reasoning models | `medium` |
+| `ANTHROPIC_API_KEY` | API key from console.anthropic.com (not a subscription token) | — |
+| `ANTHROPIC_MODEL` | Default Claude model | `claude-sonnet-5` |
+| `ANTHROPIC_BASE_URL` | Only for a proxy/gateway | `https://api.anthropic.com` |
+| `EMBED_BACKEND` | Where embeddings run: `ollama` or `openai`; empty = follow `LLM_BACKEND` (Anthropic → Ollama) | — |
+| `CHAT_VISION` | `false` if the chat model is text-only — widget previews are captioned instead | `true` |
+| `VISION_MODEL` | Model used for that captioning | the chat model |
 
-> **Note on embedding models:** the vector dimension is detected automatically at startup by probing the model. If you change the embedding model, you need to reset the RAG database (the vector dimension is fixed per table).
+### Everything else
 
-> **Note on timezone:** `TZ` defaults to `UTC`. Set it to your local timezone (IANA format, e.g. `America/New_York`, `Europe/Paris`, `Asia/Tokyo`) so that cron schedules and agent timestamps match your local time. For a fixed offset without daylight saving, use `Etc/GMT+4` (note: POSIX convention inverts the sign — `Etc/GMT+4` = UTC-4).
+| Variable | What | Default |
+|---|---|---|
+| `PRISM_TOKEN` | Login token for the dashboard; unset = no login | — |
+| `MULTI_USER` | `1` for accounts, groups, rooms and an admin console ([one-way door](#personal-or-shared)) | off |
+| `TZ` | IANA timezone for cron and timestamps (`Europe/Paris`) | `UTC` |
+| `SEARXNG_URL` | SearXNG for web search; remove to disable | `http://searxng:8080` |
+| `POSTGRES_URL` | PostgreSQL connection string | bundled service |
+| `VOX_URL` / `VOX_USER` / `VOX_PASSWORD` | [PrismConnect](https://github.com/blazux/PrismConnect) for telephony | — |
+| `WORKSPACE` | `gpu` for the CUDA workspace image (~20 GB) | ubuntu base |
+| `SERVICE_PORT_START` / `_END` | Host port range for agent-launched containers | `20000–20999` |
+| `AGENT_CONTAINER`, `WORKSPACE_DIR`, `PLUGIN_DIR` | Internal Docker plumbing — leave alone | set |
+
+Things that aren't env vars — the agent's name and personality, its **turn budget** (max iterations per message, reasoning on/off), integrations, webhooks — live in **Settings** and change without a restart.
+
+---
+
+## First run & troubleshooting
+
+- **It can't reach Ollama.** From inside Docker, `localhost` is the container, not your machine. Use `host-gateway` (the compose file maps it) or the host's LAN IP. `docker compose logs -f prism-server` shows what it tried.
+- **"model not found".** The name must match `ollama list` exactly, tag included — `qwen3.6:27b`, not `qwen3.6`.
+- **Replies come back empty or cut off on a reasoning model.** It spent the whole budget thinking. Lower `OPENAI_REASONING_EFFORT`, or switch reasoning off in **Settings → Agent**.
+- **"Iteration limit reached".** The agent hit its per-message cap on a long task — not a bug, a budget. Raise it in **Settings → Agent → Turn budget** (default 75, up to 500), or just say "continue".
+- **Widget previews look wrong / the agent says it can't see.** Text-only chat model: set `CHAT_VISION=false` and optionally `VISION_MODEL` to a small vision model for captions.
+- **You changed `EMBED_MODEL`.** The vector dimension is fixed per table — reset the RAG data (`docker compose down -v` wipes everything, or drop the `rag_*` tables) and re-index.
+- **Upgrading.** `docker compose pull && docker compose up -d` (or `--build` if you build locally). Schema migrations run at start, nothing to do — [docs/UPGRADING.md](docs/UPGRADING.md) is the contract.
+- **Timezone.** `TZ` accepts IANA names; for a fixed offset use `Etc/GMT+4` — POSIX inverts the sign, so that's UTC-4.
+
+More on daily use in [docs/help/](docs/help/) — it's also the built-in help inside the app.
 
 ---
 
