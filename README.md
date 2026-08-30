@@ -225,11 +225,35 @@ reply in the response.
 
 ## Personal, or shared
 
-Prism is a personal dashboard by default: one user, and `PRISM_TOKEN` is the whole of authentication. But the same binary runs a shared deployment — set `MULTI_USER=1` and it grows accounts, a login and signup page, groups, per-user scoping for every integration, an admin console, and **Rooms** (shared chat spaces where several people talk to the same agent). The first person to sign up becomes the global admin.
+Same binary, one flag. Decide which you are before the first `up`:
 
-It's the same codebase either way; the mode is decided in one place. At home you never see any of it.
+| | **Personal** (default) | **Shared** (`MULTI_USER=1`) |
+|---|---|---|
+| Who it's for | You. Maybe your household on the NAS. | A team, a lab, an association — several people, one Prism |
+| Login | `PRISM_TOKEN`, or nothing at all | Accounts: email + password, signup page |
+| Who's admin | Whoever reaches the port | The first person to sign up; they approve everyone after |
+| Agents | Your agent, your workspaces | Everyone gets their own agent **plus** a shared agent per group |
+| Integrations (mail, calendar, OAuth…) | Global | Scoped per user — your mailbox is yours |
+| Where to configure | Settings | Settings for yourself, **Admin console** for the deployment |
 
-> **Heads up:** turning `MULTI_USER` on is a one-way door. It migrates this deployment's config keys and secrets into the first admin's scope, and single-user mode would no longer find them. Decide before you flip it, not after.
+> Personal mode without `PRISM_TOKEN` means *anyone who can reach the port is you*. Fine on a laptop; set the token the moment the box has a LAN address.
+
+### How shared mode works
+
+**Accounts.** The first signup becomes the global admin, auto-approved. Every later signup lands as *pending* and can't log in until an admin approves it in **Admin → Users** (admins are notified). No open registration by surprise.
+
+**Groups** are the unit of collaboration. The global admin creates them and adds members; a member can be promoted to *group admin* for that group. Each group has:
+
+- a **shared agent** — its own name, avatar, model, system prompt and turn budget, configured by a group admin. It lives in the group's **Room**, a chat where members talk to each other and to the agent by @mention, and it's the one that answers on the group's **Webex** bot;
+- a **knowledge base** and **MCP servers** shared with the whole group — the shared agent and every member's personal agent can use them, members see them read-only;
+- **group secrets** for those MCP servers and tools;
+- a **tool policy**: the global admin sets the ceiling for every tool (*open to members* / *admins only* / *disabled*), a group admin can only tighten it for their group. Everything is open by default — it's a trusted deployment, not a hostile one.
+
+**What stays personal.** Each member keeps their own agent, personality, workspaces, chat history, and their own integrations. Group things are additive: your agent gains the group's knowledge base, it doesn't lose yours.
+
+### Switching
+
+> **Turning `MULTI_USER` on is a one-way door.** At the first start in shared mode, Prism migrates the deployment's existing config keys and secrets into the scope of the first admin — so *you* must be that first signup, or your mail and calendar settings end up belonging to whoever beat you to it. Single-user mode won't find them afterwards. Starting from a fresh volume is the clean way; flipping an existing install works as long as you sign up first.
 
 ---
 
