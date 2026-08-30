@@ -828,8 +828,10 @@ async function renderAgentTab(container) {
   container.appendChild(page)
 
   let name = '', base = '', sessions = [], uid = ''
+  let limits = { maxIterations: 0, thinking: true, default: 75, min: 10, max: 500 }
   const NO_CACHE = { cache: 'no-store' }
   try { name = (await fetch('/api/agent/name', NO_CACHE).then(r => r.json())).name || '' } catch (_) {}
+  try { limits = Object.assign(limits, await fetch('/api/agent/limits', NO_CACHE).then(r => r.json())) } catch (_) {}
   try { base = (await fetch('/api/agent/personality', NO_CACHE).then(r => r.json())).personality || '' } catch (_) {}
   try { sessions = (await fetch('/api/sessions', NO_CACHE).then(r => r.json())).sessions || [] } catch (_) {}
   try { uid = (await fetch('/api/profile').then(r => r.json())).userId || 0 } catch (_) {}
@@ -854,6 +856,18 @@ async function renderAgentTab(container) {
       <span id="ag-status" class="ag-status"></span>
     </div>
 
+    <div class="config-cat-header" style="margin-top:26px"><span class="config-cat-icon" style="color:var(--accent)">${icon('agent')}</span><span class="config-cat-name">Turn budget</span></div>
+    <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.5">How far one message may go. Each model call (every tool use is one) counts as an iteration — raise the cap for long multi-step tasks that hit "iteration limit reached".</div>
+    <label class="ag-label">Max iterations per turn
+      <input id="ag-maxiter" type="number" min="${limits.min}" max="${limits.max}" step="5" placeholder="${limits.default} (default)" value="${limits.maxIterations || ''}" style="max-width:160px">
+      <span style="color:var(--text3);font-size:11.5px;display:block;margin-top:4px">${limits.min}–${limits.max}. Leave blank for the default (${limits.default}). Identical-call loops are still caught early regardless of this cap.</span></label>
+    <label class="ag-label" style="display:flex;align-items:center;gap:10px;cursor:pointer"><input id="ag-thinking" type="checkbox" ${limits.thinking ? 'checked' : ''} style="width:auto;margin:0">Extended reasoning</label>
+    <div style="color:var(--text3);font-size:11.5px;margin:-6px 0 10px;line-height:1.5">Lets thinking models (Qwen3, DeepSeek-R1, gpt-oss…) reason before answering. Off = faster, cheaper replies. Applies to Ollama and OpenAI-compatible backends; Claude models never use it here. Always off on phone calls.</div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:4px">
+      <button class="btn btn-primary" id="ag-limits-save">Save</button>
+      <span id="ag-limits-status" class="ag-status"></span>
+    </div>
+
     <div class="config-cat-header" style="margin-top:26px"><span class="config-cat-icon" style="color:var(--accent)">${icon('layers')}</span><span class="config-cat-name">Per-workspace adaptations</span></div>
     <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.5">Extra instructions layered on top of the default for one workspace. Leave blank to use the default as-is.</div>
     <div id="ag-workspaces"></div>`
@@ -876,6 +890,19 @@ async function renderAgentTab(container) {
     try {
       await fetch('/api/agent/name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: page.querySelector('#ag-name').value }) })
       await fetch('/api/agent/personality', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: page.querySelector('#ag-base').value }) })
+      st.textContent = '✓ Saved — takes effect on the next message'
+    } catch (e) { st.textContent = 'Failed: ' + e.message }
+    setTimeout(() => { st.textContent = '' }, 3000)
+  })
+
+  page.querySelector('#ag-limits-save').addEventListener('click', async () => {
+    const st = page.querySelector('#ag-limits-status'); st.textContent = 'Saving…'
+    try {
+      const raw = page.querySelector('#ag-maxiter').value.trim()
+      const r = await fetch('/api/agent/limits', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxIterations: raw === '' ? 0 : parseInt(raw, 10) || 0, thinking: page.querySelector('#ag-thinking').checked }) }).then(r => r.json())
+      // Echo the clamped value back so the field shows what was actually stored.
+      page.querySelector('#ag-maxiter').value = r.maxIterations || ''
       st.textContent = '✓ Saved — takes effect on the next message'
     } catch (e) { st.textContent = 'Failed: ' + e.message }
     setTimeout(() => { st.textContent = '' }, 3000)

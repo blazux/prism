@@ -357,7 +357,7 @@ func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, co
 			s.rooms.broadcast(groupID, map[string]interface{}{"type": "agent_tool", "tool": ev.Tool})
 		}
 	}
-	reply, err := s.runHeadlessChatTap(ctx, sessionID, message, model, cc, tap)
+	reply, err := s.runHeadlessChatTap(ctx, sessionID, message, model, cc, tap, roomLimits(cfg))
 	if err != nil || strings.TrimSpace(reply) == "" {
 		reply = "⚠️ Sorry, I couldn't produce a response."
 	}
@@ -475,13 +475,19 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusForbidden, "group admin only")
 			return
 		}
-		var b struct{ AgentName, AgentPrompt, AgentModel string }
+		var b struct {
+			AgentName, AgentPrompt, AgentModel string
+			AgentMaxIter                       int
+			AgentThinking                      *bool // absent = keep reasoning on
+		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			writeErr(w, http.StatusBadRequest, "bad body")
 			return
 		}
+		thinking := b.AgentThinking == nil || *b.AgentThinking
 		if err := ms.SetRoomConfig(r.Context(), memory.RoomConfig{
 			GroupID: groupID, AgentName: b.AgentName, AgentPrompt: b.AgentPrompt, AgentModel: b.AgentModel,
+			AgentMaxIter: agent.ClampIterations(b.AgentMaxIter), AgentThinking: thinking,
 		}); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -490,6 +496,12 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// roomLimits maps a group's shared-agent budget onto the agent's turn limits.
+func roomLimits(cfg memory.RoomConfig) agent.Limits {
+	th := cfg.AgentThinking
+	return agent.Limits{MaxIterations: cfg.AgentMaxIter, Thinking: &th}
 }
 
 // ─── mention parsing ────────────────────────────────────────────────────────────

@@ -147,7 +147,7 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats := newTurnStats()
-	resp, err := s.runHeadlessChatTap(ctx, sessionID, body.Message, body.Model, s.callerContextForUser(ctx, user, sessionID), stats.tap)
+	resp, err := s.runHeadlessChatTap(ctx, sessionID, body.Message, body.Model, s.callerContextForUser(ctx, user, sessionID), stats.tap, agent.Limits{})
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -213,12 +213,14 @@ func (t *turnStats) finish() *turnStats {
 // reach the tools they've been granted. Trusted callers (browser, Telegram,
 // /api/chat) get a nil guard (see callerContextForUser) to allow every tool.
 func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model string, cc CallerContext) (string, error) {
-	return s.runHeadlessChatTap(ctx, sessionID, message, model, cc, nil)
+	return s.runHeadlessChatTap(ctx, sessionID, message, model, cc, nil, agent.Limits{})
 }
 
 // runHeadlessChatTap is runHeadlessChat with an optional event tap, so callers
-// (the group room) can surface tool activity live while the turn runs.
-func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, cc CallerContext, tap func(agent.Event)) (string, error) {
+// (the group room) can surface tool activity live while the turn runs, and
+// explicit turn limits for agents whose budget isn't in a user's config scope
+// (the group's shared agent — see agent.Limits; zero = config/default).
+func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, cc CallerContext, tap func(agent.Event), limits agent.Limits) (string, error) {
 	s.mu.RLock()
 	ms := s.memStore
 	s.mu.RUnlock()
@@ -280,6 +282,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 
 	ag := agent.New(ollamaClient, executor, model, ms, personality)
 	ag.SetSession(sessionID, personality)
+	ag.SetLimits(limits)
 
 	if fn := s.ragContextFn(cc.RAGScope); fn != nil {
 		ag.SetRAGContextFn(fn)

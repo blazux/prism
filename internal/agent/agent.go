@@ -92,7 +92,14 @@ type Agent struct {
 	personality     string // this session's own editable section (the adaptation, or the base for the default session)
 	basePersonality string // default personality prepended for non-default sessions (layered model)
 	agentName       string // optional global agent name injected into the prompt
-	historyLoaded   bool   // true after first DB load
+	// limits are the per-turn budget (iteration cap, extended reasoning) loaded
+	// from config by loadProfile each turn; limitsOverride is set by headless
+	// callers (the group's shared agent) whose config lives elsewhere and wins
+	// field by field over the config values. See Limits.
+	limits         Limits
+	limitsOverride Limits
+	turnThinking   bool // resolved by Chat at turn start; read where requests are built
+	historyLoaded  bool // true after first DB load
 	// historyGen counts every external mutation of history (InjectNote,
 	// ResetHistory, SetSession) — bumped under histMu. compactLiveContextIfNeeded
 	// captures it before releasing the lock for its ~20s best-effort LLM
@@ -106,6 +113,60 @@ type Agent struct {
 	// (spoken, short, no markup) and disables extended reasoning — never the
 	// agent's identity, which stays the same across channels.
 	channel string
+}
+
+// Limits bounds one turn of the agent loop. Zero values mean "not set": the
+// config value applies, then the built-in default.
+type Limits struct {
+	// MaxIterations caps the number of model calls in one turn (each tool call
+	// costs one). 0 = config / DefaultMaxIterations.
+	MaxIterations int
+	// Thinking controls extended reasoning (<think> / reasoning channel) for
+	// backends that expose the switch. nil = config / on.
+	Thinking *bool
+}
+
+const (
+	DefaultMaxIterations = 75
+	MinMaxIterations     = 10
+	MaxMaxIterations     = 500
+)
+
+// ClampIterations bounds a requested iteration cap; 0 stays 0 ("use default").
+func ClampIterations(n int) int {
+	switch {
+	case n <= 0:
+		return 0
+	case n < MinMaxIterations:
+		return MinMaxIterations
+	case n > MaxMaxIterations:
+		return MaxMaxIterations
+	}
+	return n
+}
+
+// SetLimits overrides the config-derived turn limits for this agent. Used by
+// headless runs of a group's shared agent, whose budget is set by the group
+// admin in room_config rather than in a user's config scope.
+func (a *Agent) SetLimits(l Limits) { a.limitsOverride = l }
+
+// effectiveLimits resolves override → config → default.
+func (a *Agent) effectiveLimits() (maxIter int, thinking bool) {
+	maxIter = a.limitsOverride.MaxIterations
+	if maxIter == 0 {
+		maxIter = a.limits.MaxIterations
+	}
+	if maxIter == 0 {
+		maxIter = DefaultMaxIterations
+	}
+	thinking = true
+	switch {
+	case a.limitsOverride.Thinking != nil:
+		thinking = *a.limitsOverride.Thinking
+	case a.limits.Thinking != nil:
+		thinking = *a.limits.Thinking
+	}
+	return maxIter, thinking
 }
 
 // SetChannel declares the surface the next turn comes from. See Agent.channel.
@@ -214,6 +275,7 @@ func New(ollamaClient ollama.Backend, executor *ToolExecutor, model string, memS
 func (a *Agent) loadProfile() {
 	a.basePersonality = ""
 	a.agentName = ""
+	a.limits = Limits{}
 	if a.memStore == nil {
 		return
 	}
@@ -228,6 +290,18 @@ func (a *Agent) loadProfile() {
 	// The base persona is layered under every session (including the default one).
 	if base, ok, err := store.GetConfig(ctx, memory.KeyPersonalityBase); err == nil && ok {
 		a.basePersonality = base
+	}
+	// Turn budget — edited in Settings, so re-read per turn like the persona.
+	if v, ok, err := store.GetConfig(ctx, memory.KeyAgentMaxIterations); err == nil && ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			a.limits.MaxIterations = ClampIterations(n)
+		}
+	}
+	if v, ok, err := store.GetConfig(ctx, memory.KeyAgentThinking); err == nil && ok {
+		if t := strings.TrimSpace(v); t != "" {
+			on := t != "off" && t != "false" && t != "0"
+			a.limits.Thinking = &on
+		}
 	}
 }
 
@@ -681,8 +755,6 @@ For ANY factual question (opening hours, prices, services, procedures, addresses
 	return sb.String()
 }
 
-const maxIterations = 75
-
 // Chat processes a user message (with optional images) and streams events.
 // images is a slice of base64-encoded image strings (raw base64, no data-URL prefix).
 func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, events chan<- Event) {
@@ -731,6 +803,11 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		lastLoopResult string
 		loopCount      int
 	)
+
+	// Resolved once per turn: a Settings change lands on the next message,
+	// never mid-turn.
+	maxIterations, thinking := a.effectiveLimits()
+	a.turnThinking = thinking
 
 	var emptyRetried bool
 	intentNudges := 0
@@ -928,7 +1005,9 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		}
 	}
 
-	events <- Event{Type: "error", Content: "Max iterations reached — the agent may be looping. Start a new chat."}
+	// Reached the budget, not necessarily a loop (identical-call loops are
+	// caught above). Say where the knob is instead of blaming the chat.
+	events <- Event{Type: "error", Content: fmt.Sprintf("Iteration limit reached (%d model calls this turn). Raise it in Settings › Agent, or send a follow-up to continue.", maxIterations)}
 }
 
 // extractScreenshotImages parses a browser_act JSON result, reads any screenshot
@@ -1013,8 +1092,9 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 		Messages: messages,
 		Tools:    tools,
 		// On the phone the caller waits in silence while the model reasons, so the
-		// thinking budget is pure dead air. Turn it off for voice turns.
-		NoThinking: a.channel == voiceChannel,
+		// thinking budget is pure dead air. Turn it off for voice turns — and
+		// whenever the user switched reasoning off in Settings.
+		NoThinking: a.channel == voiceChannel || !a.turnThinking,
 	}
 	// num_ctx is filled in by the Ollama client (ollama.NumCtx); the OpenAI and
 	// Anthropic backends ignore it and size their own context.

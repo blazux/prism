@@ -240,6 +240,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/webhook/", s.handleWebhookIncoming)
 	mux.HandleFunc("/api/personality", s.handlePersonality)
 	mux.HandleFunc("/api/agent/name", s.handleAgentName)
+	mux.HandleFunc("/api/agent/limits", s.handleAgentLimits)
 	mux.HandleFunc("/api/agent/personality", s.handleAgentPersonality)
 	mux.HandleFunc("/api/telegram/config", s.handleTelegramConfig)
 	mux.HandleFunc("/api/telegram/send", s.handleTelegramSend)

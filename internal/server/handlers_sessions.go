@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"prism/internal/agent"
+	"strconv"
 	"strings"
 
 	"prism/internal/memory"
@@ -255,6 +257,62 @@ func (s *Server) handleAgentName(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// handleAgentLimits reads/writes the caller's agent turn budget (Settings › Agent).
+// GET -> {maxIterations, thinking, default, min, max}; POST {maxIterations, thinking}.
+// maxIterations 0 = built-in default. Applied by Agent.loadProfile on the next turn.
+func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ms := s.userStore(r)
+	if ms == nil {
+		http.Error(w, "memory store not available", http.StatusServiceUnavailable)
+		return
+	}
+	switch r.Method {
+	case "GET":
+		maxIter := 0
+		if v, ok, _ := ms.GetConfig(r.Context(), memory.KeyAgentMaxIterations); ok {
+			maxIter, _ = strconv.Atoi(strings.TrimSpace(v))
+		}
+		thinking := true
+		if v, ok, _ := ms.GetConfig(r.Context(), memory.KeyAgentThinking); ok && strings.TrimSpace(v) == "off" {
+			thinking = false
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"maxIterations": maxIter, "thinking": thinking,
+			"default": agent.DefaultMaxIterations, "min": agent.MinMaxIterations, "max": agent.MaxMaxIterations,
+		})
+	case "POST":
+		var b struct {
+			MaxIterations int   `json:"maxIterations"`
+			Thinking      *bool `json:"thinking"`
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
+		maxIter := agent.ClampIterations(b.MaxIterations)
+		mv := ""
+		if maxIter > 0 {
+			mv = strconv.Itoa(maxIter)
+		}
+		if err := ms.SetConfig(r.Context(), memory.KeyAgentMaxIterations, mv); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		tv := "on"
+		if b.Thinking != nil && !*b.Thinking {
+			tv = "off"
+		}
+		if err := ms.SetConfig(r.Context(), memory.KeyAgentThinking, tv); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "maxIterations": maxIter, "thinking": tv == "on"})
 	default:
 		http.Error(w, "method not allowed", 405)
 	}
