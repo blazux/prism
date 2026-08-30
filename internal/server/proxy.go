@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,7 @@ func (s *Server) handleSocketIOProxy(w http.ResponseWriter, r *http.Request) {
 		req.URL.Host = host
 		req.URL.Path = r.URL.Path
 		req.Host = host
+		stripPrismCredentials(req.Header)
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		body, err := io.ReadAll(resp.Body)
@@ -119,10 +121,43 @@ func (s *Server) resolveProxyTarget(referer string) (string, bool) {
 		return "", false
 	}
 	port, err := strconv.Atoi(parts[1])
-	if err != nil || port < 1 || port > 65535 {
+	if err != nil || port < 1 || port > 65535 || !proxyServiceNameRe.MatchString(parts[0]) {
 		return "", false
 	}
 	return fmt.Sprintf("prism-svc-%s:%d", parts[0], port), true
+}
+
+// proxyServiceNameRe bounds the <name> segment of /proxy/<name>/<port>/ to a
+// container slug. Unbounded, "prism-svc-" + name became an SSRF primitive: a
+// name like "x.attacker.com" resolves wherever the attacker's DNS says, and
+// the request carried the victim's Prism session cookie.
+var proxyServiceNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
+// stripPrismCredentials removes Prism's own session cookie and bearer token
+// from a request about to leave for a proxied service. Other cookies (the
+// service's own login, e.g. Grafana's) pass through untouched.
+func stripPrismCredentials(h http.Header) {
+	if auth := h.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		h.Del("Authorization")
+	}
+	raw := h.Values("Cookie")
+	if len(raw) == 0 {
+		return
+	}
+	h.Del("Cookie")
+	var kept []string
+	for _, line := range raw {
+		for _, part := range strings.Split(line, ";") {
+			part = strings.TrimSpace(part)
+			if part == "" || strings.HasPrefix(part, sessionCookie+"=") {
+				continue
+			}
+			kept = append(kept, part)
+		}
+	}
+	if len(kept) > 0 {
+		h.Set("Cookie", strings.Join(kept, "; "))
+	}
 }
 
 // handleWorkspaceProxy reverse-proxies requests to services running in Docker.
@@ -166,6 +201,10 @@ func (s *Server) handleWorkspaceProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid proxy route", http.StatusBadRequest)
 		return
 	}
+	if !proxyServiceNameRe.MatchString(firstSeg) {
+		http.Error(w, "invalid proxy route", http.StatusBadRequest)
+		return
+	}
 	prefix := "/proxy/" + firstSeg + "/" + portStr
 	s.reverseProxy(w, r, fmt.Sprintf("prism-svc-%s:%d", firstSeg, svcPort), subPath, prefix)
 }
@@ -182,6 +221,7 @@ func (s *Server) reverseProxy(w http.ResponseWriter, r *http.Request, targetHost
 		req.URL.Host = targetHost
 		req.URL.Path = subPath
 		req.Host = targetHost
+		stripPrismCredentials(req.Header)
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		// Strip framing restrictions so the service can be embedded as an iframe
@@ -339,6 +379,7 @@ func (s *Server) tunnelWebSocket(w http.ResponseWriter, r *http.Request, targetH
 	fwd := r.Clone(r.Context())
 	fwd.URL = &url.URL{Path: subPath, RawQuery: r.URL.RawQuery}
 	fwd.RequestURI = ""
+	stripPrismCredentials(fwd.Header)
 	if err := fwd.Write(dst); err != nil {
 		return
 	}

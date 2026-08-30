@@ -480,15 +480,28 @@ function renderCollections() {
     el.innerHTML = '<div id="no-collections">No collections</div>'
     return
   }
-  el.innerHTML = collections.map(c => `
-    <div class="collection-item ${c.name === currentCollection ? 'active' : ''}"
-         onclick="selectCollection('${escHtml(c.name)}')">
-      <span class="collection-name">${escHtml(c.name)}</span>
-      <span class="collection-count">${c.doc_count} doc${c.doc_count !== 1 ? 's' : ''}</span>
-      ${CAN_MANAGE ? `<button class="collection-del" title="Delete collection"
-              onclick="event.stopPropagation();deleteCollection('${escHtml(c.name)}')">✕</button>` : ''}
-    </div>
-  `).join('')
+  el.innerHTML = ''
+  for (const c of collections) {
+    const item = document.createElement('div')
+    item.className = 'collection-item' + (c.name === currentCollection ? ' active' : '')
+    item.addEventListener('click', () => selectCollection(c.name))
+    const name = document.createElement('span')
+    name.className = 'collection-name'
+    name.textContent = c.name
+    const count = document.createElement('span')
+    count.className = 'collection-count'
+    count.textContent = `${c.doc_count} doc${c.doc_count !== 1 ? 's' : ''}`
+    item.append(name, count)
+    if (CAN_MANAGE) {
+      const del = document.createElement('button')
+      del.className = 'collection-del'
+      del.title = 'Delete collection'
+      del.textContent = '✕'
+      del.addEventListener('click', ev => { ev.stopPropagation(); deleteCollection(c.name) })
+      item.appendChild(del)
+    }
+    el.appendChild(item)
+  }
 }
 
 function selectCollection(name) {

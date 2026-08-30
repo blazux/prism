@@ -507,7 +507,7 @@ func (c *webexChannel) handleMessage(ctx context.Context, m webexMessage) {
 	ms.AddUsage(ctx, 0, sessionID, "channel_msg", "webex", 1, nil)
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	resp, err := c.s.runHeadlessChat(runCtx, sessionID, text, cfg.AgentModel, cc)
+	resp, err := c.s.runHeadlessChatTap(runCtx, sessionID, text, cfg.AgentModel, cc, nil, roomLimits(cfg))
 	if err != nil {
 		log.Printf("[webex-g%d] chat: %v", c.groupID, err)
 		c.postMarkdown(ctx, m.RoomID, "⚠️ Sorry, something went wrong.")
@@ -545,7 +545,6 @@ func (c *webexChannel) guardFor(email string) agent.ToolGuard {
 		return fmt.Errorf("permission denied: %s is not allowed to %s", email, agent.ToolPermission(name, args).Action())
 	}
 }
-
 
 // parseAllowlist splits a comma/newline/space separated list of emails into a
 // lookup set (lowercased). "*" means everyone.

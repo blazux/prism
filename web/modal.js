@@ -13,10 +13,10 @@
     justify-content: center; background: rgba(0,0,0,.45); backdrop-filter: blur(2px);
     animation: pmFade .12s ease; }
   @keyframes pmFade { from { opacity: 0 } to { opacity: 1 } }
-  .pm-box { background: var(--bg2, #16181f); color: var(--text, #e6e8ef);
+  .pm-box { background: var(--bg1, #12141a); color: var(--text, #e6e8ef);
     border: 1px solid var(--border2, var(--border, #2a2e3a)); border-radius: 12px;
     min-width: 320px; max-width: 440px; padding: 18px 20px 16px;
-    box-shadow: 0 14px 48px rgba(0,0,0,.45); font: 13.5px/1.5 inherit;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5); font: 13.5px/1.5 inherit;
     animation: pmPop .14s ease; }
   @keyframes pmPop { from { transform: scale(.96); opacity: 0 } to { transform: scale(1); opacity: 1 } }
   .pm-title { font-weight: 700; font-size: 14px; margin-bottom: 8px; }
@@ -24,14 +24,14 @@
     word-break: break-word; margin-bottom: 4px; }
   .pm-field { margin: 10px 0 0; }
   .pm-field label { display: block; font-size: 11.5px; color: var(--text3, #8b90a0); margin-bottom: 4px; }
-  .pm-field input { width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit;
-    background: var(--bg, #0e1015); color: var(--text, #e6e8ef);
+  .pm-field input, .pm-field textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit;
+    background: var(--bg2, #16181f); color: var(--text, #e6e8ef);
     border: 1px solid var(--border2, var(--border, #2a2e3a)); border-radius: 8px; }
-  .pm-field input:focus { outline: none; border-color: var(--accent, #6b8afd); }
+  .pm-field input:focus, .pm-field textarea:focus { outline: none; border-color: var(--accent, #6b8afd); }
   .pm-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
   .pm-btn { padding: 7px 16px; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 600;
     cursor: pointer; border: 1px solid var(--border2, var(--border, #2a2e3a));
-    background: var(--bg, #0e1015); color: var(--text, #e6e8ef); }
+    background: var(--bg2, #16181f); color: var(--text, #e6e8ef); }
   .pm-btn:hover { border-color: var(--accent, #6b8afd); }
   .pm-btn.pm-primary { background: var(--accent, #6b8afd); border-color: var(--accent, #6b8afd); color: #fff; }
   .pm-btn.pm-danger { background: var(--red, #e5534b); border-color: var(--red, #e5534b); color: #fff; }
@@ -155,5 +155,8 @@
     },
   }
 
+  PrismModal.open = open
+  PrismModal.btn = btn
+  PrismModal.ensureStyle = ensureStyle
   window.PrismModal = PrismModal
 })()

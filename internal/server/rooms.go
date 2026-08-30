@@ -61,6 +61,21 @@ func (h *roomHub) remove(c *roomClient) {
 	h.mu.Unlock()
 }
 
+// sendJSON queues a frame for this client through the writer pump. gorilla's
+// Conn panics on concurrent writes, and the pump is already running by the
+// time the join handler wants to send history — so the handler must never
+// call conn.WriteJSON itself.
+func (c *roomClient) sendJSON(payload interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	select {
+	case c.send <- data:
+	default: // slow client: drop rather than block
+	}
+}
+
 // broadcast delivers a payload to every client connected to a group's room.
 func (h *roomHub) broadcast(groupID int64, payload interface{}) {
 	data, err := json.Marshal(payload)
@@ -154,13 +169,13 @@ func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
 	// Send recent history + config + who's here to the newcomer, then announce join.
 	if ms := s.store(); ms != nil {
 		if msgs, err := ms.RecentRoomMessages(r.Context(), groupID, 50); err == nil {
-			conn.WriteJSON(map[string]interface{}{"type": "history", "messages": msgs})
+			c.sendJSON(map[string]interface{}{"type": "history", "messages": msgs})
 		}
 		if cfg, err := ms.GetRoomConfig(r.Context(), groupID); err == nil {
-			conn.WriteJSON(map[string]interface{}{"type": "room_config", "agentName": cfg.AgentName, "groupId": groupID})
+			c.sendJSON(map[string]interface{}{"type": "room_config", "agentName": cfg.AgentName, "groupId": groupID})
 		}
 	}
-	conn.WriteJSON(map[string]interface{}{"type": "presence", "users": s.rooms.presence(groupID)})
+	c.sendJSON(map[string]interface{}{"type": "presence", "users": s.rooms.presence(groupID)})
 	s.pushPresence(groupID)
 
 	// Read pump.
@@ -342,7 +357,7 @@ func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, co
 			s.rooms.broadcast(groupID, map[string]interface{}{"type": "agent_tool", "tool": ev.Tool})
 		}
 	}
-	reply, err := s.runHeadlessChatTap(ctx, sessionID, message, model, cc, tap)
+	reply, err := s.runHeadlessChatTap(ctx, sessionID, message, model, cc, tap, roomLimits(cfg))
 	if err != nil || strings.TrimSpace(reply) == "" {
 		reply = "⚠️ Sorry, I couldn't produce a response."
 	}
@@ -460,13 +475,19 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusForbidden, "group admin only")
 			return
 		}
-		var b struct{ AgentName, AgentPrompt, AgentModel string }
+		var b struct {
+			AgentName, AgentPrompt, AgentModel string
+			AgentMaxIter                       int
+			AgentThinking                      *bool // absent = keep reasoning on
+		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			writeErr(w, http.StatusBadRequest, "bad body")
 			return
 		}
+		thinking := b.AgentThinking == nil || *b.AgentThinking
 		if err := ms.SetRoomConfig(r.Context(), memory.RoomConfig{
 			GroupID: groupID, AgentName: b.AgentName, AgentPrompt: b.AgentPrompt, AgentModel: b.AgentModel,
+			AgentMaxIter: agent.ClampIterations(b.AgentMaxIter), AgentThinking: thinking,
 		}); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -475,6 +496,12 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// roomLimits maps a group's shared-agent budget onto the agent's turn limits.
+func roomLimits(cfg memory.RoomConfig) agent.Limits {
+	th := cfg.AgentThinking
+	return agent.Limits{MaxIterations: cfg.AgentMaxIter, Thinking: &th}
 }
 
 // ─── mention parsing ────────────────────────────────────────────────────────────

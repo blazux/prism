@@ -19,6 +19,10 @@ const (
 	KeyPersonality     = "system_prompt_personality"
 	KeyAgentName       = "agent_name"
 	KeyPersonalityBase = "system_prompt_personality_base" // global base persona, layered under every session
+	// Turn budget of the caller's agent (Settings › Agent). Both re-read each
+	// turn by Agent.loadProfile, scoped like agent_name in multi-user mode.
+	KeyAgentMaxIterations = "agent_max_iterations" // integer; empty = built-in default
+	KeyAgentThinking      = "agent_thinking"       // "on" / "off"; empty = on
 )
 
 // HistoryEntry is one row from conversation_history.
@@ -100,7 +104,7 @@ func (s *Store) migrateUserScopedConfig(ctx context.Context) {
 	cfgKeys := []string{
 		"email_config", "notes_provider", "notes_vault_path",
 		"caldav_config", "tasks_provider", "calendar_provider",
-		"agent_name", KeyPersonalityBase,
+		"agent_name", KeyPersonalityBase, KeyAgentMaxIterations, KeyAgentThinking,
 		"oauth_google_client_id", "oauth_microsoft_client_id",
 		"telegram_allowed_chat",
 	}
@@ -355,6 +359,9 @@ func (s *Store) initSchema(ctx context.Context) error {
 		)`,
 		// ─── Profiles, avatars & richer room chat (Spectrum) ───────────────────
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT ''`,
+		// Shared-agent turn budget, set by the group admin (Admin › Shared agent).
+		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_max_iter INT NOT NULL DEFAULT 0`,
+		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_thinking BOOLEAN NOT NULL DEFAULT TRUE`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT NOT NULL DEFAULT ''`,
 		// Avatars for users and agents, keyed by scope: "u<id>" (user),
@@ -381,6 +388,19 @@ func (s *Store) initSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS usage_events_ts_idx ON usage_events(ts DESC)`,
 		`CREATE INDEX IF NOT EXISTS usage_events_kind_idx ON usage_events(kind, ts DESC)`,
+		// Shared widgets/dashboards: a group member publishes a widget (or a whole
+		// board) to their group; other members add it to their own dashboard.
+		`CREATE TABLE IF NOT EXISTS shared_items (
+			id         BIGSERIAL PRIMARY KEY,
+			group_id   BIGINT NOT NULL,
+			kind       TEXT NOT NULL,
+			title      TEXT NOT NULL DEFAULT '',
+			owner_id   BIGINT NOT NULL DEFAULT 0,
+			owner_name TEXT NOT NULL DEFAULT '',
+			payload    JSONB NOT NULL DEFAULT '{}',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS shared_items_group_idx ON shared_items(group_id, id DESC)`,
 		// Inbound webhooks: an external HTTP call becomes an agent turn wrapped in a
 		// stored prompt. The id is the URL segment and must be unique on its own —
 		// the inbound request cannot tell us which scope to look in.
@@ -582,7 +602,11 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM conversation_history WHERE session_id = $1`, id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM agent_config WHERE key LIKE $1`, "%_"+id); err != nil {
+	// Explicit per-session keys. The previous `LIKE '%_' || id` treated `_` as a
+	// single-char wildcard: deleting a session named "id" also wiped
+	// oauth_google_client_id, and "b" took system_prompt_personality_ab with it.
+	if _, err := tx.Exec(ctx, `DELETE FROM agent_config WHERE key = ANY($1)`,
+		[]string{KeyPersonality + "_" + id, summaryKey(id)}); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM mcp_servers WHERE session_id = $1`, id); err != nil {

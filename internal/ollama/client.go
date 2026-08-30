@@ -201,8 +201,13 @@ type ChatRequest struct {
 	Options  Options   `json:"options,omitempty"`
 	// NoThinking asks the model to skip extended reasoning for this turn. Set on
 	// the voice channel, where a caller waits in silence while the model thinks.
-	// Wire-neutral (each backend translates it); not sent to Ollama as-is.
+	// Wire-neutral (each backend translates it); Ollama's translation is the
+	// Think field below, set by Client.Chat.
 	NoThinking bool `json:"-"`
+	// Think is Ollama's own switch (/api/chat "think": false) for models with a
+	// thinking mode (Qwen3, DeepSeek-R1, gpt-oss…). Omitted → the model's
+	// default; never sent true so models without the mode don't reject it.
+	Think *bool `json:"think,omitempty"`
 }
 
 type Options struct {
@@ -256,6 +261,10 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 	}
 	if req.Options.NumCtx == 0 {
 		req.Options.NumCtx = NumCtx
+	}
+	if req.NoThinking {
+		off := false
+		req.Think = &off
 	}
 
 	body, err := json.Marshal(req)

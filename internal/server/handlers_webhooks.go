@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -153,6 +154,17 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// The session is stored namespaced, exactly as /ws and /api/chat would
+		// resolve it for this caller — a member cannot point a webhook at another
+		// user's "u<id>-…" board. Empty stays empty (dedicated per-webhook session).
+		if row.SessionID != "" {
+			sid, ok := s.sessionFor(r, row.SessionID)
+			if !ok {
+				writeErr(w, http.StatusForbidden, "session belongs to another user")
+				return
+			}
+			row.SessionID = sid
+		}
 		if row.Token == "" {
 			row.Token = newWebhookTok()
 		}
@@ -279,6 +291,28 @@ func webhookTokenOK(r *http.Request, want string) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
+// webhookCallerContext resolves the owner of a webhook ("u<id>" scope) to a
+// real user record and builds their standard caller context. Falls back to the
+// unrestricted context only when there is no user to resolve.
+func (s *Server) webhookCallerContext(ctx context.Context, hook memory.WebhookRow, session string) CallerContext {
+	ms := s.store()
+	if ms == nil || !strings.HasPrefix(hook.Scope, "u") {
+		return trustedCallerContext()
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(hook.Scope, "u"), 10, 64)
+	if err != nil || id <= 0 {
+		return trustedCallerContext()
+	}
+	u, err := ms.GetUserByID(ctx, id)
+	if err != nil || u == nil {
+		// Owner gone: a webhook must not outlive its user's permissions.
+		return CallerContext{Guard: func(string, map[string]interface{}) error {
+			return fmt.Errorf("webhook owner no longer exists")
+		}, MultiUser: s.cfg.MultiUser}
+	}
+	return s.callerContextForUser(ctx, u, session)
+}
+
 // webhookSession is the chat session the turn runs in: the configured one, or a
 // dedicated per-webhook session so an automated feed never lands in a human's
 // conversation.
@@ -327,18 +361,24 @@ func prettyJSON(s string) string {
 }
 
 // runWebhook executes the agent turn and optionally pushes the answer to a
-// channel. It runs with the trusted caller context, like cron does: the sender
-// authenticated with the webhook's own token, and the prompt — written by whoever
-// configured the webhook — is what bounds the turn.
+// channel. The turn runs with the caller context of the webhook's OWNER — the
+// user whose scope holds it — so their tool policy, RAG/MCP scope and hidden
+// tools apply exactly as if they had typed the message themselves. A webhook
+// in the "global" scope (single-user, or created by the service identity) is
+// unrestricted, as before.
 func (s *Server) runWebhook(ctx context.Context, hook memory.WebhookRow, message string) (string, error) {
 	session := webhookSession(hook)
-	resp, err := s.runHeadlessChat(ctx, session, message, hook.Model, trustedCallerContext())
+	resp, err := s.runHeadlessChat(ctx, session, message, hook.Model, s.webhookCallerContext(ctx, hook, session))
 	if ms := s.store(); ms != nil {
 		status := "ok"
 		if err != nil {
 			status = "error: " + err.Error()
 		}
 		ms.WebhookRecordCall(context.Background(), hook.ID, status)
+		// Surface the fire in the activity feed so a human can see what their
+		// agent did on an inbound trigger, not just the webhook's own LastCallAt.
+		ms.AddUsage(context.Background(), 0, session, "webhook", hook.Name, 1,
+			map[string]interface{}{"id": hook.ID, "status": status})
 	}
 	if err != nil {
 		return "", fmt.Errorf("webhook %s: %w", hook.ID, err)

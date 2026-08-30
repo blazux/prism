@@ -146,7 +146,8 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "you are not allowed to use model "+body.Model)
 		return
 	}
-	resp, err := s.runHeadlessChat(ctx, sessionID, body.Message, body.Model, s.callerContextForUser(ctx, user, sessionID))
+	stats := newTurnStats()
+	resp, err := s.runHeadlessChatTap(ctx, sessionID, body.Message, body.Model, s.callerContextForUser(ctx, user, sessionID), stats.tap, agent.Limits{})
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -163,7 +164,44 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		"response":  resp,
 		"session":   sessionID,
 		"delivered": delivered,
+		"stats":     stats.finish(),
 	})
+}
+
+// turnStats counts what one headless turn cost the agent — tool calls, tool
+// failures, loop/backend errors, wall time. Returned under "stats" by /api/chat
+// so the eval harness (cmd/prism-eval) can score a change on the agent's own
+// terms: not just "did it succeed" but "how many tries did it take".
+type turnStats struct {
+	started    time.Time
+	ToolCalls  int            `json:"tool_calls"`
+	ToolErrors int            `json:"tool_errors"`
+	Errors     []string       `json:"errors,omitempty"`
+	Tools      map[string]int `json:"tools,omitempty"`
+	DurationMS int64          `json:"duration_ms"`
+}
+
+func newTurnStats() *turnStats {
+	return &turnStats{started: time.Now(), Tools: map[string]int{}}
+}
+
+func (t *turnStats) tap(ev agent.Event) {
+	switch ev.Type {
+	case "tool_use":
+		t.ToolCalls++
+		t.Tools[ev.Tool]++
+	case "tool_result":
+		if ev.IsError {
+			t.ToolErrors++
+		}
+	case "error":
+		t.Errors = append(t.Errors, ev.Content)
+	}
+}
+
+func (t *turnStats) finish() *turnStats {
+	t.DurationMS = time.Since(t.started).Milliseconds()
+	return t
 }
 
 // runHeadlessChat runs a single agent turn for a session outside the WebSocket
@@ -175,12 +213,14 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 // reach the tools they've been granted. Trusted callers (browser, Telegram,
 // /api/chat) get a nil guard (see callerContextForUser) to allow every tool.
 func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model string, cc CallerContext) (string, error) {
-	return s.runHeadlessChatTap(ctx, sessionID, message, model, cc, nil)
+	return s.runHeadlessChatTap(ctx, sessionID, message, model, cc, nil, agent.Limits{})
 }
 
 // runHeadlessChatTap is runHeadlessChat with an optional event tap, so callers
-// (the group room) can surface tool activity live while the turn runs.
-func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, cc CallerContext, tap func(agent.Event)) (string, error) {
+// (the group room) can surface tool activity live while the turn runs, and
+// explicit turn limits for agents whose budget isn't in a user's config scope
+// (the group's shared agent — see agent.Limits; zero = config/default).
+func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, cc CallerContext, tap func(agent.Event), limits agent.Limits) (string, error) {
 	s.mu.RLock()
 	ms := s.memStore
 	s.mu.RUnlock()
@@ -193,7 +233,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	os.MkdirAll(sessionPluginDir, 0755)
 
 	ollamaClient := s.chatBackendFor(model)
-	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
+	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
 	executor.SetLLM(ollamaClient, model)
 	executor.SetChatBlind(!s.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
@@ -242,6 +282,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 
 	ag := agent.New(ollamaClient, executor, model, ms, personality)
 	ag.SetSession(sessionID, personality)
+	ag.SetLimits(limits)
 
 	if fn := s.ragContextFn(cc.RAGScope); fn != nil {
 		ag.SetRAGContextFn(fn)

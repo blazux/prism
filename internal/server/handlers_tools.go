@@ -109,7 +109,7 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	env := map[string]string{
 		"PRISM_SESSION": sessionID,
 		"PRISM_URL":     "http://prism-server:8080",
-		"PRISM_TOKEN":   s.cfg.AuthToken,
+		"PRISM_TOKEN":   s.selfCallToken(sessionID),
 	}
 
 	// Pass the JSON payload via stdin to avoid shell argument-length limits (ARG_MAX).
@@ -215,7 +215,7 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
-	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.cfg.AuthToken)
+	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
 	executor.SetLLM(s.newChatBackend(), s.cfg.Model)
 	executor.SetChatBlind(!s.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked

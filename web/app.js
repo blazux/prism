@@ -19,6 +19,7 @@ let currentSessionID = lastWorkspace
 
 // Identity for chat avatars: the current user + their personal agent.
 let ME = { uid: '', name: 'You', isAdmin: false }
+let MY_GROUPS = [] // groups the user can share widgets within (multi-user)
 let AGENT_NAME = 'Agent'
 // Apps disabled platform-wide by the global admin (Admin → Platform).
 let DISABLED_APPS = new Set()
@@ -29,6 +30,22 @@ async function loadIdentity() {
   try { ME.isAdmin = !!(await fetch('/api/me').then(r => r.json())).isAdmin } catch (_) {}
   try { AGENT_NAME = (await fetch('/api/agent/name', { cache: 'no-store' }).then(r => r.json())).name || 'Agent' } catch (_) {}
   try { DISABLED_APPS = new Set((await fetch('/api/platform').then(r => r.json())).disabledApps || []) } catch (_) {}
+  // /api/my/groups returns two shapes: {groupId,groupName} for a member,
+  // {id,name} for a global admin (ListGroups). Normalize to one.
+  try {
+    const raw = (await fetch('/api/my/groups').then(r => r.json())).groups || []
+    MY_GROUPS = raw.map(g => ({ groupId: g.groupId ?? g.id, groupName: g.groupName ?? g.name }))
+  } catch (_) {}
+  refreshShareAffordances()
+}
+
+// Show the per-widget share button (and the header gallery button) only when
+// the user belongs to a group — sharing is a multi-user, group-scoped feature.
+function refreshShareAffordances() {
+  const on = MY_GROUPS.length > 0
+  document.querySelectorAll('.widget-share').forEach(b => { b.style.display = on ? '' : 'none' })
+  const sb = document.getElementById('shared-btn')
+  if (sb) { sb.style.display = on ? 'flex' : 'none'; sb.onclick = () => openSharedGallery() }
 }
 function applyDisabledApps() {
   for (const a of DISABLED_APPS) {
@@ -259,13 +276,20 @@ function mountWindow(rec) {
   titleEl.className = 'widget-title'
   titleEl.textContent = rec.title
 
+  const shareBtn = document.createElement('button')
+  shareBtn.className = 'widget-min widget-share'
+  shareBtn.textContent = '⤴'
+  shareBtn.title = 'Share this widget with a group'
+  shareBtn.style.display = MY_GROUPS.length ? '' : 'none'
+  shareBtn.addEventListener('click', (e) => { e.stopPropagation(); shareWidget(rec.id, rec.title) })
+
   const minBtn = document.createElement('button')
   minBtn.className = 'widget-min'
   minBtn.textContent = '–'
   minBtn.title = 'Minimize (keep in dock)'
   minBtn.addEventListener('click', () => minimizeWidget(rec.id))
 
-  hdr.append(titleEl, minBtn)
+  hdr.append(titleEl, shareBtn, minBtn)
 
   const body = document.createElement('div')
   body.className = 'widget-body'
@@ -1029,7 +1053,7 @@ window.handleSecretKey = function(e) {
 
 // ─── View router (rail: apps + boards) ─────────────────────────────────────────
 
-const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar', room: 'Room' }
+const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar', activity: 'Activity', room: 'Room' }
 const ASSISTANT = 'assistant'            // reserved session: the global super-agent
 let currentView = { type: 'board' }      // { type:'board', workspace } | { type:'app', name }
 let allSessions = []
@@ -1287,6 +1311,167 @@ function editWorkspace(sess) {
   }
   setTimeout(() => dlg.querySelector('#ws-name').focus(), 50)
 }
+
+// shareWidget publishes one widget to a group, straight from its window header —
+// the intuitive "this widget is good, share it" affordance (the gallery modal's
+// Share tab does the same, plus whole-dashboard).
+async function shareWidget(id, title) {
+  if (!MY_GROUPS.length) return
+  let groupId = MY_GROUPS[0].groupId
+  if (MY_GROUPS.length > 1) {
+    groupId = await pickShareGroup(title)
+    if (!groupId) return
+  } else {
+    const ok = await PrismModal.confirm(`Share "${title}" with the group "${MY_GROUPS[0].groupName}"? Members can then add it to their own dashboard.`, { title: 'Share widget', okLabel: 'Share' })
+    if (!ok) return
+  }
+  try {
+    const r = await fetch('/api/shared', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'widget', widgetId: id, groupId, session: currentSessionID }) }).then(r => r.json())
+    if (r && r.id) showToast({ title: 'Shared', message: `"${title}" is now in your group's gallery`, level: 'success' })
+    else showToast({ title: 'Share failed', message: (r && r.error) || '', level: 'error' })
+  } catch (_) { showToast({ title: 'Share failed', message: '', level: 'error' }) }
+}
+
+// pickShareGroup asks which group to publish to (only used when the user is in
+// several). Resolves the chosen groupId, or null on cancel.
+function pickShareGroup(title) {
+  if (!window.PrismModal) return Promise.resolve(null)
+  PrismModal.ensureStyle()
+  return PrismModal.open({
+    onEscape: null,
+    render(box, done) {
+      const t = document.createElement('div'); t.className = 'pm-title'; t.textContent = `Share "${title}"`
+      box.appendChild(t)
+      const sel = document.createElement('select'); sel.style.cssText = sharedFieldCss(); sel.style.marginTop = '10px'
+      sel.innerHTML = MY_GROUPS.map(g => `<option value="${g.groupId}">${escHtml(g.groupName)}</option>`).join('')
+      box.appendChild(sel)
+      const foot = document.createElement('div'); foot.className = 'pm-foot'
+      foot.appendChild(PrismModal.btn('Cancel', '', () => done(null)))
+      foot.appendChild(PrismModal.btn('Share', 'pm-primary', () => done(parseInt(sel.value, 10))))
+      box.appendChild(foot)
+    },
+  })
+}
+
+// ─── Shared widgets gallery (multi-user groups) ──────────────────────────────
+function sharedFieldCss() {
+  return 'width:100%;box-sizing:border-box;padding:8px 10px;font:inherit;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:8px'
+}
+
+function openSharedGallery() {
+  if (!window.PrismModal) return
+  PrismModal.ensureStyle()
+  let tab = 'add'
+  PrismModal.open({
+    onEscape: undefined,
+    render(box, done) {
+      box.style.maxWidth = '640px'
+      box.style.width = 'min(640px, 94vw)'
+      const head = document.createElement('div')
+      head.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px'
+      const title = document.createElement('div')
+      title.className = 'pm-title'; title.style.margin = '0'; title.style.flex = '1'
+      title.textContent = 'Shared widgets'
+      const tabAdd = PrismModal.btn('Add', '', () => { tab = 'add'; renderBody() })
+      const tabShare = PrismModal.btn('Share', '', () => { tab = 'share'; renderBody() })
+      head.append(title, tabAdd, tabShare)
+      box.appendChild(head)
+      const body = document.createElement('div')
+      body.style.cssText = 'max-height:60vh;overflow:auto'
+      box.appendChild(body)
+      const foot = document.createElement('div'); foot.className = 'pm-foot'
+      foot.appendChild(PrismModal.btn('Close', '', () => done(undefined)))
+      box.appendChild(foot)
+      function renderBody() {
+        tabAdd.className = 'pm-btn' + (tab === 'add' ? ' pm-primary' : '')
+        tabShare.className = 'pm-btn' + (tab === 'share' ? ' pm-primary' : '')
+        body.innerHTML = '<div style="color:var(--text3);padding:24px;text-align:center">Loading…</div>'
+        if (tab === 'add') renderSharedAdd(body); else renderSharedShare(body)
+      }
+      renderBody()
+    },
+  })
+}
+
+async function renderSharedAdd(body) {
+  let items = []
+  try { items = (await fetch('/api/shared').then(r => r.json())).items || [] } catch (_) {}
+  if (!items.length) {
+    body.innerHTML = '<div style="color:var(--text3);padding:28px;text-align:center">Nothing shared in your group yet.</div>'
+    return
+  }
+  body.innerHTML = ''
+  const sel = new Set()
+  const addBtn = document.createElement('button')
+  addBtn.className = 'pm-btn pm-primary'; addBtn.style.marginTop = '6px'
+  addBtn.textContent = 'Add selected (0)'; addBtn.disabled = true
+  for (const it of items) {
+    const row = document.createElement('label')
+    row.style.cssText = 'display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer'
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.marginTop = '3px'
+    cb.onchange = () => { cb.checked ? sel.add(it.id) : sel.delete(it.id); addBtn.textContent = `Add selected (${sel.size})`; addBtn.disabled = !sel.size }
+    const info = document.createElement('div'); info.style.flex = '1'
+    const badge = it.kind === 'dashboard'
+      ? `<span style="font-size:10px;color:var(--accent);background:var(--accent-dim);padding:1px 7px;border-radius:999px;margin-left:6px">dashboard · ${it.count}</span>` : ''
+    info.innerHTML = `<div style="font-weight:600">${escHtml(it.title)}${badge}</div>` +
+      `<div style="font-size:11.5px;color:var(--text3)">by ${escHtml(it.ownerName || '—')} · ${escHtml(it.groupName || '')}</div>`
+    row.append(cb, info)
+    body.appendChild(row)
+  }
+  addBtn.onclick = async () => {
+    addBtn.disabled = true; let n = 0
+    for (const id of sel) {
+      try { const r = await fetch(`/api/shared/${id}/add?session=${encodeURIComponent(currentSessionID)}`, { method: 'POST' }).then(r => r.json()); n += r.added || 0 } catch (_) {}
+    }
+    showToast({ title: 'Added', message: `${n} widget(s) added to this board`, level: 'success' })
+    addBtn.textContent = 'Added ✓'
+  }
+  body.appendChild(addBtn)
+}
+
+async function renderSharedShare(body) {
+  body.innerHTML = ''
+  // Groups come from the already-loaded MY_GROUPS (same source as the widget
+  // share button) — no re-fetch, so it can't come back empty on a slow call.
+  if (!MY_GROUPS.length) {
+    body.innerHTML = '<div style="color:var(--text3);padding:28px;text-align:center">You are not in any group.</div>'
+    return
+  }
+  const wsel = document.createElement('select'); wsel.style.cssText = sharedFieldCss()
+  wsel.innerHTML = '<option value="__all__">Whole dashboard (all widgets)</option>' +
+    [...widgets.values()].map(r => `<option value="${escHtml(r.id)}">${escHtml(r.title)}</option>`).join('')
+  const w = document.createElement('div'); w.style.margin = '4px 0 0'
+  const l = document.createElement('label'); l.style.cssText = 'display:block;font-size:11.5px;color:var(--text3);margin-bottom:4px'; l.textContent = 'What to share'
+  w.append(l, wsel); body.appendChild(w)
+  // No group picker: you share with the group you belong to. Only when you are
+  // in several is a choice offered (below, on click).
+  const note = document.createElement('div')
+  note.style.cssText = 'font-size:11.5px;color:var(--text3);margin-top:10px'
+  note.textContent = MY_GROUPS.length === 1 ? `Shared with your group “${MY_GROUPS[0].groupName}”.` : 'You will be asked which of your groups to share with.'
+  body.appendChild(note)
+  const shareBtn = document.createElement('button')
+  shareBtn.className = 'pm-btn pm-primary'; shareBtn.style.marginTop = '14px'
+  shareBtn.textContent = MY_GROUPS.length === 1 ? `Share with ${MY_GROUPS[0].groupName}` : 'Share…'
+  shareBtn.onclick = async () => {
+    shareBtn.disabled = true
+    let groupId = MY_GROUPS[0].groupId
+    if (MY_GROUPS.length > 1) {
+      groupId = await pickShareGroup(wsel.value === '__all__' ? 'this dashboard' : 'this widget')
+      if (!groupId) { shareBtn.disabled = false; return }
+    }
+    const kind = wsel.value === '__all__' ? 'dashboard' : 'widget'
+    const b = { kind, groupId, session: currentSessionID }
+    if (kind === 'widget') b.widgetId = wsel.value
+    try {
+      const r = await fetch('/api/shared', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json())
+      if (r && r.id) showToast({ title: 'Shared', message: `${r.count} widget(s) added to your group's gallery`, level: 'success' })
+      else showToast({ title: 'Share failed', message: (r && r.error) || '', level: 'error' })
+    } catch (_) { showToast({ title: 'Share failed', message: '', level: 'error' }) }
+    shareBtn.disabled = false
+  }
+  body.appendChild(shareBtn)
+}
+window.openSharedGallery = openSharedGallery
 
 // ─── Command palette (Ctrl/⌘-K) ─────────────────────────────────────────────────
 function openCmdK() {
@@ -1715,7 +1900,9 @@ function renderMarkdown(text) {
 
   // Extract math blocks before marked so it doesn't mangle underscores/stars in LaTeX
   const mathBlocks = []
-  const placeholder = (i) => `\x00MATH${i}\x00`
+  // Private-use chars, not \x00: the HTML parser DOMPurify runs would turn a
+  // null byte into U+FFFD and the placeholders would never be found again.
+  const placeholder = (i) => `\uE000MATH${i}\uE000`
   text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => {
     mathBlocks.push({ inner, display: true })
     return placeholder(mathBlocks.length - 1)
@@ -1726,9 +1913,12 @@ function renderMarkdown(text) {
   })
 
   let html = marked.parse(text, { breaks: true, gfm: true })
+  // marked passes raw HTML through. Model output quotes web pages, emails and
+  // RAG chunks verbatim, so an <img onerror> in any of those would run here.
+  if (window.DOMPurify) html = DOMPurify.sanitize(html)
 
   // Restore math blocks as KaTeX-rendered HTML
-  html = html.replace(/\x00MATH(\d+)\x00/g, (_, i) => {
+  html = html.replace(/\uE000MATH(\d+)\uE000/g, (_, i) => {
     const { inner, display } = mathBlocks[parseInt(i)]
     try {
       return katex.renderToString(inner, { displayMode: display, throwOnError: false, output: 'html' })
@@ -1912,6 +2102,10 @@ function editorOnSaved(path) {
 
 // Listen for postMessage calls from widget iframes (Dashboard API)
 window.addEventListener('message', e => {
+  // Only our own frames (widgets, apps, settings) may drive the dashboard. A
+  // third-party page embedded inside a widget can postMessage(…, '*') to
+  // window.top just as easily, and 'sendChat' would hand it the agent.
+  if (e.origin !== location.origin) return
   const d = e.data
   if (!d || !d.type) return
   if (d.type === 'openFile' && d.path) {

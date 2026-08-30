@@ -145,17 +145,24 @@ func (e *ToolExecutor) previewWidget(ctx context.Context, id string) (string, []
 				}
 			}
 		}
-		report := "Auto-preview: a screenshot was captured but you have no vision to inspect it. Verify the widget via the console issues below and by reviewing your HTML/JS — do not attempt to open the screenshot file."
 		if consoleErrs != "" {
-			report += "\nConsole issues:\n" + consoleErrs
+			return "Auto-preview: console errors detected (you have no vision to see the screenshot). The widget is NOT done — fix these:\n" + consoleErrs, nil
 		}
-		return report, nil
+		return "Auto-preview: no console errors (you have no vision to inspect the layout). If your HTML/JS looks right, it is done — do not open the screenshot file.", nil
 	}
 
 	images := extractScreenshotImages(res, e.workspaceDir)
-	report := "Auto-preview: screenshot of the rendered widget attached. Inspect it — broken layout, missing icons/images or console errors mean the widget is NOT done; fix it before telling the user it is ready."
+	// Carry the verdict, don't prime doubt. A clean render told "it might be
+	// broken, fix it before saying it works" makes a capable model re-screenshot
+	// and re-verify a widget that already succeeded — wasted turns. State the
+	// result instead: trust a clean preview after one glance; escalate only when
+	// there is a concrete problem. (Console-clean is not proof of correct layout,
+	// so we still ask for the single glance — just not the re-verification loop.)
+	var report string
 	if consoleErrs != "" {
-		report += "\nConsole issues:\n" + consoleErrs
+		report = "Auto-preview attached — console errors detected, so the widget is NOT done. Fix these, then it is ready:\n" + consoleErrs
+	} else {
+		report = "Auto-preview attached — no console errors. One glance to confirm layout and icons; if it looks right, it is done — do not re-render or screenshot again to double-check."
 	}
 	return report, images
 }

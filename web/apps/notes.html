@@ -8,6 +8,7 @@
 <script src="/theme.js"></script>
 <script src="/modal.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<script src="/vendor/purify.min.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -308,7 +309,9 @@ function renderMarkdown(src) {
     const exists = notes.some(x => (x.title || '').toLowerCase() === title.toLowerCase());
     return `<a href="#" class="wikilink${exists ? '' : ' missing'}" data-note="${escAttr(title)}">${esc(title)}</a>`;
   });
-  return window.marked ? marked.parse(withLinks) : esc(withLinks);
+  if (!window.marked) return esc(withLinks);
+  const html = marked.parse(withLinks);
+  return window.DOMPurify ? DOMPurify.sanitize(html) : html;
 }
 function updatePreview() {
   if (mode === 'edit') return;
