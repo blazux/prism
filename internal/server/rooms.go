@@ -479,6 +479,7 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 			AgentName, AgentPrompt, AgentModel string
 			AgentMaxIter                       int
 			AgentThinking                      *bool // absent = keep reasoning on
+			AgentLean                          bool  // absent = guided profile
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			writeErr(w, http.StatusBadRequest, "bad body")
@@ -487,7 +488,7 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 		thinking := b.AgentThinking == nil || *b.AgentThinking
 		if err := ms.SetRoomConfig(r.Context(), memory.RoomConfig{
 			GroupID: groupID, AgentName: b.AgentName, AgentPrompt: b.AgentPrompt, AgentModel: b.AgentModel,
-			AgentMaxIter: agent.ClampIterations(b.AgentMaxIter), AgentThinking: thinking,
+			AgentMaxIter: agent.ClampIterations(b.AgentMaxIter), AgentThinking: thinking, AgentLean: b.AgentLean,
 		}); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -500,8 +501,8 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 
 // roomLimits maps a group's shared-agent budget onto the agent's turn limits.
 func roomLimits(cfg memory.RoomConfig) agent.Limits {
-	th := cfg.AgentThinking
-	return agent.Limits{MaxIterations: cfg.AgentMaxIter, Thinking: &th}
+	th, ln := cfg.AgentThinking, cfg.AgentLean
+	return agent.Limits{MaxIterations: cfg.AgentMaxIter, Thinking: &th, LeanPrompt: &ln}
 }
 
 // ─── mention parsing ────────────────────────────────────────────────────────────

@@ -282,14 +282,19 @@ func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
 		if v, ok, _ := ms.GetConfig(r.Context(), memory.KeyAgentThinking); ok && strings.TrimSpace(v) == "off" {
 			thinking = false
 		}
+		lean := false
+		if v, ok, _ := ms.GetConfig(r.Context(), memory.KeyAgentLeanPrompt); ok && strings.TrimSpace(v) == "on" {
+			lean = true
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"maxIterations": maxIter, "thinking": thinking,
+			"maxIterations": maxIter, "thinking": thinking, "leanPrompt": lean,
 			"default": agent.DefaultMaxIterations, "min": agent.MinMaxIterations, "max": agent.MaxMaxIterations,
 		})
 	case "POST":
 		var b struct {
 			MaxIterations int   `json:"maxIterations"`
 			Thinking      *bool `json:"thinking"`
+			LeanPrompt    *bool `json:"leanPrompt"`
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
@@ -312,7 +317,15 @@ func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "maxIterations": maxIter, "thinking": tv == "on"})
+		lv := "off"
+		if b.LeanPrompt != nil && *b.LeanPrompt {
+			lv = "on"
+		}
+		if err := ms.SetConfig(r.Context(), memory.KeyAgentLeanPrompt, lv); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "maxIterations": maxIter, "thinking": tv == "on", "leanPrompt": lv == "on"})
 	default:
 		http.Error(w, "method not allowed", 405)
 	}

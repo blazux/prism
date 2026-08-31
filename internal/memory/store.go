@@ -23,6 +23,7 @@ const (
 	// turn by Agent.loadProfile, scoped like agent_name in multi-user mode.
 	KeyAgentMaxIterations = "agent_max_iterations" // integer; empty = built-in default
 	KeyAgentThinking      = "agent_thinking"       // "on" / "off"; empty = on
+	KeyAgentLeanPrompt    = "agent_lean_prompt"    // "on" / "off"; empty = off (guided profile)
 )
 
 // HistoryEntry is one row from conversation_history.
@@ -104,7 +105,7 @@ func (s *Store) migrateUserScopedConfig(ctx context.Context) {
 	cfgKeys := []string{
 		"email_config", "notes_provider", "notes_vault_path",
 		"caldav_config", "tasks_provider", "calendar_provider",
-		"agent_name", KeyPersonalityBase, KeyAgentMaxIterations, KeyAgentThinking,
+		"agent_name", KeyPersonalityBase, KeyAgentMaxIterations, KeyAgentThinking, KeyAgentLeanPrompt,
 		"oauth_google_client_id", "oauth_microsoft_client_id",
 		"telegram_allowed_chat",
 	}
@@ -362,6 +363,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 		// Shared-agent turn budget, set by the group admin (Admin › Shared agent).
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_max_iter INT NOT NULL DEFAULT 0`,
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_thinking BOOLEAN NOT NULL DEFAULT TRUE`,
+		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_lean BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT NOT NULL DEFAULT ''`,
 		// Avatars for users and agents, keyed by scope: "u<id>" (user),

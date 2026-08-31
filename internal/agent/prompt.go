@@ -42,6 +42,20 @@ In what you build (widgets, code, any deliverable), the same rule holds three wa
 
 Estimate only when nothing can verify a value — and then say plainly that it's an estimate.`
 
+// ─── Prompt profiles ─────────────────────────────────────────────────────────
+// Two profiles, picked per user (Settings › Agent) or per group (Admin › Shared
+// agent), default guided:
+//   guided — everything below, including the scaffolding that small local
+//            models measurably need (systemPromptActTurn, the long Retry
+//            discipline). Each crutch here was earned by measurement (see the
+//            qwen numbers on systemPromptRole/systemPromptActTurn) — don't
+//            remove one without re-running eval/ on a small model.
+//   lean   — for frontier models: drops systemPromptActTurn and swaps Retry
+//            discipline for systemPromptRetryLean. Product knowledge (routes,
+//            widget patterns) and safety rules (grounding, destructive-actions,
+//            pause-before-heavy) stay in BOTH profiles: no model knows Prism's
+//            internals, and trust rules are not an intelligence question.
+
 // systemPromptActTurn closes the announce-without-acting gap. Measured on
 // qwen3.8 (session model-test, 2026-08-20): after large tool outputs the model
 // ends its response on a stated next step ("je corrige l'outil, puis je crée
@@ -59,7 +73,9 @@ A response with no tool call is your FINAL answer: the turn ends there, nothing 
 - Reply without a tool call only when the work is fully done or you are blocked on the user — reporting what happened, never what will happen.
 - If your reply is about to end on future work, don't send it — make the tool calls instead.`
 
-// systemPromptCore contains the protected technical instructions that cannot be modified.
+// systemPromptCore contains the protected technical instructions that cannot be
+// modified. It ends at the profile-dependent retry section (systemPromptRetryGuided
+// / systemPromptRetryLean) and continues in systemPromptCoreTail.
 const systemPromptCore = `
 
 ## Architecture
@@ -253,7 +269,11 @@ rag_search includes page numbers per chunk, so you can cite where an answer come
 
 ## Missing information
 
-If a task requires specific information (addresses, credentials, preferences…) that is absent from the user profile and cannot be reasonably inferred, ask before proceeding.
+If a task requires specific information (addresses, credentials, preferences…) that is absent from the user profile and cannot be reasonably inferred, ask before proceeding.`
+
+// systemPromptRetryGuided is the guided profile's retry section: step-by-step
+// rules a small model needs spelled out to stop it spinning on a failing call.
+const systemPromptRetryGuided = `
 
 ## Retry discipline
 
@@ -262,7 +282,21 @@ If a tool call fails, diagnose the error before retrying. Never call the exact s
 - Do not spin in a loop hoping the result will change
 - Ask the user for guidance or wait for the underlying condition to resolve
 - Do not invent a workaround using a mechanism that doesn't exist in your tools or these instructions — if nothing covers the need, say so plainly
-- Never pivot from a failure to a plan the user didn't ask for — especially not one that deletes, replaces or rebuilds existing data
+- Never pivot from a failure to a plan the user didn't ask for — especially not one that deletes, replaces or rebuilds existing data`
+
+// systemPromptRetryLean keeps only what is safety, not scaffolding: no pivot
+// from a failure to deletion/rebuild, no invented mechanisms. The counting
+// rules ("never twice in a row, stop after 2") go — a frontier model diagnoses
+// failures on its own, and the loop still catches identical-call spins.
+const systemPromptRetryLean = `
+
+## Retry discipline
+
+Diagnose a failure before retrying rather than looping on an identical call. Never pivot from a failure to a plan the user didn't ask for — especially not one that deletes, replaces or rebuilds existing data — and never invent a workaround using a mechanism that doesn't exist in your tools or these instructions: if nothing covers the need, say so plainly.`
+
+// systemPromptCoreTail continues the protected instructions after the
+// profile-dependent retry section.
+const systemPromptCoreTail = `
 
 ## Saving remote files
 

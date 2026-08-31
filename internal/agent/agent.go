@@ -124,6 +124,10 @@ type Limits struct {
 	// Thinking controls extended reasoning (<think> / reasoning channel) for
 	// backends that expose the switch. nil = config / on.
 	Thinking *bool
+	// LeanPrompt picks the lean system-prompt profile (for frontier models:
+	// drops the small-model scaffolding — see the prompt-profiles comment in
+	// prompt.go). nil = config / guided.
+	LeanPrompt *bool
 }
 
 const (
@@ -167,6 +171,18 @@ func (a *Agent) effectiveLimits() (maxIter int, thinking bool) {
 		thinking = *a.limits.Thinking
 	}
 	return maxIter, thinking
+}
+
+// leanPrompt resolves the prompt profile the same way effectiveLimits resolves
+// the budget: override → config → guided (false).
+func (a *Agent) leanPrompt() bool {
+	switch {
+	case a.limitsOverride.LeanPrompt != nil:
+		return *a.limitsOverride.LeanPrompt
+	case a.limits.LeanPrompt != nil:
+		return *a.limits.LeanPrompt
+	}
+	return false
 }
 
 // SetChannel declares the surface the next turn comes from. See Agent.channel.
@@ -301,6 +317,12 @@ func (a *Agent) loadProfile() {
 		if t := strings.TrimSpace(v); t != "" {
 			on := t != "off" && t != "false" && t != "0"
 			a.limits.Thinking = &on
+		}
+	}
+	if v, ok, err := store.GetConfig(ctx, memory.KeyAgentLeanPrompt); err == nil && ok {
+		if t := strings.TrimSpace(v); t != "" {
+			on := t == "on" || t == "true" || t == "1"
+			a.limits.LeanPrompt = &on
 		}
 	}
 }
@@ -641,6 +663,13 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		sb.WriteString(persona)
 	}
 	sb.WriteString(systemPromptCore)
+	lean := a.leanPrompt()
+	if lean {
+		sb.WriteString(systemPromptRetryLean)
+	} else {
+		sb.WriteString(systemPromptRetryGuided)
+	}
+	sb.WriteString(systemPromptCoreTail)
 
 	// Channel guidance: the "telegram" session is the user texting from their phone.
 	if a.sessionID == telegramSessionID {
@@ -727,7 +756,9 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	// Grounding rule, near the end on purpose: late-prompt instructions are the
 	// ones this size of model actually follows (see systemPromptRole's measurements).
 	sb.WriteString(systemPromptGrounding)
-	sb.WriteString(systemPromptActTurn)
+	if !lean {
+		sb.WriteString(systemPromptActTurn)
+	}
 
 	// Channel layer (Vortex): the phone constrains the *form* of the answer, not
 	// who the agent is. Kept last so it wins over anything the personality says

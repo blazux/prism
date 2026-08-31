@@ -863,6 +863,8 @@ async function renderAgentTab(container) {
       <span style="color:var(--text3);font-size:11.5px;display:block;margin-top:4px">${limits.min}–${limits.max}. Leave blank for the default (${limits.default}). Identical-call loops are still caught early regardless of this cap.</span></label>
     <label class="ag-label" style="display:flex;align-items:center;gap:10px;cursor:pointer"><input id="ag-thinking" type="checkbox" ${limits.thinking ? 'checked' : ''} style="width:auto;margin:0">Extended reasoning</label>
     <div style="color:var(--text3);font-size:11.5px;margin:-6px 0 10px;line-height:1.5">Lets thinking models (Qwen3, DeepSeek-R1, gpt-oss…) reason before answering. Off = faster, cheaper replies. Applies to Ollama and OpenAI-compatible backends; Claude models never use it here. Always off on phone calls.</div>
+    <label class="ag-label" style="display:flex;align-items:center;gap:10px;cursor:pointer"><input id="ag-lean" type="checkbox" ${limits.leanPrompt ? 'checked' : ''} style="width:auto;margin:0">Lean prompt (frontier models)</label>
+    <div style="color:var(--text3);font-size:11.5px;margin:-6px 0 10px;line-height:1.5">Drops the step-by-step guardrails that small local models need from the system prompt — a capable model (Claude, GPT-5, large hosted models) wastes turns on them. Leave off for small Ollama models. Safety rules stay on either way.</div>
     <div style="display:flex;gap:10px;align-items:center;margin-top:4px">
       <button class="btn btn-primary" id="ag-limits-save">Save</button>
       <span id="ag-limits-status" class="ag-status"></span>
@@ -900,7 +902,7 @@ async function renderAgentTab(container) {
     try {
       const raw = page.querySelector('#ag-maxiter').value.trim()
       const r = await fetch('/api/agent/limits', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxIterations: raw === '' ? 0 : parseInt(raw, 10) || 0, thinking: page.querySelector('#ag-thinking').checked }) }).then(r => r.json())
+        body: JSON.stringify({ maxIterations: raw === '' ? 0 : parseInt(raw, 10) || 0, thinking: page.querySelector('#ag-thinking').checked, leanPrompt: page.querySelector('#ag-lean').checked }) }).then(r => r.json())
       // Echo the clamped value back so the field shows what was actually stored.
       page.querySelector('#ag-maxiter').value = r.maxIterations || ''
       st.textContent = '✓ Saved — takes effect on the next message'

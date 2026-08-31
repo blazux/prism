@@ -188,6 +188,7 @@ code{font-size:12px}
       <label>System prompt</label><textarea id="ag-prompt" placeholder="You are the team's assistant…"></textarea>
       <label>Max iterations per turn</label><input id="ag-maxiter" type="number" min="10" max="500" step="5" placeholder="75 (default)" style="width:160px"><span class="hint">Model calls allowed for one message (each tool use is one). 10–500, blank = default. Raise it if the shared agent stops with "iteration limit reached" on long tasks.</span>
       <label class="row" style="gap:8px;cursor:pointer"><input id="ag-thinking" type="checkbox" checked style="width:auto">Extended reasoning</label><span class="hint">Thinking mode for models that have one (Qwen3, DeepSeek-R1, gpt-oss…). Off = faster, cheaper replies. No effect on Claude models.</span>
+      <label class="row" style="gap:8px;cursor:pointer"><input id="ag-lean" type="checkbox" style="width:auto">Lean prompt (frontier models)</label><span class="hint">Drops the step-by-step guardrails small local models need from the system prompt — a capable model wastes turns on them. Leave off for small Ollama models; safety rules stay on either way.</span>
       <div class="row"><button class="primary" onclick="saveAgent()">Save agent</button><span id="status"></span></div>
       <h2 style="margin-top:26px">Webex integration</h2><div class="hint">Connect a Webex bot so members can talk to this shared agent in Webex spaces — it answers when @mentioned (group spaces) or on every message (1:1). Create a bot at developer.webex.com and paste its access token.</div>
       <label>Bot access token</label><input id="wx-token" type="password" placeholder="paste token to connect / change" style="width:100%" autocomplete="new-password">
@@ -298,7 +299,7 @@ function fillGroupPickers(){const opts=adminGroups().map(g=>'<option value="'+(g
  ['ag-group','ac-group','rg-group','mc-group','gs-group'].forEach(i=>{if($(i))$(i).innerHTML=opts;});}
 async function loadAgent(){const g=$('ag-group').value;if(!g)return;const c=await jget('/api/room/config?group='+g);if(!c)return;
  $('ag-name').value=c.agentName||'';$('ag-prompt').value=c.agentPrompt||'';$('ag-model').value=c.agentModel||'';
- $('ag-maxiter').value=c.agentMaxIter||'';$('ag-thinking').checked=c.agentThinking!==false;renderAgentAvatar();}
+ $('ag-maxiter').value=c.agentMaxIter||'';$('ag-thinking').checked=c.agentThinking!==false;$('ag-lean').checked=c.agentLean===true;renderAgentAvatar();}
 // ── Shared-agent avatar ──
 function avInitials(n){return (n||'?').trim().split(/\s+/).map(w=>w[0]||'').slice(0,2).join('').toUpperCase()||'?';}
 function avBox(scope,name,ver){const px=44,fs=18,src='/api/avatar?scope='+encodeURIComponent(scope)+(ver?'&v='+ver:'');
@@ -308,7 +309,7 @@ async function downscale(file){const img=await createImageBitmap(file);const s=M
 async function uploadAgentAvatar(file){const g=$('ag-group').value;if(!g)return;const blob=await downscale(file);const fd=new FormData();fd.append('file',blob,'a.png');const r=await fetch('/api/avatar?scope=agent-g'+g,{method:'POST',body:fd});if(r.ok){renderAgentAvatar(Date.now());}else{$('status').textContent='avatar error';}}
 async function rmAgentAvatar(){const g=$('ag-group').value;if(!g)return;await fetch('/api/avatar?scope=agent-g'+g,{method:'DELETE'});renderAgentAvatar(Date.now());}
 async function saveAgent(){const g=$('ag-group').value;const r=await jpost('/api/room/config?group='+g,{agentName:$('ag-name').value,agentPrompt:$('ag-prompt').value,agentModel:$('ag-model').value,
- agentMaxIter:parseInt($('ag-maxiter').value,10)||0,agentThinking:$('ag-thinking').checked});
+ agentMaxIter:parseInt($('ag-maxiter').value,10)||0,agentThinking:$('ag-thinking').checked,agentLean:$('ag-lean').checked});
  $('status').textContent=r.ok?'saved ✓':'error';setTimeout(()=>$('status').textContent='',2000);}
 // ── Webex (per-group bot for the shared agent) ──
 // Les salles viennent de l'API Webex (GET /v1/rooms via le token du bot) : on ne
