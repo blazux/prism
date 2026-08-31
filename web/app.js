@@ -1416,6 +1416,26 @@ async function renderSharedAdd(body) {
     info.innerHTML = `<div style="font-weight:600">${escHtml(it.title)}${badge}</div>` +
       `<div style="font-size:11.5px;color:var(--text3)">by ${escHtml(it.ownerName || '—')} · ${escHtml(it.groupName || '')}</div>`
     row.append(cb, info)
+    // Unshare: your own items, or anyone's as admin. (A group admin who is not
+    // global admin gets no icon — the server would allow it, but the front does
+    // not know group roles; rare enough to live without.)
+    if (it.ownerId === ME.uid || ME.isAdmin) {
+      const del = document.createElement('button')
+      del.className = 'pm-btn'; del.style.cssText = 'padding:2px 9px;align-self:center;flex:none'
+      del.textContent = '🗑'; del.title = 'Remove from the shared gallery'
+      del.onclick = async (e) => {
+        e.preventDefault(); e.stopPropagation()
+        const ok = await PrismModal.confirm(`Remove "${it.title}" from the shared gallery? Copies members already added to their boards are kept.`, { title: 'Unshare', okLabel: 'Remove' })
+        if (!ok) return
+        try {
+          const r = await fetch(`/api/shared/${it.id}`, { method: 'DELETE' })
+          if (!r.ok) { const b = await r.json().catch(() => ({})); showToast({ title: 'Unshare failed', message: b.error || '', level: 'error' }); return }
+          showToast({ title: 'Removed', message: `"${it.title}" removed from the gallery`, level: 'success' })
+          renderSharedAdd(body)
+        } catch (_) { showToast({ title: 'Unshare failed', message: '', level: 'error' }) }
+      }
+      row.appendChild(del)
+    }
     body.appendChild(row)
   }
   addBtn.onclick = async () => {

@@ -96,6 +96,45 @@ func (e *ToolExecutor) sharedAdd(ctx context.Context, idStr string) (string, err
 	return fmt.Sprintf("Added %d widget(s) from %q to this dashboard.", added, item.Title), nil
 }
 
+// sharedUnshare removes an item from the group gallery: the acting user's own
+// shares, or anyone's when they administer the item's group (the same rule the
+// DELETE /api/shared/<id> endpoint enforces, minus global admin — the executor
+// has no global role, and a global admin has the gallery UI). Copies members
+// already added to their boards are kept: add_shared copies the files.
+func (e *ToolExecutor) sharedUnshare(ctx context.Context, idStr string) (string, error) {
+	if e.memStore == nil || len(e.sharingGroups) == 0 {
+		return "", fmt.Errorf("sharing is only available inside a multi-user group")
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("id must be the numeric id from list_shared")
+	}
+	item, ok, err := e.memStore.SharedItemByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if !ok || !e.inSharingGroup(item.GroupID) {
+		return "", fmt.Errorf("shared item %d is not available in your group", id)
+	}
+	owner := e.actingUserID > 0 && item.OwnerID == e.actingUserID
+	if !owner && !e.adminOfSharingGroup(item.GroupID) {
+		return "", fmt.Errorf("only the owner or a group admin can unshare %q", item.Title)
+	}
+	if err := e.memStore.DeleteSharedItem(ctx, id); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Removed %q from the group gallery. Copies members already added to their boards are kept.", item.Title), nil
+}
+
+func (e *ToolExecutor) adminOfSharingGroup(id int64) bool {
+	for _, g := range e.sharingGroups {
+		if g.GroupID == id && g.Role == memory.GroupRoleAdmin {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *ToolExecutor) writeSharedWidget(id, title, content string, cols, height int) error {
 	if err := os.MkdirAll(e.pluginDir, 0755); err != nil {
 		return err

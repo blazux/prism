@@ -862,8 +862,10 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			return wrap(e.sharedAdd(ctx, str("id")))
 		case "share":
 			return wrap(e.sharePublish(ctx, str("id"), str("kind"), str("group")))
+		case "unshare":
+			return wrap(e.sharedUnshare(ctx, str("id")))
 		default:
-			return "", nil, fmt.Errorf("widget: unknown action %q (expected add, update, remove, list, list_shared, add_shared, share)", str("action"))
+			return "", nil, fmt.Errorf("widget: unknown action %q (expected add, update, remove, list, list_shared, add_shared, share, unshare)", str("action"))
 		}
 	case "add_widget": // legacy alias
 		colsFloat, _ := args["cols"].(float64)
