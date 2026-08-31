@@ -5,6 +5,8 @@
 //   cyberpunk → circuit   matrix → matrix     midnight → stars
 //   nord      → snow       solarized-dark → bokeh   rose-pine → petals
 //   tech      → network    synthwave → grid
+//   slate     → sparkline  boardroom → skyline
+//   (graphite's pinstripe and paper's stillness are pure CSS — see style.css)
 
 (function () {
   'use strict';
@@ -14,6 +16,7 @@
     cyberpunk: 'circuit', matrix: 'matrix',
     midnight: 'stars', nord: 'snow', 'solarized-dark': 'bokeh',
     'rose-pine': 'petals', tech: 'network', synthwave: 'grid',
+    slate: 'sparkline', boardroom: 'skyline',
   };
 
   let canvas, ctx, w = 0, h = 0;
@@ -303,6 +306,75 @@
     }
   }
 
+  // ─── Sparkline (slate) — a quiet monitoring chart scrolling along the bottom ─
+  function sparkNext(s) {
+    s.v = Math.max(-1, Math.min(1, s.v + rand(-0.5, 0.5)));
+    s.y += s.v * 2.2;
+    const lo = s.base - s.amp, hi = s.base + s.amp;
+    if (s.y < lo) { s.y = lo; s.v = Math.abs(s.v); }
+    if (s.y > hi) { s.y = hi; s.v = -Math.abs(s.v); }
+    return s.y;
+  }
+  function spawnSparkline() {
+    parts = [];
+    const cols = [colAccent, colCyan, colWarm];
+    for (let k = 0; k < 3; k++) {
+      const s = { col: cols[k], base: h * (0.68 + 0.09 * k), amp: h * 0.045, step: 7, sp: 0.3 + 0.12 * k, off: 0, pts: [], y: 0, v: 0 };
+      s.y = s.base;
+      const m = Math.ceil(w / s.step) + 2;
+      for (let i = 0; i < m; i++) s.pts.push(sparkNext(s));
+      parts.push(s);
+    }
+  }
+  function frameSparkline() {
+    ctx.clearRect(0, 0, w, h);
+    ctx.lineWidth = 1.2; ctx.lineJoin = 'round';
+    for (const s of parts) {
+      s.off += s.sp;
+      while (s.off >= s.step) { s.off -= s.step; s.pts.shift(); s.pts.push(sparkNext(s)); }
+      ctx.strokeStyle = hexToRgba(s.col, 0.13);
+      ctx.beginPath();
+      for (let i = 0; i < s.pts.length; i++) {
+        const x = i * s.step - s.off;
+        if (i === 0) ctx.moveTo(x, s.pts[i]); else ctx.lineTo(x, s.pts[i]);
+      }
+      ctx.stroke();
+      // the "live" tip
+      ctx.fillStyle = hexToRgba(s.col, 0.4);
+      ctx.beginPath(); ctx.arc((s.pts.length - 1) * s.step - s.off, s.pts[s.pts.length - 1], 1.8, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // ─── Skyline (boardroom) — office towers at dusk, a few windows still lit ──
+  function spawnSkyline() {
+    parts = [];
+    for (const layer of [1, 0]) {           // far first, so the near row draws on top
+      let x = rand(-30, 0);
+      while (x < w + 20) {
+        const bw = rand(34, 90), bh = h * (layer ? rand(0.07, 0.15) : rand(0.1, 0.24));
+        const b = { x, bw, bh, layer, wins: [] };
+        if (!layer) {
+          for (let wx = x + 6; wx < x + bw - 9; wx += 11)
+            for (let wy = h - bh + 8; wy < h - 12; wy += 14)
+              if (Math.random() < 0.5) b.wins.push({ x: wx, y: wy, on: Math.random() < 0.3 });
+        }
+        parts.push(b);
+        x += bw + rand(4, 18);
+      }
+    }
+  }
+  function frameSkyline() {
+    ctx.clearRect(0, 0, w, h);
+    for (const b of parts) {
+      ctx.fillStyle = hexToRgba(colText, b.layer ? 0.035 : 0.06);
+      ctx.fillRect(b.x, h - b.bh, b.bw, b.bh);
+      for (const wn of b.wins) {
+        if (Math.random() < 0.0005) wn.on = !wn.on;   // someone calls it a day
+        if (wn.on) { ctx.fillStyle = hexToRgba(colWarm, 0.35); ctx.fillRect(wn.x, wn.y, 5, 3); }
+      }
+    }
+  }
+
   // ─── Effect registry + dispatch ────────────────────────────────────────────
   const effects = {
     circuit: { spawn: genCircuit, frame: frameCircuit, static: staticCircuit },
@@ -313,6 +385,8 @@
     petals: { spawn: spawnPetals, frame: framePetals },
     network: { spawn: spawnNetwork, frame: frameNetwork },
     grid: { spawn: function () { gridPhase = 0; }, frame: frameGrid },
+    sparkline: { spawn: spawnSparkline, frame: frameSparkline },
+    skyline: { spawn: spawnSkyline, frame: frameSkyline },
   };
 
   function spawn() { const e = effects[effect]; if (e && e.spawn) e.spawn(); }

@@ -2292,6 +2292,21 @@ body {
 /* ── Prism Light — kept sober (a whisper of the default aurora) ────────────── */
 [data-theme="prism-light"] #bg-fx::before { opacity: .05; }
 
+/* ── The professional set (theme.js) ───────────────────────────────────────── */
+/* Paper stays almost still — it is the reading theme. */
+[data-theme="paper"] #bg-fx::before { opacity: .04; }
+
+/* Graphite — pinstripe, the suit fabric, drifting imperceptibly. The 67.9px
+   travel is one 48px stripe period projected on the x axis (48·√2). */
+[data-theme="graphite"] #bg-fx::before {
+  inset: -80px;
+  background: repeating-linear-gradient(45deg, var(--text3) 0 1px, transparent 1px 48px);
+  opacity: .05;
+  filter: none;
+  animation: bgPinstripe 120s linear infinite;
+}
+@keyframes bgPinstripe { to { transform: translateX(67.9px); } }
+
 /* Themes with a canvas animation (bgfx.js) drop their CSS pattern layer so the
    two don't double up; the gradient base and ambient ::after glow stay. */
 [data-theme="midnight"] #bg-fx::before,
@@ -2299,6 +2314,8 @@ body {
 [data-theme="solarized-dark"] #bg-fx::before,
 [data-theme="rose-pine"] #bg-fx::before,
 [data-theme="tech"] #bg-fx::before,
+[data-theme="slate"] #bg-fx::before,
+[data-theme="boardroom"] #bg-fx::before,
 [data-theme="synthwave"] #bg-fx::before,
 [data-theme="synthwave"] #bg-fx::after { display: none; }
 

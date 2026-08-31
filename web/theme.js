@@ -33,6 +33,48 @@
         '--green': '#2e9e6b', '--red': '#d05661', '--yellow': '#b8862a', '--orange': '#c2772f',
       },
     },
+    // ── The sober/professional set: neutral surfaces, desaturated accents,
+    // muted status colors. Their aurora is damped in style.css.
+    'graphite': {
+      label: 'Graphite',
+      vars: {
+        '--bg': '#0e0e0f', '--bg1': '#131315', '--bg2': '#19191b', '--bg3': '#202023', '--bg4': '#28282c',
+        '--border': '#242428', '--border2': '#303036',
+        '--text': '#e2e2e5', '--text2': '#94949c', '--text3': '#58585f',
+        '--accent': '#7d9cc0', '--accent-dim': '#263140',
+        '--green': '#58a377', '--red': '#c56b6f', '--yellow': '#c0a468', '--orange': '#b58a5c',
+      },
+    },
+    'slate': {
+      label: 'Slate',
+      vars: {
+        '--bg': '#12161c', '--bg1': '#171c23', '--bg2': '#1d232c', '--bg3': '#242c37', '--bg4': '#2d3643',
+        '--border': '#262f3a', '--border2': '#333f4e',
+        '--text': '#dbe2ea', '--text2': '#8b98a8', '--text3': '#52606f',
+        '--accent': '#74a0c8', '--accent-dim': '#1f3446',
+        '--green': '#56a888', '--red': '#c76e75', '--yellow': '#c2a56b', '--orange': '#b8875f',
+      },
+    },
+    'paper': {
+      label: 'Paper',
+      vars: {
+        '--bg': '#f5f3ee', '--bg1': '#fdfcf9', '--bg2': '#edeae3', '--bg3': '#e3dfd6', '--bg4': '#d6d1c6',
+        '--border': '#ddd8cd', '--border2': '#c8c2b4',
+        '--text': '#26241e', '--text2': '#5f5b50', '--text3': '#9a9484',
+        '--accent': '#56718f', '--accent-dim': '#dde4ec',
+        '--green': '#588a5e', '--red': '#b05d5d', '--yellow': '#96772e', '--orange': '#a06a3a',
+      },
+    },
+    'boardroom': {
+      label: 'Boardroom',
+      vars: {
+        '--bg': '#eef1f4', '--bg1': '#ffffff', '--bg2': '#e4e8ee', '--bg3': '#d8dee6', '--bg4': '#c9d1db',
+        '--border': '#d5dce4', '--border2': '#bcc6d2',
+        '--text': '#182635', '--text2': '#4d5d70', '--text3': '#8496a8',
+        '--accent': '#2e5d8c', '--accent-dim': '#d0deee',
+        '--green': '#2f7d5b', '--red': '#b2555e', '--yellow': '#8f7020', '--orange': '#a5622c',
+      },
+    },
     'midnight': {
       label: 'Midnight',
       vars: {
