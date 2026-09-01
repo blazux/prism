@@ -235,10 +235,38 @@ func (m *Manager) CallTool(ctx context.Context, sessionID, toolName string, args
 				return "", fmt.Errorf("connect to MCP server %q: %w", srv.Name, err)
 			}
 			client.setAuth(authHeader) // a cached client may hold a now-refreshed token
-			return client.CallTool(ctx, toolName, args)
+			out, callErr := client.CallTool(ctx, toolName, args)
+			if isStaleSession(callErr) {
+				// Streamable HTTP: a 404 on a session we hold means the server
+				// no longer knows our Mcp-Session-Id (it restarted or expired
+				// the session). Per spec the client must start a new session,
+				// so drop the cached client, redo the handshake, retry once.
+				m.dropClient(sessionID, srv.ID)
+				client, err = m.getOrInitClient(ctx, sessionID, srv.ID, srv.URL, authHeader)
+				if err != nil {
+					return "", fmt.Errorf("reconnect to MCP server %q: %w", srv.Name, err)
+				}
+				return client.CallTool(ctx, toolName, args)
+			}
+			return out, callErr
 		}
 	}
 	return "", fmt.Errorf("unknown MCP tool: %s", toolName)
+}
+
+// isStaleSession reports whether a tool-call error means the server no longer
+// recognizes our Mcp-Session-Id. FastMCP keeps sessions in memory and answers
+// HTTP 404 for an unknown one (observed as {"detail":"Not Found"} after an
+// RTClient container restart).
+func isStaleSession(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "HTTP 404")
+}
+
+// dropClient evicts a cached client so the next getOrInitClient re-handshakes.
+func (m *Manager) dropClient(sessionID, serverID string) {
+	m.clientsMu.Lock()
+	delete(m.clients, sessionID+":"+serverID)
+	m.clientsMu.Unlock()
 }
 
 // getOrInitClient returns a cached initialized client, creating one if needed.

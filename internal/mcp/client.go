@@ -168,6 +168,9 @@ func (c *Client) notify(ctx context.Context, method string, params interface{}) 
 
 func readSSEResult(r io.Reader, id int64) (json.RawMessage, error) {
 	scanner := bufio.NewScanner(r)
+	// A JSON-RPC response arrives as a single "data:" line; a tool result larger
+	// than bufio's 64 KiB default (e.g. a ticket with attachments) must still fit.
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -188,6 +191,9 @@ func readSSEResult(r io.Reader, id int64) (json.RawMessage, error) {
 			return nil, fmt.Errorf("RPC error %d: %s", resp.Error.Code, resp.Error.Message)
 		}
 		return resp.Result, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("SSE read: %w", err)
 	}
 	return nil, fmt.Errorf("SSE stream ended without matching response for id %d", id)
 }
