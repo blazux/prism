@@ -730,6 +730,35 @@ body {
 }
 #theme-select:hover { color: var(--text); border-color: var(--accent); }
 
+#approval-select {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  color: var(--text3);
+  font-size: 11.5px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+#approval-select:hover { color: var(--text); border-color: var(--accent); }
+#approval-select.manual { color: var(--yellow, #d9a441); border-color: var(--yellow, #d9a441); }
+
+/* Approve/Reject bar shown under a tool call awaiting the user's verdict */
+.tool-approve-bar {
+  display: flex; gap: 8px; align-items: center;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.tool-approve-bar button {
+  font: inherit; font-size: 12px; cursor: pointer;
+  padding: 3px 12px; border-radius: var(--radius);
+  background: var(--bg2); color: var(--text); border: 1px solid var(--border2);
+  transition: color .15s, border-color .15s;
+}
+.tool-approve-bar .ta-approve:hover { color: var(--green, #4caf50); border-color: var(--green, #4caf50); }
+.tool-approve-bar .ta-reject:hover { color: var(--red, #e05252); border-color: var(--red, #e05252); }
+
 /* ── Zoom control ────────────────────────────────────────────────────────── */
 
 

@@ -68,6 +68,10 @@
           Settings
         </a>
 
+        <select id="approval-select" title="Tool approval — manual asks before every tool call" onchange="setApprovalMode(this.value)">
+          <option value="auto">⚡ Approval: auto</option>
+          <option value="manual">✋ Approval: manual</option>
+        </select>
         <select id="theme-select" title="Theme"></select>
         <select id="model-select" onchange="setModel(this.value)" title="AI Model"></select>
         <button id="notif-btn" onclick="toggleNotifPanel()" title="Notifications">

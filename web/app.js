@@ -133,7 +133,7 @@ function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(currentSessionID)}`)
 
-  ws.onopen  = () => { clearChat(); batchLoading = true; if (currentContext) send({ type: 'set_context', content: currentContext }) }
+  ws.onopen  = () => { clearChat(); batchLoading = true; send({ type: 'approval_mode', content: approvalMode }); if (currentContext) send({ type: 'set_context', content: currentContext }) }
   ws.onclose = () => { setContainerBadge('unknown'); setTimeout(connect, 2000) }
   ws.onerror = () => {}
   ws.onmessage = (e) => {
@@ -197,6 +197,7 @@ function handleServerMsg(msg) {
     case 'mcp_updated':
       break
     case 'secret_request': showSecretDialog(msg.name, msg.description); break
+    case 'approval_request': appendApprovalRequest(msg); break
     case 'open_file':    break  // handled via file_content callback
     case 'file_content': openEditor(msg.path, msg.content); break
     case 'saved':       editorOnSaved(msg.path); break
@@ -682,6 +683,7 @@ function appendToolUse(msg) {
 }
 
 function appendToolResult(msg) {
+  document.getElementById('tool-approve-' + msg.id)?.remove()
   const wasAtBottom = chatWasAtBottom()
   const el = document.getElementById('tool-out-' + msg.id)
   if (!el) {
@@ -1841,6 +1843,49 @@ function getDisabledTools() { return getConfig().disabled || [] }
 
 window.setModel = function(model) { send({ type: 'set_model', model }) }
 
+// ─── Tool approval mode ───────────────────────────────────────────────────────
+// "auto" (default) runs tool calls immediately; "manual" pauses before each one
+// until it's approved in chat. Kept per browser, pushed to the server over WS
+// (it lives on the connection, so a new tab starts from localStorage).
+let approvalMode = 'auto'
+try { approvalMode = localStorage.getItem('prism-approval') === 'manual' ? 'manual' : 'auto' } catch (_) {}
+
+window.setApprovalMode = function(mode) {
+  approvalMode = mode === 'manual' ? 'manual' : 'auto'
+  try { localStorage.setItem('prism-approval', approvalMode) } catch (_) {}
+  syncApprovalSelect()
+  send({ type: 'approval_mode', content: approvalMode })
+}
+
+function syncApprovalSelect() {
+  const sel = document.getElementById('approval-select')
+  if (!sel) return
+  sel.value = approvalMode
+  sel.classList.toggle('manual', approvalMode === 'manual')
+}
+
+function appendApprovalRequest(msg) {
+  const out = document.getElementById('tool-out-' + msg.id)
+  if (!out) return
+  const block = out.closest('.tool-block')
+  if (!block) return
+  out.innerHTML = 'Waiting for your approval…'
+  const bar = document.createElement('div')
+  bar.className = 'tool-approve-bar'
+  bar.id = 'tool-approve-' + msg.id
+  bar.innerHTML = `<button class="ta-approve">✓ Approve</button><button class="ta-reject">✕ Reject</button>`
+  const answer = (verdict) => {
+    send({ type: 'approval_response', id: msg.id, content: verdict })
+    bar.remove()
+    const o = document.getElementById('tool-out-' + msg.id)
+    if (o && verdict === 'approve') o.innerHTML = '<span class="tool-spinner"></span> Running…'
+  }
+  bar.querySelector('.ta-approve').addEventListener('click', () => answer('approve'))
+  bar.querySelector('.ta-reject').addEventListener('click', () => answer('reject'))
+  block.appendChild(bar)
+  scrollChat(true)
+}
+
 function setCurrentModel(model) {
   const sel = document.getElementById('model-select')
   let found = false
@@ -2260,6 +2305,7 @@ async function initApp() {
   await loadIdentity()
   applyDisabledApps()
   window.PrismTheme.populateSelect(document.getElementById('theme-select'))
+  syncApprovalSelect()
   renderDock()
   updateSettingsLink()
   updateAdminLink()

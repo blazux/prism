@@ -20,16 +20,19 @@ import (
 )
 
 type Client struct {
-	conn            *websocket.Conn
-	send            chan []byte
-	ag              *agent.Agent
-	cancelFn        context.CancelFunc
-	mu              sync.Mutex
-	sessionID       string
-	user            *memory.User // authenticated user for this connection (nil in legacy/no-DB mode)
-	lastNotifID     int64        // last notification ID pushed to this client
-	pendingSecretCh chan string  // non-nil while agent is waiting for secret input
-	viewContext     string       // what the user is currently looking at (UI -> agent)
+	conn              *websocket.Conn
+	send              chan []byte
+	ag                *agent.Agent
+	cancelFn          context.CancelFunc
+	mu                sync.Mutex
+	sessionID         string
+	user              *memory.User // authenticated user for this connection (nil in legacy/no-DB mode)
+	lastNotifID       int64        // last notification ID pushed to this client
+	pendingSecretCh   chan string  // non-nil while agent is waiting for secret input
+	approvalManual    bool         // manual tool approval toggle (approval_mode message)
+	pendingApproval   chan bool    // non-nil while agent is waiting for a tool verdict
+	pendingApprovalID string       // tool ID the pending verdict belongs to
+	viewContext       string       // what the user is currently looking at (UI -> agent)
 }
 
 // wsFileOpsAllowed mirrors requireAdminUser for the editor's WebSocket file
@@ -38,6 +41,40 @@ type Client struct {
 // over /ws were not gated, which made the REST gate theatre.
 func (s *Server) wsFileOpsAllowed(c *Client) bool {
 	return c.user == nil || s.isAdminUser(context.Background(), c.user)
+}
+
+// wireApproval connects an agent to this client's manual-approval toggle: the
+// mode is re-read at every tool call, and the verdict travels back over the
+// same WS as an "approval_response" message (see the read pump).
+func (c *Client) wireApproval(ag *agent.Agent) {
+	ag.SetApprovalFns(
+		func() bool {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			return c.approvalManual
+		},
+		func(ctx context.Context, toolID string) bool {
+			ch := make(chan bool, 1)
+			c.mu.Lock()
+			c.pendingApproval = ch
+			c.pendingApprovalID = toolID
+			c.mu.Unlock()
+			defer func() {
+				c.mu.Lock()
+				if c.pendingApproval == ch {
+					c.pendingApproval = nil
+					c.pendingApprovalID = ""
+				}
+				c.mu.Unlock()
+			}()
+			select {
+			case ok := <-ch:
+				return ok
+			case <-ctx.Done():
+				return false
+			}
+		},
+	)
 }
 
 // cancelActive cancels the in-flight agent turn (if any) under the client mutex.
@@ -225,6 +262,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client.ag = agent.New(ollamaClient, executor, model, ms, personality)
+	client.wireApproval(client.ag)
 	client.ag.SetSession(sessionID, personality)
 	client.sessionID = sessionID
 	if ragContextFn != nil {
@@ -723,6 +761,29 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+		case "approval_mode":
+			client.mu.Lock()
+			client.approvalManual = msg.Content == "manual"
+			client.mu.Unlock()
+
+		case "approval_response":
+			client.mu.Lock()
+			ch := client.pendingApproval
+			// Ignore a stale verdict (e.g. for a call the cancel already killed).
+			if msg.ID != "" && msg.ID != client.pendingApprovalID {
+				ch = nil
+			} else {
+				client.pendingApproval = nil
+				client.pendingApprovalID = ""
+			}
+			client.mu.Unlock()
+			if ch != nil {
+				select {
+				case ch <- msg.Content == "approve":
+				default:
+				}
+			}
+
 		case "mark_notifications_read":
 			if ms != nil {
 				ms.MarkNotificationsRead(context.Background(), client.sessionID)
@@ -757,6 +818,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			chatBE := s.chatBackendFor(model)
 			executor.SetLLM(chatBE, model)
 			client.ag = agent.New(chatBE, executor, model, curMS, curPersonality)
+			client.wireApproval(client.ag)
 			client.ag.SetSession(client.sessionID, curPersonality)
 			if ragContextFn != nil {
 				client.ag.SetRAGContextFn(ragContextFn)

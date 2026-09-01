@@ -99,7 +99,13 @@ type Agent struct {
 	limits         Limits
 	limitsOverride Limits
 	turnThinking   bool // resolved by Chat at turn start; read where requests are built
-	historyLoaded  bool // true after first DB load
+	// Manual tool approval (dashboard only). approvalNeededFn reads the live
+	// toggle at every tool call, so flipping it mid-turn applies to the next
+	// call; awaitApprovalFn blocks until the user's verdict (or ctx cancel).
+	// Both nil on headless surfaces (cron, Telegram, Webex…) = auto-approve.
+	approvalNeededFn func() bool
+	awaitApprovalFn  func(ctx context.Context, toolID string) bool
+	historyLoaded    bool // true after first DB load
 	// historyGen counts every external mutation of history (InjectNote,
 	// ResetHistory, SetSession) — bumped under histMu. compactLiveContextIfNeeded
 	// captures it before releasing the lock for its ~20s best-effort LLM
@@ -187,6 +193,13 @@ func (a *Agent) leanPrompt() bool {
 
 // SetChannel declares the surface the next turn comes from. See Agent.channel.
 func (a *Agent) SetChannel(ch string) { a.channel = ch }
+
+// SetApprovalFns wires manual tool approval: needed is consulted before every
+// tool call, await blocks for the user's verdict on one call. See the fields.
+func (a *Agent) SetApprovalFns(needed func() bool, await func(context.Context, string) bool) {
+	a.approvalNeededFn = needed
+	a.awaitApprovalFn = await
+}
 
 // voiceChannel is the phone surface (Vortex megazord: Vox → Cortex).
 const voiceChannel = "voice"
@@ -482,14 +495,14 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 		return
 	}
 	a.history = append([]ollama.Message{
-		{Role: "user", Content: "[Contexte compacté automatiquement — résumé des échanges précédents : " + summary + "]"},
+		{Role: "user", Content: "[Context compacted automatically — summary of the earlier exchanges: " + summary + "]"},
 	}, tail...)
 	a.historyGen++
 	a.histMu.Unlock()
 
 	log.Printf("[agent] session=%s compacted live context: dropped %d messages, kept %d", a.sessionID, len(dropped), len(tail))
 	events <- Event{Type: "progress", Content: fmt.Sprintf(
-		"Contexte compacté (%d messages plus anciens résumés) pour rester dans les limites du modèle.", len(dropped))}
+		"Context compacted (%d older messages summarized) to stay within the model's limits.", len(dropped))}
 }
 
 // summarizeDroppedSpan asks the model to concisely summarize a span of
@@ -499,7 +512,7 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 // failures. Runs silently (no streamed "stream" events) so it never appears
 // as if the assistant said something in the visible transcript.
 func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Message) string {
-	const fallback = "échanges antérieurs compactés — détails non résumés suite à une erreur"
+	const fallback = "earlier exchanges compacted — details lost to a summarization error"
 	var sb strings.Builder
 	for _, m := range dropped {
 		if m.Content == "" {
@@ -842,6 +855,12 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 	var emptyRetried bool
 	intentNudges := 0
+	// True once the user rejected a tool call this turn. The model then ends its
+	// reply on "what would you like instead?" — which the intent-nudge heuristic
+	// reads as an unfulfilled announcement and would push it to retry the very
+	// call that was just rejected (measured on the first live test). A turn with
+	// a rejection is allowed to end on a question.
+	toolRejected := false
 	for iter := 0; iter < maxIterations; iter++ {
 		select {
 		case <-ctx.Done():
@@ -935,7 +954,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		if len(toolCalls) == 0 {
 			// Reply ends on an announced action with nothing to run it: nudge
 			// the model to act instead of ending the turn (see announceTailRe).
-			if intentNudges < maxIntentNudges && announceTailRe.MatchString(replyTail(stripThinkingBlocks(fullContent))) {
+			if !toolRejected && intentNudges < maxIntentNudges && announceTailRe.MatchString(replyTail(stripThinkingBlocks(fullContent))) {
 				intentNudges++
 				log.Printf("[agent] reply ends on an announcement with no tool calls — nudging to act (%d/%d)", intentNudges, maxIntentNudges)
 				a.histMu.Lock()
@@ -975,7 +994,18 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			var result string
 			var toolImages []string
 			toolFailed := false
-			if tc.Function.Name == "update_system_prompt" {
+			rejected := false
+			// Manual approval gate. Voice bypasses it — a caller can't click, and
+			// silence while the dashboard waits would read as a dead line.
+			if a.channel != voiceChannel && a.approvalNeededFn != nil && a.approvalNeededFn() && a.awaitApprovalFn != nil {
+				events <- Event{Type: "approval_request", ID: toolID, Tool: tc.Function.Name, Input: tc.Function.Arguments}
+				rejected = !a.awaitApprovalFn(ctx, toolID)
+			}
+			if rejected {
+				toolRejected = true
+				result = "Tool call rejected by the user. Do not retry it as-is — ask what they want done differently."
+				toolFailed = true
+			} else if tc.Function.Name == "update_system_prompt" {
 				// Route the special-cased tool through the same policy checks as
 				// every other tool, or a group with update_system_prompt disabled
 				// (or a Webex sender without it) could still call it.
