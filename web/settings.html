@@ -455,7 +455,9 @@ fetch('/api/platform').then(r => r.json()).then(d => {
 // see renderChannelsTab.
 let IS_GLOBAL_ADMIN = false
 fetch('/api/me').then(r => r.json()).then(me => {
-  IS_GLOBAL_ADMIN = !!(me.authenticated && me.user.role === 'global_admin')
+  // Multi-user: the role lives on me.user. Single-user (legacy) has no user
+  // object — the sole user IS the deployment admin, so isAdmin decides.
+  IS_GLOBAL_ADMIN = !!(me.authenticated && (me.user ? me.user.role === 'global_admin' : me.isAdmin))
 }).catch(() => {})
 
 requestAnimationFrame(() => renderTab(currentTab))
@@ -991,7 +993,9 @@ async function renderChannelsTab(container) {
 
   // Status dots on the cards + card → pane switching (one channel config at a time).
   wrap.querySelector('.cal-st[data-st="telegram"]').classList.toggle('on', !!tg.linked)
-  wrap.querySelector('.cal-st[data-st="slack"]').classList.toggle('on', !!sl.linked)
+  // The Slack card only exists for admins — a null here must not take the
+  // telegram Save handler below down with it.
+  wrap.querySelector('.cal-st[data-st="slack"]')?.classList.toggle('on', !!sl.linked)
   wrap.querySelectorAll('.eplogo').forEach(c => c.addEventListener('click', () => {
     wrap.querySelectorAll('.eplogo').forEach(x => x.classList.toggle('sel', x === c))
     wrap.querySelectorAll('.ch-pane').forEach(p => { p.style.display = p.dataset.prov === c.dataset.prov ? '' : 'none' })

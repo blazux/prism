@@ -48,7 +48,8 @@
         (async()=>{try{
           const me=await fetch('/api/me').then(r=>r.json());
           if(!me.authenticated)return;
-          const isGA=me.user.role==='global_admin';
+          // Single-user (legacy) /api/me has no user object — don't let a throw kill the block.
+          const isGA=me.user?.role==='global_admin';
           let groups=[];
           try{groups=(await fetch('/api/my/groups').then(r=>r.json())).groups||[];}catch(e){}
           let disabled=[];

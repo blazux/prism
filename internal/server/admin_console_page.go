@@ -759,8 +759,10 @@ async function setModel(m,allowed){const s2=new Set(PF.allowedModels);allowed?s2
 async function init(){
  ME=await jget('/api/me'); MY=await jget('/api/my/groups')||{groups:[]};
  if(!ME||!ME.authenticated){location.href='/login';return;}
- const isGA=ME.user.role==='global_admin'; MY.isGlobalAdmin=isGA;
- $('who').textContent=ME.user.displayName+' · '+(isGA?'global admin':'group admin');
+ // Single-user (legacy) /api/me has no user object: fall through to the
+ // "no admin access" message instead of crashing on ME.user.role.
+ const isGA=ME.user?.role==='global_admin'; MY.isGlobalAdmin=isGA;
+ $('who').textContent=(ME.user?.displayName||'')+(ME.user?' · ':'')+(isGA?'global admin':ME.user?'group admin':'single-user mode — no admin console');
  try{const m=await fetch('/api/models').then(r=>r.json());MODELS=m.models||[];}catch(e){}
  // Global admin: load every group so the shared-agent / tool-access tabs and
  // group pickers cover all of them, not just the admin's own memberships.
