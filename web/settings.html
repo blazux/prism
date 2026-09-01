@@ -24,6 +24,14 @@ html, body { height: 100%; overflow: hidden; margin: 0; }
 .pf-field { background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 6px; padding: 6px 9px; font: inherit; font-size: 13px; box-sizing: border-box; outline: none; transition: border-color .15s; }
 .pf-field:focus { border-color: var(--accent); }
 .pf-field::placeholder { color: var(--text3); }
+/* Browser autofill paints its own background over the theme (the Display name
+   field is the classic victim — the one browsers recognize as a "name"). */
+.pf-field:-webkit-autofill, .pf-field:-webkit-autofill:hover, .pf-field:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg2) inset;
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+  transition: background-color 9999s ease-out;
+}
 .ag-status { font-size: 12px; color: var(--accent); }
 .ag-ws { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: var(--bg1); }
 .ag-ws > summary { padding: 10px 12px; cursor: pointer; font-weight: 600; color: var(--text); font-size: 13px; user-select: none; }
@@ -2305,15 +2313,15 @@ async function renderProfileTab(container) {
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:520px">
       <label style="grid-column:1/3;font-size:12px;color:var(--text2)">Display name
-        <input id="pf-display" class="pf-field" type="text" value="${escHtml(p.displayName || '')}" placeholder="How you appear in chat" style="width:100%;margin-top:4px"></label>
+        <input id="pf-display" class="pf-field" type="text" autocomplete="off" value="${escHtml(p.displayName || '')}" placeholder="How you appear in chat" style="width:100%;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--text2)">First name
-        <input id="pf-first" class="pf-field" type="text" value="${escHtml(p.firstName || '')}" style="width:100%;margin-top:4px"></label>
+        <input id="pf-first" class="pf-field" type="text" autocomplete="off" value="${escHtml(p.firstName || '')}" style="width:100%;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--text2)">Last name
-        <input id="pf-last" class="pf-field" type="text" value="${escHtml(p.lastName || '')}" style="width:100%;margin-top:4px"></label>
+        <input id="pf-last" class="pf-field" type="text" autocomplete="off" value="${escHtml(p.lastName || '')}" style="width:100%;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--text2)">Email (login)
         <input class="pf-field" type="email" value="${escHtml(p.email || '')}" readonly style="width:100%;margin-top:4px;opacity:.6"></label>
       <label style="font-size:12px;color:var(--text2)">Phone
-        <input id="pf-phone" class="pf-field" type="tel" value="${escHtml(p.phone || '')}" placeholder="+33…" style="width:100%;margin-top:4px"></label>
+        <input id="pf-phone" class="pf-field" type="tel" autocomplete="off" value="${escHtml(p.phone || '')}" placeholder="+33…" style="width:100%;margin-top:4px"></label>
     </div>
     <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
       <button class="btn btn-primary" id="pf-save">Save</button>

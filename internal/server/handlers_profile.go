@@ -34,13 +34,19 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "no database")
 		return
 	}
+	// The single-user identity (id 0) has no users row, so the UPDATE below
+	// would silently match nothing and the page would say "Saved" over a no-op
+	// (lived it). Its profile lives in config keys instead.
+	if u.ID == 0 {
+		s.handleServiceProfile(w, r, ms)
+		return
+	}
 	switch r.Method {
 	case "GET":
 		p, err := ms.GetProfile(r.Context(), u.ID)
 		if err != nil {
-			// No profile row yet — the single-user service identity (id 0), or a
-			// brand-new user — must not 500: return a default so the profile page
-			// and the avatar scope (u<id>) still work.
+			// Brand-new user without a profile row yet — must not 500: return a
+			// default so the profile page and the avatar scope (u<id>) still work.
 			p = memory.Profile{UserID: u.ID, DisplayName: u.DisplayName}
 		}
 		writeJSON(w, p)
@@ -68,6 +74,56 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		p, _ := ms.GetProfile(r.Context(), u.ID)
 		writeJSON(w, p)
+	default:
+		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// Config keys backing the single-user profile (no users row to update).
+const (
+	cfgProfileDisplay = "profile_display_name"
+	cfgProfileFirst   = "profile_first_name"
+	cfgProfileLast    = "profile_last_name"
+	cfgProfilePhone   = "profile_phone"
+)
+
+func (s *Server) handleServiceProfile(w http.ResponseWriter, r *http.Request, ms *memory.Store) {
+	get := func(key string) string { v, _, _ := ms.GetConfig(r.Context(), key); return v }
+	profile := func() memory.Profile {
+		return memory.Profile{
+			DisplayName: get(cfgProfileDisplay), FirstName: get(cfgProfileFirst),
+			LastName: get(cfgProfileLast), Phone: get(cfgProfilePhone),
+			AvatarVer: ms.AvatarVer(r.Context(), "u0"),
+		}
+	}
+	switch r.Method {
+	case "GET":
+		writeJSON(w, profile())
+	case "POST":
+		var b struct {
+			DisplayName string `json:"displayName"`
+			FirstName   string `json:"firstName"`
+			LastName    string `json:"lastName"`
+			Phone       string `json:"phone"`
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			http.Error(w, "bad body", 400)
+			return
+		}
+		dn := strings.TrimSpace(b.DisplayName)
+		if dn == "" {
+			dn = strings.TrimSpace(b.FirstName + " " + b.LastName)
+		}
+		for key, val := range map[string]string{
+			cfgProfileDisplay: dn, cfgProfileFirst: strings.TrimSpace(b.FirstName),
+			cfgProfileLast: strings.TrimSpace(b.LastName), cfgProfilePhone: strings.TrimSpace(b.Phone),
+		} {
+			if err := ms.SetConfig(r.Context(), key, val); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+		}
+		writeJSON(w, profile())
 	default:
 		http.Error(w, "method not allowed", 405)
 	}
