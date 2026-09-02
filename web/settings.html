@@ -1819,12 +1819,29 @@ async function renderMultiUserSecretsTab(container) {
             <span class="config-secret-name">${escHtml(name)}</span>
             <span class="config-secret-env">$${escHtml(name.toUpperCase().replace(/[^A-Z0-9]/g,'_'))}</span>
           </div>
+          ${myGroups.length > 0 ? `<button class="config-secret-del" style="margin-right:4px" title="Share with group (moves it — every member's agent can then use it)" data-name="${escHtml(name)}">⇧</button>` : ''}
           <button class="config-secret-del" title="Delete" data-name="${escHtml(name)}">✕</button>`
-        row.querySelector('button').addEventListener('click', async function() {
+        row.querySelector('button[title^="Delete"]').addEventListener('click', async function() {
           const n = this.dataset.name
           if (!await PrismModal.confirm(`Delete secret "${n}"?`, { danger: true })) return
           await fetch(`/api/user/secrets/${encodeURIComponent(n)}`, { method: 'DELETE' })
           document.getElementById(`user-secret-row-${CSS.escape(n)}`)?.remove()
+        })
+        // Share = server-side MOVE to the group's scope (the value is never
+        // read back into the browser). One confirm per group, in order — the
+        // first accepted wins; fine for the one-or-two-groups common case.
+        row.querySelector('button[title^="Share"]')?.addEventListener('click', async function() {
+          const n = this.dataset.name
+          for (const g of myGroups) {
+            if (!await PrismModal.confirm(`Share secret "${n}" with the group "${g.name}"? It becomes a group secret — usable by every member's agent — and leaves your personal list.`)) continue
+            const res = await fetch(`/api/user/secrets/${encodeURIComponent(n)}`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ group: g.id }),
+            })
+            if (res.ok) { container.innerHTML = ''; renderMultiUserSecretsTab(container) }
+            else { const st = document.getElementById('user-secret-add-status'); if (st) { st.textContent = 'Error: ' + await res.text(); st.className = 'mcp-add-status error' } }
+            return
+          }
         })
         list.appendChild(row)
       }
