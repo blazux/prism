@@ -157,7 +157,6 @@ One picker, three servers, per-message choice. Webhooks and rooms can each pin t
 | Service routing | Traefik |
 | Messaging | Telegram / Slack / Webex bridge |
 | Integrations | Email (IMAP/SMTP), CalDAV, Todoist, Google, Microsoft, Obsidian/Logseq |
-| Voice | Optional phone line via [PrismConnect](https://github.com/blazux/PrismConnect) — the agent answers and places calls |
 | Modes | Personal (single user) or shared (accounts, groups, rooms) — one flag |
 | Runtime | Docker / Docker Compose |
 
@@ -257,12 +256,6 @@ Same binary, one flag. Decide which you are before the first `up`:
 
 ---
 
-## Give it a phone
-
-Point `VOX_URL` at a [PrismConnect](https://github.com/blazux/PrismConnect) instance and the agent gains a phone line. It can **answer** incoming calls with its full toolset — RAG, memory, personality, the lot — and **place**, **list** and **cancel** outgoing calls itself, as ordinary agent tools (`place_call`, `list_calls`, `cancel_call`). The call queue shows up in Tasks. Leave `VOX_URL` empty and none of this exists.
-
----
-
 ## It remembers, and occasionally learns
 
 Prism keeps a memory of who you are and how you work, records lessons from problems it stumbled through, and saves multi-step jobs as reusable **skills** — so the second time you ask, it doesn't reinvent the wheel. Long conversations get summarized automatically, and it can full-text search everything you've ever discussed, which means it (mostly) stops asking you to repeat yourself. Secrets you hand it are stored **AES-256-GCM encrypted**, not in a plaintext file it'll cheerfully commit to Git.
@@ -306,7 +299,6 @@ Everything is an environment variable, set in `.env` (the annotated [`.env.examp
 | `TZ` | IANA timezone for cron and timestamps (`Europe/Paris`) | `UTC` |
 | `SEARXNG_URL` | SearXNG for web search; remove to disable | `http://searxng:8080` |
 | `POSTGRES_URL` | PostgreSQL connection string | bundled service |
-| `VOX_URL` / `VOX_USER` / `VOX_PASSWORD` | [PrismConnect](https://github.com/blazux/PrismConnect) for telephony | — |
 | `WORKSPACE` | `gpu` for the CUDA workspace image (~20 GB) | ubuntu base |
 | `SERVICE_PORT_START` / `_END` | Host port range for agent-launched containers | `20000–20999` |
 | `AGENT_CONTAINER`, `WORKSPACE_DIR`, `PLUGIN_DIR` | Internal Docker plumbing — leave alone | set |
