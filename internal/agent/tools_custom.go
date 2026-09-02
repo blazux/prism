@@ -42,9 +42,12 @@ func (e *ToolExecutor) registerTool(code string) (string, error) {
 	if e.customMgr == nil {
 		return "", fmt.Errorf("custom tools not configured")
 	}
-	name := extractToolName(code)
+	name, hdrErr := extractToolName(code)
 	if name == "" {
-		return "", fmt.Errorf("no valid # TOOL: {...} header found (must be one line, valid JSON, with a \"name\" field) — fix the header and try again")
+		if hdrErr != nil {
+			return "", fmt.Errorf("# TOOL: header found but unusable — %v. The header must be ONE line of valid JSON with a \"name\" field; fix it and try again", hdrErr)
+		}
+		return "", fmt.Errorf("no # TOOL: {...} header found (must be one line, valid JSON, with a \"name\" field) — fix the header and try again")
 	}
 	base := toolFilename(name)
 	if base == ".py" {
@@ -155,7 +158,14 @@ func shellEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
-func extractToolName(code string) string {
+// extractToolName parses the "# TOOL: {...}" header line and returns the
+// declared tool name. When a header line exists but can't be used, the error
+// says exactly WHY (the JSON parse error, or the missing "name" field) — a
+// bare "no valid header" sent the model hunting for accents and quotes when
+// the real defect was one missing closing brace (measured on xslog_sip:
+// two identical retries fixing red herrings).
+func extractToolName(code string) (string, error) {
+	var hdrErr error
 	for _, line := range strings.SplitN(code, "\n", 30) {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "# TOOL:") {
@@ -165,11 +175,25 @@ func extractToolName(code string) string {
 		var m struct {
 			Name string `json:"name"`
 		}
-		if json.Unmarshal([]byte(raw), &m) == nil {
-			return m.Name
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			// "unexpected end of JSON input" means the {...} never closes on
+			// this line: almost always an unbalanced brace (count them), since
+			// a header broken across lines wouldn't start with "# TOOL:" past
+			// the first. Spell that out — it's the actual failure mode seen.
+			if strings.Contains(err.Error(), "unexpected end of JSON input") {
+				hdrErr = fmt.Errorf("the header's JSON never closes — count your braces: every { needs its } on that same line (parse error: %v)", err)
+			} else {
+				hdrErr = fmt.Errorf("invalid JSON in header: %v", err)
+			}
+			continue // a later line may carry the real header
 		}
+		if m.Name == "" {
+			hdrErr = fmt.Errorf("header JSON parsed but has no \"name\" field")
+			continue
+		}
+		return m.Name, nil
 	}
-	return ""
+	return "", hdrErr
 }
 
 // ─── RAG tool ─────────────────────────────────────────────────────────────────
