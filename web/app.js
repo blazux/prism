@@ -691,7 +691,7 @@ function appendToolResult(msg) {
     return
   }
   if (el) {
-    el.classList.remove('running')
+    el.classList.remove('running', 'approval')
     el.textContent = msg.output || '(no output)'
     if (msg.output?.startsWith('ERROR')) el.classList.add('error')
     if (msg.images && msg.images.length > 0) {
@@ -1889,21 +1889,37 @@ function syncApprovalSelect() {
   sel.classList.toggle('manual', approvalMode === 'manual')
 }
 
+// The FULL tool input, untruncated — what a manual approval is actually
+// approving. The header's one-line summary is CSS-ellipsized, so it must
+// never be the only place the arguments appear.
+function fullToolInput(tool, input) {
+  try {
+    const inp = typeof input === 'string' ? JSON.parse(input) : input
+    if (!inp) return ''
+    if (tool === 'exec_command' && inp.command) return '$ ' + inp.command
+    if (tool === 'write_file' && inp.path) return `→ ${inp.path}\n${inp.content ?? ''}`
+    return JSON.stringify(inp, null, 2)
+  } catch { return String(input ?? '') }
+}
+
 function appendApprovalRequest(msg) {
   const out = document.getElementById('tool-out-' + msg.id)
   if (!out) return
   const block = out.closest('.tool-block')
   if (!block) return
-  out.innerHTML = 'Waiting for your approval…'
+  // Show the complete command/arguments while waiting: approving something
+  // you can't read isn't approving.
+  out.classList.add('approval')
+  out.textContent = fullToolInput(msg.tool, msg.input) || '(no arguments)'
   const bar = document.createElement('div')
   bar.className = 'tool-approve-bar'
   bar.id = 'tool-approve-' + msg.id
-  bar.innerHTML = `<button class="ta-approve">✓ Approve</button><button class="ta-reject">✕ Reject</button>`
+  bar.innerHTML = `<span class="ta-waiting">Waiting for your approval…</span><button class="ta-approve">✓ Approve</button><button class="ta-reject">✕ Reject</button>`
   const answer = (verdict) => {
     send({ type: 'approval_response', id: msg.id, content: verdict })
     bar.remove()
     const o = document.getElementById('tool-out-' + msg.id)
-    if (o && verdict === 'approve') o.innerHTML = '<span class="tool-spinner"></span> Running…'
+    if (o && verdict === 'approve') { o.classList.remove('approval'); o.innerHTML = '<span class="tool-spinner"></span> Running…' }
   }
   bar.querySelector('.ta-approve').addEventListener('click', () => answer('approve'))
   bar.querySelector('.ta-reject').addEventListener('click', () => answer('reject'))
@@ -2341,6 +2357,12 @@ async function initApp() {
   setInterval(loadModels, 30000)
   refreshMailBadge()
   setInterval(refreshMailBadge, 60000)
+
+  // The tool-block header is one CSS-ellipsized line: click it to unfold the
+  // full summary (delegated — covers live blocks and restored history alike).
+  document.getElementById('chat-messages')?.addEventListener('click', e => {
+    e.target.closest('.tool-block-input-inline')?.classList.toggle('expanded')
+  })
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {

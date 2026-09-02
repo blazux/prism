@@ -750,6 +750,7 @@ body {
   border-top: 1px solid var(--border);
   font-size: 12px;
 }
+.tool-approve-bar .ta-waiting { color: var(--text3); font-style: italic; margin-right: auto; }
 .tool-approve-bar button {
   font: inherit; font-size: 12px; cursor: pointer;
   padding: 3px 12px; border-radius: var(--radius);
@@ -1327,6 +1328,20 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  cursor: pointer;
+}
+/* Click-to-unfold: the one-line summary above, in full. */
+.tool-block-input-inline.expanded {
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-all;
+}
+/* Pending manual approval: the output slot shows the FULL command/arguments
+   being approved — neutral color, taller cap than normal output. */
+.tool-block-output.approval {
+  color: var(--text1);
+  max-height: 320px;
 }
 .tool-block-output {
   padding: 5px 11px;
