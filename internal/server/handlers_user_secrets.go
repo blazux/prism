@@ -18,6 +18,7 @@ import (
 //
 // GET    /api/user/secrets           → {secrets: [name,...]}
 // POST   /api/user/secrets           → {name,value[,group]} create/update
+// GET    /api/user/secrets/<name>    → {name,value,source} personal tier, then groups
 // POST   /api/user/secrets/<name>    → {group} share: MOVE to the group's scope
 // DELETE /api/user/secrets/<name>    → delete
 //
@@ -98,6 +99,41 @@ func (s *Server) handleUserSecretByName(w http.ResponseWriter, r *http.Request) 
 	}
 
 	switch r.Method {
+	case http.MethodGet:
+		// Value fetch for scripts — the path a CRON job needs: cron injects no
+		// secret env vars (only PRISM_*), and the legacy /api/secrets/<name>
+		// only ever serves the unscoped global bucket, so a scoped secret was
+		// unreachable from a script at runtime. Resolution mirrors the sandbox
+		// env (ToolExecutor.secretsEnv): personal tier first, then each of the
+		// caller's groups (group secrets are shared by design). The capability
+		// token binds the call to the real member, so this grants nothing the
+		// caller's own sessions don't already get in their env.
+		if agent.IsReservedSecretName(name) {
+			writeErr(w, http.StatusForbidden, "reserved name — integration credentials are not served to scripts")
+			return
+		}
+		val, ok, err := ms.GetSecret(r.Context(), name)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if ok {
+			writeJSON(w, map[string]interface{}{"name": name, "value": val, "source": "personal"})
+			return
+		}
+		if u := currentUser(r); u != nil && u.ID > 0 {
+			if gs := s.store(); gs != nil {
+				groups, _ := gs.UserGroups(r.Context(), u.ID)
+				for _, g := range groups {
+					if gv, gok, _ := gs.ConfigScope(fmt.Sprintf("g%d", g.GroupID)).GetSecret(r.Context(), name); gok {
+						writeJSON(w, map[string]interface{}{"name": name, "value": gv, "source": "group"})
+						return
+					}
+				}
+			}
+		}
+		writeErr(w, http.StatusNotFound, "secret not found in your personal or group secrets — see list_secrets for available names")
+
 	case http.MethodDelete:
 		if err := ms.DeleteSecret(r.Context(), name); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())

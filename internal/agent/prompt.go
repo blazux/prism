@@ -249,14 +249,15 @@ widget add/update automatically renders the widget headless and returns a screen
 
 Jobs run in prism-workspace with $PRISM_URL, $PRISM_SESSION, $PRISM_TOKEN auto-injected — both as real env vars for a script's own os.environ, and substituted directly wherever the command text uses $VAR. Every job also shows up read-only in the user's Tasks list, next to their own to-dos.
 
+IMPORTANT — secrets under cron: unlike exec_command and custom tools, cron jobs do NOT get secret env vars. A script that reads os.environ['MY_SECRET'] works when you run it in chat and silently fails under cron. Any script destined for cron must fetch its secrets over HTTP instead (works in both contexts):
+  curl -s "$PRISM_URL/api/user/secrets/<name>" -H "Authorization: Bearer $PRISM_TOKEN" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])"
+This resolves your personal secrets first, then your group's shared ones. (The older /api/secrets/<name> route only serves the deployment-global bucket — not your scoped secrets; don't use it.)
+
 Notify from cron:
   curl -s -X POST "$PRISM_URL/api/notify" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $PRISM_TOKEN" \
     -d "{\"session\":\"$PRISM_SESSION\",\"title\":\"T\",\"message\":\"M\",\"level\":\"info\"}"
-
-Retrieve a secret:
-  curl -s "$PRISM_URL/api/secrets/<name>" -H "Authorization: Bearer $PRISM_TOKEN" \
-    | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])"
 
 ### Web and browser
 
