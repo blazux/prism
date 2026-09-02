@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -46,12 +47,14 @@ func (e *ToolExecutor) sendNotification(title, message, level string) (string, e
 
 // ─── Secret tools ─────────────────────────────────────────────────────────────
 
-// isReservedSecretName reports whether a (scope-prefix-stripped) secret name
+// IsReservedSecretName reports whether a (scope-prefix-stripped) secret name
 // belongs to a built-in integration (email, CalDAV, Telegram, Slack, Webex,
 // MCP OAuth) rather than a key request_secret created for a script to use.
 // Both live in the same per-user/per-group scope, so name is the only way to
 // tell them apart — these must never be handed to arbitrary script execution.
-func isReservedSecretName(name string) bool {
+// Exported: internal/server's secrets handlers apply the same rule to decide
+// which group secrets a non-admin member may create or delete.
+func IsReservedSecretName(name string) bool {
 	switch name {
 	case "email_password", "caldav_password", "todoist_token",
 		"telegram_bot_token", "slack_bot_token", "slack_app_token":
@@ -72,6 +75,50 @@ func toEnvVarName(name string) string {
 	return strings.Trim(sb.String(), "_")
 }
 
+// groupScopeRe matches a group tenant scope ("g<id>") — and only that: "global"
+// or a board id starting with g must not be mistaken for a group's secrets.
+var groupScopeRe = regexp.MustCompile(`^g\d+$`)
+
+// groupSecretsScope returns the group scope whose shared secrets this session
+// also receives, beyond its own SecretsScope: group secrets are shared by
+// design, so a member's personal session (SecretsScope "u<id>", ragScope
+// "g<id>") gets the group tier too. Empty when the session already runs under
+// the group scope (room-g<id> boards) or has no group.
+func (e *ToolExecutor) groupSecretsScope() string {
+	if g := e.ragScope; groupScopeRe.MatchString(g) && g != e.SecretsScope() {
+		return g
+	}
+	return ""
+}
+
+// secretsEnv returns the env entries for this session's usable secrets: the
+// group's shared tier first (when there is one), overlaid by the session's own
+// scope so a personal secret with the same name wins. Reserved integration
+// credentials (email, OAuth, …) never leak into script execution.
+func (e *ToolExecutor) secretsEnv(ctx context.Context) map[string]string {
+	env := map[string]string{}
+	if e.memStore == nil {
+		return env
+	}
+	scopes := []string{e.SecretsScope()}
+	if g := e.groupSecretsScope(); g != "" {
+		scopes = []string{g, e.SecretsScope()}
+	}
+	for _, scope := range scopes {
+		secrets, err := e.memStore.ScopedSecrets(ctx, scope)
+		if err != nil {
+			continue
+		}
+		for name, value := range secrets {
+			if IsReservedSecretName(name) {
+				continue
+			}
+			env[toEnvVarName(name)] = value
+		}
+	}
+	return env
+}
+
 func (e *ToolExecutor) requestSecret(ctx context.Context, name, description string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("name is required")
@@ -83,6 +130,13 @@ func (e *ToolExecutor) requestSecret(ctx context.Context, name, description stri
 	if us := e.userStore(); us != nil {
 		if _, exists, _ := us.GetSecret(ctx, name); exists {
 			return fmt.Sprintf("Secret '%s' already stored. Available as os.environ['%s'] / $%s. Use delete_secret to replace it.", name, envVar, envVar), nil
+		}
+	}
+	// The group's shared tier counts as "already stored" too — don't make the
+	// user re-enter a credential the whole group already shares.
+	if g := e.groupSecretsScope(); g != "" && e.memStore != nil {
+		if _, exists, _ := e.memStore.ConfigScope(g).GetSecret(ctx, name); exists && !IsReservedSecretName(name) {
+			return fmt.Sprintf("Secret '%s' is already shared by your group. Available as os.environ['%s'] / $%s.", name, envVar, envVar), nil
 		}
 	}
 
@@ -115,13 +169,32 @@ func (e *ToolExecutor) listSecrets(ctx context.Context) (string, error) {
 	if err != nil {
 		return fmt.Sprintf("Error: %v", err), nil
 	}
-	if len(names) == 0 {
+	// Group secrets are shared with every member: list them alongside the
+	// personal tier (reserved integration credentials stay hidden — they are
+	// never exposed to scripts, so listing them would only mislead).
+	var groupNames []string
+	if g := e.groupSecretsScope(); g != "" {
+		if gn, gerr := e.memStore.ConfigScope(g).ListScopedSecretNames(ctx); gerr == nil {
+			for _, n := range gn {
+				if !IsReservedSecretName(n) {
+					groupNames = append(groupNames, n)
+				}
+			}
+		}
+	}
+	if len(names) == 0 && len(groupNames) == 0 {
 		return "No secrets stored. Use request_secret to store one.", nil
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Stored secrets (%d):\n", len(names))
 	for _, n := range names {
 		fmt.Fprintf(&sb, "  - %s  →  env var: %s\n", n, toEnvVarName(n))
+	}
+	if len(groupNames) > 0 {
+		fmt.Fprintf(&sb, "Group secrets, shared with all members (%d):\n", len(groupNames))
+		for _, n := range groupNames {
+			fmt.Fprintf(&sb, "  - %s  →  env var: %s\n", n, toEnvVarName(n))
+		}
 	}
 	return sb.String(), nil
 }
@@ -162,7 +235,7 @@ func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret s
 	// integration credential — handing it to an arbitrary MCP endpoint would
 	// exfiltrate it (agent-review finding #4). Only secrets the agent created
 	// for this purpose via request_secret may be used.
-	if authSecret != "" && isReservedSecretName(authSecret) {
+	if authSecret != "" && IsReservedSecretName(authSecret) {
 		return fmt.Sprintf("Refused: %q is a reserved integration credential and cannot be sent to an MCP server. "+
 			"If this server needs a token, create a dedicated one with request_secret and pass that name as auth_secret.", authSecret), nil
 	}

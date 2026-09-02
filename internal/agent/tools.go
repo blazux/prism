@@ -579,7 +579,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "secrets",
-			Description: "Manage stored secrets. Actions: list (names only, never values), delete (name). To create a secret, use request_secret.",
+			Description: "Manage stored secrets. Actions: list (names only, never values; includes your group's shared secrets), delete (name). To create a secret, use request_secret.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{

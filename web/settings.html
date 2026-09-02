@@ -1701,13 +1701,22 @@ async function renderSecretsTab(container) {
 
 // MULTI_USER Secrets tab: a "Personal secrets" section (always, backed by
 // /api/user/secrets — own scope) and, if the user belongs to a group, a
-// read-only pointer to the Admin console instead of any group-secret editor.
-// Never shows the raw global /api/secrets bucket — that's the cross-group
-// leak this replaces (it used to be visible to literally everyone).
+// "Group secrets" section (backed by /api/group/secrets — shared: every
+// member's agent can use them, any member may add/delete non-reserved names).
+// The add form's checkbox stores the new secret under the group's scope
+// instead of the user's. Never shows the raw global /api/secrets bucket —
+// that's the cross-group leak this replaces (it used to be visible to
+// literally everyone).
 async function renderMultiUserSecretsTab(container) {
   const page = document.createElement('div')
   page.className = 'settings-page'
   container.appendChild(page)
+
+  let myGroups = []
+  try {
+    const my = await fetch('/api/my/groups').then(r => r.json())
+    myGroups = (my.groups || []).map(g => ({ id: g.groupId ?? g.id, name: g.groupName ?? g.name ?? ('group ' + (g.groupId ?? g.id)) }))
+  } catch {}
 
   const section = document.createElement('div')
   section.className = 'config-section'
@@ -1722,33 +1731,44 @@ async function renderMultiUserSecretsTab(container) {
     <div style="margin-top:10px;font-size:11.5px;color:var(--text3);line-height:1.6">
       Secrets are stored encrypted and never exposed in plain text. The agent can also add them via <code style="background:var(--bg2);padding:1px 6px;border-radius:3px;font-size:11px">request_secret</code>.
       These are yours only — no other member or the group's shared agent can see or use them.
-    </div>
-    ${RAG_SCOPED ? '<div style="padding:10px 12px;color:var(--text3);font-size:11.5px">Group secrets (used for the group\'s MCP servers/tools) are managed by your group admin in the Admin console.</div>' : ''}`
+    </div>`
   page.appendChild(section)
 
   const addForm = document.createElement('div')
   addForm.className = 'mcp-add-form'
+  const groupChoice = myGroups.length === 0 ? '' : `
+    <label style="display:flex;gap:7px;align-items:center;margin-top:8px;font-size:12px;color:var(--text2);cursor:pointer">
+      <input type="checkbox" id="user-secret-add-shared" style="width:auto">
+      Group secret — shared, usable by every member${myGroups.length === 1 ? ' of ' + escHtml(myGroups[0].name) : ''}
+    </label>
+    ${myGroups.length > 1 ? `<select id="user-secret-add-group" class="mcp-input" style="margin-top:6px;display:none">${myGroups.map(g => `<option value="${g.id}">${escHtml(g.name)}</option>`).join('')}</select>` : ''}`
   addForm.innerHTML = `
-    <div class="mcp-add-title">Add a personal secret</div>
+    <div class="mcp-add-title">Add a secret</div>
     <div class="mcp-add-fields">
       <input id="user-secret-add-name" class="mcp-input" type="text" placeholder="Name (e.g. MY_API_KEY)" autocomplete="off">
       <input id="user-secret-add-value" class="mcp-input" type="password" placeholder="Value" autocomplete="new-password">
     </div>
+    ${groupChoice}
     <button id="user-secret-add-btn" class="mcp-add-submit">Save</button>
     <div id="user-secret-add-status" class="mcp-add-status"></div>`
   page.appendChild(addForm)
+  const sharedBox = document.getElementById('user-secret-add-shared')
+  const groupSel  = document.getElementById('user-secret-add-group')
+  if (sharedBox && groupSel) sharedBox.addEventListener('change', () => { groupSel.style.display = sharedBox.checked ? '' : 'none' })
   document.getElementById('user-secret-add-btn').addEventListener('click', async () => {
     const name  = document.getElementById('user-secret-add-name').value.trim()
     const value = document.getElementById('user-secret-add-value').value
     const status = document.getElementById('user-secret-add-status')
     const btn   = document.getElementById('user-secret-add-btn')
     if (!name || !value) { status.textContent = 'Name and value required.'; status.className = 'mcp-add-status error'; return }
+    const body = { name, value }
+    if (sharedBox?.checked) body.group = Number(groupSel ? groupSel.value : myGroups[0].id)
     btn.disabled = true
     status.textContent = 'Saving…'; status.className = 'mcp-add-status'
     try {
       const res = await fetch('/api/user/secrets', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, value }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error(await res.text())
       status.textContent = '✓ Saved'; status.className = 'mcp-add-status ok'
@@ -1760,6 +1780,26 @@ async function renderMultiUserSecretsTab(container) {
       status.textContent = 'Error: ' + e.message; status.className = 'mcp-add-status error'
     } finally { btn.disabled = false }
   })
+
+  if (myGroups.length > 0) {
+    const gsection = document.createElement('div')
+    gsection.className = 'config-section'
+    gsection.innerHTML = `
+      <div class="config-cat-header">
+        <span class="config-cat-icon" style="color:var(--accent)">${icon('key')}</span>
+        <span class="config-cat-name">Group secrets</span>
+      </div>
+      <div id="group-secrets-list" class="config-secrets-list">
+        <span style="color:var(--text3);font-size:12px">Loading…</span>
+      </div>
+      <div id="group-secrets-status" class="mcp-add-status"></div>
+      <div style="margin-top:10px;font-size:11.5px;color:var(--text3);line-height:1.6">
+        Shared with the whole group: every member's agent can use these (e.g. a common account's login).
+        Integration credentials (MCP tokens, bots…) are managed by your group admin in the Admin console.
+      </div>`
+    page.appendChild(gsection)
+    renderGroupSecretsList(myGroups)
+  }
 
   try {
     const res = await fetch('/api/user/secrets')
@@ -1793,6 +1833,47 @@ async function renderMultiUserSecretsTab(container) {
     const list = document.getElementById('user-secrets-list')
     if (list) list.innerHTML = '<span style="color:var(--text3);font-size:12px">Indisponible (Postgres requis).</span>'
   }
+}
+
+// Group secrets list for the MULTI_USER Secrets tab: one row per secret across
+// all the user's groups (group name shown when there are several). Delete goes
+// through /api/group/secrets — the server decides (any member for shared
+// names, group admin for reserved ones) and a refusal is surfaced as-is.
+async function renderGroupSecretsList(myGroups) {
+  const list = document.getElementById('group-secrets-list')
+  const status = document.getElementById('group-secrets-status')
+  if (!list) return
+  list.innerHTML = ''
+  let total = 0
+  for (const g of myGroups) {
+    let names = []
+    try {
+      const res = await fetch(`/api/group/secrets?group=${g.id}`)
+      if (!res.ok) continue
+      names = (await res.json()).secrets || []
+    } catch { continue }
+    for (const name of names) {
+      total++
+      const row = document.createElement('div')
+      row.className = 'config-secret-row'
+      row.innerHTML = `
+        <div class="config-secret-info">
+          <span class="config-secret-name">${escHtml(name)}</span>
+          <span class="config-secret-env">$${escHtml(name.toUpperCase().replace(/[^A-Z0-9]/g,'_'))}</span>
+          ${myGroups.length > 1 ? `<span style="color:var(--text3);font-size:11px">${escHtml(g.name)}</span>` : ''}
+        </div>
+        <button class="config-secret-del" title="Delete" data-name="${escHtml(name)}">✕</button>`
+      row.querySelector('button').addEventListener('click', async function() {
+        const n = this.dataset.name
+        if (!await PrismModal.confirm(`Delete group secret "${n}"? Every member loses it.`, { danger: true })) return
+        const res = await fetch(`/api/group/secrets?group=${g.id}&name=${encodeURIComponent(n)}`, { method: 'DELETE' })
+        if (res.ok) { row.remove(); if (status) { status.textContent = ''; status.className = 'mcp-add-status' } }
+        else if (status) { status.textContent = 'Error: ' + await res.text(); status.className = 'mcp-add-status error' }
+      })
+      list.appendChild(row)
+    }
+  }
+  if (total === 0) list.innerHTML = '<span style="color:var(--text3);font-size:12px">No group secret. Check "Group secret" when adding one above.</span>'
 }
 
 // ── Brand logos ────────────────────────────────────────────────────────────────

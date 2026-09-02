@@ -74,18 +74,10 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 		"PRISM_URL":     "http://prism-server:8080",
 		"PRISM_TOKEN":   e.prismToken,
 	}
-	if e.memStore != nil {
-		if secrets, err := e.memStore.ScopedSecrets(ctx, e.SecretsScope()); err == nil {
-			for name, value := range secrets {
-				// Skip built-in integration credentials (email, OAuth, Telegram, …):
-				// they share this scope with user-created keys but must not leak into
-				// the shared workspace env. Everything else is a request_secret key.
-				if isReservedSecretName(name) {
-					continue
-				}
-				env[toEnvVarName(name)] = value
-			}
-		}
+	// Personal secrets plus the group's shared tier (personal wins on a name
+	// collision); reserved integration credentials never reach the env.
+	for name, value := range e.secretsEnv(ctx) {
+		env[name] = value
 	}
 	out, err := e.docker.ExecWithEnv(ctx, "cd /workspace && "+command, 2*time.Minute, env)
 	if len(out) > 8000 {
