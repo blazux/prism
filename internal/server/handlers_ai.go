@@ -81,6 +81,11 @@ func (s *Server) handleAIAssist(w http.ResponseWriter, r *http.Request) {
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
 		},
+		// Assists are one-shot utilities ("output only the result"). On a
+		// reasoning model, without this the whole 120s budget can go to the
+		// thinking channel and the handler returns {"result":""} — measured on
+		// email_triage: "done in 2m0s, 0 chars", a silent no-op in the UI.
+		NoThinking: true,
 	}
 	backend := s.newChatBackend()
 	go func() {
@@ -97,6 +102,13 @@ func (s *Server) handleAIAssist(w http.ResponseWriter, r *http.Request) {
 		}
 		out.WriteString(ev.Content)
 	}
+	result := stripThink(out.String())
 	log.Printf("[ai/assist] task=%q done in %s, %d chars", b.Task, time.Since(start).Round(time.Millisecond), out.Len())
-	json.NewEncoder(w).Encode(map[string]interface{}{"result": stripThink(out.String())})
+	// Empty content is a failure (timeout mid-reasoning, model burned its budget
+	// thinking…) — say so instead of handing the UI an empty string to choke on.
+	if result == "" {
+		http.Error(w, "the model returned no content (it may have spent the whole budget reasoning)", 502)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"result": result})
 }
