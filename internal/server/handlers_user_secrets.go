@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"prism/internal/agent"
+	"prism/internal/memory"
 )
 
 // Personal secrets: per-user credentials (e.g. an email password) the agent's
@@ -86,6 +87,71 @@ func (s *Server) handleUserSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// resolveSecretScopes returns the personal store and the ordered list of group
+// scopes ("g<id>") a secret-value GET may read, resolved the same way every
+// other scope-aware entry point does (caller_context.go): from the caller's
+// identity AND the ?session= it names. It is the authorization gate for the
+// value endpoint, so isolation must hold by construction:
+//
+//   - A real authenticated user is scoped to THEIR OWN id, never the session's
+//     "u<id>-" prefix — so passing ?session=u2-… as user u3 can't read u2's
+//     personal secrets. Their group tier is exactly their own memberships.
+//   - The service identity (Bearer PRISM_TOKEN, user id 0 — cron/widget/custom
+//     tool) has no memberships, so it recovers scope from the session id: the
+//     numeric user of a "u<id>-<board>" session, or the group of a shared-agent
+//     "room-g<id>" / "webex-g<id>-…" session. This is the global-admin identity;
+//     letting it read the group whose agent it's driving is the whole point.
+//   - A "room-g<id>" group in the session is honored only for the service
+//     identity or a real member of that group — never to widen a non-member's
+//     reach.
+func (s *Server) resolveSecretScopes(r *http.Request) (*memory.Store, []string) {
+	sessionID := r.URL.Query().Get("session")
+	u := currentUser(r)
+	gs := s.store()
+
+	// Effective user for personal scope: a real user is always themselves; the
+	// service identity recovers the user the session acts for.
+	scopeUID := int64(0)
+	if u != nil && u.ID > 0 {
+		scopeUID = u.ID
+	} else {
+		scopeUID = userIDFromSessionID(sessionID)
+	}
+
+	personal := s.userStore(r)
+	if scopeUID > 0 && gs != nil {
+		personal = gs.ConfigScope(fmt.Sprintf("u%d", scopeUID))
+	}
+
+	var memberships []string
+	if scopeUID > 0 && gs != nil {
+		if groups, err := gs.UserGroups(r.Context(), scopeUID); err == nil {
+			for _, g := range groups {
+				memberships = append(memberships, fmt.Sprintf("g%d", g.GroupID))
+			}
+		}
+	}
+	return personal, groupSecretScopes(memberships, sessionID, u == nil || u.ID == 0)
+}
+
+// groupSecretScopes is the pure authorization decision for the secret-value
+// endpoint's group tier: which "g<id>" scopes may be read. Kept separate from
+// the store I/O so the isolation property is unit-testable without a database.
+// memberships are the effective user's own groups; a shared-agent session
+// ("room-g<id>") adds its group ONLY for the service identity (a room/webex
+// cron under the deployment token) — never for a non-member real user.
+func groupSecretScopes(memberships []string, sessionID string, isService bool) []string {
+	scopes := append([]string(nil), memberships...)
+	seen := map[string]bool{}
+	for _, s := range scopes {
+		seen[s] = true
+	}
+	if gscope := groupScopeFromSessionID(sessionID); gscope != "" && !seen[gscope] && isService {
+		scopes = append(scopes, gscope)
+	}
+	return scopes
+}
+
 func (s *Server) handleUserSecretByName(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/user/secrets/")
 	if name == "" {
@@ -103,32 +169,35 @@ func (s *Server) handleUserSecretByName(w http.ResponseWriter, r *http.Request) 
 		// Value fetch for scripts — the path a CRON job needs: cron injects no
 		// secret env vars (only PRISM_*), and the legacy /api/secrets/<name>
 		// only ever serves the unscoped global bucket, so a scoped secret was
-		// unreachable from a script at runtime. Resolution mirrors the sandbox
-		// env (ToolExecutor.secretsEnv): personal tier first, then each of the
-		// caller's groups (group secrets are shared by design). The capability
-		// token binds the call to the real member, so this grants nothing the
-		// caller's own sessions don't already get in their env.
+		// unreachable from a script at runtime.
+		//
+		// Scope is resolved from ?session=<id> exactly like /api/builtin and
+		// caller_context.go, NOT from the Bearer identity alone — because the
+		// case that matters is a shared-agent cron ("PRISM_SESSION=room-g1")
+		// firing under the deployment token (the service identity, user id 0,
+		// which belongs to no group). Without the session, its group secrets
+		// were a hard 404 (measured: the room-g1 morning briefing, which then
+		// had to scrape tokens out of /workspace/.crontab to get in). With it,
+		// the result mirrors what that session already gets in its sandbox env
+		// (ToolExecutor.secretsEnv): personal tier first, then the group's
+		// shared tier. See resolveSecretScopes for the authorization gate.
 		if agent.IsReservedSecretName(name) {
 			writeErr(w, http.StatusForbidden, "reserved name — integration credentials are not served to scripts")
 			return
 		}
-		val, ok, err := ms.GetSecret(r.Context(), name)
-		if err != nil {
+		personalStore, groupScopes := s.resolveSecretScopes(r)
+		if val, ok, err := personalStore.GetSecret(r.Context(), name); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
-		}
-		if ok {
+		} else if ok {
 			writeJSON(w, map[string]interface{}{"name": name, "value": val, "source": "personal"})
 			return
 		}
-		if u := currentUser(r); u != nil && u.ID > 0 {
-			if gs := s.store(); gs != nil {
-				groups, _ := gs.UserGroups(r.Context(), u.ID)
-				for _, g := range groups {
-					if gv, gok, _ := gs.ConfigScope(fmt.Sprintf("g%d", g.GroupID)).GetSecret(r.Context(), name); gok {
-						writeJSON(w, map[string]interface{}{"name": name, "value": gv, "source": "group"})
-						return
-					}
+		if gs := s.store(); gs != nil {
+			for _, scope := range groupScopes {
+				if gv, gok, _ := gs.ConfigScope(scope).GetSecret(r.Context(), name); gok {
+					writeJSON(w, map[string]interface{}{"name": name, "value": gv, "source": "group"})
+					return
 				}
 			}
 		}
