@@ -124,6 +124,34 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "workspace_history",
+			Description: "List recent versioned changes to the workspace. Every agent turn is auto-committed to git, so this is the undo history — use it to find a point to roll back to when a file was clobbered or a change went wrong.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"limit": {Type: "integer", Description: "How many recent changes to list (default 20, max 50)."},
+				},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "workspace_restore",
+			Description: "Roll one file back to how it was at a past commit (a hash from workspace_history) and record the restoration. Restores only the given path, and is itself reversible — nothing is lost.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"commit": {Type: "string", Description: "Commit hash from workspace_history."},
+					"path":   {Type: "string", Description: "Workspace-relative path of the file to restore."},
+				},
+				Required: []string{"commit", "path"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "list_files",
 			Description: "List files and directories in the workspace.",
 			Parameters: ollama.ToolParameters{

@@ -802,6 +802,12 @@ For ANY factual question (opening hours, prices, services, procedures, addresses
 // Chat processes a user message (with optional images) and streams events.
 // images is a slice of base64-encoded image strings (raw base64, no data-URL prefix).
 func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, events chan<- Event) {
+	// Snapshot the workspace into git once this turn ends, on every exit path.
+	// Fire-and-forget on a background context so a cancelled/disconnected request
+	// still commits, and so it never adds latency to the reply. CommitWorkspace is
+	// serialized and fail-safe — it can never break the turn.
+	defer func() { go a.executor.CommitWorkspace(context.Background(), userMsg) }()
+
 	// Re-read the agent's name and base persona once per turn. They live in the DB and
 	// are edited in Settings while this agent is connected, so loading them only at
 	// construction made an edit invisible until the page was reloaded — and "new chat"

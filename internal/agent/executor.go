@@ -821,6 +821,11 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.listFiles(path))
 	case "delete_file":
 		return wrap(e.deleteFile(str("path")))
+	case "workspace_history":
+		limitFloat, _ := args["limit"].(float64)
+		return wrap(e.workspaceHistory(ctx, int(limitFloat)))
+	case "workspace_restore":
+		return wrap(e.workspaceRestore(ctx, str("commit"), str("path")))
 	case "install_packages":
 		switch str("manager") {
 		case "apt":
