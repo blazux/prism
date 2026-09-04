@@ -35,6 +35,7 @@ type ToolExecutor struct {
 	serverTools           map[string]ServerTool            // webhook / pim_source / channel, injected per caller
 	globalAdmin           bool                             // caller is a global admin (MCP group management)
 	ragReadOnly           bool                             // group knowledge base is admin-curated: this caller may only search it
+	rawResults            bool                             // programmatic caller (/api/builtin → prismTool, cron): never truncate a result
 	ragStore              *rag.Store
 	ragEmbedder           *rag.Embedder
 	ragCaptioner          *rag.Captioner
@@ -622,7 +623,22 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 		e.memStore.AddUsage(ctx, 0, e.sessionID, "audit", "tool_error",
 			1, map[string]interface{}{"tool": name, "error": truncateForAudit(err.Error())})
 	}
-	return capToolResult(res), images, err
+	return e.capResult(res), images, err
+}
+
+// SetRawResults marks a programmatic caller: /api/builtin — which prismTool,
+// widgets and cron scripts consume as DATA (a 60 KB JSON call flow is normal
+// there). The truncations below exist to protect the model's context; applied
+// to such a caller they hand it a cut JSON that no longer parses (measured
+// 2026-09-04: every prismTool result cut at 4000 chars, JSON.parse failing).
+func (e *ToolExecutor) SetRawResults(v bool) { e.rawResults = v }
+
+// capResult applies the model-context safety net, except for raw callers.
+func (e *ToolExecutor) capResult(s string) string {
+	if e.rawResults {
+		return s
+	}
+	return capToolResult(s)
 }
 
 // maxToolResultBytes is the safety net for tool results that don't cap

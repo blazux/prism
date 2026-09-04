@@ -216,6 +216,7 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
+	executor.SetRawResults(true) // the result is data for a widget/script, not context for the model
 	executor.SetLLM(s.newChatBackend(), s.cfg.Model)
 	executor.SetChatBlind(!s.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked

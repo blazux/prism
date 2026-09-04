@@ -48,3 +48,17 @@ func TestCapToolResult(t *testing.T) {
 		t.Error("cap must keep head and tail")
 	}
 }
+
+// A programmatic caller (/api/builtin → prismTool, cron) consumes results as
+// data: the model-context cap must not touch them.
+func TestCapResult_RawCallerUntouched(t *testing.T) {
+	big := strings.Repeat("x", maxToolResultBytes*3)
+	if got := (&ToolExecutor{}).capResult(big); len(got) >= len(big) {
+		t.Error("model caller: huge result must be capped")
+	}
+	e := &ToolExecutor{}
+	e.SetRawResults(true)
+	if got := e.capResult(big); got != big {
+		t.Errorf("raw caller: result must pass through untouched (got %d of %d bytes)", len(got), len(big))
+	}
+}

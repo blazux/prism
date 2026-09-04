@@ -148,7 +148,9 @@ func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Too
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v\nOutput: %s", err, out), nil
 	}
-	if len(out) > 8000 {
+	// Model-context cap only: a programmatic caller (prismTool / cron) gets the
+	// whole output, as /api/tool/ always did — see SetRawResults.
+	if !e.rawResults && len(out) > 8000 {
 		out = out[:4000] + "\n...[truncated]...\n" + out[len(out)-4000:]
 	}
 	return out, nil
