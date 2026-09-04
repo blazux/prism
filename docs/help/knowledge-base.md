@@ -68,3 +68,7 @@ In multi-user mode the knowledge base is **group-scoped and admin-curated**:
   collection. The shared agent and every member's agent search the same base.
 - A member with no group has no knowledge base at all until an admin adds them
   to one.
+
+## Asking the agent
+
+The agent can do all of this itself: "index `reports/audit.pdf` into a collection called audits" creates the collection and ingests the file (one file per request — for a folder it lists the files and ingests them one by one), "describe the audits collection as …" sets the one-line description you see in this tab, and "delete the audits collection" removes it after confirming. In shared mode the same rule as the upload zone applies: a plain member's agent can search the group knowledge base but is refused when it tries to add, describe or delete — only a group admin's agent (or the admin console) changes it.

@@ -67,3 +67,7 @@ knobs, set by a group admin in the **Admin console → Shared agent** pane:
 reasoning**, **Lean prompt** and **Reasoning effort**, then **Save agent**.
 These override the personal settings whenever that agent answers — in the
 Room or on the group's Webex bot.
+
+## Asking the agent
+
+The agent can change these settings itself: "call yourself Shodan", "raise your turn budget to 150", "turn reasoning off", "use low reasoning effort". It confirms the new values; they apply from the next message. A group's shared agent cannot do this for itself — its settings are in the admin console.

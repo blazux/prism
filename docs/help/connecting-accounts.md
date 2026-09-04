@@ -64,3 +64,7 @@ either leave it on Auto or pick **Google** explicitly here.
 2. In Prism: **Settings → Calendar → Tasks via Todoist**, paste the token,
    Connect. When connected, the Tasks app uses Todoist instead of CalDAV/Prism.
    (Todoist's API only lists active tasks, so completed ones won't appear.)
+
+## Asking the agent
+
+The agent can connect CalDAV and Todoist for you, and point notes at a Markdown vault. Passwords and tokens never go through the chat: the agent first asks for them with its secret dialog (they are stored as secrets), then uses the secret to connect — and it tests the connection before saving anything. It can also switch the active calendar/tasks source ("use Todoist for my tasks"). Google and Microsoft accounts still need the browser sign-in from Settings → Calendar; the agent will guide you there.

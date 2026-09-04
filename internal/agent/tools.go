@@ -165,6 +165,82 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "agent_settings",
+			Description: "Read or change the user's own agent settings (Settings → Agent): name, max_iterations per turn, thinking (extended reasoning on/off), lean_prompt (frontier-model profile) and reasoning_effort. Use it when the user asks to rename you, raise the turn budget after an 'iteration limit reached', turn reasoning off for speed, or pick a reasoning effort. Changes apply from the next message. A group's shared agent is configured by a group admin in the admin console instead.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action":           {Type: "string", Description: "One of: get, set", Enum: []string{"get", "set"}},
+					"name":             {Type: "string", Description: "set: the agent's display name (empty = default)"},
+					"max_iterations":   {Type: "integer", Description: "set: model calls allowed per turn (10–500; 0 = default 75)"},
+					"thinking":         {Type: "boolean", Description: "set: extended reasoning on/off"},
+					"lean_prompt":      {Type: "boolean", Description: "set: lean system-prompt profile for frontier models"},
+					"reasoning_effort": {Type: "string", Description: "set: One of: low, medium, high, xhigh, default (the model decides which it accepts — Qwen3.8-Flash-Next: low/medium/xhigh; gpt-oss: low/medium/high)", Enum: []string{"low", "medium", "high", "xhigh", "default"}},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "webhook",
+			Description: "Manage the user's inbound webhooks (Settings → Webhooks): an external system POSTs to a Prism URL and the payload becomes a message to you. Actions: list, add (name + optional prompt wrapping the payload — use {{content}} where it goes — optional deliver to push your answer to a channel, optional respond for a synchronous reply), remove (id from list). add returns the URL and the token the caller must send as X-Prism-Token. Each webhook runs in its own session so feeds never pollute the user's chat.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action":  {Type: "string", Description: "One of: list, add, remove", Enum: []string{"list", "add", "remove"}},
+					"name":    {Type: "string", Description: "add: a short label, e.g. 'github-ci'"},
+					"prompt":  {Type: "string", Description: "add: instructions wrapping the payload, e.g. 'Summarize this CI event in one line: {{content}}'"},
+					"deliver": {Type: "string", Description: "add: One of: telegram, slack, webex — push the answer there too", Enum: []string{"telegram", "slack", "webex"}},
+					"respond": {Type: "boolean", Description: "add: reply synchronously with your answer in the HTTP response (off by default)"},
+					"id":      {Type: "string", Description: "remove: the webhook id from list"},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "pim_source",
+			Description: "Read or change where the user's calendar, tasks and notes come from (Settings → Calendar / Notes): status; set (calendar=auto|local|caldav|google|microsoft, tasks=auto|local|caldav|todoist); connect_caldav (url, user, password_secret = the NAME of a secret stored with request_secret, optional event_path/task_path — the connection is tested before anything is saved); disconnect_caldav; connect_todoist (token_secret = secret name, validated first); disconnect_todoist; set_notes_vault (path of a Markdown vault mounted in the server container); use_builtin_notes. Google and Microsoft accounts need a browser OAuth sign-in: guide the user to Settings → Calendar for those.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action":          {Type: "string", Description: "One of: status, set, connect_caldav, disconnect_caldav, connect_todoist, disconnect_todoist, set_notes_vault, use_builtin_notes", Enum: []string{"status", "set", "connect_caldav", "disconnect_caldav", "connect_todoist", "disconnect_todoist", "set_notes_vault", "use_builtin_notes"}},
+					"calendar":        {Type: "string", Description: "set: One of: auto, local, caldav, google, microsoft", Enum: []string{"auto", "local", "caldav", "google", "microsoft"}},
+					"tasks":           {Type: "string", Description: "set: One of: auto, local, caldav, todoist", Enum: []string{"auto", "local", "caldav", "todoist"}},
+					"url":             {Type: "string", Description: "connect_caldav: server URL (e.g. https://cloud.example.com/remote.php/dav)"},
+					"user":            {Type: "string", Description: "connect_caldav: login"},
+					"password_secret": {Type: "string", Description: "connect_caldav: NAME of the secret holding the password (request_secret first)"},
+					"event_path":      {Type: "string", Description: "connect_caldav: optional calendar collection path (auto-discovered when omitted)"},
+					"task_path":       {Type: "string", Description: "connect_caldav: optional task collection path (auto-discovered when omitted)"},
+					"token_secret":    {Type: "string", Description: "connect_todoist: NAME of the secret holding the API token (request_secret first)"},
+					"path":            {Type: "string", Description: "set_notes_vault: absolute directory of the vault as seen by the server container"},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
+			Name:        "channel",
+			Description: "Messaging channels for this user (Settings → Channels): status; telegram_connect (token_secret = the NAME of a secret holding the BotFather token, stored with request_secret — the token is checked against Telegram before it is saved; the user then sends /start to the bot to link the chat); telegram_unlink. Slack is deployment-wide (global admin, Settings → Channels) and Webex is per group (group admin, admin console): guide the user there for those.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"action":       {Type: "string", Description: "One of: status, telegram_connect, telegram_unlink", Enum: []string{"status", "telegram_connect", "telegram_unlink"}},
+					"token_secret": {Type: "string", Description: "telegram_connect: NAME of the secret holding the bot token"},
+				},
+				Required: []string{"action"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "list_files",
 			Description: "List files and directories in the workspace.",
 			Parameters: ollama.ToolParameters{
@@ -453,13 +529,14 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "rag_manage",
-			Description: "Inspect or delete RAG collections. Actions: list (all collections, or the documents of one collection if collection is given), delete (one document if document is given, else the entire collection).",
+			Description: "Inspect, describe or delete RAG collections. Actions: list (all collections, or the documents of one collection if collection is given), delete (one document if document is given, else the entire collection), describe (set the one-line description shown in Settings → Knowledge and in your own prompt — do it for every collection you create so future turns know what it holds).",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":     {Type: "string", Description: "One of: list, delete", Enum: []string{"list", "delete"}},
-					"collection": {Type: "string", Description: "Collection name (required for delete)"},
-					"document":   {Type: "string", Description: "Document filename (delete action — omit to delete the whole collection)"},
+					"action":      {Type: "string", Description: "One of: list, delete, describe", Enum: []string{"list", "delete", "describe"}},
+					"collection":  {Type: "string", Description: "Collection name (required for delete and describe)"},
+					"document":    {Type: "string", Description: "Document filename (delete action — omit to delete the whole collection)"},
+					"description": {Type: "string", Description: "describe action: what the collection holds, one line"},
 				},
 				Required: []string{"action"},
 			},

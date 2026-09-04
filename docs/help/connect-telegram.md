@@ -53,3 +53,7 @@ pushed to your Telegram chat — no need to be at the dashboard.
 - Manual tool approval does not apply over Telegram: tool calls run in auto
   mode.
 - A single Telegram turn is limited to 10 minutes.
+
+## Asking the agent
+
+You can hand the bot token to the agent instead of pasting it in Settings: it asks for it with its secret dialog (the token never appears in the chat), checks it with Telegram, connects the bot and reminds you to send `/start` to link your chat. "Unlink my Telegram chat" works too.

@@ -81,6 +81,9 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 	if collection == HelpCollection {
 		return helpReadOnlyMsg, nil
 	}
+	if e.groupWriteRefused(collection) {
+		return ragReadOnlyMsg, nil
+	}
 	if e.ragStore == nil || e.ragEmbedder == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
@@ -290,6 +293,9 @@ func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document strin
 	if collection == HelpCollection {
 		return helpReadOnlyMsg, nil
 	}
+	if e.groupWriteRefused(collection) {
+		return ragReadOnlyMsg, nil
+	}
 	if e.ragStore == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
@@ -344,6 +350,61 @@ func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document strin
 		return fmt.Sprintf("Document %q not found — collection %q is empty.", document, displayCol), nil
 	}
 	return fmt.Sprintf("Document %q not found in collection %q. Documents there: %s", document, displayCol, strings.Join(names, ", ")), nil
+}
+
+// ragReadOnlyMsg: the group knowledge base is curated by its admin — the HTTP
+// upload path always enforced this, the tool path now does too.
+const ragReadOnlyMsg = "The group knowledge base is curated by a group admin: you can search it, but not add, describe or delete documents. Ask a group admin (admin console → knowledge base), or keep a personal note with save_learning."
+
+// groupWriteRefused reports whether a write to collection must be refused for
+// this caller: only group-scoped collections are protected, the personal ones
+// (learnings, profile) stay writable.
+func (e *ToolExecutor) groupWriteRefused(collection string) bool {
+	return e.ragReadOnly && collection != learningsCollection && collection != userProfileCollection
+}
+
+// ragDescribe sets the one-line description shown in Settings › Knowledge and
+// in the agent's own Knowledge Base prompt block.
+func (e *ToolExecutor) ragDescribe(ctx context.Context, collection, description string) (string, error) {
+	if e.ragBlocked() {
+		return ragBlockedMsg, nil
+	}
+	if collection == HelpCollection {
+		return helpReadOnlyMsg, nil
+	}
+	if e.groupWriteRefused(collection) {
+		return ragReadOnlyMsg, nil
+	}
+	if e.ragStore == nil {
+		return "RAG not available (Postgres not configured)", nil
+	}
+	if collection == "" {
+		return "", fmt.Errorf("collection is required")
+	}
+	description = strings.TrimSpace(description)
+	cols, err := e.ragStore.ListCollections(ctx, e.resolveScope(collection))
+	if err != nil {
+		return fmt.Sprintf("ERROR: %v", err), nil
+	}
+	stored := e.resolveCollection(collection)
+	found := false
+	var names []string
+	for _, c := range cols {
+		names = append(names, e.uncol(c.Name))
+		if c.Name == stored {
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Sprintf("Collection %q does not exist. Available collections: %s", collection, strings.Join(names, ", ")), nil
+	}
+	if err := e.ragStore.SetCollectionDescription(ctx, stored, e.resolveScope(collection), description); err != nil {
+		return fmt.Sprintf("ERROR: %v", err), nil
+	}
+	if description == "" {
+		return fmt.Sprintf("Description of %q cleared.", collection), nil
+	}
+	return fmt.Sprintf("Collection %q is now described as: %s", collection, description), nil
 }
 
 // resolveCollection maps a user-facing collection name to its storage name.

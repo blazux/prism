@@ -235,6 +235,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Every branch above configured scope/guard; the help tool is the same for
 	// all of them and must not depend on which branch ran.
 	executor.SetHelp(s.helpFn(), s.integrationsStatusFor(wsUser))
+	executor.SetGlobalAdmin(wsUser != nil && wsUser.IsGlobalAdmin())
+	executor.SetRAGReadOnly(!s.canManageRAGScope(r.Context(), wsUser))
+	if !voiceCall {
+		executor.SetServerTools(s.serverToolsFor(wsUser))
+	}
 	ragContextFn := s.ragContextFn(ragScope)
 
 	client := &Client{

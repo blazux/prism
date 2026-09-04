@@ -59,6 +59,19 @@ func (e *ToolExecutor) prismHelp(ctx context.Context, topic string) (string, err
 			sb.WriteString("\n")
 		}
 	}
+	// Several groups: say which one this session works in — its room is the
+	// way to work in another group's context.
+	if strings.HasPrefix(e.ragScope, "g") && len(e.sharingGroups) > 1 {
+		active, others := e.ragScope, []string{}
+		for _, m := range e.sharingGroups {
+			if fmt.Sprintf("g%d", m.GroupID) == e.ragScope {
+				active = m.GroupName
+			} else {
+				others = append(others, m.GroupName)
+			}
+		}
+		fmt.Fprintf(&sb, "- Active group for the knowledge base and MCP servers: %s. You are also in %s — to work with another group's knowledge base or MCP servers, talk to its shared agent in that group's room.\n", active, strings.Join(others, ", "))
+	}
 	// Knowledge base and MCP servers: the executor sees those itself.
 	switch {
 	case e.ragStore == nil:

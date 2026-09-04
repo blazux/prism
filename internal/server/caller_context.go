@@ -28,6 +28,9 @@ type CallerContext struct {
 	ActingUserID  int64                            // the real user behind the session (share ownership)
 	Help          agent.HelpFn                     // Prism's bundled docs for prism_help
 	Status        func(ctx context.Context) string // what this caller has configured
+	ServerTools   map[string]agent.ServerTool      // webhook / pim_source / channel implementations (nil = unavailable)
+	GlobalAdmin   bool                             // may manage any group's MCP servers
+	RAGReadOnly   bool                             // group knowledge base: search only (not its admin)
 }
 
 // apply sets every field this bundles onto an executor in one call, instead
@@ -42,6 +45,9 @@ func (cc CallerContext) apply(e *agent.ToolExecutor) {
 	e.SetMultiUserMode(cc.MultiUser)
 	e.SetSharingContext(cc.ActingUserID, cc.Groups)
 	e.SetHelp(cc.Help, cc.Status)
+	e.SetServerTools(cc.ServerTools)
+	e.SetGlobalAdmin(cc.GlobalAdmin)
+	e.SetRAGReadOnly(cc.RAGReadOnly)
 }
 
 // callerContextForUser builds the standard per-user CallerContext — the
@@ -93,6 +99,9 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 		ActingUserID: aid,
 		Help:         s.helpFn(),
 		Status:       s.integrationsStatusFor(scopeUser),
+		ServerTools:  s.serverToolsFor(scopeUser),
+		GlobalAdmin:  u != nil && u.IsGlobalAdmin(),
+		RAGReadOnly:  !s.canManageRAGScope(ctx, scopeUser),
 	}
 }
 

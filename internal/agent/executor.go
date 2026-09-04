@@ -32,6 +32,9 @@ type ToolExecutor struct {
 	multiUser             bool                             // MULTI_USER: retires the personal RAG/MCP fallback (group scope only)
 	helpFn                HelpFn                           // Prism's bundled docs (prism_help); nil = not wired
 	integrationsStatusFn  func(ctx context.Context) string // what this caller has configured; nil = unknown
+	serverTools           map[string]ServerTool            // webhook / pim_source / channel, injected per caller
+	globalAdmin           bool                             // caller is a global admin (MCP group management)
+	ragReadOnly           bool                             // group knowledge base is admin-curated: this caller may only search it
 	ragStore              *rag.Store
 	ragEmbedder           *rag.Embedder
 	ragCaptioner          *rag.Captioner
@@ -459,6 +462,13 @@ func (e *ToolExecutor) SetPersonalScope(scope string) { e.personalScopeOverride 
 // grouped one still gets the group's.
 func (e *ToolExecutor) SetMultiUserMode(v bool) { e.multiUser = v }
 
+// SetGlobalAdmin marks the caller as a global admin (may manage any group's MCP servers).
+func (e *ToolExecutor) SetGlobalAdmin(v bool) { e.globalAdmin = v }
+
+// SetRAGReadOnly makes group-scoped RAG writes refuse with a pointer to the
+// group admin — the same rule the HTTP upload path enforces.
+func (e *ToolExecutor) SetRAGReadOnly(v bool) { e.ragReadOnly = v }
+
 // ragBlocked reports whether this executor's RAG scope is the personal
 // fallback MULTI_USER retires: true only when multiUser is set and ragScope
 // isn't a group scope. Mirrors server.ragPersonalFallbackBlocked.
@@ -830,6 +840,10 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.workspaceRestore(ctx, str("commit"), str("path")))
 	case "prism_help":
 		return wrap(e.prismHelp(ctx, str("topic")))
+	case "agent_settings":
+		return wrap(e.agentSettings(ctx, str("action"), args))
+	case "webhook", "pim_source", "channel":
+		return wrap(e.serverTool(ctx, name, args))
 	case "install_packages":
 		switch str("manager") {
 		case "apt":
@@ -968,8 +982,10 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			return wrap(e.ragListCollections(ctx))
 		case "delete":
 			return wrap(e.ragDelete(ctx, str("collection"), str("document")))
+		case "describe":
+			return wrap(e.ragDescribe(ctx, str("collection"), str("description")))
 		default:
-			return "", nil, fmt.Errorf("rag_manage: unknown action %q (expected list, delete)", str("action"))
+			return "", nil, fmt.Errorf("rag_manage: unknown action %q (expected list, delete, describe)", str("action"))
 		}
 	case "rag_list": // legacy alias
 		if col := str("collection"); col != "" {

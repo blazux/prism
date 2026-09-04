@@ -72,3 +72,7 @@ immediately.
 
 The settings page shows the call count and the outcome of the last call, which
 is the fastest way to tell whether a sender is actually reaching you.
+
+## Asking the agent
+
+"Create a webhook for my CI, summarize each event in one line, and send it to Telegram" creates it; the agent replies with the URL and the token to give the calling system (sent as an `X-Prism-Token` header, a Bearer token, or `?token=`). "List my webhooks" and "remove the CI webhook" work the same way. Webhooks created this way run in their own session, so a feed never lands in your chat.

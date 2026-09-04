@@ -59,3 +59,7 @@ In multi-user mode MCP is **group-scoped**:
 - **A tool disappeared**: the server may be toggled off, or an admin restricted
   the tool — see the tools help.
 - Errors returned by the server are shown as-is under the form.
+
+## Asking the agent
+
+"List my MCP servers" always works. Adding or removing one through the agent works in single-user mode, and in shared mode for a **group admin** (the server is then added to the group, exactly as from the admin console); a plain member is told to ask a group admin. A server that requires an OAuth sign-in cannot be added by the agent — it needs the browser consent page from Settings → MCP or the admin console.

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -228,9 +229,41 @@ func (e *ToolExecutor) deleteSecret(ctx context.Context, name string) (string, e
 // through the same tool's list action and through Admin console management.
 const mcpPersonalBlockedMsg = "Personal MCP servers are not available in multi-user mode. Ask your group admin to add the server for your group from the Admin console."
 
+// mcpWriteScope decides where mcp add/remove writes, or why it can't.
+// Single-user: the personal storage scope. Multi-user: MCP is group-scoped,
+// so an admin of the session's group (or a global admin) writes to the group
+// scope — the same one the admin console uses — and anyone else is told, by
+// name, who can, instead of a blanket refusal that even told admins to ask
+// themselves.
+func (e *ToolExecutor) mcpWriteScope() (scope, denial string) {
+	if !e.multiUser {
+		return e.mcpStorageScope(), ""
+	}
+	g := e.ragScope
+	if !strings.HasPrefix(g, "g") {
+		return "", "MCP servers are group-scoped in multi-user mode and you are not in a group — ask an admin to add you to one."
+	}
+	groupName := g
+	for _, m := range e.sharingGroups {
+		if fmt.Sprintf("g%d", m.GroupID) == g {
+			if m.Role == "admin" {
+				return g, ""
+			}
+			if m.GroupName != "" {
+				groupName = m.GroupName
+			}
+		}
+	}
+	if e.globalAdmin {
+		return g, ""
+	}
+	return "", fmt.Sprintf("MCP servers for group %s are managed by its group admin (admin console → MCP servers). You are a member, not an admin, so you cannot add or remove them — tell the user to ask a group admin.", groupName)
+}
+
 func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret string) (string, error) {
-	if e.multiUser {
-		return mcpPersonalBlockedMsg, nil
+	scope, denial := e.mcpWriteScope()
+	if denial != "" {
+		return denial, nil
 	}
 	if e.mcpMgr == nil {
 		return "MCP not available (Postgres required)", nil
@@ -247,8 +280,12 @@ func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret s
 		return fmt.Sprintf("Refused: %q is a reserved integration credential and cannot be sent to an MCP server. "+
 			"If this server needs a token, create a dedicated one with request_secret and pass that name as auth_secret.", authSecret), nil
 	}
-	tools, err := e.mcpMgr.Connect(ctx, e.mcpStorageScope(), name, url, authSecret)
+	tools, err := e.mcpMgr.Connect(ctx, scope, name, url, authSecret)
 	if err != nil {
+		var needAuth *mcp.OAuthRequiredError
+		if errors.As(err, &needAuth) {
+			return fmt.Sprintf("MCP server '%s' requires an OAuth sign-in, which needs a browser: add it from Settings → MCP (single-user) or the admin console → MCP servers (group) — that opens the consent page. Nothing was saved.", name), nil
+		}
 		return fmt.Sprintf("Failed to connect MCP server '%s': %v", name, err), nil
 	}
 	if e.onMCPReload != nil {
@@ -263,15 +300,16 @@ func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret s
 }
 
 func (e *ToolExecutor) mcpRemoveServer(ctx context.Context, name string) (string, error) {
-	if e.multiUser {
-		return mcpPersonalBlockedMsg, nil
+	scope, denial := e.mcpWriteScope()
+	if denial != "" {
+		return denial, nil
 	}
 	if e.mcpMgr == nil {
 		return "MCP not available", nil
 	}
 	// Remove is a no-op on an unknown name: check first so a miss is reported as
 	// one, with the real names, instead of a cheerful "removed".
-	if servers, lerr := e.mcpMgr.List(ctx, e.mcpStorageScope()); lerr == nil {
+	if servers, lerr := e.mcpMgr.List(ctx, scope); lerr == nil {
 		found := false
 		var names []string
 		for _, s := range servers {
@@ -287,7 +325,7 @@ func (e *ToolExecutor) mcpRemoveServer(ctx context.Context, name string) (string
 			return fmt.Sprintf("No MCP server named %q — nothing was removed. Configured servers: %s", name, strings.Join(names, ", ")), nil
 		}
 	}
-	if err := e.mcpMgr.Remove(ctx, e.mcpStorageScope(), name); err != nil {
+	if err := e.mcpMgr.Remove(ctx, scope, name); err != nil {
 		return fmt.Sprintf("Error: %v", err), nil
 	}
 	if e.onMCPReload != nil {
@@ -326,6 +364,12 @@ func (e *ToolExecutor) mcpListServers(ctx context.Context) (string, error) {
 		}
 	}
 	if len(servers) == 0 {
+		if e.multiUser {
+			if _, denial := e.mcpWriteScope(); denial != "" {
+				return "No MCP servers configured for your group. " + denial, nil
+			}
+			return "No MCP servers configured for your group. As its admin you can add one with mcp action=add (or from the admin console → MCP servers).", nil
+		}
 		return "No MCP servers configured. Use mcp action=add to connect one.", nil
 	}
 	var sb strings.Builder
