@@ -21,9 +21,10 @@ const (
 	KeyPersonalityBase = "system_prompt_personality_base" // global base persona, layered under every session
 	// Turn budget of the caller's agent (Settings › Agent). Both re-read each
 	// turn by Agent.loadProfile, scoped like agent_name in multi-user mode.
-	KeyAgentMaxIterations = "agent_max_iterations" // integer; empty = built-in default
-	KeyAgentThinking      = "agent_thinking"       // "on" / "off"; empty = on
-	KeyAgentLeanPrompt    = "agent_lean_prompt"    // "on" / "off"; empty = off (guided profile)
+	KeyAgentMaxIterations   = "agent_max_iterations"   // integer; empty = built-in default
+	KeyAgentThinking        = "agent_thinking"         // "on" / "off"; empty = on
+	KeyAgentLeanPrompt      = "agent_lean_prompt"      // "on" / "off"; empty = off (guided profile)
+	KeyAgentReasoningEffort = "agent_reasoning_effort" // "low"/"medium"/"high"/"xhigh"; empty = server default (OPENAI_REASONING_EFFORT)
 )
 
 // HistoryEntry is one row from conversation_history.
@@ -105,7 +106,7 @@ func (s *Store) migrateUserScopedConfig(ctx context.Context) {
 	cfgKeys := []string{
 		"email_config", "notes_provider", "notes_vault_path",
 		"caldav_config", "tasks_provider", "calendar_provider",
-		"agent_name", KeyPersonalityBase, KeyAgentMaxIterations, KeyAgentThinking, KeyAgentLeanPrompt,
+		"agent_name", KeyPersonalityBase, KeyAgentMaxIterations, KeyAgentThinking, KeyAgentLeanPrompt, KeyAgentReasoningEffort,
 		"oauth_google_client_id", "oauth_microsoft_client_id",
 		"telegram_allowed_chat",
 	}
@@ -364,6 +365,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_max_iter INT NOT NULL DEFAULT 0`,
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_thinking BOOLEAN NOT NULL DEFAULT TRUE`,
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_lean BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_reasoning TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT NOT NULL DEFAULT ''`,
 		// Avatars for users and agents, keyed by scope: "u<id>" (user),

@@ -96,9 +96,10 @@ type Agent struct {
 	// from config by loadProfile each turn; limitsOverride is set by headless
 	// callers (the group's shared agent) whose config lives elsewhere and wins
 	// field by field over the config values. See Limits.
-	limits         Limits
-	limitsOverride Limits
-	turnThinking   bool // resolved by Chat at turn start; read where requests are built
+	limits              Limits
+	limitsOverride      Limits
+	turnThinking        bool   // resolved by Chat at turn start; read where requests are built
+	turnReasoningEffort string // idem
 	// Manual tool approval (dashboard only). approvalNeededFn reads the live
 	// toggle at every tool call, so flipping it mid-turn applies to the next
 	// call; awaitApprovalFn blocks until the user's verdict (or ctx cancel).
@@ -134,6 +135,10 @@ type Limits struct {
 	// drops the small-model scaffolding — see the prompt-profiles comment in
 	// prompt.go). nil = config / guided.
 	LeanPrompt *bool
+	// ReasoningEffort bounds the reasoning budget of thinking models
+	// ("low"/"medium"/"high"/"xhigh"). "" = config / server default
+	// (OPENAI_REASONING_EFFORT).
+	ReasoningEffort string
 }
 
 const (
@@ -153,6 +158,24 @@ func ClampIterations(n int) int {
 		return MaxMaxIterations
 	}
 	return n
+}
+
+// ReasoningEfforts lists the reasoning_effort values Settings may pick from.
+// Which ones a given model accepts is up to the backend (gpt-oss: low/medium/
+// high; Qwen3.8-Flash-Next: low/medium/xhigh) — an unsupported value comes back
+// as the backend's own error, which is the honest signal to pick another.
+var ReasoningEfforts = []string{"low", "medium", "high", "xhigh"}
+
+// NormalizeReasoningEffort maps user input onto ReasoningEfforts; anything else
+// (including empty) is "" = use the server default.
+func NormalizeReasoningEffort(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	for _, v := range ReasoningEfforts {
+		if s == v {
+			return v
+		}
+	}
+	return ""
 }
 
 // SetLimits overrides the config-derived turn limits for this agent. Used by
@@ -189,6 +212,15 @@ func (a *Agent) leanPrompt() bool {
 		return *a.limits.LeanPrompt
 	}
 	return false
+}
+
+// reasoningEffort resolves the reasoning budget the same way: override →
+// config → "" (the backend's default applies).
+func (a *Agent) reasoningEffort() string {
+	if a.limitsOverride.ReasoningEffort != "" {
+		return a.limitsOverride.ReasoningEffort
+	}
+	return a.limits.ReasoningEffort
 }
 
 // SetChannel declares the surface the next turn comes from. See Agent.channel.
@@ -337,6 +369,9 @@ func (a *Agent) loadProfile() {
 			on := t == "on" || t == "true" || t == "1"
 			a.limits.LeanPrompt = &on
 		}
+	}
+	if v, ok, err := store.GetConfig(ctx, memory.KeyAgentReasoningEffort); err == nil && ok {
+		a.limits.ReasoningEffort = NormalizeReasoningEffort(v)
 	}
 }
 
@@ -858,6 +893,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	// never mid-turn.
 	maxIterations, thinking := a.effectiveLimits()
 	a.turnThinking = thinking
+	a.turnReasoningEffort = a.reasoningEffort()
 
 	var emptyRetried bool
 	intentNudges := 0
@@ -1161,7 +1197,8 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 		// On the phone the caller waits in silence while the model reasons, so the
 		// thinking budget is pure dead air. Turn it off for voice turns — and
 		// whenever the user switched reasoning off in Settings.
-		NoThinking: a.channel == voiceChannel || !a.turnThinking,
+		NoThinking:      a.channel == voiceChannel || !a.turnThinking,
+		ReasoningEffort: a.turnReasoningEffort,
 	}
 	// num_ctx is filled in by the Ollama client (ollama.NumCtx); the OpenAI and
 	// Anthropic backends ignore it and size their own context.

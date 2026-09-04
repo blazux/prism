@@ -258,3 +258,52 @@ func TestBuildMessages_ToolCallIDCorrelation(t *testing.T) {
 		t.Error("synthesised tool call id is empty")
 	}
 }
+
+// The per-request reasoning effort (Settings › Agent, or a group's shared-agent
+// config) must reach the wire and win over the process-wide default; a
+// no-thinking turn sends neither, since the model is told not to reason at all.
+func TestChat_ReasoningEffort(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		json.NewDecoder(r.Body).Decode(&b)
+		mu.Lock()
+		bodies = append(bodies, b)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte(`data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}` + "\n"))
+		w.Write([]byte("data: [DONE]\n"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "")
+	send := func(req ollama.ChatRequest) {
+		ch := make(chan ollama.StreamEvent, 50)
+		go func() { c.Chat(context.Background(), req, ch); close(ch) }()
+		drain(ch)
+	}
+	send(ollama.ChatRequest{Model: "m", ReasoningEffort: "xhigh"})
+	send(ollama.ChatRequest{Model: "m"})
+	send(ollama.ChatRequest{Model: "m", NoThinking: true, ReasoningEffort: "xhigh"})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 3 {
+		t.Fatalf("got %d requests, want 3", len(bodies))
+	}
+	if got := bodies[0]["reasoning_effort"]; got != "xhigh" {
+		t.Errorf("explicit effort: reasoning_effort = %v, want xhigh", got)
+	}
+	// No per-request value → the process-wide default (env / "medium"), or the
+	// field is absent when that default is empty.
+	if got, _ := bodies[1]["reasoning_effort"].(string); got != reasoningEffort {
+		t.Errorf("default effort: reasoning_effort = %q, want %q", got, reasoningEffort)
+	}
+	if _, has := bodies[2]["reasoning_effort"]; has {
+		t.Errorf("no-thinking turn must not send reasoning_effort: %v", bodies[2])
+	}
+	if kw, _ := bodies[2]["chat_template_kwargs"].(map[string]any); kw == nil || kw["enable_thinking"] != false {
+		t.Errorf("no-thinking turn must send enable_thinking=false: %v", bodies[2])
+	}
+}

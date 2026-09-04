@@ -108,7 +108,7 @@ EMBED_MODEL=qwen3-embedding:8b
 # EMBED_BACKEND=ollama                        # if the server has no /v1/embeddings
 ```
 
-Chat-only servers are common (a 120B on vLLM rarely bothers with embeddings) — keep `OLLAMA_URL` set and `EMBED_BACKEND=ollama` and RAG carries on quietly over there. Heavy reasoners (gpt-oss and friends) get `reasoning_effort=medium` by default so they don't spend the whole token budget thinking and forget to answer; `OPENAI_REASONING_EFFORT=low|high|none` overrides it.
+Chat-only servers are common (a 120B on vLLM rarely bothers with embeddings) — keep `OLLAMA_URL` set and `EMBED_BACKEND=ollama` and RAG carries on quietly over there. Heavy reasoners (gpt-oss and friends) get `reasoning_effort=medium` by default so they don't spend the whole token budget thinking and forget to answer; `OPENAI_REASONING_EFFORT=low|high|xhigh|none` overrides it, and each user can pick their own in **Settings → Agent → Turn budget** (a group admin sets it for the shared agent in the admin console). The set a model accepts varies — Qwen3.8-Flash-Next takes `low|medium|xhigh`. Behind LiteLLM, note that `drop_params: true` silently strips `reasoning_effort`: add `allowed_openai_params: ["reasoning_effort"]` to that route's `litellm_params`.
 
 ### Anthropic — Claude, for when local isn't enough
 
@@ -282,7 +282,7 @@ Everything is an environment variable, set in `.env` (the annotated [`.env.examp
 | `OPENAI_BASE_URL` | `/v1` root of an OpenAI-compatible server | — |
 | `OPENAI_MODEL` | Its chat model (`--served-model-name`) | — |
 | `OPENAI_API_KEY` | Bearer token, if the server wants one | — |
-| `OPENAI_REASONING_EFFORT` | `low` / `medium` / `high` / `none` for reasoning models | `medium` |
+| `OPENAI_REASONING_EFFORT` | `low` / `medium` / `high` / `xhigh` / `none` for reasoning models (the set a model accepts varies); users override it in Settings → Agent | `medium` |
 | `ANTHROPIC_API_KEY` | API key from console.anthropic.com (not a subscription token) | — |
 | `ANTHROPIC_MODEL` | Default Claude model | `claude-sonnet-5` |
 | `ANTHROPIC_BASE_URL` | Only for a proxy/gateway | `https://api.anthropic.com` |
@@ -311,7 +311,8 @@ Things that aren't env vars — the agent's name and personality, its **turn bud
 
 - **It can't reach Ollama.** From inside Docker, `localhost` is the container, not your machine. Use `host-gateway` (the compose file maps it) or the host's LAN IP. `docker compose logs -f prism-server` shows what it tried.
 - **"model not found".** The name must match `ollama list` exactly, tag included — `qwen3.6:27b`, not `qwen3.6`.
-- **Replies come back empty or cut off on a reasoning model.** It spent the whole budget thinking. Lower `OPENAI_REASONING_EFFORT`, or switch reasoning off in **Settings → Agent**.
+- **Replies come back empty or cut off on a reasoning model.** It spent the whole budget thinking. Lower the reasoning effort in **Settings → Agent** (or `OPENAI_REASONING_EFFORT`), or switch reasoning off there.
+- **Reasoning effort has no effect behind LiteLLM.** `drop_params: true` strips `reasoning_effort` before it reaches the model — add `allowed_openai_params: ["reasoning_effort"]` to the route's `litellm_params`.
 - **"Iteration limit reached".** The agent hit its per-message cap on a long task — not a bug, a budget. Raise it in **Settings → Agent → Turn budget** (default 75, up to 500), or just say "continue".
 - **Widget previews look wrong / the agent says it can't see.** Text-only chat model: set `CHAT_VISION=false` and optionally `VISION_MODEL` to a small vision model for captions.
 - **You changed `EMBED_MODEL`.** The vector dimension is fixed per table — reset the RAG data (`docker compose down -v` wipes everything, or drop the `rag_*` tables) and re-index.

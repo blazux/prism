@@ -263,7 +263,8 @@ func (s *Server) handleAgentName(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAgentLimits reads/writes the caller's agent turn budget (Settings › Agent).
-// GET -> {maxIterations, thinking, default, min, max}; POST {maxIterations, thinking}.
+// GET -> {maxIterations, thinking, leanPrompt, reasoningEffort, reasoningEfforts, default, min, max};
+// POST {maxIterations, thinking, leanPrompt, reasoningEffort} (reasoningEffort "" = server default).
 // maxIterations 0 = built-in default. Applied by Agent.loadProfile on the next turn.
 func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -286,15 +287,21 @@ func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
 		if v, ok, _ := ms.GetConfig(r.Context(), memory.KeyAgentLeanPrompt); ok && strings.TrimSpace(v) == "on" {
 			lean = true
 		}
+		effort := ""
+		if v, ok, _ := ms.GetConfig(r.Context(), memory.KeyAgentReasoningEffort); ok {
+			effort = agent.NormalizeReasoningEffort(v)
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"maxIterations": maxIter, "thinking": thinking, "leanPrompt": lean,
+			"reasoningEffort": effort, "reasoningEfforts": agent.ReasoningEfforts,
 			"default": agent.DefaultMaxIterations, "min": agent.MinMaxIterations, "max": agent.MaxMaxIterations,
 		})
 	case "POST":
 		var b struct {
-			MaxIterations int   `json:"maxIterations"`
-			Thinking      *bool `json:"thinking"`
-			LeanPrompt    *bool `json:"leanPrompt"`
+			MaxIterations   int    `json:"maxIterations"`
+			Thinking        *bool  `json:"thinking"`
+			LeanPrompt      *bool  `json:"leanPrompt"`
+			ReasoningEffort string `json:"reasoningEffort"`
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
@@ -325,7 +332,12 @@ func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "maxIterations": maxIter, "thinking": tv == "on", "leanPrompt": lv == "on"})
+		ev := agent.NormalizeReasoningEffort(b.ReasoningEffort)
+		if err := ms.SetConfig(r.Context(), memory.KeyAgentReasoningEffort, ev); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "maxIterations": maxIter, "thinking": tv == "on", "leanPrompt": lv == "on", "reasoningEffort": ev})
 	default:
 		http.Error(w, "method not allowed", 405)
 	}

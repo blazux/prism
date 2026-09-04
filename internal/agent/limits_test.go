@@ -31,3 +31,32 @@ func TestEffectiveLimits(t *testing.T) {
 		t.Errorf("iter override: got (%d,%v)", n, th)
 	}
 }
+
+func TestNormalizeReasoningEffort(t *testing.T) {
+	cases := map[string]string{"": "", "low": "low", " XHigh ": "xhigh", "medium": "medium", "high": "high", "ultra": "", "none": ""}
+	for in, want := range cases {
+		if got := NormalizeReasoningEffort(in); got != want {
+			t.Errorf("NormalizeReasoningEffort(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestReasoningEffort_Resolution(t *testing.T) {
+	a := &Agent{}
+	if got := a.reasoningEffort(); got != "" {
+		t.Errorf("default: got %q, want \"\" (server default)", got)
+	}
+	a.limits = Limits{ReasoningEffort: "low"}
+	if got := a.reasoningEffort(); got != "low" {
+		t.Errorf("config: got %q, want low", got)
+	}
+	// A group override wins; an empty override falls through to config.
+	a.limitsOverride = Limits{ReasoningEffort: "xhigh"}
+	if got := a.reasoningEffort(); got != "xhigh" {
+		t.Errorf("override: got %q, want xhigh", got)
+	}
+	a.limitsOverride = Limits{MaxIterations: 30}
+	if got := a.reasoningEffort(); got != "low" {
+		t.Errorf("partial override: got %q, want low", got)
+	}
+}

@@ -204,6 +204,11 @@ type ChatRequest struct {
 	// Wire-neutral (each backend translates it); Ollama's translation is the
 	// Think field below, set by Client.Chat.
 	NoThinking bool `json:"-"`
+	// ReasoningEffort bounds how much a reasoning model thinks this turn
+	// ("low"/"medium"/"high"/"xhigh" — the accepted set is model-specific).
+	// Wire-neutral: the OpenAI backend sends it as reasoning_effort, Ollama has
+	// no equivalent and ignores it. Empty = the backend's own default.
+	ReasoningEffort string `json:"-"`
 	// Think is Ollama's own switch (/api/chat "think": false) for models with a
 	// thinking mode (Qwen3, DeepSeek-R1, gpt-oss…). Omitted → the model's
 	// default; never sent true so models without the mode don't reject it.

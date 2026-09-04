@@ -110,7 +110,9 @@ type chatRequest struct {
 	// Qwen/SGLang convention for turning extended reasoning off. Passes through
 	// LiteLLM unharmed; ignored by backends that don't know it.
 	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
-	// gpt-oss/o-series reasoning budget ("low"|"medium"|"high"). See reasoningEffort.
+	// Reasoning budget. The accepted set is model-specific (gpt-oss: low/medium/
+	// high; Qwen3.8-Flash-Next: low/medium/xhigh). Per-request value first
+	// (Settings › Agent / group config), else the process-wide reasoningEffort.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
@@ -386,6 +388,9 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	}
 	if req.NoThinking {
 		payload.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+	} else if effort := req.ReasoningEffort; effort != "" {
+		// The caller's choice (Settings › Agent, or a group's shared-agent config).
+		payload.ReasoningEffort = effort
 	} else if reasoningEffort != "" {
 		// Cap reasoning so the model can't spend the whole generation budget
 		// thinking and return empty content. Not set for voice/no-thinking turns.

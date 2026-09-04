@@ -39,6 +39,9 @@ type RoomConfig struct {
 	AgentMaxIter  int  `json:"agentMaxIter"`
 	AgentThinking bool `json:"agentThinking"`
 	AgentLean     bool `json:"agentLean"`
+	// AgentReasoning bounds the reasoning budget ("low"/"medium"/"high"/"xhigh");
+	// "" = the server default.
+	AgentReasoning string `json:"agentReasoning"`
 }
 
 // AddRoomMessage appends a message (human or agent) to a group's room. replyTo is
@@ -150,8 +153,8 @@ func (s *Store) RoomMessageGroup(ctx context.Context, msgID int64) int64 {
 func (s *Store) GetRoomConfig(ctx context.Context, groupID int64) (RoomConfig, error) {
 	c := RoomConfig{GroupID: groupID, AgentName: "Assistant", AgentThinking: true}
 	err := s.pool.QueryRow(ctx, `
-		SELECT agent_name, agent_prompt, agent_model, agent_max_iter, agent_thinking, agent_lean FROM room_config WHERE group_id = $1
-	`, groupID).Scan(&c.AgentName, &c.AgentPrompt, &c.AgentModel, &c.AgentMaxIter, &c.AgentThinking, &c.AgentLean)
+		SELECT agent_name, agent_prompt, agent_model, agent_max_iter, agent_thinking, agent_lean, agent_reasoning FROM room_config WHERE group_id = $1
+	`, groupID).Scan(&c.AgentName, &c.AgentPrompt, &c.AgentModel, &c.AgentMaxIter, &c.AgentThinking, &c.AgentLean, &c.AgentReasoning)
 	if err != nil {
 		// No row yet → return defaults (not an error).
 		return RoomConfig{GroupID: groupID, AgentName: "Assistant", AgentThinking: true}, nil
@@ -165,15 +168,16 @@ func (s *Store) SetRoomConfig(ctx context.Context, c RoomConfig) error {
 		c.AgentName = "Assistant"
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO room_config (group_id, agent_name, agent_prompt, agent_model, agent_max_iter, agent_thinking, agent_lean)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO room_config (group_id, agent_name, agent_prompt, agent_model, agent_max_iter, agent_thinking, agent_lean, agent_reasoning)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (group_id) DO UPDATE SET
 			agent_name = EXCLUDED.agent_name,
 			agent_prompt = EXCLUDED.agent_prompt,
 			agent_model = EXCLUDED.agent_model,
 			agent_max_iter = EXCLUDED.agent_max_iter,
 			agent_thinking = EXCLUDED.agent_thinking,
-			agent_lean = EXCLUDED.agent_lean
-	`, c.GroupID, c.AgentName, c.AgentPrompt, c.AgentModel, c.AgentMaxIter, c.AgentThinking, c.AgentLean)
+			agent_lean = EXCLUDED.agent_lean,
+			agent_reasoning = EXCLUDED.agent_reasoning
+	`, c.GroupID, c.AgentName, c.AgentPrompt, c.AgentModel, c.AgentMaxIter, c.AgentThinking, c.AgentLean, c.AgentReasoning)
 	return err
 }
