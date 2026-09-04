@@ -710,14 +710,14 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		sb.WriteString("\n\n")
 		sb.WriteString(persona)
 	}
-	sb.WriteString(systemPromptCore)
 	lean := a.leanPrompt()
+	sb.WriteString(systemPromptCoreFor(lean))
 	if lean {
 		sb.WriteString(systemPromptRetryLean)
 	} else {
 		sb.WriteString(systemPromptRetryGuided)
 	}
-	sb.WriteString(systemPromptCoreTail)
+	sb.WriteString(systemPromptCoreTailFor(lean))
 
 	// Channel guidance: the "telegram" session is the user texting from their phone.
 	if a.sessionID == telegramSessionID {
@@ -805,7 +805,11 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	// ones this size of model actually follows (see systemPromptRole's measurements).
 	sb.WriteString(systemPromptGrounding)
 	sb.WriteString(systemPromptDeliverable)
-	if !lean {
+	if lean {
+		// A capable model over-delivers; the small-model act-turn crutch is
+		// replaced by the opposite discipline.
+		sb.WriteString(systemPromptKeepItSimple)
+	} else {
 		sb.WriteString(systemPromptActTurn)
 	}
 
