@@ -35,7 +35,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":  {Type: "string", Description: "One of: ps, list, logs, exec, stop"},
+					"action":  {Type: "string", Description: "One of: ps, list, logs, exec, stop", Enum: []string{"ps", "list", "logs", "exec", "stop"}},
 					"name":    {Type: "string", Description: "Service name as given to docker_run (required for logs, exec, stop)"},
 					"command": {Type: "string", Description: "Shell command to run inside the container (exec action only)"},
 					"tail":    {Type: "integer", Description: "Number of log lines to return (logs action, default 50)"},
@@ -52,7 +52,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":  {Type: "string", Description: "Action: up (start all services), down (stop and remove), ps (list services), logs (get logs), restart, exec (run a command inside a service container)"},
+					"action":  {Type: "string", Description: "Action: up (start all services), down (stop and remove), ps (list services), logs (get logs), restart, exec (run a command inside a service container)", Enum: []string{"up", "down", "ps", "logs", "restart", "exec"}},
 					"file":    {Type: "string", Description: "Path to docker-compose.yml relative to /workspace (e.g. 'greenbone/docker-compose.yml')"},
 					"project": {Type: "string", Description: "Optional project name override. If omitted, auto-set to prism-svc-<directory> (e.g. 'prism-svc-greenbone')."},
 					"service": {Type: "string", Description: "Service name to target for logs, restart, or exec"},
@@ -185,7 +185,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"manager":  {Type: "string", Description: "Package manager: apt or pip"},
+					"manager":  {Type: "string", Description: "Package manager: apt or pip", Enum: []string{"apt", "pip"}},
 					"packages": {Type: "string", Description: "Space-separated list of packages to install"},
 				},
 				Required: []string{"manager", "packages"},
@@ -200,7 +200,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":  {Type: "string", Description: "One of: add, update, remove, list, list_shared, add_shared, share, unshare"},
+					"action":  {Type: "string", Description: "One of: add, update, remove, list, list_shared, add_shared, share, unshare", Enum: []string{"add", "update", "remove", "list", "list_shared", "add_shared", "share", "unshare"}},
 					"id":      {Type: "string", Description: "Widget ID (add: optional, derived from title; update/remove/share: the id from list). For add_shared/unshare: the NUMERIC id from list_shared."},
 					"kind":    {Type: "string", Description: "For list_shared/share: 'widget' (default) or 'dashboard' (the whole board)."},
 					"group":   {Type: "string", Description: "For share: which group to publish to, by name — only needed when you belong to several groups."},
@@ -238,11 +238,12 @@ var ToolDefinitions = []ollama.Tool{
 				"Use \"deliver\" only when you want the model's ANSWER delivered. To post an exact text, push a raw line instead:\n" +
 				"  Telegram: curl -s -X POST $PRISM_URL/api/telegram/send -H \"Authorization: Bearer $PRISM_TOKEN\" -d '{\"text\":\"Backup finished ✅\"}'\n" +
 				"  Webex:    curl -s -X POST $PRISM_URL/api/webex/send -H \"Authorization: Bearer $PRISM_TOKEN\" -d '{\"text\":\"Bonjour à tous !\"}'  (posts to the group's announcement room)\n" +
-				"($PRISM_URL/$PRISM_SESSION/$PRISM_TOKEN are available both ways: as real environment variables for a script's own os.environ lookups, and substituted directly into the command text for inline shell $VAR usage.)",
+				"($PRISM_URL/$PRISM_SESSION/$PRISM_TOKEN are available both ways: as real environment variables for a script's own os.environ lookups, and substituted directly into the command text for inline shell $VAR usage.)\n" +
+				"SECRETS ARE NOT INJECTED INTO CRON JOBS (unlike exec_command): a scheduled script that reads os.environ['MY_SECRET'] silently fails. Fetch it over HTTP instead: curl -s \"$PRISM_URL/api/user/secrets/<name>?session=$PRISM_SESSION\" -H \"Authorization: Bearer $PRISM_TOKEN\" (JSON with a 'value' field).",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":      {Type: "string", Description: "One of: list, add, remove"},
+					"action":      {Type: "string", Description: "One of: list, add, remove", Enum: []string{"list", "add", "remove"}},
 					"name":        {Type: "string", Description: "Unique job identifier (e.g. 'daily-backup', 'sync-feed')"},
 					"schedule":    {Type: "string", Description: "Cron expression (e.g. '*/5 * * * *' every 5 min, '0 9 * * 1-5' weekdays 9am)"},
 					"command":     {Type: "string", Description: "Shell command to run (e.g. 'python3 /workspace/myscript.py >> /workspace/logs/myscript.log 2>&1')"},
@@ -306,7 +307,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":      {Type: "string", Description: "add, get, list, or delete"},
+					"action":      {Type: "string", Description: "add, get, list, or delete", Enum: []string{"add", "save", "update", "get", "list", "delete"}},
 					"name":        {Type: "string", Description: "Skill name (required for add/get/delete)"},
 					"description": {Type: "string", Description: "One-line summary (for add)"},
 					"when_to_use": {Type: "string", Description: "When this skill applies, shown in the index (for add)"},
@@ -324,7 +325,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action": {Type: "string", Description: "add, list, update, or delete"},
+					"action": {Type: "string", Description: "add, list, update, or delete", Enum: []string{"add", "list", "update", "delete"}},
 					"id":     {Type: "string", Description: "Note id from list, used for update/delete. Opaque: a number for local notes, or a file path like \"folder/Note.md\" when a Markdown vault is connected."},
 					"title":  {Type: "string", Description: "Note title"},
 					"body":   {Type: "string", Description: "Note body (Markdown)"},
@@ -342,10 +343,10 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":       {Type: "string", Description: "add, list, done, reopen, or delete"},
+					"action":       {Type: "string", Description: "add, list, done, reopen, or delete", Enum: []string{"add", "list", "done", "reopen", "delete"}},
 					"id":           {Type: "string", Description: "Task id from list, used for done/reopen/delete. Opaque: a number locally, or an object path when a CalDAV account is connected."},
 					"title":        {Type: "string", Description: "Task title (for add)"},
-					"priority":     {Type: "string", Description: "low, normal, or high"},
+					"priority":     {Type: "string", Description: "low, normal, or high", Enum: []string{"low", "normal", "high"}},
 					"due":          {Type: "string", Description: "Due date, e.g. '2026-07-01 09:00' or '2026-07-01'"},
 					"include_done": {Type: "boolean", Description: "Include completed tasks when listing"},
 				},
@@ -361,7 +362,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":    {Type: "string", Description: "config, list, read, search, send, or reply"},
+					"action":    {Type: "string", Description: "config, list, read, search, send, or reply", Enum: []string{"config", "list", "read", "search", "send", "reply"}},
 					"to":        {Type: "string", Description: "Recipient (send); defaults to original sender for reply"},
 					"subject":   {Type: "string", Description: "Subject (send)"},
 					"body":      {Type: "string", Description: "Message body (send/reply)"},
@@ -388,7 +389,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":      {Type: "string", Description: "add, list, or delete"},
+					"action":      {Type: "string", Description: "add, list, or delete", Enum: []string{"add", "list", "delete"}},
 					"id":          {Type: "string", Description: "Event id from list, used for delete. Opaque: a number locally, or an object path when a CalDAV account is connected."},
 					"title":       {Type: "string", Description: "Event title (for add)"},
 					"description": {Type: "string", Description: "Event description"},
@@ -422,14 +423,14 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "rag_ingest",
-			Description: "Add a document to a RAG collection so it can be retrieved later with rag_search. Use this for user-provided documents, reference material, or any content the user wants to query. For agent learnings use save_learning instead. Prefer source_path for PDF files — images will be extracted automatically and returned alongside text chunks during search.",
+			Description: "Add a document to a RAG collection so it can be retrieved later with rag_search. Use this for user-provided documents, reference material, or any content the user wants to query. For agent learnings use save_learning instead. Prefer source_path for files: PDF is parsed page by page, PPTX is converted to PDF first, anything else is indexed as text. ONE file per call — for a folder, list_files then ingest each file into the same collection.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"collection":  {Type: "string", Description: "Collection name (created automatically if it doesn't exist)"},
 					"source":      {Type: "string", Description: "A descriptive name for this document (e.g. 'api-docs', 'meeting-notes-2025'). Defaults to the filename when source_path is used."},
 					"content":     {Type: "string", Description: "The full text content to index (use for inline text). Omit when using source_path."},
-					"source_path": {Type: "string", Description: "Path to a file inside the workspace to ingest (relative to workspace root). For PDFs, page images are extracted automatically and returned with search results for vision models."},
+					"source_path": {Type: "string", Description: "Path to ONE file inside the workspace (relative to workspace root). Directories are not accepted — ingest their files one at a time."},
 				},
 				Required: []string{"collection"},
 			},
@@ -443,7 +444,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":     {Type: "string", Description: "One of: list, delete"},
+					"action":     {Type: "string", Description: "One of: list, delete", Enum: []string{"list", "delete"}},
 					"collection": {Type: "string", Description: "Collection name (required for delete)"},
 					"document":   {Type: "string", Description: "Document filename (delete action — omit to delete the whole collection)"},
 				},
@@ -581,7 +582,7 @@ var ToolDefinitions = []ollama.Tool{
 				Properties: map[string]ollama.ToolProperty{
 					"title":         {Type: "string", Description: "Short notification title"},
 					"message":       {Type: "string", Description: "Optional detail message"},
-					"level":         {Type: "string", Description: "Severity: info (default), success, warning, error"},
+					"level":         {Type: "string", Description: "Severity: info (default), success, warning, error", Enum: []string{"info", "success", "warning", "error"}},
 					"delay_seconds": {Type: "integer", Description: "Delay before sending (0 = immediate, e.g. 120 = 2 minutes from now)"},
 				},
 				Required: []string{"title"},
@@ -611,7 +612,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action": {Type: "string", Description: "One of: list, delete"},
+					"action": {Type: "string", Description: "One of: list, delete", Enum: []string{"list", "delete"}},
 					"name":   {Type: "string", Description: "Secret name (delete action)"},
 				},
 				Required: []string{"action"},
@@ -626,7 +627,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":      {Type: "string", Description: "One of: list, add, remove"},
+					"action":      {Type: "string", Description: "One of: list, add, remove", Enum: []string{"list", "add", "remove"}},
 					"name":        {Type: "string", Description: "Short server name (e.g. 'github', 'linear')"},
 					"url":         {Type: "string", Description: "HTTP endpoint of the MCP server (add action)"},
 					"auth_secret": {Type: "string", Description: "Optional: name of a stored secret used as Bearer token (add action)"},

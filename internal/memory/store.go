@@ -917,6 +917,17 @@ func (s *Store) DeleteSecret(ctx context.Context, name string) error {
 	return err
 }
 
+// RemoveSecret deletes a secret in this scope and reports whether one existed.
+// Callers that talk to a person must not claim a deletion that never happened
+// (a typo, or a group secret that only a group admin can remove).
+func (s *Store) RemoveSecret(ctx context.Context, name string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM secrets WHERE name = $1`, s.cfgScope+name)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // ListScopedSecretNames lists secret names visible under this store's
 // ConfigScope ("u<id>:" or "g<id>:"), prefix stripped — e.g. a "u42:"-scoped
 // store lists "email_password" for the row named "u42:email_password".

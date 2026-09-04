@@ -207,8 +207,16 @@ func (e *ToolExecutor) deleteSecret(ctx context.Context, name string) (string, e
 	if name == "" {
 		return "", fmt.Errorf("name is required")
 	}
-	if err := us.DeleteSecret(ctx, name); err != nil {
+	deleted, err := us.RemoveSecret(ctx, name)
+	if err != nil {
 		return fmt.Sprintf("Error: %v", err), nil
+	}
+	if !deleted {
+		// Nothing was removed: a typo, or a GROUP secret — shared with every member
+		// and deletable only by a group admin from the Admin console. Never report
+		// a deletion that did not happen.
+		listing, _ := e.listSecrets(ctx)
+		return fmt.Sprintf("No personal secret named %q — nothing was deleted. (Group secrets can only be removed by a group admin from the Admin console.)\n%s", name, listing), nil
 	}
 	return fmt.Sprintf("Secret '%s' deleted.", name), nil
 }
@@ -260,6 +268,24 @@ func (e *ToolExecutor) mcpRemoveServer(ctx context.Context, name string) (string
 	}
 	if e.mcpMgr == nil {
 		return "MCP not available", nil
+	}
+	// Remove is a no-op on an unknown name: check first so a miss is reported as
+	// one, with the real names, instead of a cheerful "removed".
+	if servers, lerr := e.mcpMgr.List(ctx, e.mcpStorageScope()); lerr == nil {
+		found := false
+		var names []string
+		for _, s := range servers {
+			names = append(names, s.Name)
+			if strings.EqualFold(s.Name, name) || s.ID == name {
+				found = true
+			}
+		}
+		if !found {
+			if len(names) == 0 {
+				return fmt.Sprintf("No MCP server named %q — none are configured, nothing was removed.", name), nil
+			}
+			return fmt.Sprintf("No MCP server named %q — nothing was removed. Configured servers: %s", name, strings.Join(names, ", ")), nil
+		}
 	}
 	if err := e.mcpMgr.Remove(ctx, e.mcpStorageScope(), name); err != nil {
 		return fmt.Sprintf("Error: %v", err), nil

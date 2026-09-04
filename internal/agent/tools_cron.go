@@ -31,7 +31,7 @@ func (e *ToolExecutor) cronOwner() string {
 }
 
 // shQuote single-quotes a value for safe use as a POSIX shell word, escaping
-// any embedded single quotes the standard way ('\'').
+// any embedded single quotes the standard way ('\”).
 func shQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
@@ -149,6 +149,9 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 	if strings.ContainsAny(command, "\n\r") {
 		return "", fmt.Errorf("command must not contain newlines")
 	}
+	if err := validateCronSchedule(schedule); err != nil {
+		return "", err
+	}
 	description = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(description, "\n", " "), "\r", " "))
 
 	current, _ := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)
@@ -199,7 +202,9 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 	if err := e.writeCrontab(ctx, newCrontab); err != nil {
 		return fmt.Sprintf("cron add failed: %v", err), nil
 	}
-	return fmt.Sprintf("Scheduled %q: %s %s", name, schedule, command), nil
+	// displayCommand: the injected PRISM_TOKEN must not land in the model's
+	// context (cron_list strips it the same way).
+	return fmt.Sprintf("Scheduled %q: %s %s", name, schedule, displayCommand(command)), nil
 }
 
 func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, error) {
@@ -274,15 +279,44 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 	return fmt.Sprintf("Removed job %q", name), nil
 }
 
-// writeCrontab writes content to a temp file on the shared volume and applies it via `crontab`.
+var cronFieldRe = regexp.MustCompile(`^[0-9A-Za-z*,/\-]+$`)
+
+// validateCronSchedule rejects what crontab would refuse — BEFORE anything is
+// persisted. "every 5 min" is the classic model mistake; it must come back as a
+// clear error, not as a poisoned mirror file.
+func validateCronSchedule(s string) error {
+	s = strings.TrimSpace(s)
+	switch s {
+	case "@reboot", "@yearly", "@annually", "@monthly", "@weekly", "@daily", "@midnight", "@hourly":
+		return nil
+	}
+	fields := strings.Fields(s)
+	if len(fields) != 5 {
+		return fmt.Errorf("schedule %q is not a cron expression: expected 5 fields (minute hour day-of-month month day-of-week), e.g. '*/5 * * * *' or '0 9 * * 1-5', or one of @hourly/@daily/@weekly/@monthly", s)
+	}
+	for i, f := range fields {
+		if !cronFieldRe.MatchString(f) {
+			return fmt.Errorf("schedule %q: field %d (%q) contains characters cron does not accept", s, i+1, f)
+		}
+	}
+	return nil
+}
+
+// writeCrontab applies content via `crontab` and only THEN replaces the
+// persistent mirror (/workspace/.crontab, re-applied on container restart): a
+// crontab that the daemon rejects must never reach the mirror, or every job is
+// lost at the next restart.
 func (e *ToolExecutor) writeCrontab(ctx context.Context, content string) error {
-	// Write to persistent path on the shared volume so cron jobs survive container recreation.
 	persistPath := filepath.Join(e.workspaceDir, ".crontab")
-	if err := os.WriteFile(persistPath, []byte(content), 0600); err != nil {
+	tmpPath := persistPath + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(content), 0600); err != nil {
 		return err
 	}
-	_, err := e.docker.Exec(ctx, "crontab /workspace/.crontab", 10*time.Second)
-	return err
+	if _, err := e.docker.Exec(ctx, "crontab /workspace/.crontab.tmp", 10*time.Second); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, persistPath)
 }
 
 // ─── Custom tools ─────────────────────────────────────────────────────────────

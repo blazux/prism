@@ -235,6 +235,8 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 	}
 
 	pluginPath := filepath.Join(e.pluginDir, id+".html")
+	_, statErr := os.Stat(pluginPath)
+	replaced := statErr == nil // same title → same id → silent clobber unless we say so
 	if err := os.WriteFile(pluginPath, []byte(content), 0644); err != nil {
 		return "", nil, fmt.Errorf("write plugin: %w", err)
 	}
@@ -246,6 +248,9 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 		e.onPluginAdd(id, title, content, cols, height)
 	}
 	msg := fmt.Sprintf("Widget '%s' added to dashboard (cols=%d, height=%dpx)", title, cols, height)
+	if replaced {
+		msg = fmt.Sprintf("Widget '%s' (id %s) already existed — REPLACED it entirely (cols=%d, height=%dpx). Use action=update to change only some fields of an existing widget.", title, id, cols, height)
+	}
 	report, images := e.previewWidget(ctx, id)
 	return msg + "\n" + report, images, nil
 }

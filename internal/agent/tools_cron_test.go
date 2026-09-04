@@ -24,3 +24,18 @@ func TestParseCronJobs(t *testing.T) {
 		t.Errorf("disabled job's schedule/command should still parse (un-prefixed): %+v", jobs[1])
 	}
 }
+
+func TestValidateCronSchedule(t *testing.T) {
+	ok := []string{"*/5 * * * *", "0 9 * * 1-5", "30 6 1,15 * *", "0 0 * * MON", "@daily", "@hourly", " 0 12 * * * "}
+	for _, s := range ok {
+		if err := validateCronSchedule(s); err != nil {
+			t.Errorf("%q should be accepted: %v", s, err)
+		}
+	}
+	bad := []string{"every 5 min", "* * * *", "* * * * * *", "0 9 * * 1-5 extra", "", "0 9 * * mon;rm -rf /", "@every5m"}
+	for _, s := range bad {
+		if err := validateCronSchedule(s); err == nil {
+			t.Errorf("%q should be rejected", s)
+		}
+	}
+}

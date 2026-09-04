@@ -103,6 +103,21 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			return "", fmt.Errorf("source_path escapes workspace")
 		}
 
+		if st, serr := os.Stat(fullPath); serr == nil && st.IsDir() {
+			// A folder is the natural first guess; teach the one-file-per-call rule
+			// with the actual file names instead of a bare "is a directory".
+			entries, _ := os.ReadDir(fullPath)
+			var names []string
+			for _, en := range entries {
+				if !en.IsDir() {
+					names = append(names, en.Name())
+				}
+			}
+			if len(names) == 0 {
+				return fmt.Sprintf("%s is a directory with no files in it — rag_ingest takes one file per call.", sourcePath), nil
+			}
+			return fmt.Sprintf("%s is a directory — rag_ingest takes ONE file per call. Files in it: %s. Ingest them one at a time into the same collection.", sourcePath, strings.Join(names, ", ")), nil
+		}
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -311,7 +326,14 @@ func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document strin
 			return fmt.Sprintf("Document %q deleted from collection %q", document, displayCol), nil
 		}
 	}
-	return fmt.Sprintf("Document %q not found in collection %q", document, displayCol), nil
+	var names []string
+	for _, d := range docs {
+		names = append(names, d.Filename)
+	}
+	if len(names) == 0 {
+		return fmt.Sprintf("Document %q not found — collection %q is empty.", document, displayCol), nil
+	}
+	return fmt.Sprintf("Document %q not found in collection %q. Documents there: %s", document, displayCol, strings.Join(names, ", ")), nil
 }
 
 // resolveCollection maps a user-facing collection name to its storage name.

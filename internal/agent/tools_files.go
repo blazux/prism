@@ -347,6 +347,14 @@ func appendToManifest(path, entry string) {
 }
 
 func (e *ToolExecutor) openFile(path string) (string, error) {
+	path = NormalizeWorkspacePath(path)
+	fullPath := filepath.Join(e.workspaceDir, path)
+	if _, err := os.Stat(fullPath); err != nil {
+		if os.IsNotExist(err) {
+			return e.notFoundHint(path, fullPath).Error(), nil // teach: siblings + closest name
+		}
+		return fmt.Sprintf("cannot open %s: %v", path, err), nil
+	}
 	if e.onOpenFile != nil {
 		e.onOpenFile(path)
 	}
