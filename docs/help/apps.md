@@ -13,9 +13,12 @@ filters by design.
 
 ## Calendar
 Events with title, time, location and description. Backed by Prism's database by
-default, or by a **CalDAV** account (Apple iCloud, Nextcloud, Fastmail) when
-connected in Settings → Calendar. Ask the agent to "add lunch with Sam Friday at
-noon" or "what's on next week".
+default, or by a connected account: **CalDAV** (Apple iCloud, Nextcloud,
+Fastmail), **Google Calendar** or **Microsoft / Outlook** (both via your own
+OAuth app — see their dedicated guides). Connect them in Settings → Calendar;
+when several are connected, **Active sources** there picks which one the app
+uses. Ask the agent to "add lunch with Sam Friday at noon" or "what's on next
+week".
 
 ## Tasks
 To-do items with priority and due date. Backed by Prism's database, **CalDAV**

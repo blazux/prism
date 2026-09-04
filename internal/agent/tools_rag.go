@@ -78,6 +78,9 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 	if e.ragBlocked() {
 		return ragBlockedMsg, nil
 	}
+	if collection == HelpCollection {
+		return helpReadOnlyMsg, nil
+	}
 	if e.ragStore == nil || e.ragEmbedder == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
@@ -230,7 +233,8 @@ func (e *ToolExecutor) ragListCollections(ctx context.Context) (string, error) {
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
-	if len(cols) == 0 {
+	help := e.helpCollectionInfo(ctx)
+	if len(cols) == 0 && help == nil {
 		return "No collections yet. Use rag_ingest to create one.", nil
 	}
 
@@ -242,6 +246,9 @@ func (e *ToolExecutor) ragListCollections(ctx context.Context) (string, error) {
 			fmt.Fprintf(&sb, "\n    %s", c.Description)
 		}
 		sb.WriteByte('\n')
+	}
+	if help != nil {
+		fmt.Fprintf(&sb, "  • %s — Prism's own user documentation, %d docs (read-only; search it, or call prism_help, for how-to questions)\n", HelpCollection, help.DocCount)
 	}
 	return sb.String(), nil
 }
@@ -279,6 +286,9 @@ func (e *ToolExecutor) ragListDocuments(ctx context.Context, collection string) 
 func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document string) (string, error) {
 	if e.ragBlocked() {
 		return ragBlockedMsg, nil
+	}
+	if collection == HelpCollection {
+		return helpReadOnlyMsg, nil
 	}
 	if e.ragStore == nil {
 		return "RAG not available (Postgres not configured)", nil
@@ -347,6 +357,9 @@ func (e *ToolExecutor) resolveCollection(name string) string {
 	if name == learningsCollection || name == userProfileCollection {
 		return e.pcol(name)
 	}
+	if name == HelpCollection {
+		return HelpCollection // one deployment-wide copy, outside tenant scoping
+	}
 	return e.col(name)
 }
 
@@ -354,6 +367,9 @@ func (e *ToolExecutor) resolveCollection(name string) string {
 func (e *ToolExecutor) resolveScope(name string) string {
 	if name == learningsCollection || name == userProfileCollection {
 		return e.personalScope()
+	}
+	if name == HelpCollection {
+		return HelpCollectionScope
 	}
 	return e.ragScope
 }

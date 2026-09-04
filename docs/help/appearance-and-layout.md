@@ -4,11 +4,23 @@ All in **Settings → Appearance**. Defaults are deliberately understated; there
 plenty of depth if you want it.
 
 ## Theme
-- Pick a theme, or set an **accent colour** and let Prism derive a matching
-  palette. Light and Dark are plain; the other themes (cyberpunk, synthwave,
-  matrix, nord, rose-pine, solarized, tech, midnight) each get a fitting
-  **animated canvas background**. The animation intensity is adjustable, and can
-  be turned off.
+- **Active theme** — pick one of the built-in themes (also available from the
+  theme dropdown in the header):
+  - Plain: **Prism Dark**, **Prism Light**.
+  - Sober / professional: **Graphite** (dark, pinstripe), **Slate** (dark, a
+    quiet sparkline chart), **Paper** (light, still), **Boardroom** (light,
+    office skyline).
+  - Expressive: **Midnight** (stars), **Nord** (snow), **Solarized Dark**
+    (bokeh), **Rosé Pine** (petals), **Tech** (network), **Cyberpunk**
+    (circuit), **Matrix**, **Synthwave** (grid).
+
+  Each of the animated ones gets its own **animated canvas background**; the
+  **Animated background** slider (0–100%) sets the intensity, 0 turns it off.
+- **Create a custom theme** — pick an **Accent color**, a **Mode** (dark or
+  light) and a **Harmony** (monochromatic, analogous, complementary, triadic);
+  Prism derives the whole palette, which you can fine-tune under **Edit every
+  color**. **Preview** it, give it a **Name**, **Save & apply**. Custom themes
+  can be **Export**ed and **Import**ed as JSON.
 
 ## Typography & density
 - **Interface font**: System default, or Inter / Helvetica / Serif / Monospace /

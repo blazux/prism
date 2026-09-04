@@ -27,9 +27,11 @@ type ToolExecutor struct {
 	searxngURL            string
 	prismToken            string
 	sessionID             string
-	ragScope              string // tenant scope prefix for RAG collection names (Phase 3b)
-	personalScopeOverride string // per-user scope for personal knowledge when the session id doesn't encode it
-	multiUser             bool   // MULTI_USER: retires the personal RAG/MCP fallback (group scope only)
+	ragScope              string                           // tenant scope prefix for RAG collection names (Phase 3b)
+	personalScopeOverride string                           // per-user scope for personal knowledge when the session id doesn't encode it
+	multiUser             bool                             // MULTI_USER: retires the personal RAG/MCP fallback (group scope only)
+	helpFn                HelpFn                           // Prism's bundled docs (prism_help); nil = not wired
+	integrationsStatusFn  func(ctx context.Context) string // what this caller has configured; nil = unknown
 	ragStore              *rag.Store
 	ragEmbedder           *rag.Embedder
 	ragCaptioner          *rag.Captioner
@@ -826,6 +828,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.workspaceHistory(ctx, int(limitFloat)))
 	case "workspace_restore":
 		return wrap(e.workspaceRestore(ctx, str("commit"), str("path")))
+	case "prism_help":
+		return wrap(e.prismHelp(ctx, str("topic")))
 	case "install_packages":
 		switch str("manager") {
 		case "apt":

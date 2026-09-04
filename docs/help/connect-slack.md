@@ -4,6 +4,10 @@ Chat with your Prism agent from Slack using a **Socket Mode** app — an outboun
 WebSocket, so Prism needs no public URL. You create the app once and paste two
 tokens into Prism. The agent can walk you through it.
 
+Unlike Telegram (one bot per user), Slack is a **single, deployment-wide bot**:
+in a shared deployment only a **global admin** sees the Slack card in
+**Settings → Channels** and can set or clear its tokens.
+
 ## 1. Create a Slack app
 1. Go to https://api.slack.com/apps → **Create New App → From scratch**.
 2. Name it (e.g. "Prism") and pick your workspace → Create.
@@ -31,7 +35,10 @@ Slack — the first person to message it is linked as the owner.
 
 ## Notes
 - Only the **first user** to DM the bot is allowed (the agent has powerful
-  tools — keep the tokens private).
+  tools — keep the tokens private). Pasting new tokens forgets the linked user;
+  **Disconnect** clears the tokens.
+- Because the bot is deployment-wide, it is not a per-member channel: in a
+  team, members reach their own agent over Telegram instead.
 - Scheduled jobs can push to Slack too — ask e.g. "every morning at 8, summarize
   my unread emails and send it to me on Slack".
 - Reaching the agent from Slack does **not** require Prism to be internet-facing.

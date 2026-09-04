@@ -23,9 +23,11 @@ type CallerContext struct {
 	RAGScope      string
 	PersonalScope string // "" = let the executor derive it from the session id itself
 	HiddenTools   map[string]bool
-	MultiUser     bool                // MULTI_USER: retires the personal RAG/MCP fallback in the executor
-	Groups        []memory.Membership // groups this caller can share widgets within
-	ActingUserID  int64               // the real user behind the session (share ownership)
+	MultiUser     bool                             // MULTI_USER: retires the personal RAG/MCP fallback in the executor
+	Groups        []memory.Membership              // groups this caller can share widgets within
+	ActingUserID  int64                            // the real user behind the session (share ownership)
+	Help          agent.HelpFn                     // Prism's bundled docs for prism_help
+	Status        func(ctx context.Context) string // what this caller has configured
 }
 
 // apply sets every field this bundles onto an executor in one call, instead
@@ -39,6 +41,7 @@ func (cc CallerContext) apply(e *agent.ToolExecutor) {
 	e.SetHiddenTools(cc.HiddenTools)
 	e.SetMultiUserMode(cc.MultiUser)
 	e.SetSharingContext(cc.ActingUserID, cc.Groups)
+	e.SetHelp(cc.Help, cc.Status)
 }
 
 // callerContextForUser builds the standard per-user CallerContext — the
@@ -88,6 +91,8 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 		MultiUser:    s.cfg.MultiUser,
 		Groups:       groups,
 		ActingUserID: aid,
+		Help:         s.helpFn(),
+		Status:       s.integrationsStatusFor(scopeUser),
 	}
 }
 
@@ -103,6 +108,8 @@ func (s *Server) callerContextForGroup(ctx context.Context, groupID int64) Calle
 		RAGScope:  fmt.Sprintf("g%d", groupID),
 		MultiUser: s.cfg.MultiUser,
 		Groups:    []memory.Membership{{GroupID: groupID, Role: "member"}},
+		Help:      s.helpFn(),
+		Status:    s.groupStatusFor(groupID),
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"prism/internal/agent"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -35,7 +36,21 @@ func (s *Server) ragContextFn(scope string) func() string {
 			return ""
 		}
 		cols, err := ragStore.ListCollections(context.Background(), scope)
-		if err != nil || len(cols) == 0 {
+		if err != nil {
+			return ""
+		}
+		// Prism's own docs live outside tenant scoping (one read-only copy):
+		// list them too, so the agent knows the collection exists without the
+		// prompt having to hard-code its name.
+		var help *rag.Collection
+		if hc, herr := ragStore.ListCollections(context.Background(), agent.HelpCollectionScope); herr == nil {
+			for i := range hc {
+				if hc[i].Name == agent.HelpCollection {
+					help = &hc[i]
+				}
+			}
+		}
+		if len(cols) == 0 && help == nil {
 			return ""
 		}
 		var sb strings.Builder
@@ -48,6 +63,9 @@ func (s *Server) ragContextFn(scope string) func() string {
 			} else {
 				fmt.Fprintf(&sb, "- **%s** (%d docs, %d chunks)\n", name, c.DocCount, c.ChunkCount)
 			}
+		}
+		if help != nil {
+			fmt.Fprintf(&sb, "- **%s** — Prism's own user documentation (%d docs, read-only): search it, or call prism_help, when the user asks how to use or configure Prism\n", agent.HelpCollection, help.DocCount)
 		}
 		return sb.String()
 	}

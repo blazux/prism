@@ -152,6 +152,19 @@ var ToolDefinitions = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
+			Name:        "prism_help",
+			Description: "Prism's own user documentation plus what is currently configured for this user. Call it FIRST whenever the user asks how to use or configure Prism, what you can do, where a setting lives, or whether something (email, calendar, notes vault, Telegram, Slack, Webex, MCP, knowledge base) is connected. Without a topic: the list of topics AND the current configuration. With a topic (a name from that list): the full page. Then guide the user step by step from their actual situation.",
+			Parameters: ollama.ToolParameters{
+				Type: "object",
+				Properties: map[string]ollama.ToolProperty{
+					"topic": {Type: "string", Description: "A topic name from the index (e.g. 'settings-agent', 'connect-telegram'). Omit for the index + current configuration."},
+				},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: ollama.ToolFunction{
 			Name:        "list_files",
 			Description: "List files and directories in the workspace.",
 			Parameters: ollama.ToolParameters{
