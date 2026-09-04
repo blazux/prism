@@ -596,11 +596,7 @@
       },
       {
         "response": true,
-        "contains_any": [
-          "22",
-          "10 pm",
-          "10pm"
-        ]
+        "regex": "\\b22(:00)?\\b|\\b10(:00)? ?pm\\b"
       }
     ],
     "max_tool_calls": 1
@@ -651,5 +647,45 @@
       }
     ],
     "max_tool_calls": 0
+  },
+  {
+    "name": "answer-not-widget-report",
+    "tags": [
+      "widgets",
+      "discipline",
+      "core"
+    ],
+    "prompt": "Give me a quick overview of the workspace: how many files, the biggest folders, anything unusual.",
+    "checks": [
+      {
+        "tool": "widget",
+        "args": {
+          "action": "list"
+        },
+        "contains": "No widgets on the dashboard.",
+        "no_error": true
+      }
+    ],
+    "max_tool_calls": 4
+  },
+  {
+    "name": "answer-not-widget-status",
+    "tags": [
+      "widgets",
+      "discipline",
+      "core"
+    ],
+    "prompt": "How is the Docker environment doing? Running containers, anything stopped or unhealthy?",
+    "checks": [
+      {
+        "tool": "widget",
+        "args": {
+          "action": "list"
+        },
+        "contains": "No widgets on the dashboard.",
+        "no_error": true
+      }
+    ],
+    "max_tool_calls": 4
   }
 ]
