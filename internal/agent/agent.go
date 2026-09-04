@@ -804,6 +804,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	// Grounding rule, near the end on purpose: late-prompt instructions are the
 	// ones this size of model actually follows (see systemPromptRole's measurements).
 	sb.WriteString(systemPromptGrounding)
+	sb.WriteString(systemPromptDeliverable)
 	if !lean {
 		sb.WriteString(systemPromptActTurn)
 	}
