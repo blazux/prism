@@ -147,6 +147,11 @@ type Message struct {
 	Thinking  string     `json:"thinking,omitempty"` // extended thinking (Qwen3, QwQ, etc.)
 	Images    []string   `json:"images,omitempty"`   // base64-encoded images for multimodal models
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	// DBID is the conversation_history row this message was persisted as (0 for
+	// synthetic messages that only live in memory: nudges, compaction notes…).
+	// Never sent to any backend — it lets the agent's live-context compaction
+	// record WHERE in the stored history its summary takes over.
+	DBID int64 `json:"-"`
 }
 
 type ToolCall struct {

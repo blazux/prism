@@ -115,6 +115,11 @@ type Agent struct {
 	// that window, the generation no longer matches and the stale compaction
 	// is discarded instead of clobbering what changed in the meantime.
 	historyGen int
+	// compactMu serializes live-context compaction passes: a proactive
+	// background pass (end of turn) and the next turn's foreground check must
+	// never summarize the same span twice. Always taken BEFORE histMu, never
+	// while holding it.
+	compactMu sync.Mutex
 	// channel is the surface this turn arrives from ("" = dashboard/browser,
 	// "voice" = a phone call docked from Vox). It changes the *form* of the reply
 	// (spoken, short, no markup) and disables extended reasoning — never the
@@ -279,11 +284,11 @@ func (a *Agent) SetLearningsCtxFn(fn func(ctx context.Context, query string) str
 // by the user) so its context stays accurate across turns.
 func (a *Agent) InjectNote(content string) {
 	msg := ollama.Message{Role: "user", Content: content}
+	msg.DBID = a.saveMessageToDB(context.Background(), msg)
 	a.histMu.Lock()
 	a.history = append(a.history, msg)
 	a.historyGen++
 	a.histMu.Unlock()
-	a.saveMessageToDB(context.Background(), msg)
 }
 
 // SetActiveTools stores the list of disabled tool names. buildToolList() uses
@@ -421,14 +426,26 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 		log.Printf("[agent] load history: %v", err)
 		return
 	}
+	// A previous Agent on this session may have compacted its live context
+	// (see compactLiveContextTo). Replay the same state instead of the raw
+	// history: the note stands in for every row before BeforeID, so a page
+	// reload or a new connection doesn't hand the model a different (and
+	// possibly over-budget) context than the one it was just working with.
+	lc := a.memStore.GetLiveCompaction(ctx, a.sessionID)
+	if lc != nil {
+		a.history = append(a.history, ollama.Message{Role: "user", Content: lc.Summary})
+	}
 	for _, e := range entries {
+		if lc != nil && e.ID < lc.BeforeID {
+			continue
+		}
 		content := e.Content
 		// Inject timestamp prefix on user messages only so the model can reason about time
 		// (not on assistant messages, to avoid the model mimicking the pattern in its responses)
 		if e.Role == "user" {
 			content = fmt.Sprintf("[%s] %s", e.CreatedAt.In(agentLocation).Format("2006-01-02 15:04"), e.Content)
 		}
-		msg := ollama.Message{Role: e.Role, Content: content}
+		msg := ollama.Message{Role: e.Role, Content: content, DBID: e.ID}
 		if len(e.ToolCalls) > 0 && string(e.ToolCalls) != "null" {
 			var tcs []ollama.ToolCall
 			if json.Unmarshal(e.ToolCalls, &tcs) == nil {
@@ -437,7 +454,11 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 		}
 		a.history = append(a.history, msg)
 	}
-	log.Printf("[agent] loaded %d messages from DB", len(a.history))
+	if lc != nil {
+		log.Printf("[agent] loaded %d messages from DB (replayed live compaction note, rows before id %d covered by it)", len(a.history), lc.BeforeID)
+	} else {
+		log.Printf("[agent] loaded %d messages from DB", len(a.history))
+	}
 }
 
 // compactLiveContextIfNeeded shrinks the LIVE in-memory history when it gets
@@ -466,16 +487,48 @@ func (a *Agent) effectiveHistoryBudget() int {
 
 func (a *Agent) compactLiveContextIfNeeded(ctx context.Context, events chan<- Event) {
 	budget := a.effectiveHistoryBudget()
+	if a.liveHistoryChars() > budget {
+		a.compactLiveContextTo(ctx, events, budget/2)
+	}
+}
+
+// liveHistoryChars is the total content size of the live history.
+func (a *Agent) liveHistoryChars() int {
 	a.histMu.Lock()
+	defer a.histMu.Unlock()
 	total := 0
 	for _, m := range a.history {
 		total += len(m.Content)
 	}
-	over := total > budget
-	a.histMu.Unlock()
-	if over {
-		a.compactLiveContextTo(ctx, events, budget/2)
+	return total
+}
+
+// liveContextSoftRatio is the fraction of the effective budget past which a
+// turn's end triggers a PROACTIVE compaction in the background (see
+// compactLiveContextProactively), well before the hard budget forces one in
+// the foreground at the start of a turn — where the user waits through the
+// summarization call with nothing but a progress line.
+const liveContextSoftRatio = 0.7
+
+// needsProactiveCompaction reports whether the live history has crossed the
+// soft threshold.
+func (a *Agent) needsProactiveCompaction() bool {
+	return a.liveHistoryChars() > int(float64(a.effectiveHistoryBudget())*liveContextSoftRatio)
+}
+
+// compactLiveContextProactively is deferred by every turn: once the turn is
+// over and the live history sits above the soft threshold, it compacts in the
+// background, off the user's critical path. No events channel — the turn's
+// channel is closed by the time this runs — so the outcome is logged only; the
+// note the pass leaves in the history is what tells the model what happened.
+// Safe against the next turn starting meanwhile: compactLiveContextTo splices
+// against the current history, and a foreground pass simply waits on compactMu
+// then finds nothing left to cut.
+func (a *Agent) compactLiveContextProactively() {
+	if !a.needsProactiveCompaction() {
+		return
 	}
+	go a.compactLiveContextTo(context.Background(), nil, a.effectiveHistoryBudget()/2)
 }
 
 // forceCompactLiveContext compacts even when the live history is nominally under
@@ -490,7 +543,11 @@ func (a *Agent) forceCompactLiveContext(ctx context.Context, events chan<- Event
 
 // compactLiveContextTo replaces the oldest completed turns with a summary until
 // the kept tail is under `target` chars, cutting only at a "user" boundary.
+// events may be nil (background pass): then nothing is announced to the UI.
 func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, target int) {
+	a.compactMu.Lock()
+	defer a.compactMu.Unlock()
+
 	a.histMu.Lock()
 	total := 0
 	for _, m := range a.history {
@@ -511,65 +568,191 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 		return // nothing safe to drop (e.g. a single huge in-progress turn)
 	}
 	dropped := append([]ollama.Message(nil), a.history[:cut]...)
-	tail := append([]ollama.Message(nil), a.history[cut:]...)
 	genBefore := a.historyGen
 	a.histMu.Unlock()
 
-	summary := a.summarizeDroppedSpan(ctx, dropped)
+	summary, err := a.summarizeDroppedSpan(ctx, dropped)
 
 	a.histMu.Lock()
 	if a.historyGen != genBefore {
 		// InjectNote/ResetHistory/SetSession ran while summarizeDroppedSpan was
-		// in flight (deliberately unlocked, up to ~20s) — a.history has moved
-		// on since dropped/tail were captured. Applying our stale view now
-		// would silently discard whatever that concurrent call did (a note,
-		// a "new chat", a session switch). Skip this pass; if still over
-		// budget, the next iteration will recompute from the current state.
+		// in flight (deliberately unlocked, possibly for a couple of minutes) —
+		// a.history has moved on since `dropped` was captured. Applying our
+		// stale view now would silently discard whatever that concurrent call
+		// did (a note, a "new chat", a session switch). Skip this pass; if
+		// still over budget, the next check will recompute from the current
+		// state.
 		a.histMu.Unlock()
 		log.Printf("[agent] session=%s compaction aborted: history changed concurrently (gen %d -> %d)", a.sessionID, genBefore, a.historyGen)
 		return
 	}
-	a.history = append([]ollama.Message{
-		{Role: "user", Content: "[Context compacted automatically — summary of the earlier exchanges: " + summary + "]"},
-	}, tail...)
+	// The note is honest either way: when the summary failed, the model is told
+	// the details are gone rather than being handed a bland placeholder it
+	// might mistake for the actual context.
+	var note string
+	if err == nil {
+		note = "[Context compacted automatically — summary of the earlier exchanges: " + summary + "]"
+	} else {
+		note = "[Context compacted automatically — the earlier exchanges could NOT be summarized (" + err.Error() + "), so their details are lost. If something from before this point matters, ask the user instead of guessing.]"
+	}
+	// Splice against the CURRENT history, not a tail captured before the
+	// summarization call: this may be a background pass and the next turn may
+	// already have appended its own messages after the cut. Only gen-bumping
+	// mutations change what precedes the cut; plain appends never do, so
+	// history[:cut] is still exactly the span that was summarized.
+	tail := a.history[cut:]
+	beforeID := firstDBID(tail)
+	if beforeID == 0 {
+		if m := maxDBID(dropped); m > 0 {
+			beforeID = m + 1
+		}
+	}
+	a.history = append([]ollama.Message{{Role: "user", Content: note}}, tail...)
 	a.historyGen++
 	a.histMu.Unlock()
 
-	log.Printf("[agent] session=%s compacted live context: dropped %d messages, kept %d", a.sessionID, len(dropped), len(tail))
-	events <- Event{Type: "progress", Content: fmt.Sprintf(
-		"Context compacted (%d older messages summarized) to stay within the model's limits.", len(dropped))}
+	a.persistLiveCompaction(note, beforeID)
+
+	if err == nil {
+		log.Printf("[agent] session=%s compacted live context: dropped %d messages, kept %d (summary %d chars)", a.sessionID, len(dropped), len(tail), len(summary))
+		if events != nil {
+			events <- Event{Type: "progress", Content: fmt.Sprintf(
+				"Context compacted (%d older messages summarized) to stay within the model's limits.", len(dropped))}
+		}
+		return
+	}
+	log.Printf("[agent] session=%s compacted live context WITHOUT a summary: dropped %d messages, kept %d — %v", a.sessionID, len(dropped), len(tail), err)
+	if events != nil {
+		events <- Event{Type: "progress", Content: fmt.Sprintf(
+			"Context compacted (%d older messages dropped) but their summary failed (%v) — the assistant no longer has their details.", len(dropped), err)}
+	}
 }
 
-// summarizeDroppedSpan asks the model to concisely summarize a span of
-// messages being dropped from the live context during compaction. Best
-// effort: never propagates an error or blocks the turn indefinitely — falls
-// back to a generic note so compaction can't itself become a source of
-// failures. Runs silently (no streamed "stream" events) so it never appears
-// as if the assistant said something in the visible transcript.
-func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Message) string {
-	const fallback = "earlier exchanges compacted — details lost to a summarization error"
+// firstDBID returns the row id of the first persisted message in msgs (0 if none).
+func firstDBID(msgs []ollama.Message) int64 {
+	for _, m := range msgs {
+		if m.DBID > 0 {
+			return m.DBID
+		}
+	}
+	return 0
+}
+
+// maxDBID returns the highest row id among msgs (0 if none is persisted).
+func maxDBID(msgs []ollama.Message) int64 {
+	var max int64
+	for _, m := range msgs {
+		if m.DBID > max {
+			max = m.DBID
+		}
+	}
+	return max
+}
+
+// persistLiveCompaction records the compaction note and its boundary so a fresh
+// Agent on this session replays the same context (see loadHistoryFromDB).
+// Best-effort: a failure only means a reload falls back to the raw history.
+func (a *Agent) persistLiveCompaction(note string, beforeID int64) {
+	if a.memStore == nil || beforeID == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.memStore.SetLiveCompaction(ctx, a.sessionID, memory.LiveCompaction{Summary: note, BeforeID: beforeID}); err != nil {
+		log.Printf("[agent] session=%s persist live compaction: %v", a.sessionID, err)
+	}
+}
+
+// Caps applied to each message when building the excerpt handed to the
+// summarizer. Tool outputs are the bulk of a long session's history (file
+// reads, HTTP bodies, search results) and the least useful to a summary —
+// what matters is that the tool was called and what was concluded from it,
+// which the assistant's own messages carry. Measured on Flash-Next: a raw
+// 80k-char span is a ~40k-token cold prefill (~60s); trimmed, the same span is
+// a few thousand tokens.
+const (
+	excerptToolChars = 500
+	excerptMsgHead   = 3000
+	excerptMsgTail   = 800
+)
+
+// compactionExcerpt renders the dropped span as a compact transcript for the
+// summarizer.
+func compactionExcerpt(dropped []ollama.Message) string {
 	var sb strings.Builder
 	for _, m := range dropped {
-		if m.Content == "" {
+		content := m.Content
+		if m.Role == "tool" {
+			if len(content) > excerptToolChars {
+				content = content[:excerptToolChars] + fmt.Sprintf(" …[tool output truncated, %d chars total]", len(m.Content))
+			}
+		} else if len(content) > excerptMsgHead+excerptMsgTail {
+			content = content[:excerptMsgHead] + fmt.Sprintf(" …[%d chars truncated]… ", len(m.Content)-excerptMsgHead-excerptMsgTail) + content[len(content)-excerptMsgTail:]
+		}
+		if len(m.ToolCalls) > 0 {
+			names := make([]string, 0, len(m.ToolCalls))
+			for _, tc := range m.ToolCalls {
+				names = append(names, tc.Function.Name)
+			}
+			content = strings.TrimSpace("(called tools: " + strings.Join(names, ", ") + ") " + content)
+		}
+		if content == "" {
 			continue
 		}
-		fmt.Fprintf(&sb, "[%s] %s\n", m.Role, m.Content)
+		fmt.Fprintf(&sb, "[%s] %s\n", m.Role, content)
 	}
-	if sb.Len() == 0 {
-		return fallback
+	return sb.String()
+}
+
+// summarizeTimeout sizes the summarizer's deadline to the excerpt: a fixed
+// allowance for queueing and generation plus prefill time proportional to the
+// input. Measured cold prefill on Flash-Next behind LiteLLM is ~0.7 ms/char
+// (58s for 82k chars), so 1s per 1000 chars leaves margin; the previous fixed
+// 20s deadline expired on every realistic span and the model never got a
+// summary — only the fallback note.
+func summarizeTimeout(excerptChars int) time.Duration {
+	d := 30*time.Second + time.Duration(excerptChars/1000)*time.Second
+	if d > 180*time.Second {
+		d = 180 * time.Second
+	}
+	return d
+}
+
+// compactionSummaryPrompt asks for a HANDOFF, not a recap: what the assistant
+// needs to pick the conversation back up as if nothing had been cut.
+const compactionSummaryPrompt = `You are compacting the older part of a live conversation between a user and an AI assistant that uses tools. The original messages will be removed; write the handoff summary the assistant needs to continue seamlessly. Cover, in this order:
+1. What the user is trying to achieve overall, and the task in progress right now (or the last one completed).
+2. Requests or questions from the user that are still unanswered or pending.
+3. Decisions taken, constraints, and preferences the user stated.
+4. Files, paths, URLs, identifiers and key values that were read, created or modified, with their last known state.
+5. Errors met and whether they were resolved.
+Be factual and specific; keep names, paths and values verbatim. If the excerpt begins with an earlier compaction note, integrate it — it describes even older context. Write in the language the user writes in. Output only the summary: no preamble, no commentary, no markdown headings.`
+
+// summarizeDroppedSpan asks the model to summarize a span of messages being
+// dropped from the live context during compaction. Returns an error instead
+// of a summary when the model could not produce one (timeout, backend error,
+// empty output) so the caller can be honest about it — never blocks the turn
+// past its sized deadline. Runs silently (no streamed "stream" events) so it
+// never appears as if the assistant said something in the visible transcript.
+func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Message) (string, error) {
+	excerpt := compactionExcerpt(dropped)
+	if excerpt == "" {
+		return "", errors.New("nothing to summarize")
 	}
 
-	sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	timeout := summarizeTimeout(len(excerpt))
+	sctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	started := time.Now()
 
 	req := ollama.ChatRequest{
 		Model: a.model,
 		Messages: []ollama.Message{
-			{Role: "system", Content: "Summarize the following conversation excerpt concisely (a few sentences), preserving key facts, decisions, and any file/data references. Do not add commentary or preamble."},
-			{Role: "user", Content: sb.String()},
+			{Role: "system", Content: compactionSummaryPrompt},
+			{Role: "user", Content: excerpt},
 		},
 		NoThinking: true,
-		Options:    ollama.Options{NumPredict: 300},
+		Options:    ollama.Options{NumPredict: 1000},
 	}
 	ch := make(chan ollama.StreamEvent, 20)
 	go func() {
@@ -578,22 +761,27 @@ func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Messa
 	}()
 
 	var out strings.Builder
-	failed := false
+	var firstErr error
 	for ev := range ch {
 		if ev.Err != nil {
-			failed = true
+			if firstErr == nil {
+				firstErr = ev.Err
+			}
 			continue
 		}
 		out.WriteString(ev.Content)
 	}
-	if failed {
-		return fallback
+	if firstErr != nil {
+		if sctx.Err() != nil {
+			return "", fmt.Errorf("summarization timed out after %s (excerpt %d chars)", timeout, len(excerpt))
+		}
+		return "", fmt.Errorf("summarization failed after %s: %w", time.Since(started).Round(time.Second), firstErr)
 	}
 	summary := strings.TrimSpace(stripThinkingBlocks(out.String()))
 	if summary == "" {
-		return fallback
+		return "", errors.New("model returned an empty summary")
 	}
-	return summary
+	return summary, nil
 }
 
 // stripThinkingBlocks removes <thought>…</thought> and <thinking>…</thinking> blocks
@@ -658,19 +846,23 @@ func sanitizeForDB(s string) string {
 	return strings.ReplaceAll(s, "\x00", "")
 }
 
-// saveMessageToDB persists a single message to the DB (best-effort).
-func (a *Agent) saveMessageToDB(ctx context.Context, msg ollama.Message) {
+// saveMessageToDB persists a single message to the DB (best-effort) and
+// returns its row id (0 when not persisted).
+func (a *Agent) saveMessageToDB(ctx context.Context, msg ollama.Message) int64 {
 	if a.memStore == nil {
-		return
+		return 0
 	}
 	var toolCallsJSON json.RawMessage
 	if len(msg.ToolCalls) > 0 {
 		b, _ := json.Marshal(msg.ToolCalls)
 		toolCallsJSON = b
 	}
-	if err := a.memStore.AppendMessage(ctx, a.sessionID, msg.Role, sanitizeForDB(msg.Content), toolCallsJSON); err != nil {
+	id, err := a.memStore.AppendMessage(ctx, a.sessionID, msg.Role, sanitizeForDB(msg.Content), toolCallsJSON)
+	if err != nil {
 		log.Printf("[agent] save message: %v", err)
+		return 0
 	}
+	return id
 }
 
 // agentLocation is the timezone used for all timestamps shown to the model.
@@ -847,6 +1039,10 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	// still commits, and so it never adds latency to the reply. CommitWorkspace is
 	// serialized and fail-safe — it can never break the turn.
 	defer func() { go a.executor.CommitWorkspace(context.Background(), userMsg) }()
+	// Once this turn is over, compact the live context in the background if it
+	// has grown past the soft threshold — so the NEXT turn doesn't start with a
+	// forced foreground compaction the user has to sit through.
+	defer a.compactLiveContextProactively()
 
 	// Re-read the agent's name and base persona once per turn. They live in the DB and
 	// are edited in Settings while this agent is connected, so loading them only at
@@ -863,17 +1059,18 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	// mimicking the pattern and outputting timestamps in its own responses.
 	timestampedContent := fmt.Sprintf("[%s] %s", time.Now().In(agentLocation).Format("2006-01-02 15:04"), userMsg)
 	userMessage := ollama.Message{Role: "user", Content: timestampedContent, Images: images}
-	a.histMu.Lock()
-	a.history = append(a.history, userMessage)
-	historyLen := len(a.history)
-	a.histMu.Unlock()
 
-	// For DB: store clean content (created_at column is the canonical timestamp)
+	// For DB: store clean content (created_at column is the canonical timestamp).
+	// Saved before the in-memory append so the live copy carries its row id.
 	dbContent := userMsg
 	if len(images) > 0 {
 		dbContent += fmt.Sprintf(" [%d image(s) attached]", len(images))
 	}
-	a.saveMessageToDB(ctx, ollama.Message{Role: "user", Content: dbContent})
+	userMessage.DBID = a.saveMessageToDB(ctx, ollama.Message{Role: "user", Content: dbContent})
+	a.histMu.Lock()
+	a.history = append(a.history, userMessage)
+	historyLen := len(a.history)
+	a.histMu.Unlock()
 
 	// Fetch relevant past learnings once per turn (before the tool loop).
 	// Use a short timeout so a slow embed model doesn't block the whole turn.
@@ -990,13 +1187,13 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			Content:   fullContent,
 			ToolCalls: toolCalls,
 		}
-		a.histMu.Lock()
-		a.history = append(a.history, assistantMsg)
-		a.histMu.Unlock()
 		// Strip thinking blocks before saving to DB (not user-visible content)
 		dbMsg := assistantMsg
 		dbMsg.Content = stripThinkingBlocks(fullContent)
-		a.saveMessageToDB(ctx, dbMsg)
+		assistantMsg.DBID = a.saveMessageToDB(ctx, dbMsg)
+		a.histMu.Lock()
+		a.history = append(a.history, assistantMsg)
+		a.histMu.Unlock()
 
 		if len(toolCalls) == 0 {
 			// Reply ends on an announced action with nothing to run it: nudge
@@ -1106,10 +1303,10 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			} else if len(toolImages) > 0 {
 				toolMsg.Images = toolImages
 			}
+			toolMsg.DBID = a.saveMessageToDB(ctx, toolMsg)
 			a.histMu.Lock()
 			a.history = append(a.history, toolMsg)
 			a.histMu.Unlock()
-			a.saveMessageToDB(ctx, toolMsg)
 		}
 	}
 

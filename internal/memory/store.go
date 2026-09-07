@@ -669,21 +669,65 @@ func (s *Store) LoadHistory(ctx context.Context, sessionID string) ([]HistoryEnt
 	return entries, rows.Err()
 }
 
-// AppendMessage inserts a single message into conversation_history.
-func (s *Store) AppendMessage(ctx context.Context, sessionID, role, content string, toolCalls json.RawMessage) error {
-	_, err := s.pool.Exec(ctx, `
+// AppendMessage inserts a single message into conversation_history and returns
+// its row id.
+func (s *Store) AppendMessage(ctx context.Context, sessionID, role, content string, toolCalls json.RawMessage) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `
 		INSERT INTO conversation_history (session_id, role, content, tool_calls)
 		VALUES ($1, $2, $3, $4)
-	`, sessionID, role, content, toolCalls)
-	return err
+		RETURNING id
+	`, sessionID, role, content, toolCalls).Scan(&id)
+	return id, err
 }
 
-// ClearHistory deletes all messages and the summary for a session.
+// ClearHistory deletes all messages, the running summary and the live
+// compaction record for a session.
 func (s *Store) ClearHistory(ctx context.Context, sessionID string) error {
 	if _, err := s.pool.Exec(ctx, `DELETE FROM conversation_history WHERE session_id = $1`, sessionID); err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `DELETE FROM agent_config WHERE key = $1`, summaryKey(sessionID))
+	_, err := s.pool.Exec(ctx, `DELETE FROM agent_config WHERE key = ANY($1)`,
+		[]string{summaryKey(sessionID), liveCompactionKey(sessionID)})
+	return err
+}
+
+// LiveCompaction is what the agent's live-context compaction leaves behind so
+// a fresh Agent (page reload, new WebSocket, /api/chat) replays the SAME
+// context the previous one was working with: the compaction note that stands
+// in for the older messages, and the conversation_history row id from which
+// the stored messages are replayed verbatim (rows before it are covered by
+// the note). The rows themselves are left untouched — the UI transcript and
+// MaybeSummarize's long-term memory keep working on the full history.
+type LiveCompaction struct {
+	Summary  string `json:"summary"`
+	BeforeID int64  `json:"before_id"`
+}
+
+// GetLiveCompaction returns the session's live compaction record, or nil.
+func (s *Store) GetLiveCompaction(ctx context.Context, sessionID string) *LiveCompaction {
+	var raw string
+	if err := s.pool.QueryRow(ctx, `SELECT value FROM agent_config WHERE key = $1`, liveCompactionKey(sessionID)).Scan(&raw); err != nil {
+		return nil
+	}
+	var lc LiveCompaction
+	if err := json.Unmarshal([]byte(raw), &lc); err != nil || lc.Summary == "" {
+		return nil
+	}
+	return &lc
+}
+
+// SetLiveCompaction replaces the session's live compaction record.
+func (s *Store) SetLiveCompaction(ctx context.Context, sessionID string, lc LiveCompaction) error {
+	raw, err := json.Marshal(lc)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO agent_config (key, value, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+	`, liveCompactionKey(sessionID), string(raw))
 	return err
 }
 
@@ -862,6 +906,10 @@ func stripThinking(s string) string {
 
 func summaryKey(sessionID string) string {
 	return "conversation_summary_" + sessionID
+}
+
+func liveCompactionKey(sessionID string) string {
+	return "live_compaction_" + sessionID
 }
 
 // ─── Secrets ──────────────────────────────────────────────────────────────────

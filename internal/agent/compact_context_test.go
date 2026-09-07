@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"prism/internal/ollama"
 )
@@ -142,16 +144,186 @@ func TestCompactLiveContext_NoSafeCutPoint_NoOp(t *testing.T) {
 	}
 }
 
-// summarizeDroppedSpan falls back to a generic note on backend failure,
-// rather than propagating the error or blocking.
-func TestSummarizeDroppedSpan_FailureFallback(t *testing.T) {
-	a := &Agent{model: "test", ollama: &fakeSummarizeBackend{err: context.DeadlineExceeded}}
-	got := a.summarizeDroppedSpan(context.Background(), []ollama.Message{{Role: "user", Content: "something important"}})
-	if got == "" {
-		t.Fatal("expected a non-empty fallback string")
+// summarizeDroppedSpan reports a backend failure as an error (never blocks,
+// never propagates a panic) so the caller can leave an honest note.
+func TestSummarizeDroppedSpan_FailureIsReported(t *testing.T) {
+	a := &Agent{model: "test", ollama: &fakeSummarizeBackend{err: errors.New("backend down")}}
+	got, err := a.summarizeDroppedSpan(context.Background(), []ollama.Message{{Role: "user", Content: "something important"}})
+	if err == nil {
+		t.Fatalf("expected an error, got summary %q", got)
 	}
-	if got == "something important" {
-		t.Fatal("fallback must not just echo the input back")
+	if !strings.Contains(err.Error(), "backend down") {
+		t.Fatalf("error should carry the cause, got %v", err)
+	}
+	if got != "" {
+		t.Fatalf("no summary expected on failure, got %q", got)
+	}
+}
+
+// When the summary fails, the compaction still happens (the context must
+// shrink) but the note left in history and the UI line both say the details
+// are LOST — never a bland placeholder the model could mistake for context.
+func TestCompactLiveContext_FailedSummaryLeavesHonestNote(t *testing.T) {
+	origBudget := liveContextCharBudget
+	liveContextCharBudget = 1000
+	defer func() { liveContextCharBudget = origBudget }()
+
+	var history []ollama.Message
+	for i := 0; i < 20; i++ {
+		history = append(history,
+			ollama.Message{Role: "user", Content: string(make([]byte, 100))},
+			ollama.Message{Role: "assistant", Content: string(make([]byte, 100))},
+		)
+	}
+	a := &Agent{model: "test", ollama: &fakeSummarizeBackend{err: errors.New("boom")}, history: history}
+	events := make(chan Event, 10)
+	a.compactLiveContextIfNeeded(context.Background(), events)
+	close(events)
+
+	if len(a.history) >= len(history) {
+		t.Fatalf("history must still shrink on a failed summary: before=%d after=%d", len(history), len(a.history))
+	}
+	if !strings.Contains(a.history[0].Content, "could NOT be summarized") || !strings.Contains(a.history[0].Content, "boom") {
+		t.Fatalf("note must say the summary failed and why, got %q", a.history[0].Content)
+	}
+	var progress string
+	for _, ev := range drainEvents(events) {
+		if ev.Type == "progress" {
+			progress = ev.Content
+		}
+	}
+	if !strings.Contains(progress, "summary failed") {
+		t.Fatalf("UI progress line must not claim success, got %q", progress)
+	}
+}
+
+// capturingBackend records the request it receives and replies with a canned
+// summary — to inspect the excerpt the summarizer is actually sent.
+type capturingBackend struct {
+	req   ollama.ChatRequest
+	reply string
+}
+
+func (f *capturingBackend) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
+	f.req = req
+	out <- ollama.StreamEvent{Content: f.reply}
+}
+func (f *capturingBackend) Ping(ctx context.Context) error                   { return nil }
+func (f *capturingBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }
+func (f *capturingBackend) ContextBudgetChars() int                          { return 0 }
+
+// Tool outputs dominate a long session's history and are the least useful to
+// a summary: they must be cut down hard in the excerpt (this is what turned a
+// ~60s cold prefill into a few seconds on Flash-Next), while the assistant's
+// tool calls are still named so the summary knows what was done.
+func TestCompactionExcerpt_TrimsToolOutputKeepsToolNames(t *testing.T) {
+	be := &capturingBackend{reply: "ok"}
+	a := &Agent{model: "test", ollama: be}
+	dropped := []ollama.Message{
+		{Role: "user", Content: "lis le rapport"},
+		{Role: "assistant", ToolCalls: []ollama.ToolCall{{Function: ollama.ToolCallFunction{Name: "read_file"}}}},
+		{Role: "tool", Content: strings.Repeat("x", 50_000)},
+		{Role: "assistant", Content: "Le rapport dit " + strings.Repeat("y", 10_000)},
+	}
+	if _, err := a.summarizeDroppedSpan(context.Background(), dropped); err != nil {
+		t.Fatal(err)
+	}
+	excerpt := be.req.Messages[len(be.req.Messages)-1].Content
+	if len(excerpt) > 6_000 {
+		t.Fatalf("excerpt not trimmed: %d chars", len(excerpt))
+	}
+	for _, want := range []string{"[user] lis le rapport", "(called tools: read_file)", "tool output truncated, 50000 chars total", "chars truncated"} {
+		if !strings.Contains(excerpt, want) {
+			t.Errorf("excerpt missing %q", want)
+		}
+	}
+	if be.req.Options.NumPredict < 800 {
+		t.Errorf("summary generation budget too small: %d", be.req.Options.NumPredict)
+	}
+	if !be.req.NoThinking {
+		t.Error("summarizer must run without thinking")
+	}
+}
+
+// The deadline scales with the excerpt (cold prefill is linear in input) and
+// is floored high enough that a small span still survives a busy backend.
+func TestSummarizeTimeout_ScalesWithExcerpt(t *testing.T) {
+	if got := summarizeTimeout(0); got < 30*time.Second {
+		t.Fatalf("floor too low: %s", got)
+	}
+	if small, big := summarizeTimeout(5_000), summarizeTimeout(60_000); big <= small {
+		t.Fatalf("timeout must grow with the excerpt: %s vs %s", small, big)
+	}
+	if got := summarizeTimeout(10_000_000); got > 180*time.Second {
+		t.Fatalf("cap exceeded: %s", got)
+	}
+}
+
+// appendingBackend simulates the NEXT turn starting while a background
+// compaction's summarization call is in flight: it appends to history
+// (a plain append, no generation bump — exactly what Chat does).
+type appendingBackend struct {
+	agent *Agent
+}
+
+func (f *appendingBackend) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
+	f.agent.histMu.Lock()
+	f.agent.history = append(f.agent.history,
+		ollama.Message{Role: "user", Content: "next turn's question"},
+		ollama.Message{Role: "assistant", Content: "next turn's answer"},
+	)
+	f.agent.histMu.Unlock()
+	out <- ollama.StreamEvent{Content: "summary of the old span"}
+}
+func (f *appendingBackend) Ping(ctx context.Context) error                   { return nil }
+func (f *appendingBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }
+func (f *appendingBackend) ContextBudgetChars() int                          { return 0 }
+
+// A compaction pass must splice against the CURRENT history, so messages the
+// next turn appended while the summary was being generated survive.
+func TestCompactLiveContext_KeepsMessagesAppendedMidFlight(t *testing.T) {
+	origBudget := liveContextCharBudget
+	liveContextCharBudget = 1000
+	defer func() { liveContextCharBudget = origBudget }()
+
+	var history []ollama.Message
+	for i := 0; i < 20; i++ {
+		history = append(history,
+			ollama.Message{Role: "user", Content: string(make([]byte, 100)), DBID: int64(2*i + 1)},
+			ollama.Message{Role: "assistant", Content: string(make([]byte, 100)), DBID: int64(2*i + 2)},
+		)
+	}
+	a := &Agent{model: "test", history: history}
+	a.ollama = &appendingBackend{agent: a}
+
+	a.compactLiveContextTo(context.Background(), nil, liveContextCharBudget/2)
+
+	n := len(a.history)
+	if n < 3 || a.history[n-2].Content != "next turn's question" || a.history[n-1].Content != "next turn's answer" {
+		t.Fatalf("messages appended mid-flight were lost; tail = %+v", a.history[max(0, n-3):])
+	}
+	if !strings.Contains(a.history[0].Content, "summary of the old span") {
+		t.Fatalf("expected the note first, got %q", a.history[0].Content)
+	}
+	if a.history[1].Role != "user" || a.history[1].DBID == 0 {
+		t.Fatalf("kept tail must start on a persisted user message, got %+v", a.history[1])
+	}
+}
+
+// Proactive compaction fires past the soft threshold only.
+func TestNeedsProactiveCompaction_SoftThreshold(t *testing.T) {
+	origBudget := liveContextCharBudget
+	liveContextCharBudget = 1000
+	defer func() { liveContextCharBudget = origBudget }()
+
+	a := &Agent{ollama: &fakeSummarizeBackend{reply: "s"}}
+	a.history = []ollama.Message{{Role: "user", Content: string(make([]byte, 500))}}
+	if a.needsProactiveCompaction() {
+		t.Fatal("50% of budget must not trigger the proactive pass")
+	}
+	a.history = append(a.history, ollama.Message{Role: "assistant", Content: string(make([]byte, 300))})
+	if !a.needsProactiveCompaction() {
+		t.Fatal("80% of budget must trigger the proactive pass")
 	}
 }
 
