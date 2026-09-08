@@ -208,7 +208,9 @@ func (a *Agent) effectiveLimits() (maxIter int, thinking bool) {
 }
 
 // leanPrompt resolves the prompt profile the same way effectiveLimits resolves
-// the budget: override → config → guided (false).
+// the budget: override → config → guided (false). Guided is the deliberate
+// default: a Prism deployment normally runs a small local model (Ollama/vLLM),
+// and lean is the marginal case a user opts into by hand.
 func (a *Agent) leanPrompt() bool {
 	switch {
 	case a.limitsOverride.LeanPrompt != nil:
@@ -999,7 +1001,9 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	sb.WriteString(systemPromptDeliverable)
 	if lean {
 		// A capable model over-delivers; the small-model act-turn crutch is
-		// replaced by the opposite discipline.
+		// replaced by the harness fact it cannot guess (a reply without a tool
+		// call ends the turn) and by the opposite discipline.
+		sb.WriteString(systemPromptTurnContract)
 		sb.WriteString(systemPromptKeepItSimple)
 	} else {
 		sb.WriteString(systemPromptActTurn)
