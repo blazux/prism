@@ -312,7 +312,13 @@ func (s *Server) handleRAGDocuments(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(docs)
 }
 
-// DELETE /api/rag/document?id=xxx
+// DELETE /api/rag/document?id=xxx[&group=<id>]
+//
+// The id is global (rag_documents.id), so the delete is restricted to the
+// caller's resolved scope: a group admin can only remove documents whose
+// collection carries their group's prefix — never another tenant's by guessing
+// an id. ?group=<id> targets that group's base from the admin console, exactly
+// like the collections endpoint.
 func (s *Server) handleRAGDocument(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "DELETE only", http.StatusMethodNotAllowed)
@@ -321,7 +327,8 @@ func (s *Server) handleRAGDocument(w http.ResponseWriter, r *http.Request) {
 	if !s.ragEnabled(w) {
 		return
 	}
-	if !s.canManageRAGScope(r.Context(), currentUser(r)) {
+	scope, canManage, scopeOK := s.ragScopeForRequest(r)
+	if !scopeOK || !canManage {
 		jsonError(w, "the group knowledge base is managed by your group admin", http.StatusForbidden)
 		return
 	}
@@ -331,11 +338,26 @@ func (s *Server) handleRAGDocument(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if err := s.ragStore.DeleteDocument(r.Context(), id); err != nil {
+	deleted, err := s.ragStore.DeleteDocumentInScope(r.Context(), id, ragScopePrefix(scope))
+	if err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if !deleted {
+		jsonError(w, "document not found", http.StatusNotFound)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ragScopePrefix is the collection-name prefix every collection of a scope
+// carries (see agent.ScopeCollection); empty for the unscoped legacy mode where
+// names are stored bare.
+func ragScopePrefix(scope string) string {
+	if scope == "" {
+		return ""
+	}
+	return scope + "--"
 }
 
 // POST /api/rag/upload  (multipart: file + collection)

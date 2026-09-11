@@ -369,6 +369,21 @@ func (s *Store) DeleteDocument(ctx context.Context, id int64) error {
 	return err
 }
 
+// DeleteDocumentInScope removes a document (and its chunks) only if its
+// collection name starts with prefix — the tenant scope prefix ("g3--"). An
+// empty prefix matches every collection (legacy / single-user mode). Returns
+// false when no row matched: unknown id, or a document of another tenant, which
+// the caller must not be able to tell apart from a missing one.
+func (s *Store) DeleteDocumentInScope(ctx context.Context, id int64, prefix string) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM rag_documents WHERE id = $1 AND left(collection, length($2::text)) = $2::text`,
+		id, prefix)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // Search performs a cosine similarity search and returns the top-k chunks.
 func (s *Store) Search(ctx context.Context, collection string, embedding []float32, limit int) ([]SearchResult, error) {
 	vec := pgvector.NewVector(embedding)

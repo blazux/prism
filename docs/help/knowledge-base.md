@@ -65,7 +65,11 @@ In multi-user mode the knowledge base is **group-scoped and admin-curated**:
 - A group admin manages it in **Admin console → RAG**: pick the **Group**,
   **+ New collection**, **Choose a file…** and **Upload** (uploading to a new
   name creates the collection), plus **description** and **delete** per
-  collection. The shared agent and every member's agent search the same base.
+  collection. Each collection lists its documents (file, size, chunks, last
+  update) with a **delete** per document, so a stale file can be removed
+  without touching the rest of the collection; uploading a file with the same
+  name replaces it in place. The shared agent and every member's agent search
+  the same base.
 - A member with no group has no knowledge base at all until an admin adds them
   to one.
 

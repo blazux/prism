@@ -55,6 +55,8 @@ button.mini{padding:3px 8px;font-size:11.5px;margin:0 3px 3px 0}
 .filebtn{display:inline-flex;align-items:center;gap:8px}
 .filename{color:var(--text3);font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .coldesc{color:var(--text3);font-size:12px;margin-top:2px}
+.list>div.docrow{padding-left:28px;font-size:12px;background:var(--bg2)}
+.docrow .docmeta{color:var(--text3);margin-left:8px}
 .coldesc.missing{color:var(--yellow)}
 .grp{border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg1)}
 .tag{display:inline-block;background:var(--bg3);border-radius:6px;padding:2px 8px;margin:2px;font-size:12px}
@@ -202,7 +204,7 @@ code{font-size:12px}
       <div class="hint" style="margin-bottom:6px">Where scheduled jobs post (cron with deliver:"webex"). Only group spaces the bot was added to are listed — add the bot to a space, then refresh.</div>
       <div class="row"><select id="wx-room" style="min-width:260px"></select><button onclick="loadWebexRooms()">Refresh list</button><span id="wx-room-status" class="hint" style="margin:0"></span></div>
       <div class="row"><button class="primary" onclick="saveWebex()">Save Webex</button><button onclick="disconnectWebex()">Disconnect</button><span id="wx-status"></span></div></div>
-    <div class="pane" data-pane="rag"><h2>Knowledge base (RAG)</h2><div class="hint">Collections shared with the whole group: the shared agent and every member's agent search them. Members see them read-only in their settings — you curate them here. Uploading to a new name creates the collection.</div>
+    <div class="pane" data-pane="rag"><h2>Knowledge base (RAG)</h2><div class="hint">Collections shared with the whole group: the shared agent and every member's agent search them. Members see them read-only in their settings — you curate them here. Uploading to a new name creates the collection; uploading a file with the same name as an existing document replaces it.</div>
       <label>Group</label><select id="rg-group"></select>
       <div id="grag" class="list" style="max-height:none"></div>
       <div class="row">
@@ -422,13 +424,31 @@ async function loadGroupRAG(){const g=$('rg-group').value;if(!g)return;const d=a
  sel.innerHTML=list.map(c=>'<option value=\"'+esc(c.name)+'\">'+esc(c.name)+'</option>').join('')||'<option value=\"\">no collection yet</option>';
  if(keep&&list.some(c=>c.name===keep))sel.value=keep;
  if(!list.length){box.innerHTML='<div style=\"color:var(--text3)\">No collections yet — create one, then upload a document.</div>';return;}
- list.forEach(c=>{const el=document.createElement('div');
+ // Documents are fetched per collection (one request each, a handful at most)
+ // so a stale upload can be removed on its own, not only with the whole collection.
+ const docsByCol=await Promise.all(list.map(c=>jget('/api/rag/documents?collection='+encodeURIComponent(c.name)+'&group='+g).then(x=>Array.isArray(x)?x:[]).catch(()=>[])));
+ list.forEach((c,i)=>{const el=document.createElement('div');
   const desc=c.description||'';
   el.innerHTML='<span><b>'+esc(c.name)+'</b> <span style=\"color:var(--text3)\">'+(c.doc_count||0)+' docs</span>'+
    '<div class=\"coldesc'+(desc?'':' missing')+'\">'+(desc?esc(desc):'No description — the agent will not know when to search this collection.')+'</div></span>'+
    '<span><button class=\"mini\" onclick=\"editGroupColDesc(\''+esc(c.name)+'\')\">description</button> '+
    '<button class=\"mini\" onclick=\"deleteGroupCol(\''+esc(c.name)+'\')\">delete</button></span>';
-  box.appendChild(el);});}
+  box.appendChild(el);
+  docsByCol[i].forEach(doc=>{const row=document.createElement('div');row.className='docrow';
+   row.innerHTML='<span>'+esc(doc.filename)+'<span class=\"docmeta\">'+fmtBytes(doc.size_bytes)+' · '+(doc.chunk_count||0)+' chunks · '+fmtDay(doc.updated_at)+'</span></span>'+
+    '<span><button class=\"mini\" onclick=\"deleteGroupDoc('+Number(doc.id)+',\''+esc(doc.filename)+'\',\''+esc(c.name)+'\')\">delete</button></span>';
+   box.appendChild(row);});});}
+
+function fmtBytes(n){n=Number(n)||0;if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB';}
+function fmtDay(s){const d=new Date(s);return isNaN(d)?'':d.toISOString().slice(0,10);}
+
+// One document at a time: the usual case is replacing a stale file by a newer
+// version under a different name — the whole collection must survive.
+async function deleteGroupDoc(id,filename,col){const g=$('rg-group').value;if(!g)return;
+ if(!await PrismModal.confirm('Delete "'+filename+'" from collection "'+col+'"?',{danger:true}))return;
+ const r=await fetch('/api/rag/document?id='+id+'&group='+g,{method:'DELETE'});
+ if(!r.ok){$('grag-status').textContent='delete failed';setTimeout(()=>$('grag-status').textContent='',2500);}
+ loadGroupRAG();}
 
 // Écrit nom + description via PATCH ; la collection survit même sans document.
 async function saveGroupCol(g,name,description){
