@@ -22,6 +22,14 @@ type Item struct {
 	EndAt       *time.Time `json:"endAt,omitempty"`
 	Location    string     `json:"location"`
 	CreatedAt   time.Time  `json:"createdAt"`
+	// Recurring marks one occurrence of a repeating event, or a series the
+	// server would not expand (its StartAt is then the start of the series).
+	// Free (TRANSP:TRANSPARENT) and Cancelled (STATUS:CANCELLED) mean the
+	// event does not hold the time. Only the CalDAV provider fills these in,
+	// so "not Free" must not be read as "busy" for another source.
+	Recurring bool `json:"recurring,omitempty"`
+	Free      bool `json:"free,omitempty"`
+	Cancelled bool `json:"cancelled,omitempty"`
 }
 
 type Provider interface {
