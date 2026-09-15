@@ -404,7 +404,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					// Not in the directory → don't dial; let the agent offer a near
 					// match from the list or take a message.
-					return fmt.Sprintf("Échec : %q ne figure pas dans l'annuaire, le transfert n'a pas eu lieu. Ne réessaie pas sans l'accord de l'appelant : propose un nom proche de la liste, ou de prendre un message.", dest), nil
+					return fmt.Sprintf("Aucune correspondance unique pour %q : nom absent ou ambigu. Aucun transfert demandé. Demande le nom complet et utilise l'annuaire pour proposer les personnes possibles.", dest), nil
 				}
 				args["destination"] = cname
 				args["dial_number"] = phone // pre-resolved for Vox

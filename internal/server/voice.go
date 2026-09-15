@@ -182,25 +182,43 @@ func voiceDirectoryText(entries []memory.DirEntry) string {
 }
 
 // resolveTransferName matches a name the agent passed to transfer_call against the
-// directory and returns the canonical name + phone. Match is exact (case/accent-
-// insensitive) then substring, so "Vincent" finds "Vincent Dupont".
+// directory and returns the canonical name + phone. Match is exact (case-, accent-
+// and hyphen-insensitive) then a whole word of the name, so "Vincent" finds
+// "Vincent Dupont". The match must be unique: with "Jean Dupont" and "Jean
+// Martin" listed, "Jean" resolves to nothing and the agent has to ask — it must
+// never pick a colleague at random.
 func resolveTransferName(entries []memory.DirEntry, query string) (name, phone string, ok bool) {
-	q := strings.ToLower(strings.TrimSpace(query))
+	q := normalizeDirectoryName(query)
 	if q == "" {
 		return "", "", false
 	}
-	for _, e := range entries { // exact display name
-		if strings.ToLower(e.Name) == q {
-			return e.Name, e.Phone, true
+	for _, exact := range []bool{true, false} {
+		var match *memory.DirEntry
+		for i := range entries {
+			n := normalizeDirectoryName(entries[i].Name)
+			matches := n == q
+			if !exact {
+				matches = strings.Contains(" "+n+" ", " "+q+" ")
+			}
+			if matches {
+				if match != nil {
+					return "", "", false // ambiguous
+				}
+				match = &entries[i]
+			}
 		}
-	}
-	for _, e := range entries { // query is a word of the name (first name, etc.)
-		n := strings.ToLower(e.Name)
-		if strings.Contains(n, q) || strings.Contains(q, n) {
-			return e.Name, e.Phone, true
+		if match != nil {
+			return match.Name, match.Phone, true
 		}
 	}
 	return "", "", false
+}
+
+func normalizeDirectoryName(s string) string {
+	r := strings.NewReplacer("é", "e", "è", "e", "ê", "e", "ë", "e",
+		"à", "a", "â", "a", "ä", "a", "î", "i", "ï", "i",
+		"ô", "o", "ö", "o", "ù", "u", "û", "u", "ü", "u", "ç", "c", "œ", "oe", "-", " ")
+	return strings.Join(strings.Fields(r.Replace(strings.ToLower(s))), " ")
 }
 
 // voiceKnownPersonaNote is prepended to an identified caller's persona so the

@@ -143,8 +143,8 @@ type DirEntry struct {
 // separate contacts table).
 func (s *Store) DirectoryEntries(ctx context.Context) ([]DirEntry, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT display_name, phone FROM users
-		WHERE status = 'approved' AND phone <> ''
+		SELECT COALESCE(NULLIF(BTRIM(display_name),''),email), BTRIM(phone) FROM users
+		WHERE status = 'approved' AND BTRIM(phone) <> ''
 		ORDER BY display_name`)
 	if err != nil {
 		return nil, err
