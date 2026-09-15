@@ -102,16 +102,17 @@ type WSMessage struct {
 	// Channel names the surface the message comes from. Empty = the browser
 	// dashboard; "voice" = a phone call docked from Vox (Vortex megazord), which
 	// makes the agent answer in spoken form and skip extended reasoning.
-	Channel       string          `json:"channel,omitempty"`
-	Content       string          `json:"content,omitempty"`
-	Path          string          `json:"path,omitempty"`
-	ID            string          `json:"id,omitempty"`
-	Locked        bool            `json:"locked,omitempty"`
-	Data          json.RawMessage `json:"data,omitempty"`
-	Model         string          `json:"model,omitempty"`
-	DisabledTools []string        `json:"disabledTools,omitempty"`
-	Images        []string        `json:"images,omitempty"` // base64 image strings for multimodal
-	Files         []ChatFile      `json:"files,omitempty"`  // parsed text file attachments
+	Channel        string          `json:"channel,omitempty"`
+	Content        string          `json:"content,omitempty"`
+	GatewayContext []string        `json:"gateway_context,omitempty"`
+	Path           string          `json:"path,omitempty"`
+	ID             string          `json:"id,omitempty"`
+	Locked         bool            `json:"locked,omitempty"`
+	Data           json.RawMessage `json:"data,omitempty"`
+	Model          string          `json:"model,omitempty"`
+	DisabledTools  []string        `json:"disabledTools,omitempty"`
+	Images         []string        `json:"images,omitempty"` // base64 image strings for multimodal
+	Files          []ChatFile      `json:"files,omitempty"`  // parsed text file attachments
 	// Widget window state (set_plugin_state). Pointers so callers can send a
 	// partial update — only the provided fields are written to meta.json.
 	Open *bool    `json:"open,omitempty"`
@@ -413,9 +414,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[voice] relaying telephony tool %q to Vox: %v", name, args)
 			switch name {
 			case "transfer_call":
-				return "Le transfert est en cours.", nil
+				return "Demande de transfert transmise à la passerelle. Son résultat n'est pas encore connu ; ne prétends pas que la personne a répondu.", nil
 			case "take_message":
-				return "Le message est bien noté.", nil
+				return "Demande de prise de message transmise à la passerelle. Ne promets pas de livraison au destinataire.", nil
 			case "end_call":
 				return "L'appel va se terminer.", nil
 			}
@@ -629,7 +630,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 			client.ag.SetActiveTools(msg.DisabledTools)
 			client.ag.SetChannel(msg.Channel)
-			content := msg.Content
+			content := voiceTurnContent(msg.Content, msg.GatewayContext, voiceCall)
 			for _, f := range msg.Files {
 				// The browser already ran ingestAttachment via /api/chat/upload and
 				// sent back {Text, Path}; here we only build the preamble.

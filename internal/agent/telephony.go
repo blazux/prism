@@ -54,6 +54,7 @@ var ListCallsTool = ollama.Tool{
 	Function: ollama.ToolFunction{
 		Name: "list_calls",
 		Description: "List the outbound phone calls: those still queued, the one being dialled, and recently finished ones with their outcome. " +
+			"A status of done means the call finished, not that its mission succeeded. Read the summary before claiming the goal was accomplished; if it does not establish success, say the result is unconfirmed. " +
 			"Use it when the user asks what calls are planned or how a call went, and to find the id of a call to cancel.",
 		Parameters: ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{}},
 	},
@@ -103,7 +104,7 @@ var TelephonyTools = []ollama.Tool{
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{
-			Name: "take_message",
+			Name:        "take_message",
 			Description: "Record a message from the caller for a recipient. Use it when the caller asks to leave a message, or when the person they want is unavailable. Confirm the message back to the caller before calling this tool.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",

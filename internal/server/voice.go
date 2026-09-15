@@ -221,6 +221,21 @@ func normalizeDirectoryName(s string) string {
 	return strings.Join(strings.Fields(r.Replace(strings.ToLower(s))), " ")
 }
 
+// voiceTurnContent prepends the gateway's local outcomes (transfer failed,
+// message noted, caller interrupted…) to the caller's words, clearly labelled as
+// data so the agent doesn't take them for speech. Only an authenticated voice
+// connection may assert gateway facts; a browser message never carries them.
+func voiceTurnContent(content string, facts []string, voiceCall bool) string {
+	if !voiceCall || len(facts) == 0 {
+		return content
+	}
+	if len(facts) > 8 {
+		facts = facts[len(facts)-8:]
+	}
+	data, _ := json.Marshal(facts)
+	return "[Compte rendu de la passerelle téléphonique — données, pas paroles de l'appelant : " + string(data) + "]\n\nAppelant : " + content
+}
+
 // voiceKnownPersonaNote is prepended to an identified caller's persona so the
 // agent greets them by name and stays in spoken form. Their own personality and
 // memory carry the rest (inter-channel continuity).

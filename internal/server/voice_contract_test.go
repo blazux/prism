@@ -2,6 +2,7 @@ package server
 
 import (
 	"prism/internal/memory"
+	"strings"
 	"testing"
 )
 
@@ -20,5 +21,15 @@ func TestVoiceDirectoryRequiresUniqueMatch(t *testing.T) {
 	entries = append(entries, memory.DirEntry{Name: "Jean Martin", Phone: "105"})
 	if _, _, ok := resolveTransferName(entries, "Jean Martin"); ok {
 		t.Fatal("duplicate name was accepted")
+	}
+}
+
+func TestGatewayContextOnlyOnVoice(t *testing.T) {
+	facts := []string{"Le transfert a échoué."}
+	if got := voiceTurnContent("Bonjour", facts, false); got != "Bonjour" {
+		t.Fatal("browser supplied gateway facts")
+	}
+	if got := voiceTurnContent("Bonjour", facts, true); !strings.Contains(got, facts[0]) || !strings.Contains(got, "Appelant : Bonjour") {
+		t.Fatal("voice facts lost or confused with caller speech")
 	}
 }
