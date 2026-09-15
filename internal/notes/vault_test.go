@@ -60,3 +60,75 @@ func TestVaultRoundTrip(t *testing.T) {
 		t.Fatalf("expected empty vault, got %d", len(items))
 	}
 }
+
+// A note whose front-matter carries a title used to be renamed by a plain save:
+// List reported the front-matter title, Save compared it to the FILE name,
+// found them different and renamed the file, killing every [[wikilink]] to it.
+func TestSavingAnUnchangedNoteDoesNotRenameIt(t *testing.T) {
+	dir := t.TempDir()
+	p := &VaultProvider{Dir: dir}
+	ctx := context.Background()
+	const raw = "---\ntitle: Réunion Digicel\ntags: work\n---\nvoir [[2026-01-05]]"
+	if err := os.WriteFile(filepath.Join(dir, "2026-01-05.md"), []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := p.List(ctx)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("list err=%v n=%d", err, len(items))
+	}
+	if items[0].Title != "Réunion Digicel" {
+		t.Fatalf("title = %q", items[0].Title)
+	}
+
+	// Exactly what the app sends back on blur: the values it just read.
+	id, err := p.Save(ctx, items[0].ID, items[0].Title, items[0].Body, items[0].Tags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "2026-01-05.md" {
+		t.Fatalf("an unchanged save renamed the note to %q", id)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "2026-01-05.md")); err != nil {
+		t.Fatalf("original file gone: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "2026-01-05.md")); string(got) != raw {
+		t.Fatalf("content changed: %q", got)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Fatalf("vault now holds %d files", len(entries))
+	}
+
+	// Renaming on purpose still works, and still goes by the displayed title.
+	id, err = p.Save(ctx, id, "Compte rendu", raw, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "Compte rendu.md" {
+		t.Fatalf("deliberate rename did not happen: %q", id)
+	}
+}
+
+// A write must never leave a half-written note in a vault that is usually
+// synchronised elsewhere.
+func TestVaultWritesAreAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.md")
+	if err := os.WriteFile(path, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWrite(path, []byte("replacement")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "replacement" {
+		t.Fatalf("content = %q err = %v", got, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("temporary file left behind: %d entries", len(entries))
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0644 {
+		t.Fatalf("mode = %v", info.Mode().Perm())
+	}
+}

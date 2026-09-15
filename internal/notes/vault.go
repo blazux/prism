@@ -64,7 +64,7 @@ func (p *VaultProvider) Save(ctx context.Context, id, title, body, tags string) 
 			name = "Untitled"
 		}
 		full := uniquePath(filepath.Join(p.Dir, name+".md"))
-		if err := os.WriteFile(full, []byte(body), 0644); err != nil {
+		if err := atomicWrite(full, []byte(body)); err != nil {
 			return "", err
 		}
 		return relSlash(p.Dir, full), nil
@@ -73,19 +73,69 @@ func (p *VaultProvider) Save(ctx context.Context, id, title, body, tags string) 
 	if err != nil {
 		return "", err
 	}
-	// Rename the file when the title (i.e. the note name) changed.
+	// Rename the file when the title actually changed. The title the caller was
+	// shown comes from the front-matter when the note has one, so comparing the
+	// incoming title against the FILE name renamed notes nobody had renamed: a
+	// daily note "2026-01-05.md" holding `title: Réunion Digicel` was renamed on
+	// the first save, and every [[2026-01-05]] pointing at it went dead.
 	target := full
-	cur := strings.TrimSuffix(filepath.Base(full), filepath.Ext(full))
-	if nn := sanitizeFilename(title); nn != "" && !strings.EqualFold(nn, cur) {
-		target = uniquePath(filepath.Join(filepath.Dir(full), nn+".md"))
+	base := strings.TrimSuffix(filepath.Base(full), filepath.Ext(full))
+	newName := sanitizeFilename(title)
+	if newName != "" && !strings.EqualFold(title, currentTitle(full, base)) && !strings.EqualFold(newName, base) {
+		target = uniquePath(filepath.Join(filepath.Dir(full), newName+".md"))
 	}
-	if err := os.WriteFile(target, []byte(body), 0644); err != nil {
+	if err := atomicWrite(target, []byte(body)); err != nil {
 		return "", err
 	}
 	if target != full {
+		// A failure here leaves a copy behind, which is recoverable; the new
+		// file is already written, so the note itself is never lost.
 		_ = os.Remove(full)
 	}
 	return relSlash(p.Dir, target), nil
+}
+
+// currentTitle is the title Save would have handed out for the file as it is on
+// disk: its front-matter title when it has one, otherwise its name.
+func currentTitle(full, base string) string {
+	raw, err := os.ReadFile(full)
+	if err != nil {
+		return base
+	}
+	if meta, ok := parseFrontmatter(string(raw)); ok {
+		if t := strings.Trim(meta["title"], `'"`); t != "" {
+			return t
+		}
+	}
+	return base
+}
+
+// atomicWrite writes through a temporary file in the same directory, so an
+// interrupted write (disk full, container killed) cannot leave a truncated or
+// empty note behind. A vault is usually synchronised elsewhere, which would
+// propagate the damage.
+func atomicWrite(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".prism-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (p *VaultProvider) Delete(ctx context.Context, id string) error {
