@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/smtp"
 	"regexp"
@@ -19,6 +20,12 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	gomessage "github.com/emersion/go-message"
+	// Registers the decoders for every charset that is not UTF-8 or US-ASCII.
+	// Without this import the library has no CharsetReader at all, so a plain
+	// iso-8859-1 or windows-1252 message — ordinary French mail — failed to
+	// decode and the whole body was lost.
+	"github.com/emersion/go-message/charset"
 	gomail "github.com/emersion/go-message/mail"
 )
 
@@ -50,13 +57,13 @@ func (c Config) from() string {
 }
 
 type Message struct {
-	UID       uint32    `json:"uid"`
-	Subject   string    `json:"subject"`
-	From      string    `json:"from"`
-	To        string    `json:"to,omitempty"`  // comma-joined recipients (for reply-all)
-	Cc        string    `json:"cc,omitempty"`
-	Date      time.Time `json:"date"`
-	Seen      bool      `json:"seen"`
+	UID         uint32       `json:"uid"`
+	Subject     string       `json:"subject"`
+	From        string       `json:"from"`
+	To          string       `json:"to,omitempty"` // comma-joined recipients (for reply-all)
+	Cc          string       `json:"cc,omitempty"`
+	Date        time.Time    `json:"date"`
+	Seen        bool         `json:"seen"`
 	MessageID   string       `json:"messageId,omitempty"`
 	Body        string       `json:"body,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
@@ -88,7 +95,12 @@ func (c Config) dial() (*imapclient.Client, error) {
 		port = 993
 	}
 	addr := fmt.Sprintf("%s:%d", c.IMAPHost, port)
-	opts := &imapclient.Options{TLSConfig: c.tlsConfig(c.IMAPHost)}
+	opts := &imapclient.Options{
+		TLSConfig: c.tlsConfig(c.IMAPHost),
+		// Without a CharsetReader, a subject encoded in anything but utf-8,
+		// us-ascii or latin-1 came back as its raw =?windows-1252?Q?…?= form.
+		WordDecoder: &mime.WordDecoder{CharsetReader: charset.Reader},
+	}
 	var cl *imapclient.Client
 	var err error
 	if c.Security == "starttls" {
@@ -291,20 +303,32 @@ func (c Config) Attachment(uid uint32, index int) (filename, contentType string,
 		return "", "", nil, fmt.Errorf("no body")
 	}
 	mr, err := gomail.CreateReader(bytes.NewReader(raw))
-	if err != nil {
+	if err != nil && !usablePart(err) {
 		return "", "", nil, err
+	}
+	if mr == nil {
+		return "", "", nil, fmt.Errorf("message could not be parsed")
 	}
 	n := 0
 	for {
 		p, e := mr.NextPart()
-		if e == io.EOF || e != nil {
+		if e == io.EOF {
+			break
+		}
+		if e != nil && !usablePart(e) {
+			break
+		}
+		if p == nil {
 			break
 		}
 		if h, ok := p.Header.(*gomail.AttachmentHeader); ok {
 			if n == index {
 				fn, _ := h.Filename()
 				ct, _, _ := h.ContentType()
-				b, _ := io.ReadAll(p.Body)
+				b, rerr := io.ReadAll(p.Body)
+				if rerr != nil {
+					return "", "", nil, fmt.Errorf("attachment %d could not be read in full: %w", index, rerr)
+				}
 				if fn == "" {
 					fn = "attachment"
 				}
@@ -424,16 +448,32 @@ func (c Config) SetSeen(uid uint32, seen bool) error {
 // back to the raw bytes if MIME parsing fails.
 // parseBody walks a message's MIME parts, returning the best text body and the
 // list of attachments (metadata only).
+// usablePart reports an error the library documents as non-fatal: the part (or
+// the reader) is still returned and must be used. Treating those as fatal threw
+// away the rest of the message, attachments included.
+func usablePart(err error) bool {
+	return gomessage.IsUnknownCharset(err) || gomessage.IsUnknownEncoding(err)
+}
+
 func parseBody(raw []byte) (string, []Attachment) {
 	mr, err := gomail.CreateReader(bytes.NewReader(raw))
-	if err != nil {
+	if err != nil && !usablePart(err) {
+		return string(raw), nil
+	}
+	if mr == nil {
 		return string(raw), nil
 	}
 	var text, htmlFallback strings.Builder
 	var atts []Attachment
 	for {
 		p, err := mr.NextPart()
-		if err == io.EOF || err != nil {
+		if err == io.EOF {
+			break
+		}
+		if err != nil && !usablePart(err) {
+			break
+		}
+		if p == nil {
 			break
 		}
 		switch h := p.Header.(type) {

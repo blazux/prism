@@ -105,7 +105,10 @@ func parsePPTX(path string) (string, error) {
 		if err != nil {
 			continue
 		}
-		text := extractPPTXText(data)
+		text, err := extractPPTXText(data)
+		if err != nil {
+			return "", fmt.Errorf("slide %s could not be read in full: %w", name, err)
+		}
 		if strings.TrimSpace(text) != "" {
 			sb.WriteString(text)
 			sb.WriteString("\n\n")
@@ -121,15 +124,21 @@ func pptxSlideNum(name string) int {
 	return n
 }
 
-// extractPPTXText pulls text runs (<a:t>) from a DrawingML slide XML.
-func extractPPTXText(data []byte) string {
+// extractPPTXText pulls text runs (<a:t>) from a DrawingML slide XML. A parse
+// error is reported rather than swallowed: the loop used to stop on any error,
+// including a malformed document, and the caller indexed the partial text into
+// the knowledge base as if it were the whole slide.
+func extractPPTXText(data []byte) (string, error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	var sb strings.Builder
 	inT := false
 	for {
 		tok, err := dec.Token()
-		if err != nil {
+		if err == io.EOF {
 			break
+		}
+		if err != nil {
+			return sb.String(), err
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
@@ -149,7 +158,7 @@ func extractPPTXText(data []byte) string {
 			}
 		}
 	}
-	return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(sb.String()), nil
 }
 
 // hyphenBreak matches a word split across two lines by the typesetter: a letter,
@@ -224,7 +233,11 @@ func parseDOCX(path string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return extractDocxText(data), nil
+		text, err := extractDocxText(data)
+		if err != nil {
+			return "", fmt.Errorf("document.xml could not be read in full: %w", err)
+		}
+		return text, nil
 	}
 	return "", fmt.Errorf("word/document.xml not found in docx archive")
 }
@@ -264,15 +277,20 @@ func parseXLSX(path string) (string, error) {
 
 // extractDocxText parses the OOXML document.xml and collects text runs (<w:t>),
 // inserting newlines at paragraph boundaries (<w:p>).
-func extractDocxText(data []byte) string {
+func extractDocxText(data []byte) (string, error) {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	var sb strings.Builder
 	inT := false // inside <w:t>
 
 	for {
 		tok, err := dec.Token()
-		if err != nil {
+		if err == io.EOF {
 			break
+		}
+		if err != nil {
+			// Truncated text indexed as if complete makes the agent answer
+			// from half a document without knowing it.
+			return sb.String(), err
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
@@ -294,5 +312,5 @@ func extractDocxText(data []byte) string {
 			}
 		}
 	}
-	return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(sb.String()), nil
 }

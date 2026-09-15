@@ -47,3 +47,20 @@ func TestNormalizeExtractedTextTypography(t *testing.T) {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
 }
+
+// A malformed document used to be indexed truncated and reported as a success,
+// so the agent answered from half a file without knowing it.
+func TestTruncatedOfficeXMLIsReportedNotSwallowed(t *testing.T) {
+	good := []byte(`<?xml version="1.0"?><w:document xmlns:w="x"><w:p><w:t>bonjour</w:t></w:p></w:document>`)
+	text, err := extractDocxText(good)
+	if err != nil || text != "bonjour" {
+		t.Fatalf("well-formed document: %q err=%v", text, err)
+	}
+	cut := []byte(`<?xml version="1.0"?><w:document xmlns:w="x"><w:p><w:t>bonjour`)
+	if _, err := extractDocxText(cut); err == nil {
+		t.Error("a truncated document was accepted as complete")
+	}
+	if _, err := extractPPTXText(cut); err == nil {
+		t.Error("a truncated slide was accepted as complete")
+	}
+}

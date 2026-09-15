@@ -65,3 +65,40 @@ func TestParseBodyMIME(t *testing.T) {
 		t.Errorf("parseBody = %q", got)
 	}
 }
+
+// Ordinary French mail is often iso-8859-1 or windows-1252. The library has no
+// charset decoder unless one is registered, and its "unknown charset" error is
+// documented as non-fatal — but it was treated as fatal, so the whole message
+// was abandoned and the raw MIME source was shown as the body.
+func TestLatin1MessageIsDecodedNotDumpedRaw(t *testing.T) {
+	body := []byte("Subject: test\r\nContent-Type: text/plain; charset=iso-8859-1\r\n\r\nR\xe9union pr\xe9vue \xe0 9h.\r\n")
+	text, atts := parseBody(body)
+	if strings.Contains(text, "Content-Type:") || strings.Contains(text, "Subject:") {
+		t.Fatalf("raw source returned as the body: %q", text)
+	}
+	if !strings.Contains(text, "Réunion prévue à 9h") {
+		t.Fatalf("accents lost: %q", text)
+	}
+	if len(atts) != 0 {
+		t.Fatalf("unexpected attachments: %+v", atts)
+	}
+}
+
+// A part in an unusual charset used to end the walk, so everything after it —
+// including the attachments — disappeared from the message.
+func TestAPartInAnOddCharsetDoesNotHideTheRest(t *testing.T) {
+	raw := "MIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=b\r\n\r\n" +
+		"--b\r\nContent-Type: text/plain; charset=x-inconnu-9000\r\n\r\nbonjour\r\n" +
+		"--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsuite du message\r\n" +
+		"--b\r\nContent-Type: application/pdf\r\n" +
+		"Content-Disposition: attachment; filename=\"facture.pdf\"\r\n\r\n%PDF-1.4\r\n" +
+		"--b--\r\n"
+	text, atts := parseBody([]byte(raw))
+	if !strings.Contains(text, "suite du message") {
+		t.Errorf("the part after the odd one was dropped: %q", text)
+	}
+	if len(atts) != 1 || atts[0].Filename != "facture.pdf" {
+		t.Errorf("the attachment after the odd part vanished: %+v", atts)
+	}
+}
