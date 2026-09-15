@@ -51,7 +51,7 @@ func TestGroupScopeFromSessionID(t *testing.T) {
 	cases := []struct{ sessionID, want string }{
 		{"webex-g3-Y2lzY29zcGFyazovL3Vz", "g3"},
 		{"room-g3", "g3"},
-		{"webex", ""},       // the literal bug this exists to catch
+		{"webex", ""}, // the literal bug this exists to catch
 		{"default", ""},
 		{"u5-telegram", ""}, // personal, not a group scope
 	}

@@ -29,7 +29,7 @@ func (s *Server) handlePimSources(w http.ResponseWriter, r *http.Request) {
 		if tsk == "" {
 			tsk = "auto"
 		}
-		_, caldavOK := caldav.Load(ctx, s.userStore(r))
+		_, caldavOK, _ := caldav.Load(ctx, s.userStore(r))
 		todoTok, _, _ := s.userStore(r).GetSecret(ctx, tasks.TodoistTokenSecret)
 		writeJSON(w, map[string]interface{}{
 			"calendar": cal,

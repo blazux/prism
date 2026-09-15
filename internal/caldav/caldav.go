@@ -36,26 +36,36 @@ type Config struct {
 }
 
 // Load returns the stored config (with password) and whether it is usable.
-func Load(ctx context.Context, store *memory.Store) (Config, bool) {
+// Load reports (config, configured, error). A read failure is NOT "not
+// configured": telling the two apart is what stops a database hiccup from
+// silently routing the user's writes to a different backend.
+func Load(ctx context.Context, store *memory.Store) (Config, bool, error) {
 	var c Config
 	if store == nil {
-		return c, false
+		return c, false, nil
 	}
-	raw, ok, _ := store.GetConfig(ctx, KeyConfig)
+	raw, ok, err := store.GetConfig(ctx, KeyConfig)
+	if err != nil {
+		return c, false, err
+	}
 	if !ok || raw == "" {
-		return c, false
+		return c, false, nil
 	}
 	_ = json.Unmarshal([]byte(raw), &c)
-	c.Pass, _, _ = store.GetSecret(ctx, PasswordSecret)
-	if c.URL == "" || c.User == "" || c.Pass == "" {
-		return c, false
+	var perr error
+	c.Pass, _, perr = store.GetSecret(ctx, PasswordSecret)
+	if perr != nil {
+		return c, false, perr
 	}
-	return c, true
+	if c.URL == "" || c.User == "" || c.Pass == "" {
+		return c, false, nil
+	}
+	return c, true, nil
 }
 
 // Enabled reports whether CalDAV is configured.
 func Enabled(ctx context.Context, store *memory.Store) bool {
-	_, ok := Load(ctx, store)
+	_, ok, _ := Load(ctx, store)
 	return ok
 }
 

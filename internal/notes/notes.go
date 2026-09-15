@@ -8,6 +8,7 @@ package notes
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -41,9 +42,19 @@ type Provider interface {
 // Postgres-backed one. session scopes the local provider's notes.
 func ProviderFor(ctx context.Context, store *memory.Store, session string) Provider {
 	if store != nil {
-		if kind, _, _ := store.GetConfig(ctx, KeyProvider); kind == "vault" {
-			if path, _, _ := store.GetConfig(ctx, KeyVaultPath); path != "" {
-				return &VaultProvider{Dir: path}
+		kind, _, err := store.GetConfig(ctx, KeyProvider)
+		if err != nil {
+			// A database hiccup used to send the next note into Postgres
+			// instead of the vault, where Obsidian would never show it.
+			return &unavailableProvider{err}
+		}
+		if kind == "vault" {
+			dir, _, perr := store.GetConfig(ctx, KeyVaultPath)
+			if perr != nil {
+				return &unavailableProvider{perr}
+			}
+			if dir != "" {
+				return &VaultProvider{Dir: dir}
 			}
 		}
 	}
@@ -93,3 +104,19 @@ func (p *DBProvider) Delete(ctx context.Context, id string) error {
 	}
 	return p.Store.DeleteNote(ctx, p.Session, iid)
 }
+
+// unavailableProvider stands in when the configured source cannot be
+// determined, so a transient failure cannot silently move where notes live.
+type unavailableProvider struct{ err error }
+
+func (p *unavailableProvider) fail() error {
+	return fmt.Errorf("cannot tell where notes are stored, so nothing was read or written: %w", p.err)
+}
+func (p *unavailableProvider) Kind() string { return "unavailable" }
+func (p *unavailableProvider) List(context.Context) ([]Item, error) {
+	return nil, p.fail()
+}
+func (p *unavailableProvider) Save(context.Context, string, string, string, string) (string, error) {
+	return "", p.fail()
+}
+func (p *unavailableProvider) Delete(context.Context, string) error { return p.fail() }

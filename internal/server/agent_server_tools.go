@@ -245,7 +245,7 @@ func (s *Server) pimSourceTool(us *memory.Store) agent.ServerTool {
 		if tsk == "" {
 			tsk = "auto"
 		}
-		_, caldavOK := caldav.Load(ctx, us)
+		_, caldavOK, _ := caldav.Load(ctx, us)
 		todo, _, _ := us.GetSecret(ctx, tasks.TodoistTokenSecret)
 		np, _, _ := us.GetConfig(ctx, notes.KeyProvider)
 		vault, _, _ := us.GetConfig(ctx, notes.KeyVaultPath)

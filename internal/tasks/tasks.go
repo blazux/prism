@@ -5,6 +5,7 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -45,7 +46,13 @@ const KeyProvider = "tasks_provider"
 // local.
 func ProviderFor(ctx context.Context, store *memory.Store, session string) Provider {
 	if store != nil {
-		choice, _, _ := store.GetConfig(ctx, KeyProvider)
+		choice, _, err := store.GetConfig(ctx, KeyProvider)
+		if err != nil {
+			// Falling back to local here sent the user's next task into the
+			// local database instead of Todoist or their CalDAV server, where
+			// it would never be seen again. Fail the call instead.
+			return &unavailableProvider{err}
+		}
 		switch choice {
 		case "local":
 			return &DBProvider{Store: store, Session: session}
@@ -69,18 +76,44 @@ func ProviderFor(ctx context.Context, store *memory.Store, session string) Provi
 }
 
 func todoistProvider(ctx context.Context, store *memory.Store) Provider {
-	if tok := todoistToken(ctx, store); tok != "" {
+	tok, err := todoistToken(ctx, store)
+	if err != nil {
+		return &unavailableProvider{err}
+	}
+	if tok != "" {
 		return &TodoistProvider{token: tok}
 	}
 	return nil
 }
 
 func caldavProvider(ctx context.Context, store *memory.Store) Provider {
-	if cfg, ok := caldav.Load(ctx, store); ok {
+	cfg, ok, err := caldav.Load(ctx, store)
+	if err != nil {
+		return &unavailableProvider{err}
+	}
+	if ok {
 		return &CalDAVProvider{cfg: cfg}
 	}
 	return nil
 }
+
+// unavailableProvider stands in when the configured source cannot be
+// determined. Every call fails with the reason, which is the honest answer:
+// silently using a different backend loses what the user writes.
+type unavailableProvider struct{ err error }
+
+func (p *unavailableProvider) fail() error {
+	return fmt.Errorf("cannot tell which task source is configured, so nothing was read or written: %w", p.err)
+}
+func (p *unavailableProvider) Kind() string { return "unavailable" }
+func (p *unavailableProvider) List(context.Context, bool) ([]Item, error) {
+	return nil, p.fail()
+}
+func (p *unavailableProvider) Add(context.Context, string, string, *time.Time) (string, error) {
+	return "", p.fail()
+}
+func (p *unavailableProvider) SetDone(context.Context, string, bool) error { return p.fail() }
+func (p *unavailableProvider) Delete(context.Context, string) error        { return p.fail() }
 
 // ─── Local (Postgres) provider ──────────────────────────────────────────────────
 

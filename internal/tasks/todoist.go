@@ -21,12 +21,12 @@ const (
 	todoistBase        = "https://api.todoist.com/rest/v2"
 )
 
-func todoistToken(ctx context.Context, store *memory.Store) string {
+func todoistToken(ctx context.Context, store *memory.Store) (string, error) {
 	if store == nil {
-		return ""
+		return "", nil
 	}
-	t, _, _ := store.GetSecret(ctx, TodoistTokenSecret)
-	return t
+	t, _, err := store.GetSecret(ctx, TodoistTokenSecret)
+	return t, err
 }
 
 // baseURL is empty in production and points at a test server in tests.

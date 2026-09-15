@@ -6,6 +6,7 @@ package calendar
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -52,7 +53,12 @@ const KeyProvider = "calendar_provider"
 // CalDAV → local.
 func ProviderFor(ctx context.Context, store *memory.Store, session string) Provider {
 	if store != nil {
-		choice, _, _ := store.GetConfig(ctx, KeyProvider)
+		choice, _, err := store.GetConfig(ctx, KeyProvider)
+		if err != nil {
+			// Guessing here would write the user's next event into the local
+			// database instead of their real calendar.
+			return &unavailableProvider{err}
+		}
 		switch choice {
 		case "local":
 			return &DBProvider{Store: store, Session: session}
@@ -101,7 +107,7 @@ func microsoftProvider(ctx context.Context, store *memory.Store) Provider {
 }
 
 func caldavProvider(ctx context.Context, store *memory.Store) Provider {
-	if cfg, ok := caldav.Load(ctx, store); ok {
+	if cfg, ok, _ := caldav.Load(ctx, store); ok {
 		return &CalDAVProvider{cfg: cfg}
 	}
 	return nil
@@ -151,3 +157,23 @@ func (p *DBProvider) Delete(ctx context.Context, id string) error {
 	}
 	return p.Store.DeleteEvent(ctx, p.Session, iid)
 }
+
+// unavailableProvider stands in when the configured source cannot be
+// determined. Every call fails with the reason rather than quietly using a
+// different backend, which would strand what the user writes.
+type unavailableProvider struct{ err error }
+
+func (p *unavailableProvider) fail() error {
+	return fmt.Errorf("cannot tell which calendar source is configured, so nothing was read or written: %w", p.err)
+}
+func (p *unavailableProvider) Kind() string { return "unavailable" }
+func (p *unavailableProvider) List(context.Context, *time.Time, *time.Time) ([]Item, error) {
+	return nil, p.fail()
+}
+func (p *unavailableProvider) Add(context.Context, string, string, string, time.Time, *time.Time) (string, error) {
+	return "", p.fail()
+}
+func (p *unavailableProvider) Update(context.Context, string, string, string, string, time.Time, *time.Time) error {
+	return p.fail()
+}
+func (p *unavailableProvider) Delete(context.Context, string) error { return p.fail() }
