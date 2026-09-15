@@ -207,6 +207,9 @@ func (p *CalDAVProvider) Update(ctx context.Context, id, title, description, loc
 	if err != nil {
 		return err
 	}
+	if _, err := caldav.ObjectIn(conn.EventPath, objectPath); err != nil {
+		return err
+	}
 	obj, err := conn.Client.GetCalendarObject(ctx, objectPath)
 	if err != nil {
 		// Never fall back to overwriting with a fresh event: a transient read
@@ -274,5 +277,9 @@ func (p *CalDAVProvider) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return conn.Client.RemoveAll(ctx, objectPath)
+	target, err := caldav.ObjectIn(conn.EventPath, objectPath)
+	if err != nil {
+		return err
+	}
+	return conn.Client.RemoveAll(ctx, target)
 }

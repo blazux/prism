@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -150,6 +151,33 @@ func ObjectPath(calPath, uid string) string {
 		calPath += "/"
 	}
 	return calPath + uid + ".ics"
+}
+
+// ObjectIn checks that id addresses ONE object inside collection, and returns
+// it unchanged when it does. A DELETE on a collection href removes every object
+// the collection holds, and these ids come from a model that can invent one, so
+// anything that is not a single object directly below the collection is refused
+// before it reaches the server. A wrongly refused delete is an annoyance; a
+// wrongly accepted one erases a calendar.
+func ObjectIn(collection, id string) (string, error) {
+	if strings.TrimSpace(collection) == "" {
+		return "", fmt.Errorf("no calendar collection resolved for this account")
+	}
+	raw := strings.TrimSpace(id)
+	if raw == "" {
+		return "", fmt.Errorf("empty id")
+	}
+	if strings.HasSuffix(raw, "/") {
+		return "", fmt.Errorf("%q addresses a whole calendar, not one item: refusing, it would delete everything in it", id)
+	}
+	base := strings.TrimSuffix(path.Clean("/"+collection), "/")
+	full := path.Clean("/" + strings.TrimPrefix(raw, "/"))
+	rest := strings.TrimPrefix(full, base+"/")
+	// An object resource is a direct child of its collection (RFC 4791 §5.2).
+	if full == base || rest == full || rest == "" || strings.Contains(rest, "/") {
+		return "", fmt.Errorf("%q is not an item of this calendar (%s): refusing to touch it", id, collection)
+	}
+	return raw, nil
 }
 
 // WrapCalendar wraps a single component into a VCALENDAR ready to PUT.

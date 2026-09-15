@@ -16,11 +16,11 @@ type CalDAVProvider struct{ cfg caldav.Config }
 func (p *CalDAVProvider) Kind() string { return "caldav" }
 
 const (
-	statusDone   = "COMPLETED"
-	statusOpen   = "NEEDS-ACTION"
-	prioHigh     = "1"
-	prioNormal   = "5"
-	prioLow      = "9"
+	statusDone = "COMPLETED"
+	statusOpen = "NEEDS-ACTION"
+	prioHigh   = "1"
+	prioNormal = "5"
+	prioLow    = "9"
 )
 
 func (p *CalDAVProvider) List(ctx context.Context, includeDone bool) ([]Item, error) {
@@ -97,6 +97,9 @@ func (p *CalDAVProvider) SetDone(ctx context.Context, id string, done bool) erro
 	if err != nil {
 		return err
 	}
+	if _, err := caldav.ObjectIn(conn.TaskPath, id); err != nil {
+		return err
+	}
 	obj, err := conn.Client.GetCalendarObject(ctx, id)
 	if err != nil {
 		return err
@@ -123,7 +126,11 @@ func (p *CalDAVProvider) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return conn.Client.RemoveAll(ctx, id)
+	target, err := caldav.ObjectIn(conn.TaskPath, id)
+	if err != nil {
+		return err
+	}
+	return conn.Client.RemoveAll(ctx, target)
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────────
