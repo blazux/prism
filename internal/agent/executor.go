@@ -972,7 +972,7 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 	case "skill":
 		return wrap(e.skillTool(str("action"), str("name"), str("description"), str("when_to_use"), str("body")))
 	case "note":
-		return wrap(e.noteTool(ctx, str("action"), idArg(args), str("title"), str("body"), str("tags")))
+		return wrap(e.noteTool(ctx, str("action"), idArg(args), args))
 	case "task":
 		includeDone, _ := args["include_done"].(bool)
 		return wrap(e.taskTool(ctx, str("action"), idArg(args), str("title"), str("priority"), str("due"), includeDone))

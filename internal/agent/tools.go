@@ -420,9 +420,9 @@ var ToolDefinitions = []ollama.Tool{
 				Properties: map[string]ollama.ToolProperty{
 					"action": {Type: "string", Description: "add, list, update, delete, share (publish one of your notes to your group, read-only for members; re-sharing updates the copy) or unshare (remove a group-shared note — its id from the group-shared list; author or group admin only)", Enum: []string{"add", "list", "update", "delete", "share", "unshare"}},
 					"id":     {Type: "string", Description: "Note id from list, used for update/delete/share/unshare. Opaque: a number for local notes, or a file path like \"folder/Note.md\" when a Markdown vault is connected."},
-					"title":  {Type: "string", Description: "Note title"},
-					"body":   {Type: "string", Description: "Note body (Markdown)"},
-					"tags":   {Type: "string", Description: "Comma-separated tags"},
+					"title":  {Type: "string", Description: "Note title. On update, omit it to leave the title unchanged."},
+					"body":   {Type: "string", Description: "Note body (Markdown). On update, omit it to leave the body unchanged; pass an empty string to clear it."},
+					"tags":   {Type: "string", Description: "Comma-separated tags. On update, omit them to leave the tags unchanged."},
 				},
 				Required: []string{"action"},
 			},

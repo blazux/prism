@@ -91,10 +91,38 @@ func noteLookup(ctx context.Context, prov notes.Provider, id string) (*notes.Ite
 
 // ─── note ─────────────────────────────────────────────────────────────────────
 
-func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body, tags string) (string, error) {
+// noteArg reads a string argument. The second result says whether the caller
+// actually passed it, which is what lets update leave a field alone instead of
+// overwriting it with the zero value.
+func noteArg(args map[string]any, key string) (string, bool) {
+	v, ok := args[key].(string)
+	return v, ok
+}
+
+// mergeNoteFields applies onto the stored note only the fields the caller
+// passed. An omitted field keeps its current value; a field passed empty
+// clears it, which is what the Notes app means when you empty a box.
+func mergeNoteFields(cur notes.Item, args map[string]any) (title, body, tags string) {
+	title, body, tags = cur.Title, cur.Body, cur.Tags
+	if v, ok := noteArg(args, "title"); ok {
+		title = v
+	}
+	if v, ok := noteArg(args, "body"); ok {
+		body = v
+	}
+	if v, ok := noteArg(args, "tags"); ok {
+		tags = v
+	}
+	return title, body, tags
+}
+
+func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr string, args map[string]any) (string, error) {
 	if e.memStore == nil {
 		return "", fmt.Errorf("notes unavailable: no database")
 	}
+	title, _ := noteArg(args, "title")
+	body, _ := noteArg(args, "body")
+	tags, _ := noteArg(args, "tags")
 	prov := notes.ProviderFor(ctx, e.userStore(), e.pimSessionScope())
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
@@ -143,9 +171,18 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body,
 		if strings.TrimSpace(idStr) == "" {
 			return "", fmt.Errorf("update requires an id")
 		}
-		if item, hint := noteLookup(ctx, prov, idStr); item == nil && hint != "" {
-			return "", fmt.Errorf("note %q not found. %s", idStr, hint)
+		// Read-modify-write. Save rewrites the whole note, so passing the
+		// arguments straight through blanked the body and the tags whenever the
+		// model only meant to change the title — and still reported success.
+		item, hint := noteLookup(ctx, prov, idStr)
+		if item == nil {
+			if hint != "" {
+				return "", fmt.Errorf("note %q not found. %s", idStr, hint)
+			}
+			// Listing failed: refuse rather than overwrite a note we cannot read.
+			return "", fmt.Errorf("note %q could not be read, so nothing was changed; try again", idStr)
 		}
+		title, body, tags = mergeNoteFields(*item, args)
 		if _, err := prov.Save(ctx, idStr, title, body, tags); err != nil {
 			return "", err
 		}
