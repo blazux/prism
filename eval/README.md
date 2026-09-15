@@ -41,6 +41,26 @@ Each task runs in its own fresh session `eval-<name>` (deleted before and
 after), and fixtures are created/removed through `/api/builtin`, outside the
 agent. `-keep` leaves sessions and fixtures in place for inspection.
 
+## CalDAV, against a disposable server
+
+The PIM providers have live tests that only run when a throwaway CalDAV server
+is pointed at. They cover what no unit test can: whether the server expands a
+recurring series, and whether a read-modify-write really preserves what it sent
+back. **Never point these at a real account.**
+
+```bash
+docker run -d --name prism-caldav-test -p 127.0.0.1:5232:5232 \
+  -v "$PWD/caldav-test/config:/config:ro" tomsquest/docker-radicale
+curl -s -X MKCALENDAR -u eval:eval http://127.0.0.1:5232/eval/agenda/
+
+export PRISM_TEST_CALDAV_URL=http://127.0.0.1:5232 \
+       PRISM_TEST_CALDAV_USER=eval PRISM_TEST_CALDAV_PASS=eval
+go test ./internal/calendar/ ./internal/tasks/ -run Live -v
+```
+
+Without those variables the tests skip, so the everyday `go test ./...` stays
+self-contained.
+
 ## Writing a task
 
 ```json

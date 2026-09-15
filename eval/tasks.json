@@ -687,5 +687,136 @@
       }
     ],
     "max_tool_calls": 4
+  },
+  {
+    "name": "note-rename-keeps-body",
+    "tags": [
+      "pim",
+      "discipline"
+    ],
+    "prompt": "Rename my note titled 'Eval Mesa' to 'Eval Mesa Verde'. Change nothing else.",
+    "setup": [
+      {
+        "tool": "note",
+        "args": {
+          "action": "add",
+          "title": "Eval Mesa",
+          "body": "Le code du portail est 4417.",
+          "tags": "eval"
+        }
+      }
+    ],
+    "checks": [
+      {
+        "tool": "note",
+        "args": {
+          "action": "list"
+        },
+        "contains_all": [
+          "Eval Mesa Verde",
+          "4417"
+        ],
+        "no_error": true
+      }
+    ],
+    "max_tool_calls": 3,
+    "cleanup": [
+      {
+        "tool": "exec_command",
+        "args": {
+          "command": "true"
+        }
+      }
+    ]
+  },
+  {
+    "name": "note-update-body-keeps-title",
+    "tags": [
+      "pim",
+      "discipline"
+    ],
+    "prompt": "In my note 'Eval Bandelier', replace the body with exactly: rendez-vous reporte a jeudi. Keep its title.",
+    "setup": [
+      {
+        "tool": "note",
+        "args": {
+          "action": "add",
+          "title": "Eval Bandelier",
+          "body": "rendez-vous mardi",
+          "tags": "eval"
+        }
+      }
+    ],
+    "checks": [
+      {
+        "tool": "note",
+        "args": {
+          "action": "list"
+        },
+        "contains_all": [
+          "Eval Bandelier",
+          "reporte a jeudi"
+        ],
+        "no_error": true
+      },
+      {
+        "tool": "note",
+        "args": {
+          "action": "list"
+        },
+        "not_contains": "rendez-vous mardi"
+      }
+    ],
+    "max_tool_calls": 3,
+    "cleanup": [
+      {
+        "tool": "exec_command",
+        "args": {
+          "command": "true"
+        }
+      }
+    ]
+  },
+  {
+    "name": "task-reopen-after-done",
+    "tags": [
+      "pim",
+      "recovery"
+    ],
+    "prompt": "Mark the task 'Eval: relancer le comptable' as done, then reopen it.",
+    "setup": [
+      {
+        "tool": "task",
+        "args": {
+          "action": "add",
+          "title": "Eval: relancer le comptable",
+          "priority": "normal"
+        }
+      }
+    ],
+    "checks": [
+      {
+        "tool": "task",
+        "args": {
+          "action": "list",
+          "include_done": true
+        },
+        "contains": "Eval: relancer le comptable",
+        "no_error": true
+      },
+      {
+        "response": true,
+        "regex": "reopen|rouvert|réouvert|done and reopened|rouverte"
+      }
+    ],
+    "max_tool_calls": 5,
+    "cleanup": [
+      {
+        "tool": "exec_command",
+        "args": {
+          "command": "true"
+        }
+      }
+    ]
   }
 ]
