@@ -6,6 +6,7 @@
 <title>Room</title>
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
+<script src="/apiclient.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -129,6 +130,7 @@
     <select id="group"></select>
     <div class="presence" id="presence"></div>
   </div>
+  <div id="conn" style="display:none;padding:6px 10px;background:var(--danger,#e05252);color:#fff;font-size:12px"></div>
   <div id="log"></div>
   <div class="typing-row" id="typing"></div>
   <div class="composer">
@@ -302,6 +304,18 @@ function noteTyping(userId){
 }
 
 // ── websocket ────────────────────────────────────────────────────────────────────
+let live = false, retry = null, retryDelay = 1000
+function setLive(v){
+  live = v
+  const bar = $('conn')
+  if (!bar) return
+  bar.style.display = v ? 'none' : 'block'
+  bar.textContent = 'Disconnected from the room — reconnecting…'
+}
+function scheduleReconnect(g){
+  if (retry) return
+  retry = setTimeout(() => { retry = null; retryDelay = Math.min(retryDelay * 2, 15000); if (gid === g) connect(g) }, retryDelay)
+}
 function connect(g){
   gid = g
   if (ws){ ws.onclose = null; ws.close() }
@@ -310,6 +324,11 @@ function connect(g){
   loadMembers(g)
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   ws = new WebSocket(proto + '://' + location.host + '/wsroom?group=' + g)
+  ws.onopen = () => { setLive(true); retryDelay = 1000 }
+  // The socket dying changed nothing on screen: the room looked quiet, and
+  // send() returned without a word, leaving the typed message in the box.
+  ws.onclose = () => { setLive(false); scheduleReconnect(g) }
+  ws.onerror = () => setLive(false)
   ws.onmessage = e => {
     const d = JSON.parse(e.data)
     if (d.type === 'history'){ msgs = d.messages || []; msgById.clear(); msgs.forEach(m => msgById.set(m.id, m)); renderAll() }
@@ -327,9 +346,14 @@ function connect(g){
 }
 async function loadMembers(g){
   try {
-    const d = await fetch('/api/group/members?group=' + g).then(r => r.json())
+    const d = await PrismAPI.api('/api/group/members?group=' + g)
     members = d.members || []; if (d.agentName) agentName = d.agentName
-  } catch(_) { members = [] }
+  } catch(e) {
+    // Without members, @mentions and "someone mentioned me" quietly stop
+    // working, so say so rather than degrade in silence.
+    members = []
+    PrismAPI.toast('Could not load the room members: ' + e.message)
+  }
 }
 
 // ── send / reply ─────────────────────────────────────────────────────────────────
@@ -342,7 +366,8 @@ function clearReply(){ replyTo = null; $('reply-bar').classList.remove('on') }
 $('reply-x').onclick = clearReply
 
 function send(){
-  const v = $('box').value.trim(); if (!v || !ws || ws.readyState !== 1) return
+  const v = $('box').value.trim(); if (!v) return
+  if (!ws || ws.readyState !== 1){ PrismAPI.toast('Not sent: you are disconnected from the room. It reconnects on its own; your text is still in the box.'); return }
   ws.send(JSON.stringify({ type: 'message', content: v, replyTo: replyTo }))
   $('box').value = ''; autoGrow(); clearReply(); hideMentions()
   $('send-ic').classList.remove('ready')
@@ -442,12 +467,16 @@ document.addEventListener('click', e => { if (!e.target.closest('#emoji-pop') &&
 // ── init ──────────────────────────────────────────────────────────────────────
 $('group').onchange = () => connect($('group').value)
 async function init(){
-  try { const p = await fetch('/api/profile').then(r => r.json()); ME = { uid: p.userId || 0, name: p.displayName || p.email || '' } } catch(_){}
-  let d = {}
-  try { d = await fetch('/api/my/groups').then(r => r.json()) } catch(_){}
+  try { const p = await PrismAPI.api('/api/profile'); ME = { uid: p.userId || 0, name: p.displayName || p.email || '' } }
+  catch(e){ PrismAPI.toast('Could not read your profile: ' + e.message) }
+  let d = {}, failed = false
+  try { d = await PrismAPI.api('/api/my/groups') } catch(e){ failed = true; PrismAPI.toast('Could not load your groups: ' + e.message) }
   const g = $('group')
   ;(d.groups || []).forEach(x => { const o = document.createElement('option'); o.value = x.id || x.groupId; o.textContent = x.name || x.groupName; g.appendChild(o) })
   if (g.options.length){ connect(g.value) }
+  // A failed read used to claim membership news: "you are not in any group,
+  // ask an admin" sent people to open a ticket for a server hiccup.
+  else if (failed){ $('log').innerHTML = '<div class="room-empty">Could not load your groups. This is a connection problem, not a missing membership.</div>'; g.style.display = 'none' }
   else { $('log').innerHTML = '<div class="room-empty">You are not in any group yet. Ask an admin to add you.</div>'; g.style.display = 'none' }
 }
 init()

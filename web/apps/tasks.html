@@ -6,6 +6,7 @@
 <title>Tasks</title>
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
+<script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
 <script>
   addEventListener('message', e => {
@@ -205,7 +206,7 @@ function updateCount() {
 }
 
 // ═══════════════════════ To-do (PIM tasks) ═══════════════════════
-let todos = [];
+let todos = [], loadFailed = false;
 const PRANK = { high: 0, normal: 1, low: 2 };
 
 function setSourceBadge(src) {
@@ -214,7 +215,17 @@ function setSourceBadge(src) {
   if (src && L[src]) { el.textContent = '◦ ' + L[src]; el.style.display = 'inline-block'; } else { el.style.display = 'none'; }
 }
 async function loadTodos() {
-  try { const d = await fetch('/api/tasks?include_done=true').then(r => r.json()); todos = d.tasks || []; setSourceBadge(d.source); } catch { todos = []; }
+  // A failed read used to render "Nothing to do", which reads as "your tasks
+  // are gone" rather than "I could not reach the server".
+  try {
+    const d = await PrismAPI.api('/api/tasks?include_done=true');
+    todos = d.tasks || [];
+    loadFailed = false;
+    setSourceBadge(d.source);
+  } catch (e) {
+    loadFailed = true;
+    PrismAPI.toast('Could not load your tasks: ' + e.message);
+  }
   renderTodos();
   postTodoContext();
 }
@@ -234,7 +245,9 @@ function renderTodos() {
     String(a.dueAt || '9999').localeCompare(String(b.dueAt || '9999')));
   if (!showDone) items = items.filter(t => !t.done);
   if (!items.length) {
-    host.innerHTML = '<div class="empty"><div class="big">✓</div><div>' + (showDone ? 'No tasks yet' : 'Nothing to do') + '</div><div style="font-size:12px">Add one above, or break down an objective with AI.</div></div>';
+    host.innerHTML = loadFailed
+      ? '<div class="empty"><div class="big">⚠</div><div>Could not load your tasks</div><div style="font-size:12px">This is a connection problem, not an empty list. Retry in a moment.</div></div>'
+      : '<div class="empty"><div class="big">✓</div><div>' + (showDone ? 'No tasks yet' : 'Nothing to do') + '</div><div style="font-size:12px">Add one above, or break down an objective with AI.</div></div>';
     updateCount(); return;
   }
   for (const t of items) {
@@ -256,16 +269,33 @@ async function addTodo() {
   const title = $('t-title').value.trim();
   if (!title) return;
   const body = { title, priority: $('t-prio').value, due: $('t-due').value || '' };
+  try {
+    await PrismAPI.api('/api/tasks', PrismAPI.body('POST', body));
+  } catch (e) {
+    // The fields used to be cleared BEFORE the request, so a failure threw the
+    // typed title away with nothing to show for it.
+    PrismAPI.toast('Task not added: ' + e.message);
+    return;
+  }
   $('t-title').value = ''; $('t-due').value = '';
-  await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   loadTodos();
 }
 async function toggleTodo(t) {
-  await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: t.id, done: !t.done }) });
+  // Outbound phone calls appear in this list and the server refuses to tick
+  // them, with a message that says what to do instead. It was never shown.
+  try {
+    await PrismAPI.api('/api/tasks', PrismAPI.body('POST', { id: t.id, done: !t.done }));
+  } catch (e) {
+    PrismAPI.toast(e.message);
+  }
   loadTodos();
 }
 async function removeTodo(t) {
-  await fetch('/api/tasks?id=' + encodeURIComponent(t.id), { method: 'DELETE' });
+  try {
+    await PrismAPI.api('/api/tasks?id=' + encodeURIComponent(t.id), { method: 'DELETE' });
+  } catch (e) {
+    PrismAPI.toast(e.message);
+  }
   loadTodos();
 }
 
@@ -320,8 +350,9 @@ async function addBreakdown() {
 }
 
 // ═══════════════════════ Scheduled (cron) ═══════════════════════
+const cronURL = () => '/api/cron';
 const cronApi = (opts) => fetch('/api/cron', opts);
-let jobs = [], editName = null;
+let jobs = [], editName = null, jobsFailed = false;
 
 // Turn a cron expression into a plain-English phrase — never raw cron syntax.
 const DOW_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -449,14 +480,22 @@ function nextRunLabel(expr) {
   return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ' ' + hm;
 }
 async function loadJobs() {
-  try { jobs = (await cronApi().then(r => r.json())).jobs || []; } catch { jobs = []; }
+  try {
+    jobs = (await PrismAPI.api(cronURL())).jobs || [];
+    jobsFailed = false;
+  } catch (e) {
+    jobsFailed = true;
+    PrismAPI.toast('Could not load your scheduled tasks: ' + e.message);
+  }
   renderJobs();
 }
 function renderJobs() {
   const list = $('list');
   list.innerHTML = '';
   if (!jobs.length) {
-    list.innerHTML = '<div class="empty"><div class="big">⏱</div><div>No scheduled tasks yet</div><div style="font-size:12px">Create one, or ask the agent to schedule something.</div></div>';
+    list.innerHTML = jobsFailed
+      ? '<div class="empty"><div class="big">⚠</div><div>Could not load your scheduled tasks</div><div style="font-size:12px">This is a connection problem, not a list that emptied itself.</div></div>'
+      : '<div class="empty"><div class="big">⏱</div><div>No scheduled tasks yet</div><div style="font-size:12px">Create one, or ask the agent to schedule something.</div></div>';
     updateCount(); return;
   }
   for (const j of jobs) {
@@ -485,12 +524,21 @@ function renderJobs() {
   updateCount();
 }
 async function toggleJob(name, enabled) {
-  await cronApi({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, enabled }) });
+  try {
+    await PrismAPI.api(cronURL(), PrismAPI.body('POST', { name, enabled }));
+  } catch (e) {
+    // The switch used to flip, then silently flip back on the next load.
+    PrismAPI.toast(e.message);
+  }
   loadJobs();
 }
 async function removeJob(name) {
   if (!await PrismModal.confirm(`Delete scheduled task "${name}"?`, { danger: true })) return;
-  await fetch('/api/cron?name=' + encodeURIComponent(name), { method: 'DELETE' });
+  try {
+    await PrismAPI.api('/api/cron?name=' + encodeURIComponent(name), { method: 'DELETE' });
+  } catch (e) {
+    PrismAPI.toast(e.message);
+  }
   loadJobs();
 }
 function openForm(job) {

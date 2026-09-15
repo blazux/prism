@@ -132,3 +132,29 @@ func TestVaultWritesAreAtomic(t *testing.T) {
 		t.Fatalf("mode = %v", info.Mode().Perm())
 	}
 }
+
+// The tags argument used to be accepted and ignored: the app's tag box emptied
+// itself on the next load and the agent was told the change had been made.
+func TestVaultRefusesTagsItCannotStore(t *testing.T) {
+	dir := t.TempDir()
+	p := &VaultProvider{Dir: dir}
+	ctx := context.Background()
+	const raw = "---\ntags: a, b\n---\ncorps"
+	if err := os.WriteFile(filepath.Join(dir, "N.md"), []byte(raw), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Tags that the body does not carry cannot be honoured.
+	if _, err := p.Save(ctx, "N.md", "N", raw, "urgent"); err == nil {
+		t.Fatal("a tag change the vault cannot store was reported as done")
+	} else if !strings.Contains(err.Error(), "front-matter") {
+		t.Fatalf("unhelpful error: %v", err)
+	}
+	// Sending back what was read stays a normal save.
+	if _, err := p.Save(ctx, "N.md", "N", raw, "a, b"); err != nil {
+		t.Fatalf("round-trip refused: %v", err)
+	}
+	// And so does a save that does not mention tags at all.
+	if _, err := p.Save(ctx, "N.md", "N", raw, ""); err != nil {
+		t.Fatalf("tagless save refused: %v", err)
+	}
+}

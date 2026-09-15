@@ -6,6 +6,7 @@
 <title>Notes</title>
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
+<script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <script src="/vendor/purify.min.js"></script>
@@ -195,7 +196,7 @@
 
 <script>
 const session = new URLSearchParams(location.search).get('session') || 'default';
-const api = (path, opts) => fetch(`/api/notes${path}`, opts).then(r => r.json());
+const api = (path, opts) => PrismAPI.api(`/api/notes${path}`, opts);
 const $ = id => document.getElementById(id);
 let notes = [], selectedId = null, filter = '', tagFilter = '', mode = 'edit', lastTarget = null;
 
@@ -236,7 +237,14 @@ function setSourceBadge(src) {
 // note you have open keeps showing the pre-agent text until a reload. Routine loads leave
 // the editor alone so a background refresh can't yank the field you're typing in.
 async function load(syncEditor = false) {
-  const data = await api(`?session=${encodeURIComponent(session)}`);
+  let data;
+  try {
+    data = await api(`?session=${encodeURIComponent(session)}`);
+  } catch (e) {
+    // Never show "no notes" for a failed read: it looks like data loss.
+    PrismAPI.toast('Could not load your notes: ' + e.message);
+    return;
+  }
   notes = data.notes || [];
   setSourceBadge(data.source);
   render();
@@ -324,9 +332,15 @@ async function openWikiLink(title) {
   const n = notes.find(x => (x.title || '').toLowerCase() === title.toLowerCase());
   if (n) { select(n.id); return; }
   if (await PrismModal.confirm(`Note "${title}" doesn't exist yet. Create it?`, { okLabel: 'Create' })) {
-    const { id } = await api(`?session=${encodeURIComponent(session)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, body: '', tags: '' })
-    });
+    let id;
+    try {
+      ({ id } = await api(`?session=${encodeURIComponent(session)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, body: '', tags: '' })
+      }));
+    } catch (e) {
+      PrismAPI.toast('Could not create the note: ' + e.message);
+      return;
+    }
     await load(); select(id);
   }
 }
@@ -455,10 +469,16 @@ async function toggleShare() {
 }
 
 async function newNote() {
-  const { id } = await api(`?session=${encodeURIComponent(session)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: 'Untitled', body: '', tags: '' })
-  });
+  let id;
+  try {
+    ({ id } = await api(`?session=${encodeURIComponent(session)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Untitled', body: '', tags: '' })
+    }));
+  } catch (e) {
+    PrismAPI.toast('Could not create the note: ' + e.message);
+    return;
+  }
   await load();
   select(id);
   $('e-title').focus(); $('e-title').select();
@@ -470,9 +490,15 @@ async function saveNote() {
   if (n && n.scope === 'group' && !n.canEdit) return; // read-only shared note
   const body = { id: selectedId, title: $('e-title').value, body: $('e-body').value, tags: $('e-tags').value };
   if (n && n.scope === 'group') body.scope = 'group';
-  await api(`?session=${encodeURIComponent(session)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-  });
+  try {
+    await api(`?session=${encodeURIComponent(session)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+  } catch (e) {
+    // Keep what the user typed on screen; only say it is not saved yet.
+    PrismAPI.toast('Not saved: ' + e.message);
+    return;
+  }
   await load();
 }
 
@@ -482,7 +508,12 @@ async function deleteNote() {
   const isGroup = n && n.scope === 'group';
   if (!await PrismModal.confirm(isGroup ? 'Remove this note from the group?' : 'Delete this note?', { danger: true, okLabel: isGroup ? 'Remove' : 'Delete' })) return;
   const q = isGroup ? '&scope=group' : '';
-  await fetch(`/api/notes?session=${encodeURIComponent(session)}&id=${selectedId}${q}`, { method: 'DELETE' });
+  try {
+    await PrismAPI.api(`/api/notes?session=${encodeURIComponent(session)}&id=${selectedId}${q}`, { method: 'DELETE' });
+  } catch (e) {
+    PrismAPI.toast('Not removed: ' + e.message);
+    return;
+  }
   selectedId = null;
   closeEditor();
   await load();

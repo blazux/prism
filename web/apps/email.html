@@ -6,6 +6,7 @@
 <title>Email</title>
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
+<script src="/apiclient.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -144,7 +145,15 @@ const SESSION = new URLSearchParams(location.search).get('session') || 'default'
 function openSettings() { window.top.location.href = `/settings.html?session=${encodeURIComponent(SESSION)}#email`; }
 
 async function init() {
-  cfg = await fetch('/api/email/config').then(J).catch(() => null);
+  // A 503 from the store used to land here as "no mailbox connected", sending
+  // the user off to re-enter credentials that were never lost.
+  try {
+    cfg = await PrismAPI.api('/api/email/config');
+  } catch (e) {
+    cfg = null;
+    PrismAPI.toast('Could not read your mailbox settings: ' + e.message);
+    return;
+  }
   if (!cfg || !cfg.configured || !cfg.has_password) renderNotConfigured();
   else renderInbox();
 }
@@ -437,7 +446,8 @@ async function triage() {
       mailTags[m.uid] = rec; updates[m.uid] = rec;
     }
     if (Object.keys(updates).length) {
-      await fetch('/api/email/tags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+      // Unsaved categories used to appear, then vanish on the next reload.
+      await PrismAPI.api('/api/email/tags', PrismAPI.body('POST', updates));
     }
     renderList();
     btn.textContent = label;
@@ -502,7 +512,14 @@ function setLocalSeen(uid, seen) {
 }
 async function markSeen(uid, seen) {
   setLocalSeen(uid, seen);   // optimistic
-  try { await fetch('/api/email/markseen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uid, seen }) }); } catch (_) {}
+  try {
+    await PrismAPI.api('/api/email/markseen', PrismAPI.body('POST', { uid, seen }));
+  } catch (e) {
+    // IMAP refused: put the message and the unread badge back where they were,
+    // instead of leaving a reminder the server never recorded.
+    setLocalSeen(uid, !seen);
+    PrismAPI.toast('Could not mark the message: ' + e.message);
+  }
 }
 function markUnread() { if (current) markSeen(current.uid, false); }
 function stripHtml(s) {

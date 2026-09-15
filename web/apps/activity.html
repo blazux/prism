@@ -6,6 +6,7 @@
 <title>Activity</title>
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
+<script src="/apiclient.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -158,7 +159,9 @@ async function load(reset) {
   if (before) p.set('before', before);
   if (document.getElementById('scopeAll').checked) p.set('scope', 'all');
   try {
-    const d = await fetch('/api/activity?' + p.toString()).then(r => r.json());
+    // The server reports its failures as JSON, so .json() succeeded, d.events
+    // was undefined and a dead database displayed as "Nothing here yet".
+    const d = await PrismAPI.api('/api/activity?' + p.toString());
     const events = d.events || [];
     for (const ev of events) feed.appendChild(row(ev));
     if (!feed.children.length) { statusEl.innerHTML = '<div class="big">≋</div><div>Nothing here yet.</div>'; }
@@ -166,7 +169,8 @@ async function load(reset) {
     before = d.nextBefore || 0;
     moreBtn.style.display = before ? 'block' : 'none';
   } catch (e) {
-    statusEl.innerHTML = 'Failed to load activity.';
+    statusEl.style.display = '';
+    statusEl.innerHTML = 'Could not load the activity feed: ' + String((e && e.message) || e).slice(0, 300);
   } finally { loading = false; }
 }
 

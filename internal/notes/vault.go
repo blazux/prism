@@ -58,6 +58,13 @@ func (p *VaultProvider) List(ctx context.Context) ([]Item, error) {
 }
 
 func (p *VaultProvider) Save(ctx context.Context, id, title, body, tags string) (string, error) {
+	// A vault note keeps its tags in its own YAML front-matter, and the body is
+	// written verbatim, so there is nowhere else to put them. This used to be
+	// accepted and ignored: the Notes app's tag box emptied itself on reload and
+	// the agent was told "updated" when nothing had changed. Say so instead.
+	if want := normTags(tags); want != "" && !strings.EqualFold(want, itemFrom(id, body, time.Time{}).Tags) {
+		return "", fmt.Errorf("this note lives in your Markdown vault, where tags belong to the note itself: put `tags: %s` in the YAML front-matter at the top of the body", want)
+	}
 	if id == "" { // create
 		name := sanitizeFilename(title)
 		if name == "" {
