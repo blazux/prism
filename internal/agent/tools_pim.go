@@ -276,9 +276,15 @@ func (e *ToolExecutor) groupNameFor(id int64) string {
 	return fmt.Sprintf("g%d", id)
 }
 
-// taskLookup is noteLookup for tasks (includes completed tasks, so re-marking
-// a done task or deleting one still resolves).
+// taskLookup is noteLookup for tasks. It only guards the LOCAL provider: an
+// external one can return a list that does not contain the id even though the
+// task exists — Todoist's task endpoint never returns completed tasks, so
+// reopening or deleting one you just ticked was refused with "task not found",
+// which was simply false. Same rule as the calendar tool's delete.
 func taskLookup(ctx context.Context, prov tasks.Provider, id string) (*tasks.Item, string) {
+	if prov.Kind() != "local" {
+		return nil, ""
+	}
 	items, err := prov.List(ctx, true)
 	if err != nil {
 		return nil, ""

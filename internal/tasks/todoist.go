@@ -29,10 +29,21 @@ func todoistToken(ctx context.Context, store *memory.Store) string {
 	return t
 }
 
-type TodoistProvider struct{ token string }
+// baseURL is empty in production and points at a test server in tests.
+type TodoistProvider struct {
+	token   string
+	baseURL string
+}
 
 // NewTodoistProvider builds a provider for a raw token (used for validation).
 func NewTodoistProvider(token string) *TodoistProvider { return &TodoistProvider{token: token} }
+
+func (p *TodoistProvider) base() string {
+	if p.baseURL != "" {
+		return p.baseURL
+	}
+	return todoistBase
+}
 
 func (p *TodoistProvider) Kind() string { return "todoist" }
 
@@ -41,7 +52,7 @@ func (p *TodoistProvider) do(ctx context.Context, method, path string, body []by
 	if body != nil {
 		r = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, todoistBase+path, r)
+	req, err := http.NewRequestWithContext(ctx, method, p.base()+path, r)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +75,12 @@ type todoistTask struct {
 	} `json:"due"`
 }
 
+// List returns the ACTIVE tasks. Todoist's REST task endpoint has no completed
+// tasks to give (they live behind the Sync API), so includeDone cannot be
+// honoured here: an absent task is not proof that it does not exist, which is
+// why taskLookup no longer guards non-local providers.
 func (p *TodoistProvider) List(ctx context.Context, includeDone bool) ([]Item, error) {
+	_ = includeDone
 	resp, err := p.do(ctx, "GET", "/tasks", nil)
 	if err != nil {
 		return nil, err
@@ -84,14 +100,17 @@ func (p *TodoistProvider) List(ctx context.Context, includeDone bool) ([]Item, e
 			it.CreatedAt = c
 		}
 		if t.Due != nil {
-			if t.Due.Datetime != "" {
-				if d, err := time.Parse(time.RFC3339, t.Due.Datetime); err == nil {
-					it.DueAt = &d
-				}
-			} else if t.Due.Date != "" {
-				if d, err := time.ParseInLocation("2006-01-02", t.Due.Date, time.Local); err == nil {
-					it.DueAt = &d
-				}
+			// Branch on what actually parsed, not on what is merely present:
+			// Todoist sends a floating datetime for a task with no timezone,
+			// which is not RFC3339, and the plain date sitting next to it in
+			// the same response was never tried. The task then came back with
+			// no due date at all and stopped looking urgent.
+			if d, err := time.Parse(time.RFC3339, t.Due.Datetime); t.Due.Datetime != "" && err == nil {
+				it.DueAt = &d
+			} else if d, err := time.ParseInLocation("2006-01-02T15:04:05", t.Due.Datetime, time.Local); t.Due.Datetime != "" && err == nil {
+				it.DueAt = &d
+			} else if d, err := time.ParseInLocation("2006-01-02", t.Due.Date, time.Local); t.Due.Date != "" && err == nil {
+				it.DueAt = &d
 			}
 		}
 		out = append(out, it)
