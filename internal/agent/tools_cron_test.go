@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A disabled ("#DISABLED# ") job must still parse its Schedule/Command
 // correctly and report Enabled=false — it used to be caught by the generic
@@ -37,5 +40,47 @@ func TestValidateCronSchedule(t *testing.T) {
 		if err := validateCronSchedule(s); err == nil {
 			t.Errorf("%q should be rejected", s)
 		}
+	}
+}
+
+// rewriteCronBlock is the pure part of cronEditBlock. Two properties guarded
+// here: (1) an edit that changes nothing yields content identical to the
+// normalized input, which is what lets cronEditBlock skip the crontab rewrite
+// on "pause an already-paused job"; (2) a real edit keeps the block's owner and
+// description lines and the rest of the crontab untouched.
+func TestRewriteCronBlock(t *testing.T) {
+	e := &ToolExecutor{}
+	raw := "MAILTO=x\n# agent-job: backup\n# agent-owner: u1\n# agent-desc: nightly\n@daily /bin/backup\n# agent-job: ping\n#DISABLED# */5 * * * * curl http://x\n\n"
+	same := func(desc, line string, enabled bool) (string, string, bool) { return desc, line, enabled }
+
+	// (1) no-op on a paused job → same content, so no write.
+	job, msg, content, err := e.rewriteCronBlock(raw, "ping", same)
+	if err != nil || msg != "" || job == nil || job.Name != "ping" || job.Enabled {
+		t.Fatalf("unexpected: job=%+v msg=%q err=%v", job, msg, err)
+	}
+	if content != normalizeCrontab(raw) {
+		t.Errorf("no-op edit must reproduce the crontab verbatim\n got: %q\nwant: %q", content, normalizeCrontab(raw))
+	}
+
+	// (2) pause backup → only its command line gains the prefix.
+	_, msg, content, err = e.rewriteCronBlock(raw, "backup", func(desc, line string, _ bool) (string, string, bool) { return desc, line, false })
+	if err != nil || msg != "" {
+		t.Fatalf("msg=%q err=%v", msg, err)
+	}
+	want := "MAILTO=x\n# agent-job: backup\n# agent-owner: u1\n# agent-desc: nightly\n#DISABLED# @daily /bin/backup\n# agent-job: ping\n#DISABLED# */5 * * * * curl http://x\n"
+	if content != want {
+		t.Errorf("pause rewrite wrong\n got: %q\nwant: %q", content, want)
+	}
+	if content == normalizeCrontab(raw) {
+		t.Errorf("a real edit must differ from the input, otherwise the write would be skipped")
+	}
+
+	// Refusals: unknown name lists the existing jobs; foreign owner in multi-user mode.
+	if _, msg, _, _ := e.rewriteCronBlock(raw, "nope", same); !strings.Contains(msg, "backup, ping") {
+		t.Errorf("unknown job should list existing names, got %q", msg)
+	}
+	mu := &ToolExecutor{multiUser: true, sessionID: "u2-ws"}
+	if _, msg, _, _ := mu.rewriteCronBlock(raw, "backup", same); !strings.Contains(msg, "another user") {
+		t.Errorf("foreign job should be refused, got %q", msg)
 	}
 }

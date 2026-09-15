@@ -936,8 +936,14 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			return wrap(e.cronAdd(ctx, str("name"), str("schedule"), str("command"), str("description")))
 		case "remove":
 			return wrap(e.cronRemove(ctx, str("name")))
+		case "update":
+			return wrap(e.cronUpdate(ctx, str("name"), str("schedule"), str("command"), str("description")))
+		case "enable", "resume":
+			return wrap(e.cronSetEnabled(ctx, str("name"), true))
+		case "disable", "pause":
+			return wrap(e.cronSetEnabled(ctx, str("name"), false))
 		default:
-			return "", nil, fmt.Errorf("cron: unknown action %q (expected list, add, remove)", str("action"))
+			return "", nil, fmt.Errorf("cron: unknown action %q (expected list, add, update, remove, enable, disable)", str("action"))
 		}
 	case "cron_list": // legacy alias
 		return wrap(e.cronList(ctx))
@@ -1036,8 +1042,10 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			return wrap(e.listSecrets(ctx))
 		case "delete":
 			return wrap(e.deleteSecret(ctx, str("name")))
+		case "share":
+			return wrap(e.shareSecret(ctx, str("name"), str("group")))
 		default:
-			return "", nil, fmt.Errorf("secrets: unknown action %q (expected list, delete)", str("action"))
+			return "", nil, fmt.Errorf("secrets: unknown action %q (expected list, delete, share)", str("action"))
 		}
 	case "mcp":
 		switch str("action") {
@@ -1047,8 +1055,12 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			return wrap(e.mcpAddServer(ctx, str("name"), str("url"), str("auth_secret")))
 		case "remove":
 			return wrap(e.mcpRemoveServer(ctx, str("name")))
+		case "enable":
+			return wrap(e.mcpSetEnabled(ctx, str("name"), true))
+		case "disable":
+			return wrap(e.mcpSetEnabled(ctx, str("name"), false))
 		default:
-			return "", nil, fmt.Errorf("mcp: unknown action %q (expected list, add, remove)", str("action"))
+			return "", nil, fmt.Errorf("mcp: unknown action %q (expected list, add, remove, enable, disable)", str("action"))
 		}
 	case "list_secrets": // legacy alias
 		return wrap(e.listSecrets(ctx))

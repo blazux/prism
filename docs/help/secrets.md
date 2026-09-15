@@ -42,7 +42,12 @@ The dialog exists in the dashboard chat only. Over Telegram, Webex, webhooks or
 cron, `request_secret` is unavailable — add the secret in Settings first.
 
 You can also ask the agent to *list* your secrets (names only, never values,
-group ones included) or to delete one.
+group ones included), to delete a personal one, or to **share one with your
+group** ("share my `github_token` with the team"): the same move as the ⇧
+button — the value goes from your scope to the group's without ever passing
+through the chat, and your personal copy is removed. To create a group secret
+from scratch, ask for it as usual (the secure dialog stores it as yours), then
+ask to share it.
 
 ## How scripts get them
 Every `exec_command` and custom tool run receives your usable secrets as

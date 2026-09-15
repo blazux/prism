@@ -166,7 +166,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "agent_settings",
-			Description: "Read or change the user's own agent settings (Settings → Agent): name, max_iterations per turn, thinking (extended reasoning on/off), lean_prompt (frontier-model profile) and reasoning_effort. Use it when the user asks to rename you, raise the turn budget after an 'iteration limit reached', turn reasoning off for speed, or pick a reasoning effort. Changes apply from the next message. A group's shared agent is configured by a group admin in the admin console instead.",
+			Description: "Read or change the user's own agent settings (Settings → Agent): name, personality (the default one, every workspace), max_iterations per turn, thinking (extended reasoning on/off), lean_prompt (frontier-model profile) and reasoning_effort. Use it when the user asks to rename you, raise the turn budget after an 'iteration limit reached', turn reasoning off for speed, or pick a reasoning effort. Changes apply from the next message. A group's shared agent is configured by a group admin in the admin console instead.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -175,6 +175,7 @@ var ToolDefinitions = []ollama.Tool{
 					"max_iterations":   {Type: "integer", Description: "set: model calls allowed per turn (10–500; 0 = default 75)"},
 					"thinking":         {Type: "boolean", Description: "set: extended reasoning on/off"},
 					"lean_prompt":      {Type: "boolean", Description: "set: lean system-prompt profile for frontier models"},
+					"personality":      {Type: "string", Description: "set: the default personality applied in every workspace (Settings → Agent → Default personality); empty = none. For one workspace only, use update_system_prompt instead"},
 					"reasoning_effort": {Type: "string", Description: "set: One of: low, medium, high, xhigh, default (the model decides which it accepts — Qwen3.8-Flash-Next: low/medium/xhigh; gpt-oss: low/medium/high)", Enum: []string{"low", "medium", "high", "xhigh", "default"}},
 				},
 				Required: []string{"action"},
@@ -189,12 +190,15 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":  {Type: "string", Description: "One of: list, add, remove", Enum: []string{"list", "add", "remove"}},
-					"name":    {Type: "string", Description: "add: a short label, e.g. 'github-ci'"},
-					"prompt":  {Type: "string", Description: "add: instructions wrapping the payload, e.g. 'Summarize this CI event in one line: {{content}}'"},
-					"deliver": {Type: "string", Description: "add: One of: telegram, slack, webex — push the answer there too", Enum: []string{"telegram", "slack", "webex"}},
-					"respond": {Type: "boolean", Description: "add: reply synchronously with your answer in the HTTP response (off by default)"},
-					"id":      {Type: "string", Description: "remove: the webhook id from list"},
+					"action":  {Type: "string", Description: "One of: list, add, update, remove — update edits an existing webhook in place (URL and token unchanged)", Enum: []string{"list", "add", "update", "remove"}},
+					"name":    {Type: "string", Description: "add/update: a short label, e.g. 'github-ci'"},
+					"prompt":  {Type: "string", Description: "add/update: instructions wrapping the payload, e.g. 'Summarize this CI event in one line: {{content}}'"},
+					"deliver": {Type: "string", Description: "add/update: One of: telegram, slack, webex — push the answer there too (empty = none)", Enum: []string{"telegram", "slack", "webex"}},
+					"respond": {Type: "boolean", Description: "add/update: reply synchronously with your answer in the HTTP response (off by default)"},
+					"session": {Type: "string", Description: "add/update: chat session (workspace) the turn runs in — empty = a dedicated webhook-<id> session so the feed never lands in a human chat"},
+					"model":   {Type: "string", Description: "add/update: model for this webhook's turns — empty = deployment default"},
+					"enabled": {Type: "boolean", Description: "update: false pauses the webhook (callers get 403), true resumes it"},
+					"id":      {Type: "string", Description: "update/remove: the webhook id from list"},
 				},
 				Required: []string{"action"},
 			},
@@ -332,7 +336,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":      {Type: "string", Description: "One of: list, add, remove", Enum: []string{"list", "add", "remove"}},
+					"action":      {Type: "string", Description: "One of: list, add, update, remove, enable, disable — disable pauses a job (kept, not run), enable resumes it; update changes schedule/command/description of an existing job in place", Enum: []string{"list", "add", "update", "remove", "enable", "disable"}},
 					"name":        {Type: "string", Description: "Unique job identifier (e.g. 'daily-backup', 'sync-feed')"},
 					"schedule":    {Type: "string", Description: "Cron expression (e.g. '*/5 * * * *' every 5 min, '0 9 * * 1-5' weekdays 9am)"},
 					"command":     {Type: "string", Description: "Shell command to run (e.g. 'python3 /workspace/myscript.py >> /workspace/logs/myscript.log 2>&1')"},
@@ -414,8 +418,8 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action": {Type: "string", Description: "add, list, update, or delete", Enum: []string{"add", "list", "update", "delete"}},
-					"id":     {Type: "string", Description: "Note id from list, used for update/delete. Opaque: a number for local notes, or a file path like \"folder/Note.md\" when a Markdown vault is connected."},
+					"action": {Type: "string", Description: "add, list, update, delete, share (publish one of your notes to your group, read-only for members; re-sharing updates the copy) or unshare (remove a group-shared note — its id from the group-shared list; author or group admin only)", Enum: []string{"add", "list", "update", "delete", "share", "unshare"}},
+					"id":     {Type: "string", Description: "Note id from list, used for update/delete/share/unshare. Opaque: a number for local notes, or a file path like \"folder/Note.md\" when a Markdown vault is connected."},
 					"title":  {Type: "string", Description: "Note title"},
 					"body":   {Type: "string", Description: "Note body (Markdown)"},
 					"tags":   {Type: "string", Description: "Comma-separated tags"},
@@ -451,20 +455,23 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":    {Type: "string", Description: "config, list, read, search, send, or reply", Enum: []string{"config", "list", "read", "search", "send", "reply"}},
-					"to":        {Type: "string", Description: "Recipient (send); defaults to original sender for reply"},
-					"subject":   {Type: "string", Description: "Subject (send)"},
-					"body":      {Type: "string", Description: "Message body (send/reply)"},
-					"uid":       {Type: "integer", Description: "Message UID from list/search (read/reply)"},
-					"query":     {Type: "string", Description: "Search query (search)"},
-					"limit":     {Type: "integer", Description: "Max messages to return (list/search, default 20)"},
-					"imap_host": {Type: "string", Description: "IMAP server host (config)"},
-					"imap_port": {Type: "integer", Description: "IMAP port (config, default 993)"},
-					"smtp_host": {Type: "string", Description: "SMTP server host (config)"},
-					"smtp_port": {Type: "integer", Description: "SMTP port (config, default 587; 465 = implicit TLS)"},
-					"user":      {Type: "string", Description: "Account username/email (config)"},
-					"password":  {Type: "string", Description: "Account password — stored encrypted (config)"},
-					"from":      {Type: "string", Description: "From address if different from user (config)"},
+					"action":     {Type: "string", Description: "config, list, read, search, send, or reply", Enum: []string{"config", "list", "read", "search", "send", "reply"}},
+					"to":         {Type: "string", Description: "Recipient (send); defaults to original sender for reply"},
+					"subject":    {Type: "string", Description: "Subject (send)"},
+					"body":       {Type: "string", Description: "Message body (send/reply)"},
+					"uid":        {Type: "integer", Description: "Message UID from list/search (read/reply)"},
+					"query":      {Type: "string", Description: "Search query (search)"},
+					"limit":      {Type: "integer", Description: "Max messages to return (list/search, default 20)"},
+					"imap_host":  {Type: "string", Description: "IMAP server host (config)"},
+					"imap_port":  {Type: "integer", Description: "IMAP port (config, default 993)"},
+					"smtp_host":  {Type: "string", Description: "SMTP server host (config)"},
+					"smtp_port":  {Type: "integer", Description: "SMTP port (config, default 587; 465 = implicit TLS)"},
+					"user":       {Type: "string", Description: "Account username/email (config)"},
+					"password":   {Type: "string", Description: "Account password — stored encrypted (config)"},
+					"from":       {Type: "string", Description: "From address if different from user (config)"},
+					"security":   {Type: "string", Description: "config: One of: ssl, starttls — ssl = implicit TLS (993/465, the default), starttls = plain port upgraded (143/587, e.g. ProtonMail Bridge)", Enum: []string{"ssl", "starttls"}},
+					"insecure":   {Type: "boolean", Description: "config: accept a self-signed certificate (ProtonMail Bridge needs it)"},
+					"list_limit": {Type: "integer", Description: "config: how many messages the Email app loads in the inbox (1–500, default 60)"},
 				},
 				Required: []string{"action"},
 			},
@@ -698,12 +705,13 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "secrets",
-			Description: "Manage stored secrets. Actions: list (names only, never values; includes your group's shared secrets), delete (name). To create a secret, use request_secret.",
+			Description: "Manage stored secrets. Actions: list (names only, never values; includes your group's shared secrets), delete (name — personal secrets only), share (name + optional group — MOVES a personal secret to the group so every member's agent can use it; the value never transits the chat). To create a secret, use request_secret.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action": {Type: "string", Description: "One of: list, delete", Enum: []string{"list", "delete"}},
-					"name":   {Type: "string", Description: "Secret name (delete action)"},
+					"action": {Type: "string", Description: "One of: list, delete, share", Enum: []string{"list", "delete", "share"}},
+					"name":   {Type: "string", Description: "Secret name (delete / share)"},
+					"group":  {Type: "string", Description: "share: group name — only needed when the user is in several groups"},
 				},
 				Required: []string{"action"},
 			},
@@ -717,7 +725,7 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":      {Type: "string", Description: "One of: list, add, remove", Enum: []string{"list", "add", "remove"}},
+					"action":      {Type: "string", Description: "One of: list, add, remove, enable, disable", Enum: []string{"list", "add", "remove", "enable", "disable"}},
 					"name":        {Type: "string", Description: "Short server name (e.g. 'github', 'linear')"},
 					"url":         {Type: "string", Description: "HTTP endpoint of the MCP server (add action)"},
 					"auth_secret": {Type: "string", Description: "Optional: name of a stored secret used as Bearer token (add action)"},

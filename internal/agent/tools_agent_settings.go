@@ -12,7 +12,9 @@ import (
 // agentSettings reads/writes the caller's Settings › Agent values (name, turn
 // budget, extended reasoning, lean prompt, reasoning effort) — the same keys
 // handleAgentLimits/handleAgentName write, re-read by loadProfile on the next
-// turn. A group's shared agent has its own copy in room_config, edited by a
+// turn. personality is the DEFAULT one (KeyPersonalityBase, every workspace);
+// update_system_prompt edits the current workspace's layer instead. A group's
+// shared agent has its own copy in room_config, edited by a
 // group admin in the admin console, so it is refused here rather than silently
 // writing to the wrong place.
 func (e *ToolExecutor) agentSettings(ctx context.Context, action string, args map[string]any) (string, error) {
@@ -38,8 +40,12 @@ func (e *ToolExecutor) agentSettings(ctx context.Context, action string, args ma
 		if effort == "" {
 			effort = "server default"
 		}
-		return fmt.Sprintf("Agent settings (Settings → Agent):\n- name: %s\n- max_iterations: %s\n- thinking (extended reasoning): %v\n- lean_prompt: %v\n- reasoning_effort: %s\nChanges take effect from the next message.",
-			name, iter, get(memory.KeyAgentThinking) != "off", get(memory.KeyAgentLeanPrompt) == "on", effort)
+		persona := "(none)"
+		if p := get(memory.KeyPersonalityBase); p != "" {
+			persona = fmt.Sprintf("set (%d chars): %s", len(p), truncate(p, 200))
+		}
+		return fmt.Sprintf("Agent settings (Settings → Agent):\n- name: %s\n- personality (default, every workspace): %s\n- max_iterations: %s\n- thinking (extended reasoning): %v\n- lean_prompt: %v\n- reasoning_effort: %s\nChanges take effect from the next message.",
+			name, persona, iter, get(memory.KeyAgentThinking) != "off", get(memory.KeyAgentLeanPrompt) == "on", effort)
 	}
 	if action != "set" {
 		return render(), nil
@@ -54,6 +60,11 @@ func (e *ToolExecutor) agentSettings(ctx context.Context, action string, args ma
 	}
 	if v, ok := args["name"].(string); ok {
 		if err := set("name", memory.KeyAgentName, strings.TrimSpace(v)); err != nil {
+			return "", err
+		}
+	}
+	if v, ok := args["personality"].(string); ok {
+		if err := set("personality", memory.KeyPersonalityBase, strings.TrimSpace(v)); err != nil {
 			return "", err
 		}
 	}
@@ -94,7 +105,7 @@ func (e *ToolExecutor) agentSettings(ctx context.Context, action string, args ma
 		}
 	}
 	if len(changed) == 0 {
-		return "Nothing to change: pass at least one of name, max_iterations, thinking, lean_prompt, reasoning_effort.", nil
+		return "Nothing to change: pass at least one of name, personality, max_iterations, thinking, lean_prompt, reasoning_effort.", nil
 	}
 	return "Updated " + strings.Join(changed, ", ") + ".\n" + render(), nil
 }

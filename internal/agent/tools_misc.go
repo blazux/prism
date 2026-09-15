@@ -222,6 +222,47 @@ func (e *ToolExecutor) deleteSecret(ctx context.Context, name string) (string, e
 	return fmt.Sprintf("Secret '%s' deleted.", name), nil
 }
 
+// shareSecret moves a personal secret into a group's scope — the same
+// server-side MOVE as Settings → Secrets' ⇧ button (a copy would let a stale
+// personal value shadow the group's after a rotation). The value never enters
+// the model's context: it is read from the store and written back to the store.
+func (e *ToolExecutor) shareSecret(ctx context.Context, name, group string) (string, error) {
+	us := e.userStore()
+	if us == nil {
+		return "Secret store not available (Postgres not configured).", nil
+	}
+	if name == "" {
+		return "", fmt.Errorf("name is required (from secrets action=list)")
+	}
+	if !e.multiUser || len(e.sharingGroups) == 0 {
+		return "Sharing is only available inside a multi-user group — nothing was shared.", nil
+	}
+	if IsReservedSecretName(name) {
+		return fmt.Sprintf("Refused: %q is a reserved integration credential and cannot be shared with a group.", name), nil
+	}
+	g, err := e.resolveShareGroup(group)
+	if err != nil {
+		return "", err
+	}
+	val, exists, err := us.GetSecret(ctx, name)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err), nil
+	}
+	if !exists {
+		listing, _ := e.listSecrets(ctx)
+		return fmt.Sprintf("No personal secret named %q — nothing was shared (a group secret is already shared).\n%s", name, listing), nil
+	}
+	if err := e.memStore.ConfigScope(fmt.Sprintf("g%d", g.GroupID)).SetSecret(ctx, name, val); err != nil {
+		return fmt.Sprintf("Error: %v", err), nil
+	}
+	if err := us.DeleteSecret(ctx, name); err != nil {
+		// The group copy is written; report the leftover honestly instead of
+		// pretending the move completed.
+		return fmt.Sprintf("Shared %q with group %s, but the personal copy could not be deleted: %v", name, g.GroupName, err), nil
+	}
+	return fmt.Sprintf("Secret %q moved to group %s: every member's agent can use it now (env var %s); your personal copy was removed. Group secrets are deleted by a group admin from the admin console.", name, g.GroupName, toEnvVarName(name)), nil
+}
+
 // ─── MCP tools ────────────────────────────────────────────────────────────────
 
 // mcpPersonalBlockedMsg is returned when MULTI_USER retires personal MCP
@@ -332,6 +373,53 @@ func (e *ToolExecutor) mcpRemoveServer(ctx context.Context, name string) (string
 		e.onMCPReload()
 	}
 	return fmt.Sprintf("MCP server '%s' removed.", name), nil
+}
+
+// mcpSetEnabled pauses or resumes a server without forgetting it — the toggle
+// on the server card in Settings → MCP / the admin console. Same write scope
+// and denials as add/remove.
+func (e *ToolExecutor) mcpSetEnabled(ctx context.Context, name string, enabled bool) (string, error) {
+	scope, denial := e.mcpWriteScope()
+	if denial != "" {
+		return denial, nil
+	}
+	if e.mcpMgr == nil {
+		return "MCP not available (Postgres required)", nil
+	}
+	if name == "" {
+		return "", fmt.Errorf("name is required (from mcp action=list)")
+	}
+	servers, err := e.mcpMgr.List(ctx, scope)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err), nil
+	}
+	var names []string
+	for _, s := range servers {
+		names = append(names, s.Name)
+		if strings.EqualFold(s.Name, name) || s.ID == name {
+			state := "disabled"
+			if enabled {
+				state = "enabled"
+			}
+			if s.Enabled == enabled {
+				return fmt.Sprintf("MCP server '%s' is already %s — nothing changed.", s.Name, state), nil
+			}
+			if err := e.mcpMgr.SetEnabled(ctx, scope, s.ID, enabled); err != nil {
+				return fmt.Sprintf("Error: %v", err), nil
+			}
+			if e.onMCPReload != nil {
+				e.onMCPReload()
+			}
+			if enabled {
+				return fmt.Sprintf("MCP server '%s' enabled — its tools are available again.", s.Name), nil
+			}
+			return fmt.Sprintf("MCP server '%s' disabled — its tools are withdrawn until it is enabled again (its configuration is kept).", s.Name), nil
+		}
+	}
+	if len(names) == 0 {
+		return fmt.Sprintf("No MCP server named %q — none are configured, nothing changed.", name), nil
+	}
+	return fmt.Sprintf("No MCP server named %q — nothing changed. Configured servers: %s", name, strings.Join(names, ", ")), nil
 }
 
 func (e *ToolExecutor) mcpListServers(ctx context.Context) (string, error) {

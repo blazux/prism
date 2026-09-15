@@ -33,20 +33,30 @@ all your tools, not a search box.
 Much of Prism can be set up from chat rather than from Settings. The agent can
 itself:
 - create **knowledge collections** and index workspace files into them;
-- schedule and remove **cron jobs**;
+- schedule, edit, pause and remove **cron jobs**;
 - build, update and share **widgets and dashboards**;
 - save **skills** (procedures it learned) and register **custom tools**
   (Python scripts);
 - store **secrets** — it asks for the value through a secure dialog, the value
-  never goes through the chat;
-- set up your **email account** (IMAP/SMTP host, user, password);
-- add or remove **MCP servers** (personal mode only);
+  never goes through the chat — and share one with your group;
+- set up your **email account** (IMAP/SMTP host, user, password, STARTTLS and
+  self-signed options — ProtonMail Bridge included);
+- connect **CalDAV** and **Todoist**, point notes at a **Markdown vault**, and
+  choose the **active source** for calendar and tasks (credentials go through
+  the secure dialog, never through the chat);
+- connect or unlink your **Telegram bot**;
+- create, edit, pause and remove **webhooks**;
+- change its own **settings**: name, personality, turn budget, extended
+  reasoning, lean prompt, reasoning effort;
+- add, remove, disable or enable **MCP servers** (personal mode only);
+- share a **note** with your group;
 - roll a workspace file back to an earlier version.
 
-What stays in Settings or the Admin console: channel tokens (Telegram, Slack,
-Webex), OAuth accounts (Google, Microsoft, CalDAV, Todoist), the notes vault,
-and — in a shared deployment — everything group-scoped (group knowledge base,
-MCP servers, tool policy, the shared agent).
+What stays in Settings or the Admin console: anything that needs a browser
+sign-in (Google and Microsoft OAuth), the deployment-wide channels (Slack,
+Webex), and — in a shared deployment — everything group-scoped (group knowledge
+base, MCP servers, tool policy, the shared agent). The agent still knows these
+pages and can walk you through them step by step.
 
 ## Channels
 - **Web**: the main dashboard chat.

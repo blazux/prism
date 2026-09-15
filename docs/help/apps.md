@@ -25,12 +25,20 @@ To-do items with priority and due date. Backed by Prism's database, **CalDAV**
 (Apple Reminders / Nextcloud Tasks), or **Todoist** when connected. The agent can
 add tasks, mark them done, and break a big task into subtasks.
 
+The same app lists the agent's **scheduled jobs** (cron) under your to-dos, each
+with a pause toggle, an edit form and a delete button. The agent does the same
+from chat: "pause the morning digest", "resume it", "run the backup at 3am
+instead", "delete the feed sync".
+
 ## Notes
 Markdown notes with `[[wikilinks]]`, a split editor with an AI toolbar, and an
 "Add to knowledge" button that pushes a note into a RAG collection. Notes live in
 Prism's database by default, or in an **Obsidian / Logseq vault** (a folder of
 `.md` files) when connected in Settings → Notes. The agent can create and edit
-notes for you.
+notes for you. In a shared deployment a note can be **shared with your group**
+(read-only for members) from the note's share button or by asking the agent
+("share my onboarding note with the team"); sharing it again refreshes the copy,
+and the author or a group admin can unshare it.
 
 ## Terminal
 A real interactive terminal into the agent's workspace container. Toggle it with

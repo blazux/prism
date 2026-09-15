@@ -241,12 +241,19 @@ Same binary, one flag. Decide which you are before the first `up`:
 
 **Accounts.** The first signup becomes the global admin, auto-approved. Every later signup lands as *pending* and can't log in until an admin approves it in **Admin → Users** (admins are notified). No open registration by surprise.
 
+> **This is a trusted-team feature, not a public SaaS tenancy.** The people
+> getting accounts are colleagues: they sent the CV, survived the interview and
+> signed the contract. Prism gives an agent real power over its environment on
+> purpose, so the default is that approved members may use that power too. Tool
+> policies are there for teams that want a tighter arrangement, not because an
+> account is assumed to be an attacker in a fake moustache.
+
 **Groups** are the unit of collaboration. The global admin creates them and adds members; a member can be promoted to *group admin* for that group. Each group has:
 
 - a **shared agent** — its own name, avatar, model, system prompt and turn budget, configured by a group admin. It lives in the group's **Room**, a chat where members talk to each other and to the agent by @mention, and it's the one that answers on the group's **Webex** bot;
 - a **knowledge base** and **MCP servers** shared with the whole group — the shared agent and every member's personal agent can use them, members see them read-only;
 - **group secrets** for those MCP servers and tools;
-- a **tool policy**: the global admin sets the ceiling for every tool (*open to members* / *admins only* / *disabled*), a group admin can only tighten it for their group. Everything is open by default — it's a trusted deployment, not a hostile one.
+- a **tool policy**: the global admin sets the ceiling for every tool (*open to members* / *admins only* / *disabled*), a group admin can only tighten it for their group. Everything is open by default — this is a cockpit for a trusted crew, not a sandbox for strangers on the internet.
 
 **What stays personal.** Each member keeps their own agent, personality, workspaces, chat history, and their own integrations. Group things are additive: your agent gains the group's knowledge base, it doesn't lose yours.
 

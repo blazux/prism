@@ -29,7 +29,9 @@ of individual ones.
 ## Asking the agent
 The agent can list the connected servers and their tools ("which MCP servers
 do I have?"). In personal mode it can also **add** one ("connect the MCP
-server at http://host:3000 as github") and **remove** one. For a server that
+server at http://host:3000 as github"), **remove** one, and **disable** or
+**enable** one without forgetting it ("switch the github server off for now").
+For a server that
 needs a token, it first asks you for it through the secure secret dialog, then
 uses that secret as the bearer token — an integration credential (email
 password, bot tokens…) is refused for this purpose.

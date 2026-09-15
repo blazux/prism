@@ -75,4 +75,6 @@ is the fastest way to tell whether a sender is actually reaching you.
 
 ## Asking the agent
 
-"Create a webhook for my CI, summarize each event in one line, and send it to Telegram" creates it; the agent replies with the URL and the token to give the calling system (sent as an `X-Prism-Token` header, a Bearer token, or `?token=`). "List my webhooks" and "remove the CI webhook" work the same way. Webhooks created this way run in their own session, so a feed never lands in your chat.
+"Create a webhook for my CI, summarize each event in one line, and send it to Telegram" creates it; the agent replies with the URL and the token to give the calling system (sent as an `X-Prism-Token` header, a Bearer token, or `?token=`). "List my webhooks" and "remove the CI webhook" work the same way. Webhooks created this way run in their own session unless you name one ("run it in my Ops workspace"), and you can pin a model to a hook the same way.
+
+Editing is in place: "change the CI webhook's prompt to…", "pause the Grafana webhook" (callers then get 403 until you resume it), "make it synchronous", "move it to my default workspace". The URL and token never change on an edit, so the calling system keeps working.

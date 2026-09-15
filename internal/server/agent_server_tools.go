@@ -81,6 +81,9 @@ func (s *Server) webhookTool(ms *memory.Store, scope string) agent.ServerTool {
 			sess = "its own webhook-" + w.ID + " session"
 		}
 		extra := ""
+		if w.Model != "" {
+			extra += ", model=" + w.Model
+		}
 		if w.Deliver != "" {
 			extra += ", deliver=" + w.Deliver
 		}
@@ -88,6 +91,44 @@ func (s *Server) webhookTool(ms *memory.Store, scope string) agent.ServerTool {
 			extra += ", responds synchronously"
 		}
 		return fmt.Sprintf("- %s (id %s, %s, runs in %s%s)\n  POST <your Prism URL>%s%s  with header X-Prism-Token: %s", w.Name, w.ID, state, sess, extra, webhookIncomingPrefix, w.ID, w.Token)
+	}
+	// namespaceSession stores a session id the way /ws and /api/chat resolve it
+	// for this user (u<id>-<board>), so a webhook can only be pointed at one of
+	// the caller's own boards — mirrors Server.sessionFor for the REST handler.
+	namespaceSession := func(id string) (string, error) {
+		id = sanitizeSessionID(id)
+		if id == "" || scope == "global" {
+			return id, nil
+		}
+		mine := scope + "-"
+		if strings.HasPrefix(id, mine) {
+			return id, nil
+		}
+		if userPrefixRe.MatchString(id) {
+			return "", fmt.Errorf("session %q belongs to another user — name one of your own workspaces", id)
+		}
+		return mine + id, nil
+	}
+	own := func(ctx context.Context, id string) (memory.WebhookRow, string, error) {
+		if id == "" {
+			return memory.WebhookRow{}, "", fmt.Errorf("id is required (from webhook action=list)")
+		}
+		existing, ok, err := ms.WebhookByID(ctx, id)
+		if err != nil {
+			return memory.WebhookRow{}, "", err
+		}
+		if !ok || existing.Scope != scope {
+			rows, _ := ms.WebhookList(ctx, scope)
+			var names []string
+			for _, w := range rows {
+				names = append(names, fmt.Sprintf("%s (id %s)", w.Name, w.ID))
+			}
+			if len(names) == 0 {
+				return memory.WebhookRow{}, fmt.Sprintf("No webhook with id %q — you have none.", id), nil
+			}
+			return memory.WebhookRow{}, fmt.Sprintf("No webhook with id %q — nothing changed. Yours: %s", id, strings.Join(names, ", ")), nil
+		}
+		return existing, "", nil
 	}
 	return func(ctx context.Context, args map[string]any) (string, error) {
 		switch argStr(args, "action") {
@@ -116,38 +157,78 @@ func (s *Server) webhookTool(ms *memory.Store, scope string) agent.ServerTool {
 			default:
 				return "", fmt.Errorf("deliver must be empty, telegram, slack or webex (got %q)", deliver)
 			}
+			session, err := namespaceSession(argStr(args, "session"))
+			if err != nil {
+				return "", err
+			}
 			row := memory.WebhookRow{
 				ID: newWebhookID(), Scope: scope, Name: name, Token: newWebhookTok(),
-				Prompt: argStr(args, "prompt"), Deliver: deliver, Respond: argBool(args, "respond"), Enabled: true,
+				Prompt: argStr(args, "prompt"), SessionID: session, Model: argStr(args, "model"),
+				Deliver: deliver, Respond: argBool(args, "respond"), Enabled: true,
 			}
 			if err := ms.WebhookUpsert(ctx, row); err != nil {
 				return "", err
 			}
 			return "Webhook created. Give the caller this URL and token; it appears under Settings → Webhooks.\n" + describe(row) +
 				"\nThe request body becomes the message ({{content}} in the prompt is replaced by it, otherwise it is appended).", nil
-		case "remove":
-			id := argStr(args, "id")
-			if id == "" {
-				return "", fmt.Errorf("id is required (from webhook action=list)")
+		case "update":
+			// Edit in place: same id, URL and token, so the caller keeps working.
+			// Only the arguments actually passed change (an explicit empty
+			// session/model/deliver clears that field).
+			row, msg, err := own(ctx, argStr(args, "id"))
+			if err != nil || msg != "" {
+				return msg, err
 			}
-			existing, ok, _ := ms.WebhookByID(ctx, id)
-			if !ok || existing.Scope != scope {
-				rows, _ := ms.WebhookList(ctx, scope)
-				var names []string
-				for _, w := range rows {
-					names = append(names, fmt.Sprintf("%s (id %s)", w.Name, w.ID))
-				}
-				if len(names) == 0 {
-					return fmt.Sprintf("No webhook with id %q — you have none.", id), nil
-				}
-				return fmt.Sprintf("No webhook with id %q — nothing removed. Yours: %s", id, strings.Join(names, ", ")), nil
+			changed := 0
+			if _, ok := args["name"]; ok && argStr(args, "name") != "" {
+				row.Name, changed = argStr(args, "name"), changed+1
 			}
-			if err := ms.WebhookDelete(ctx, scope, id); err != nil {
+			if _, ok := args["prompt"]; ok {
+				row.Prompt, changed = argStr(args, "prompt"), changed+1
+			}
+			if _, ok := args["deliver"]; ok {
+				d := argStr(args, "deliver")
+				switch d {
+				case "", "telegram", "slack", "webex":
+				default:
+					return "", fmt.Errorf("deliver must be empty, telegram, slack or webex (got %q)", d)
+				}
+				row.Deliver, changed = d, changed+1
+			}
+			if v, ok := args["respond"].(bool); ok {
+				row.Respond, changed = v, changed+1
+			}
+			if v, ok := args["enabled"].(bool); ok {
+				row.Enabled, changed = v, changed+1
+			}
+			if _, ok := args["session"]; ok {
+				sid, err := namespaceSession(argStr(args, "session"))
+				if err != nil {
+					return "", err
+				}
+				row.SessionID, changed = sid, changed+1
+			}
+			if _, ok := args["model"]; ok {
+				row.Model, changed = argStr(args, "model"), changed+1
+			}
+			if changed == 0 {
+				return "Nothing to change: pass at least one of name, prompt, deliver, respond, enabled, session, model.", nil
+			}
+			if err := ms.WebhookUpsert(ctx, row); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("Webhook %q (id %s) removed.", existing.Name, id), nil
+			return "Webhook updated (same URL and token).\n" + describe(row), nil
+		case "remove":
+			existing, msg, err := own(ctx, argStr(args, "id"))
+			if err != nil || msg != "" {
+				return strings.Replace(msg, "nothing changed", "nothing removed", 1), err
+			}
+			if err := ms.WebhookDelete(ctx, scope, existing.ID); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Webhook %q (id %s) removed.", existing.Name, existing.ID), nil
 		default:
-			return "", fmt.Errorf("webhook: unknown action %q (expected list, add, remove)", argStr(args, "action"))
+			return "", fmt.Errorf("webhook: unknown action %q (expected list, add, update, remove)", argStr(args, "action"))
 		}
 	}
 }

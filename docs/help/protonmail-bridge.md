@@ -67,7 +67,9 @@ the internet. The Bridge itself listens on 1143/1025 and the container re-expose
 those as the standard 143/25 — which is why the ports look unremarkable.
 
 Prism stores the password AES-encrypted under the `email_password` secret, so both
-the UI and the agent use the same account.
+the UI and the agent use the same account. The agent can do this setup for you
+("configure my email for ProtonMail Bridge"): it sets the hosts, ports, STARTTLS
+and the self-signed exception itself, and only asks you for the Bridge password.
 
 ## When it doesn't work
 

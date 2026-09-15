@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -167,9 +168,75 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr, title, body,
 			msg += fmt.Sprintf(" Deleted content (recreate it with 'add' if this was a mistake) — title: %q, tags: %q, body:\n%s", item.Title, item.Tags, item.Body)
 		}
 		return msg, nil
+	case "share":
+		// Same as the Notes app's share button: publish one of the user's own
+		// notes to the group (read-only for members); re-sharing updates the copy.
+		gscope, gid, msg := e.noteGroupScope()
+		if msg != "" {
+			return msg, nil
+		}
+		if strings.TrimSpace(idStr) == "" {
+			return "", fmt.Errorf("share requires the id of one of your notes (from a fresh list)")
+		}
+		item, hint := noteLookup(ctx, prov, idStr)
+		if item == nil {
+			if hint == "" {
+				hint = "it is not in your notes"
+			}
+			return "", fmt.Errorf("note %q not found. %s", idStr, hint)
+		}
+		originID, _ := strconv.ParseInt(strings.TrimSpace(item.ID), 10, 64) // 0 for a vault note: shared as a plain copy
+		newID, err := e.memStore.ShareNote(ctx, gscope, e.actingUserID, originID, item.Title, item.Body, item.Tags)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Note %q shared with group %s as group note %d (read-only for members; share it again after editing to refresh the copy, note action=unshare id=%d removes it).", item.Title, e.groupNameFor(gid), newID, newID), nil
+	case "unshare":
+		gscope, gid, msg := e.noteGroupScope()
+		if msg != "" {
+			return msg, nil
+		}
+		id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
+		if err != nil || id == 0 {
+			return "", fmt.Errorf("unshare requires the numeric id of a group-shared note (from the group-shared part of a fresh list)")
+		}
+		n, err := e.memStore.GetNote(ctx, gscope, id)
+		if err != nil {
+			return "", fmt.Errorf("no note %d is shared with your group — nothing removed (unshare takes the id from the group-shared list, not a personal note id)", id)
+		}
+		if n.OwnerID != e.actingUserID && !e.adminOfSharingGroup(gid) {
+			return fmt.Sprintf("Group note %d (%q) was shared by someone else — only its author or a group admin can unshare it. Nothing removed.", id, n.Title), nil
+		}
+		if err := e.memStore.DeleteNote(ctx, gscope, id); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Group note %d (%q) unshared — the author's personal note is untouched.", id, n.Title), nil
 	default:
-		return "", fmt.Errorf("note: unknown action %q (add, list, update, delete)", action)
+		return "", fmt.Errorf("note: unknown action %q (add, list, update, delete, share, unshare)", action)
 	}
+}
+
+// noteGroupScope is the "g<id>" scope group-shared notes live under, or a
+// message when this session has no group to share with.
+func (e *ToolExecutor) noteGroupScope() (scope string, groupID int64, msg string) {
+	gscope := e.ragScope
+	if gscope == "" || gscope == e.pimSessionScope() || !strings.HasPrefix(gscope, "g") {
+		return "", 0, "Sharing is only available inside a multi-user group — nothing was shared."
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(gscope, "g"), 10, 64)
+	if err != nil {
+		return "", 0, "Sharing is only available inside a multi-user group — nothing was shared."
+	}
+	return gscope, id, ""
+}
+
+func (e *ToolExecutor) groupNameFor(id int64) string {
+	for _, g := range e.sharingGroups {
+		if g.GroupID == id && g.GroupName != "" {
+			return g.GroupName
+		}
+	}
+	return fmt.Sprintf("g%d", id)
 }
 
 // taskLookup is noteLookup for tasks (includes completed tasks, so re-marking

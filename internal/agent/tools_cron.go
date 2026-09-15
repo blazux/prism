@@ -41,6 +41,15 @@ type CronJob struct {
 	Enabled                              bool
 }
 
+// ownsCronJob says whether this session may edit or remove a job. Multi-user:
+// only the owner (u<id>, or the shared-agent session). Single-user: every
+// workspace belongs to the same person, so any job is theirs — the Tasks app
+// and /api/cron already let them pause or delete any job, and the tool used to
+// refuse the same request as "belongs to another user", which was false.
+func (e *ToolExecutor) ownsCronJob(j CronJob) bool {
+	return !e.multiUser || j.Owner == "" || j.Owner == e.cronOwner()
+}
+
 // cronDisabledPrefix marks a paused job's command line so it's preserved
 // (and can be re-enabled) but not run by cron. Mirrors
 // server/handlers_cron.go's cronDisabledPrefix constant — can't share it
@@ -120,12 +129,20 @@ func (e *ToolExecutor) cronList(ctx context.Context) (string, error) {
 	owner := e.cronOwner()
 	var out []string
 	for _, j := range ParseCronJobs(raw) {
-		if j.Owner != "" && j.Owner != owner {
+		if !e.ownsCronJob(j) {
 			continue // another user's job
 		}
 		line := fmt.Sprintf("• %s — %s  %s", j.Name, j.Schedule, displayCommand(j.Command))
 		if j.Desc != "" {
 			line += "  (" + j.Desc + ")"
+		}
+		if j.Owner != "" && j.Owner != owner {
+			line += "  [workspace: " + j.Owner + "]" // single-user: another board's job, still yours
+		}
+		if !j.Enabled {
+			// A paused job looks identical otherwise — and the agent would
+			// "fix" a widget that is only waiting for cron action=enable.
+			line += "  [PAUSED — not running; cron action=enable resumes it]"
 		}
 		out = append(out, line)
 	}
@@ -162,29 +179,7 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 		return "", fmt.Errorf("a job named %q already exists; remove it first with cron action=remove", name)
 	}
 
-	session := e.sessionID
-	if session == "" {
-		session = "default"
-	}
-	// Resolve $PRISM_URL and $PRISM_SESSION in the command now so cron doesn't
-	// expand them in an empty environment (shell expands $VAR before inline
-	// VAR=value assignments take effect).
-	command = strings.ReplaceAll(command, "$PRISM_URL", "http://prism-server:8080")
-	command = strings.ReplaceAll(command, "${PRISM_URL}", "http://prism-server:8080")
-	command = strings.ReplaceAll(command, "$PRISM_SESSION", session)
-	command = strings.ReplaceAll(command, "${PRISM_SESSION}", session)
-	command = strings.ReplaceAll(command, "$PRISM_TOKEN", e.prismToken)
-	command = strings.ReplaceAll(command, "${PRISM_TOKEN}", e.prismToken)
-
-	// Also export them as real env vars for the command's own process — every
-	// other execution path (exec_command, register_tool) gives a script
-	// os.environ['PRISM_TOKEN'] etc. directly; a cron job is not a special case
-	// a model needs to remember differently, it should just work the same way.
-	// The text substitution above is still needed separately: a shell expands
-	// $VAR in a command's own arguments before this same line's prefix
-	// assignments take effect, so it wouldn't see them otherwise.
-	command = fmt.Sprintf("PRISM_URL=%s PRISM_SESSION=%s PRISM_TOKEN=%s %s",
-		shQuote("http://prism-server:8080"), shQuote(session), shQuote(e.prismToken), command)
+	command = e.cronCommandLine(command)
 
 	// Tag the job with its owner so each user only manages their own tasks.
 	entry := marker + "\n# agent-owner: " + e.cronOwner()
@@ -207,15 +202,223 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 	return fmt.Sprintf("Scheduled %q: %s %s", name, schedule, displayCommand(command)), nil
 }
 
+// cronCommandLine turns the model's command into the line cron runs: PRISM_*
+// resolved in the text and exported as env vars. Shared by add and update so an
+// edited command gets exactly the environment a new one does.
+func (e *ToolExecutor) cronCommandLine(command string) string {
+	session := e.sessionID
+	if session == "" {
+		session = "default"
+	}
+	// Resolve $PRISM_URL and $PRISM_SESSION in the command now so cron doesn't
+	// expand them in an empty environment (shell expands $VAR before inline
+	// VAR=value assignments take effect).
+	command = strings.ReplaceAll(command, "$PRISM_URL", "http://prism-server:8080")
+	command = strings.ReplaceAll(command, "${PRISM_URL}", "http://prism-server:8080")
+	command = strings.ReplaceAll(command, "$PRISM_SESSION", session)
+	command = strings.ReplaceAll(command, "${PRISM_SESSION}", session)
+	command = strings.ReplaceAll(command, "$PRISM_TOKEN", e.prismToken)
+	command = strings.ReplaceAll(command, "${PRISM_TOKEN}", e.prismToken)
+
+	// Also export them as real env vars for the command's own process — every
+	// other execution path (exec_command, register_tool) gives a script
+	// os.environ['PRISM_TOKEN'] etc. directly; a cron job is not a special case
+	// a model needs to remember differently, it should just work the same way.
+	// The text substitution above is still needed separately: a shell expands
+	// $VAR in a command's own arguments before this same line's prefix
+	// assignments take effect, so it wouldn't see them otherwise.
+	return fmt.Sprintf("PRISM_URL=%s PRISM_SESSION=%s PRISM_TOKEN=%s %s",
+		shQuote("http://prism-server:8080"), shQuote(session), shQuote(e.prismToken), command)
+}
+
+// cronEditBlock rewrites one agent-managed job block in place, preserving its
+// position, owner line and everything else in the crontab. edit receives the
+// current description and the bare job line (schedule + command, disabled
+// prefix stripped) and returns their replacements plus whether the job is
+// enabled. Owner check as in cronRemove: a job that belongs to another user is
+// never touched. Mirrors server/handlers_cron.go's mutateJob.
+func (e *ToolExecutor) cronEditBlock(ctx context.Context, name string, edit func(desc, line string, enabled bool) (string, string, bool)) (*CronJob, string, error) {
+	current, err := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)
+	if err != nil {
+		// A failed exec is NOT an empty crontab: reporting "no cron jobs yet"
+		// here made the model conclude the job did not exist.
+		return nil, "", fmt.Errorf("cannot read crontab: %w", err)
+	}
+	if strings.TrimSpace(current) == "" {
+		return nil, "no cron jobs yet", nil
+	}
+	target, msg, content, err := e.rewriteCronBlock(current, name, edit)
+	if err != nil || msg != "" {
+		return nil, msg, err
+	}
+	if content == normalizeCrontab(current) {
+		return target, "", nil // nothing changed (e.g. pausing an already-paused job): don't rewrite
+	}
+	if err := e.writeCrontab(ctx, content); err != nil {
+		return nil, fmt.Sprintf("cron update failed: %v", err), nil
+	}
+	return target, "", nil
+}
+
+// normalizeCrontab puts raw crontab text in the exact shape rewriteCronBlock
+// produces (single trailing newline), so an unchanged rewrite compares equal.
+func normalizeCrontab(raw string) string {
+	return strings.TrimRight(raw, "\n") + "\n"
+}
+
+// rewriteCronBlock is the pure part of cronEditBlock: given the current crontab
+// text it returns the target job, a user-facing refusal message (job missing or
+// not owned), and the full new crontab content. No I/O, so it is unit-testable.
+func (e *ToolExecutor) rewriteCronBlock(current, name string, edit func(desc, line string, enabled bool) (string, string, bool)) (*CronJob, string, string, error) {
+	jobs := ParseCronJobs(current)
+	var target *CronJob
+	for _, j := range jobs {
+		if j.Name == name {
+			jj := j
+			target = &jj
+			break
+		}
+	}
+	if target == nil {
+		names := make([]string, len(jobs))
+		for i, j := range jobs {
+			names[i] = j.Name
+		}
+		return nil, fmt.Sprintf("no job named %q found. Existing jobs: %s — use one of these names verbatim", name, strings.Join(names, ", ")), "", nil
+	}
+	if !e.ownsCronJob(*target) {
+		return nil, fmt.Sprintf("job %q belongs to another user; you can only change your own scheduled tasks", name), "", nil
+	}
+
+	marker := "# agent-job: " + name
+	lines := strings.Split(current, "\n")
+	var out []string
+	for i := 0; i < len(lines); i++ {
+		l := strings.TrimRight(lines[i], "\r")
+		if strings.TrimSpace(l) != marker {
+			out = append(out, l)
+			continue
+		}
+		out = append(out, l)
+		// The block: optional owner/desc lines, then the job line.
+		var ownerLine string
+		desc := ""
+		j := i + 1
+		for j < len(lines) {
+			t := strings.TrimSpace(strings.TrimRight(lines[j], "\r"))
+			if strings.HasPrefix(t, "# agent-owner:") {
+				ownerLine = t
+				j++
+				continue
+			}
+			if strings.HasPrefix(t, "# agent-desc:") {
+				desc = strings.TrimSpace(strings.TrimPrefix(t, "# agent-desc:"))
+				j++
+				continue
+			}
+			break
+		}
+		if j >= len(lines) {
+			return nil, "", "", fmt.Errorf("job %q has no command line in the crontab", name)
+		}
+		bare := strings.TrimPrefix(strings.TrimSpace(strings.TrimRight(lines[j], "\r")), cronDisabledPrefix)
+		newDesc, newLine, enabled := edit(desc, bare, target.Enabled)
+		if ownerLine != "" {
+			out = append(out, ownerLine)
+		}
+		if newDesc != "" {
+			out = append(out, "# agent-desc: "+newDesc)
+		}
+		if !enabled {
+			newLine = cronDisabledPrefix + newLine
+		}
+		out = append(out, newLine)
+		i = j
+	}
+	return target, "", normalizeCrontab(strings.Join(out, "\n")), nil
+}
+
+// cronSetEnabled pauses (kept, not run) or resumes a job — the toggle on the
+// job's card in the Tasks app.
+func (e *ToolExecutor) cronSetEnabled(ctx context.Context, name string, enabled bool) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("name is required (from cron action=list)")
+	}
+	already := false
+	job, msg, err := e.cronEditBlock(ctx, name, func(desc, line string, was bool) (string, string, bool) {
+		already = was == enabled
+		return desc, line, enabled
+	})
+	if err != nil || msg != "" {
+		return msg, err
+	}
+	state := map[bool]string{true: "enabled", false: "paused"}[enabled]
+	if already {
+		return fmt.Sprintf("Job %q is already %s — nothing changed.", job.Name, state), nil
+	}
+	if enabled {
+		return fmt.Sprintf("Job %q resumed: %s %s", job.Name, job.Schedule, displayCommand(job.Command)), nil
+	}
+	return fmt.Sprintf("Job %q paused — kept in the list, not run until cron action=enable.", job.Name), nil
+}
+
+// cronUpdate changes an existing job's schedule, command and/or description in
+// place (same name, same position, enabled state kept) — instead of the
+// remove-and-recreate dance, which lost the description and the paused state.
+func (e *ToolExecutor) cronUpdate(ctx context.Context, name, schedule, command, description string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("name is required (from cron action=list)")
+	}
+	if schedule == "" && command == "" && description == "" {
+		return "", fmt.Errorf("update needs at least one of schedule, command, description")
+	}
+	for k, v := range map[string]string{"schedule": schedule, "command": command} {
+		if strings.ContainsAny(v, "\n\r") {
+			return "", fmt.Errorf("%s must not contain newlines", k)
+		}
+	}
+	if schedule != "" {
+		if err := validateCronSchedule(schedule); err != nil {
+			return "", err
+		}
+	}
+	description = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(description, "\n", " "), "\r", " "))
+	var newSchedule, newCommand string
+	job, msg, err := e.cronEditBlock(ctx, name, func(desc, line string, enabled bool) (string, string, bool) {
+		curSchedule, curCommand := splitCronSchedule(line)
+		newSchedule, newCommand = curSchedule, curCommand
+		if schedule != "" {
+			newSchedule = strings.TrimSpace(schedule)
+		}
+		if command != "" {
+			newCommand = e.cronCommandLine(command)
+		}
+		if description != "" {
+			desc = description
+		}
+		return desc, newSchedule + " " + newCommand, enabled
+	})
+	if err != nil || msg != "" {
+		return msg, err
+	}
+	state := ""
+	if !job.Enabled {
+		state = " (still paused)"
+	}
+	return fmt.Sprintf("Updated job %q%s: %s %s", job.Name, state, newSchedule, displayCommand(newCommand)), nil
+}
+
 func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, error) {
 	current, err := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)
-	if err != nil || strings.TrimSpace(current) == "" {
+	if err != nil {
+		return "", fmt.Errorf("cannot read crontab: %w", err)
+	}
+	if strings.TrimSpace(current) == "" {
 		return "no cron jobs to remove", nil
 	}
 
 	// Authorize: the job must exist and belong to this user (legacy owner-less
 	// jobs stay removable by anyone).
-	owner := e.cronOwner()
 	jobs := ParseCronJobs(current)
 	var target *CronJob
 	for _, j := range jobs {
@@ -232,7 +435,7 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 		}
 		return fmt.Sprintf("no job named %q found. Existing jobs: %s — use one of these names verbatim", name, strings.Join(names, ", ")), nil
 	}
-	if target.Owner != "" && target.Owner != owner {
+	if !e.ownsCronJob(*target) {
 		return fmt.Sprintf("job %q belongs to another user; you can only remove your own scheduled tasks", name), nil
 	}
 

@@ -20,6 +20,11 @@ type emailStoredConfig struct {
 	From     string `json:"from"`
 	Security string `json:"security,omitempty"` // "" / "ssl" | "starttls"
 	Insecure bool   `json:"insecure,omitempty"` // accept self-signed cert (Proton Bridge)
+	// ListLimit is the Email app's inbox page size (Settings → Email). The agent
+	// never reads it, but it must round-trip through this struct: a config
+	// action re-marshals the whole record, and a missing field here silently
+	// reset the user's choice to the default.
+	ListLimit int `json:"list_limit,omitempty"`
 }
 
 const emailConfigKey = "email_config"
@@ -90,17 +95,33 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		if v := str("from"); v != "" {
 			sc.From = v
 		}
-		if v := str("security"); v != "" {
+		if v := strings.ToLower(strings.TrimSpace(str("security"))); v != "" {
+			if v != "ssl" && v != "starttls" {
+				return "", fmt.Errorf("security must be ssl or starttls (got %q)", v)
+			}
 			sc.Security = v
 		}
 		if v, ok := args["insecure"].(bool); ok {
 			sc.Insecure = v
 		}
+		if v := num("list_limit"); v != 0 {
+			if v < 1 || v > 500 {
+				return "", fmt.Errorf("list_limit must be between 1 and 500 (got %d)", v)
+			}
+			sc.ListLimit = v
+		}
 		if err := e.saveEmailConfig(ctx, sc, str("password")); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Email configured (imap=%s smtp=%s user=%s). Password %s.",
-			sc.IMAPHost, sc.SMTPHost, sc.User,
+		sec := sc.Security
+		if sec == "" {
+			sec = "ssl"
+		}
+		if sc.Insecure {
+			sec += ", self-signed accepted"
+		}
+		return fmt.Sprintf("Email configured (imap=%s smtp=%s user=%s security=%s). Password %s.",
+			sc.IMAPHost, sc.SMTPHost, sc.User, sec,
 			map[bool]string{true: "stored", false: "unchanged"}[str("password") != ""]), nil
 
 	case "list", "inbox", "":
