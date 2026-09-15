@@ -19,6 +19,13 @@ type Item struct {
 	Priority  string     `json:"priority"`
 	DueAt     *time.Time `json:"dueAt,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
+	// Cancelled is a task that was called off rather than finished: it holds no
+	// commitment, and must not be counted as something still to do. Recurring
+	// marks one occurrence of a repeating task, or a series the server would not
+	// expand. Only the CalDAV provider fills these in, so "not Cancelled" must
+	// not be read as "live" for another source.
+	Cancelled bool `json:"cancelled,omitempty"`
+	Recurring bool `json:"recurring,omitempty"`
 }
 
 type Provider interface {

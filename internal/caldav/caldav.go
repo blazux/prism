@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -151,6 +152,58 @@ func ObjectPath(calPath, uid string) string {
 		calPath += "/"
 	}
 	return calPath + uid + ".ics"
+}
+
+// ── Recurring occurrences ─────────────────────────────────────────────────────
+//
+// A calendar object holds one component per stored item, but a repeating item
+// is several: the master plus the occurrences that override it, or, when the
+// server expands the series, one component per instance. They all share the
+// object href, so an id has to say which one it means — and a mutation aimed at
+// a single occurrence has to be refused, because the href designates them all.
+
+// OccurrenceSep separates an object href from the RECURRENCE-ID of one
+// instance: "/cal/weekly.ics#20260302T090000Z".
+const OccurrenceSep = "#"
+
+// occurrenceKeyRe is the exact shape CompactUTC produces. Requiring it means an
+// href that genuinely contains "#" is still addressed whole, unless what
+// follows its last "#" happens to look like a UTC timestamp.
+var occurrenceKeyRe = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
+
+func CompactUTC(t time.Time) string { return t.UTC().Format("20060102T150405Z") }
+
+// RecurrenceKey identifies the instance an overriding component replaces, or ""
+// when the component is not one. An unparsable RECURRENCE-ID still marks it as
+// an instance: its own start distinguishes it just as well.
+func RecurrenceKey(comp *ical.Component, start time.Time) string {
+	if comp == nil || comp.Props.Get(ical.PropRecurrenceID) == nil {
+		return ""
+	}
+	if t, err := comp.Props.DateTime(ical.PropRecurrenceID, time.UTC); err == nil && !t.IsZero() {
+		return CompactUTC(t)
+	}
+	return CompactUTC(start)
+}
+
+// SplitOccurrenceID separates the object href from the occurrence key. Only the
+// last separator counts, and the suffix must have the exact CompactUTC shape.
+func SplitOccurrenceID(id string) (objectPath, occurrence string) {
+	i := strings.LastIndex(id, OccurrenceSep)
+	if i <= 0 || !occurrenceKeyRe.MatchString(id[i+1:]) {
+		return id, ""
+	}
+	return id[:i], id[i+1:]
+}
+
+// ErrSingleOccurrence refuses to touch one instance of a repeating item.
+// Deleting it would remove the object, so the whole series; changing it would
+// mean writing an EXDATE or an override component. Refusing out loud beats
+// destroying a series on the user's real calendar without saying so.
+func ErrSingleOccurrence(verb string) error {
+	return fmt.Errorf("this is a single occurrence of a repeating item and cannot be %sd on its own; "+
+		"use the id without its %q suffix to %s the whole series, or change this one occurrence in your calendar app",
+		verb, OccurrenceSep+"<date>", verb)
 }
 
 // ObjectIn checks that id addresses ONE object inside collection, and returns

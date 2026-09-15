@@ -1,6 +1,7 @@
 package calendar
 
 import (
+	"prism/internal/caldav"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestEveryComponentOfAnObjectIsRead(t *testing.T) {
 	if !moved.Recurring {
 		t.Error("moved occurrence not flagged as recurring")
 	}
-	if moved.ID != "/cal/weekly-1.ics"+occurrenceSep+"20260302T090000Z" {
+	if moved.ID != "/cal/weekly-1.ics"+caldav.OccurrenceSep+"20260302T090000Z" {
 		t.Errorf("occurrence id %q does not carry its RECURRENCE-ID", moved.ID)
 	}
 	if got := moved.StartAt.UTC().Format(time.RFC3339); got != "2026-03-02T14:00:00Z" {
@@ -98,7 +99,7 @@ END:VCALENDAR
 		t.Fatalf("got %d instances", len(items))
 	}
 	for _, it := range items {
-		if _, occ := splitOccurrenceID(it.ID); occ == "" {
+		if _, occ := caldav.SplitOccurrenceID(it.ID); occ == "" {
 			t.Errorf("instance %q is addressable as the whole object", it.ID)
 		}
 		if !it.Recurring {
@@ -149,7 +150,7 @@ func TestSplitOccurrenceID(t *testing.T) {
 		"/cal/a.ics#not-a-date":            "",
 		"#20260302T090000Z":                "", // no object path
 	} {
-		p, occ := splitOccurrenceID(id)
+		p, occ := caldav.SplitOccurrenceID(id)
 		if occ != want {
 			t.Errorf("%q: occurrence %q, want %q", id, occ, want)
 		}
@@ -163,7 +164,7 @@ func TestSplitOccurrenceID(t *testing.T) {
 // with no connection is enough to prove nothing reaches the server.
 func TestMutatingOneOccurrenceIsRefused(t *testing.T) {
 	p := &CalDAVProvider{}
-	id := "/cal/weekly-1.ics" + occurrenceSep + "20260302T090000Z"
+	id := "/cal/weekly-1.ics" + caldav.OccurrenceSep + "20260302T090000Z"
 	err := p.Delete(t.Context(), id)
 	if err == nil || !strings.Contains(err.Error(), "single occurrence") {
 		t.Fatalf("delete: %v", err)

@@ -3,7 +3,6 @@ package calendar
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -16,17 +15,6 @@ import (
 type CalDAVProvider struct{ cfg caldav.Config }
 
 func (p *CalDAVProvider) Kind() string { return "caldav" }
-
-// occurrenceSep separates an object href from the RECURRENCE-ID of ONE instance
-// of a recurring series: "/cal/weekly.ics#20260302T090000Z". A plain href
-// addresses the whole object, a suffixed id addresses a single occurrence —
-// and mutating one is refused, see errSingleOccurrence.
-const occurrenceSep = "#"
-
-// occurrenceKeyRe is the exact shape produced by compactUTC. Requiring it means
-// an href that genuinely contains "#" is still addressed whole, unless what
-// follows its last "#" happens to look like a UTC timestamp.
-var occurrenceKeyRe = regexp.MustCompile(`^\d{8}T\d{6}Z$`)
 
 func (p *CalDAVProvider) List(ctx context.Context, from, to *time.Time) ([]Item, error) {
 	conn, err := p.cfg.Connect(ctx)
@@ -115,52 +103,17 @@ func itemsFromEvents(objectPath string, modTime time.Time, evs []ical.Event) []I
 		// Address a single instance by its RECURRENCE-ID so no mutation can be
 		// aimed at it: the href it shares with its siblings designates the
 		// whole object.
-		occ := recurrenceKey(ev, st)
+		occ := caldav.RecurrenceKey(ev.Component, st)
 		if occ == "" && len(evs) > 1 && !identified {
-			occ = compactUTC(st)
+			occ = caldav.CompactUTC(st)
 		}
 		if occ != "" {
-			it.ID = objectPath + occurrenceSep + occ
+			it.ID = objectPath + caldav.OccurrenceSep + occ
 			it.Recurring = true
 		}
 		out = append(out, it)
 	}
 	return out
-}
-
-// recurrenceKey identifies the instance an overriding component replaces. An
-// unparsable RECURRENCE-ID still marks the component as an instance: fall back
-// to its own start, which distinguishes it just as well.
-func recurrenceKey(ev ical.Event, start time.Time) string {
-	if ev.Props.Get(ical.PropRecurrenceID) == nil {
-		return ""
-	}
-	if t, err := ev.Props.DateTime(ical.PropRecurrenceID, time.UTC); err == nil && !t.IsZero() {
-		return compactUTC(t)
-	}
-	return compactUTC(start)
-}
-
-func compactUTC(t time.Time) string { return t.UTC().Format("20060102T150405Z") }
-
-// splitOccurrenceID separates the object href from the occurrence key. Only the
-// last separator counts, and the suffix must have the exact compactUTC shape.
-func splitOccurrenceID(id string) (objectPath, occurrence string) {
-	i := strings.LastIndex(id, occurrenceSep)
-	if i <= 0 || !occurrenceKeyRe.MatchString(id[i+1:]) {
-		return id, ""
-	}
-	return id[:i], id[i+1:]
-}
-
-// errSingleOccurrence refuses to touch one instance of a series. Deleting it
-// would remove the object, so the whole series; editing it would mean writing
-// an EXDATE or an override component. Refusing out loud beats destroying a
-// series on the user's real calendar without saying so.
-func errSingleOccurrence(verb string) error {
-	return fmt.Errorf("this is a single occurrence of a recurring event and cannot be %sd on its own; "+
-		"use the id without its \"%s<date>\" suffix to %s the whole series, or change this one occurrence in your calendar app",
-		verb, occurrenceSep, verb)
 }
 
 func (p *CalDAVProvider) Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time) (string, error) {
@@ -199,9 +152,9 @@ func (p *CalDAVProvider) Add(ctx context.Context, title, description, location s
 // this used to do — silently dropped the recurrence rule, every overridden
 // occurrence, the attendees and the alarms. A weekly meeting became a one-off.
 func (p *CalDAVProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time) error {
-	objectPath, occurrence := splitOccurrenceID(id)
+	objectPath, occurrence := caldav.SplitOccurrenceID(id)
 	if occurrence != "" {
-		return errSingleOccurrence("edit")
+		return caldav.ErrSingleOccurrence("edit")
 	}
 	conn, err := p.cfg.Connect(ctx)
 	if err != nil {
@@ -269,9 +222,9 @@ func setOrDelete(props ical.Props, name, value string) {
 }
 
 func (p *CalDAVProvider) Delete(ctx context.Context, id string) error {
-	objectPath, occurrence := splitOccurrenceID(id)
+	objectPath, occurrence := caldav.SplitOccurrenceID(id)
 	if occurrence != "" {
-		return errSingleOccurrence("delete")
+		return caldav.ErrSingleOccurrence("delete")
 	}
 	conn, err := p.cfg.Connect(ctx)
 	if err != nil {
