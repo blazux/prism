@@ -4,6 +4,7 @@
 
 # Local dev overrides
 docker-compose.override.yml
+docker-compose.mu.yml
 
 # Claude
 .CLAUDE.md
