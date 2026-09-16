@@ -645,14 +645,44 @@ func (s *Store) SetConfig(ctx context.Context, key, value string) error {
 	return err
 }
 
-// LoadHistory returns all messages for a session in insertion order.
+// LoadHistory returns all messages for a session in insertion order. Used by
+// the UI transcript, which wants the whole conversation. What gets REPLAYED to
+// the model is bounded instead — see LoadHistoryTail.
 func (s *Store) LoadHistory(ctx context.Context, sessionID string) ([]HistoryEntry, error) {
-	rows, err := s.pool.Query(ctx, `
+	return s.LoadHistoryTail(ctx, sessionID, 0)
+}
+
+// LoadHistoryTail returns the last `limit` messages of a session, in insertion
+// order; limit <= 0 means every message.
+//
+// A channel session (Webex space, in-app group room) is never reset: its
+// conversation_history grows for the lifetime of the deployment, and the agent
+// rebuilds itself from the DB on every single message. Reading the whole table
+// to then throw most of it away made each message slower than the last. The
+// tail is the only part that can still fit the model's context anyway.
+func (s *Store) LoadHistoryTail(ctx context.Context, sessionID string, limit int) ([]HistoryEntry, error) {
+	q := `
 		SELECT id, role, content, tool_calls, created_at
 		FROM conversation_history
 		WHERE session_id = $1
 		ORDER BY id ASC
-	`, sessionID)
+	`
+	args := []interface{}{sessionID}
+	if limit > 0 {
+		// Take the newest rows, then flip back to insertion order — the order
+		// the agent and the UI both replay.
+		q = `
+			SELECT id, role, content, tool_calls, created_at FROM (
+				SELECT id, role, content, tool_calls, created_at
+				FROM conversation_history
+				WHERE session_id = $1
+				ORDER BY id DESC
+				LIMIT $2
+			) t ORDER BY id ASC
+		`
+		args = append(args, limit)
+	}
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

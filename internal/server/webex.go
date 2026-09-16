@@ -82,6 +82,85 @@ type webexChannel struct {
 	// dies with the connection, like the in-app delta resets on restart.
 	missedMu sync.Mutex
 	missed   map[string][]missedWebexMsg
+
+	// queues holds one inbox per space, drained by one worker goroutine each.
+	// Agent turns used to run inline on the Mercury read loop, which meant a
+	// single connection — shared by every space of the group — read no further
+	// message until the current turn finished (up to the 10-minute cap). Two
+	// members talking in two different spaces queued behind each other for no
+	// reason. Per-space so ordering within a conversation is still guaranteed:
+	// a follow-up can never overtake the message it follows.
+	queueMu sync.Mutex
+	queues  map[string]chan webexMessage
+	// handle runs one message's turn; nil means handleMessage, which is what
+	// production always uses. The seam exists so the queueing and concurrency
+	// behaviour can be exercised without a Server and a live Webex API behind
+	// every message.
+	handle func(context.Context, webexMessage)
+}
+
+// webexRoomQueueCap bounds how many messages may wait behind a space's
+// in-flight turn. Past it the space is being talked at faster than the agent
+// can answer, and queueing further would only build a backlog of replies to
+// messages nobody is waiting on any more.
+const webexRoomQueueCap = 16
+
+// dispatch hands a message to its space's worker, starting one if needed.
+// Never blocks the Mercury read loop: a full inbox drops the message instead.
+func (c *webexChannel) dispatch(ctx context.Context, m webexMessage) {
+	// Our own posts come back over Mercury like any other. Dropped here rather
+	// than only in handleMessage so a reply can never take a queue slot from a
+	// real message (handleMessage keeps its own check as the loop guard).
+	if m.PersonID == c.botID {
+		return
+	}
+
+	c.queueMu.Lock()
+	if c.queues == nil {
+		c.queues = map[string]chan webexMessage{}
+	}
+	q, ok := c.queues[m.RoomID]
+	if !ok {
+		q = make(chan webexMessage, webexRoomQueueCap)
+		c.queues[m.RoomID] = q
+		go c.roomWorker(ctx, q)
+	}
+	c.queueMu.Unlock()
+
+	select {
+	case q <- m:
+	default:
+		log.Printf("[webex-g%d] room %s: inbox full (%d waiting), dropping message", c.groupID, m.RoomID, webexRoomQueueCap)
+		// Silence would look like the bot ignoring someone who addressed it.
+		// Room chatter is best-effort context anyway, so it goes quietly.
+		if c.addressesBot(m) {
+			c.postMarkdown(ctx, m.RoomID, "⏳ I'm still working through the previous messages in this space — please resend this one in a moment.")
+		}
+	}
+}
+
+// roomWorker runs one space's turns, one at a time, until the channel shuts
+// down. Outliving a reconnect is deliberate: the inbox and its worker belong to
+// the space, not to the socket.
+func (c *webexChannel) roomWorker(ctx context.Context, q chan webexMessage) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case m := <-q:
+			h := c.handle
+			if h == nil {
+				h = c.handleMessage
+			}
+			h(ctx, m)
+		}
+	}
+}
+
+// addressesBot reports whether a message is one the bot must answer: anything
+// in a 1:1 space, only an explicit @mention in a group space.
+func (c *webexChannel) addressesBot(m webexMessage) bool {
+	return m.RoomType != "group" || contains(m.MentionedPeople, c.botID)
 }
 
 type missedWebexMsg struct {
@@ -406,7 +485,7 @@ func (c *webexChannel) handleFrame(ctx context.Context, conn *websocket.Conn, to
 		log.Printf("[webex] fetch message: %v", err)
 		return
 	}
-	c.handleMessage(ctx, msg)
+	c.dispatch(ctx, msg)
 }
 
 // resolvePublicMessageID asks the conversation service (home-cluster URL taken
@@ -452,7 +531,7 @@ func (c *webexChannel) handleMessage(ctx context.Context, m webexMessage) {
 	// chatter (attributed + timestamped) for the next @mention's context
 	// instead of dropping it, so the agent knows the conversation it wasn't
 	// addressed in. Mirrors runRoomAgent's missed-messages delta.
-	if m.RoomType == "group" && !contains(m.MentionedPeople, c.botID) {
+	if !c.addressesBot(m) {
 		if txt := strings.TrimSpace(m.Text); txt != "" {
 			c.rememberMissed(m.RoomID, missedWebexMsg{at: sentAt, name: c.senderName(ctx, m), text: txt})
 		}

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -501,10 +502,36 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// channelContextCharBudget bounds how much conversation a channel agent (a
+// Webex space, an in-app group room) replays to the model on every message.
+//
+// Deliberately far below the dashboard's budget: a channel session is never
+// reset and rebuilds its agent per message, so it sits permanently at whatever
+// ceiling it is given — every message then pays a full prefill of that much
+// context, with no warm agent and no prompt cache to amortize it. That is what
+// made @mentioning the Webex bot take minutes in a busy space. A chat channel
+// trades recall for latency here: a short window, plus the compaction note that
+// summarizes what fell out of it. Override via CHANNEL_CONTEXT_CHAR_BUDGET (0
+// restores the deployment-wide budget).
+var channelContextCharBudget = func() int {
+	if v := os.Getenv("CHANNEL_CONTEXT_CHAR_BUDGET"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return 30_000
+}()
+
 // roomLimits maps a group's shared-agent budget onto the agent's turn limits.
 func roomLimits(cfg memory.RoomConfig) agent.Limits {
 	th, ln := cfg.AgentThinking, cfg.AgentLean
-	return agent.Limits{MaxIterations: cfg.AgentMaxIter, Thinking: &th, LeanPrompt: &ln, ReasoningEffort: cfg.AgentReasoning}
+	return agent.Limits{
+		MaxIterations:      cfg.AgentMaxIter,
+		Thinking:           &th,
+		LeanPrompt:         &ln,
+		ReasoningEffort:    cfg.AgentReasoning,
+		HistoryBudgetChars: channelContextCharBudget,
+	}
 }
 
 // ─── mention parsing ────────────────────────────────────────────────────────────

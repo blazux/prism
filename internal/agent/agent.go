@@ -67,6 +67,28 @@ var liveContextCharBudget = func() int {
 	return 150_000
 }()
 
+// historyReplayMaxMessages caps how many stored rows a fresh Agent replays from
+// conversation_history (see loadHistoryFromDB). A channel session (a Webex
+// space, an in-app group room) is never reset and rebuilds its Agent on EVERY
+// message, so an unbounded read meant each message paid for the entire history
+// of the space — a cost that only ever grows. The character budget below is
+// what actually decides how much reaches the model; this cap is what stops the
+// read itself, and the compaction pass that follows it, from scaling with the
+// age of the room. Override via HISTORY_REPLAY_MAX_MESSAGES.
+var historyReplayMaxMessages = func() int {
+	if v := os.Getenv("HISTORY_REPLAY_MAX_MESSAGES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 200
+}()
+
+// historyTruncatedNote stands in for the rows the replay cap left out. Honest
+// like the compaction note: the model is told the details are gone rather than
+// being left to assume it can see the whole conversation.
+const historyTruncatedNote = "[Older messages in this conversation were not replayed — only the most recent ones are in your context. If something from earlier matters, ask instead of guessing.]"
+
 // num_ctx now lives with the Ollama client (ollama.NumCtx), which both sets it
 // on requests and derives the history budget from it via ContextBudgetChars —
 // see effectiveHistoryBudget below.
@@ -144,6 +166,11 @@ type Limits struct {
 	// ("low"/"medium"/"high"/"xhigh"). "" = config / server default
 	// (OPENAI_REASONING_EFFORT).
 	ReasoningEffort string
+	// HistoryBudgetChars caps how much conversation is replayed to the model on
+	// every call, in characters. Only ever LOWERS the effective budget (see
+	// effectiveHistoryBudget) — a channel agent must not be able to ask for
+	// more context than the backend can take. 0 = deployment default.
+	HistoryBudgetChars int
 }
 
 const (
@@ -240,7 +267,7 @@ func (a *Agent) SetApprovalFns(needed func() bool, await func(context.Context, s
 	a.awaitApprovalFn = await
 }
 
-// voiceChannel is the phone surface (Vortex megazord: Vox → Cortex).
+// voiceChannel is the phone surface (Prism Vox → Prism).
 const voiceChannel = "voice"
 
 // SetRAGContextFn registers a callback that returns the RAG collections section
@@ -413,6 +440,27 @@ func (a *Agent) SetSession(sessionID, personality string) {
 	a.histMu.Unlock()
 }
 
+// clampHistoryTail trims a freshly loaded history tail down to maxRows, and
+// reports whether anything was dropped.
+//
+// The cut never lands mid-turn: a "tool" row whose parent assistant tool_calls
+// fell outside the window is a malformed sequence for the backends that
+// validate the pairing, and an assistant reply without the question it answers
+// is merely confusing. So the window is advanced to the first user row — the
+// same boundary rule compactLiveContextTo cuts on. A window holding no user row
+// at all is dropped entirely rather than replayed headless.
+func clampHistoryTail(entries []memory.HistoryEntry, maxRows int) ([]memory.HistoryEntry, bool) {
+	if maxRows <= 0 || len(entries) <= maxRows {
+		return entries, false
+	}
+	entries = entries[len(entries)-maxRows:]
+	cut := 0
+	for cut < len(entries) && entries[cut].Role != "user" {
+		cut++
+	}
+	return entries[cut:], true
+}
+
 // loadHistoryFromDB populates a.history from the DB on first call.
 func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 	a.histMu.Lock()
@@ -423,7 +471,11 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 	}
 	a.historyLoaded = true
 
-	entries, err := a.memStore.LoadHistory(ctx, a.sessionID)
+	// Read one row beyond the cap so a truncation is detectable, and only the
+	// tail — the head of a long-running space's history can never fit the
+	// model's context anyway. See historyReplayMaxMessages.
+	maxRows := historyReplayMaxMessages
+	entries, err := a.memStore.LoadHistoryTail(ctx, a.sessionID, maxRows+1)
 	if err != nil {
 		log.Printf("[agent] load history: %v", err)
 		return
@@ -435,12 +487,23 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 	// possibly over-budget) context than the one it was just working with.
 	lc := a.memStore.GetLiveCompaction(ctx, a.sessionID)
 	if lc != nil {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.ID >= lc.BeforeID {
+				kept = append(kept, e)
+			}
+		}
+		entries = kept
+	}
+	// Apply the cap to what's left once the compaction note has taken its share.
+	entries, truncated := clampHistoryTail(entries, maxRows)
+	if lc != nil {
 		a.history = append(a.history, ollama.Message{Role: "user", Content: lc.Summary})
 	}
+	if truncated {
+		a.history = append(a.history, ollama.Message{Role: "user", Content: historyTruncatedNote})
+	}
 	for _, e := range entries {
-		if lc != nil && e.ID < lc.BeforeID {
-			continue
-		}
 		content := e.Content
 		// Inject timestamp prefix on user messages only so the model can reason about time
 		// (not on assistant messages, to avoid the model mimicking the pattern in its responses)
@@ -456,10 +519,13 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 		}
 		a.history = append(a.history, msg)
 	}
-	if lc != nil {
-		log.Printf("[agent] loaded %d messages from DB (replayed live compaction note, rows before id %d covered by it)", len(a.history), lc.BeforeID)
-	} else {
-		log.Printf("[agent] loaded %d messages from DB", len(a.history))
+	switch {
+	case lc != nil:
+		log.Printf("[agent] session=%s loaded %d messages from DB (replayed live compaction note, rows before id %d covered by it, truncated=%v)", a.sessionID, len(a.history), lc.BeforeID, truncated)
+	case truncated:
+		log.Printf("[agent] session=%s loaded %d messages from DB (capped at the %d most recent rows)", a.sessionID, len(a.history), maxRows)
+	default:
+		log.Printf("[agent] session=%s loaded %d messages from DB", a.sessionID, len(a.history))
 	}
 }
 
@@ -479,12 +545,18 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 // is what keeps a long session's assembled prompt inside a small-context local
 // model without needlessly over-compacting a large-context backend.
 func (a *Agent) effectiveHistoryBudget() int {
+	budget := liveContextCharBudget
 	if a.ollama != nil {
-		if b := a.ollama.ContextBudgetChars(); b > 0 && b < liveContextCharBudget {
-			return b
+		if b := a.ollama.ContextBudgetChars(); b > 0 && b < budget {
+			budget = b
 		}
 	}
-	return liveContextCharBudget
+	// A caller-supplied budget only ever tightens: a chat channel wants a short
+	// window for latency, but it can't hand the backend more than it accepts.
+	if b := a.limitsOverride.HistoryBudgetChars; b > 0 && b < budget {
+		budget = b
+	}
+	return budget
 }
 
 func (a *Agent) compactLiveContextIfNeeded(ctx context.Context, events chan<- Event) {
@@ -1009,7 +1081,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		sb.WriteString(systemPromptActTurn)
 	}
 
-	// Channel layer (Vortex): the phone constrains the *form* of the answer, not
+	// Channel layer: the phone constrains the *form* of the answer, not
 	// who the agent is. Kept last so it wins over anything the personality says
 	// about formatting. Everything here is read aloud by a TTS.
 	if a.channel == voiceChannel {
