@@ -14,6 +14,8 @@ package server
 // adminTelephonyPane is the pane markup, inserted after Apps.
 const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Telephony</h2><div class="hint">This deployment is docked with a Prism Vox phone stack. The agent also answers the phone: a known caller (number on their profile) gets their own agent, an unknown one gets the switchboard configured here.</div>
 
+      <div class="hint" style="margin-top:10px">Everything here is stored by the phone stack itself — this page writes to it directly, so there is no second copy to keep in sync. <b>Placing calls and watching activity are not forms:</b> ask the agent ("appelle le plombier et prends rendez-vous", "quels appels sont en attente ?") or build a widget against <code>/api/vox/…</code>, which any admin session can reach.</div>
+
       <h2 style="margin-top:18px;font-size:15px">Voice &amp; greeting — every call</h2>
       <div class="hint">How the agent sounds, and the first thing it says when it picks up. This applies to <em>every</em> caller — known or not — so it sits above the switchboard, which only shapes what it says to strangers.</div>
       <div class="row" style="gap:12px;align-items:flex-end">
@@ -73,6 +75,17 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       <div id="tel-handling"></div>
       <div class="row"><button class="primary" onclick="saveHandling()">Save call handling</button><span id="tel-hmsg" class="hint" style="margin:0"></span></div>
 
+      <h2 style="margin-top:26px;font-size:15px">Switchboard tools (MCP)</h2>
+      <div class="hint">Extra tools for the <b>switchboard agent</b> — the one that answers unknown callers. Distinct from the group MCP servers in the MCP tab, which serve your members' agents: different agent, different list. Leave empty unless the switchboard needs to look something up beyond its knowledge base.</div>
+      <div id="tel-mcp">Loading…</div>
+      <div class="row" style="gap:6px;margin-top:8px">
+        <input id="tel-mcpname" placeholder="Name" style="width:150px">
+        <select id="tel-mcptype" style="width:90px"><option value="http">http</option><option value="sse">sse</option></select>
+        <input id="tel-mcpurl" placeholder="https://…/mcp/" style="flex:1">
+        <button onclick="addTelMCP()">Add</button>
+        <span id="tel-mcpmsg" class="hint" style="margin:0"></span>
+      </div>
+
       <h2 style="margin-top:26px;font-size:15px">SIP trunk</h2>
       <div class="hint" id="tel-sipstatus">Loading status…</div>
       <label>Registrar (host)</label><input id="sip-registrar" style="width:100%">
@@ -125,6 +138,7 @@ async function loadTelephony(){
  loadVoiceKB();
  loadTelDirectory();       // who can receive a transfer, and how
  loadOutContacts();        // who the agent can call by name
+ loadTelMCP();             // extra tools for the switchboard agent
  loadTelVoiceGreeting();   // voice list + clone controls (needs the TTS backend)
  loadPhoneCfg();           // greeting + phrases + dictionary + call handling
  const s=await jget('/api/vox/sip');
@@ -213,6 +227,7 @@ const TEL_PHRASES=[
 // ElevenLabs Scribe, which accepts no lexical biasing (the local Whisper that did is
 // gone). A rare confident mis-hearing on a short, context-free word is the price.
 const TEL_DICT=[
+ ['whisper_hotwords','Words to transcribe correctly','Heard, not spoken: biases transcription so it stops hearing "Shodan" as "je donne". Put people\'s names here above all — a name misheard is a transfer that fails.','in'],
  ['tts_spell_words','Always spell out','Read letter by letter, e.g. "IP" → "i pé".','in'],
  ['tts_spell_exceptions','Never spell out','Read as a word despite looking like an acronym, e.g. "OK".','in'],
 ];
@@ -288,6 +303,30 @@ async function addOutContact(){
 async function rmOutContact(id,name){
  if(!confirm('Remove '+name+' from the outbound directory? The agent will no longer be able to call them by name.'))return;
  await fetch('/api/vox/contacts/'+id,{method:'DELETE'});loadOutContacts();
+}
+
+// MCP servers belonging to the switchboard agent, stored in Vox. Same concept as
+// the group MCP tab, a different agent — the way the voice RAG scope is the same
+// concept as a group's collections.
+async function loadTelMCP(){
+ const box=$('tel-mcp');if(!box)return;
+ const d=await jget('/api/vox/mcp');const rows=Array.isArray(d)?d:((d&&d.items)||[]);
+ if(!rows.length){box.innerHTML='<div class="hint">None. The switchboard answers from its knowledge base alone.</div>';return;}
+ box.innerHTML='<table><tr><th>Name</th><th>Type</th><th>Endpoint</th><th></th></tr>'+rows.map(m=>
+  '<tr><td>'+esc(m.name)+'</td><td>'+esc(m.type||'')+'</td><td style="word-break:break-all">'+esc(m.url||(m.command||[]).join(' '))+'</td>'+
+  '<td style="text-align:right"><button onclick="rmTelMCP('+m.id+',\''+esc(m.name).replace(/'/g,"\\'")+'\')">Remove</button></td></tr>').join('')+'</table>';
+}
+async function addTelMCP(){
+ const m=$('tel-mcpmsg');const name=$('tel-mcpname').value.trim();const url=$('tel-mcpurl').value.trim();
+ if(!name||!url){m.textContent='Name and endpoint required';return;}
+ m.textContent='Saving…';
+ const r=await fetch('/api/vox/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,type:$('tel-mcptype').value,url})});
+ if(r.ok){$('tel-mcpname').value='';$('tel-mcpurl').value='';m.textContent='✓ Added';setTimeout(()=>m.textContent='',1500);loadTelMCP();}
+ else m.textContent='Failed ('+r.status+')';
+}
+async function rmTelMCP(id,name){
+ if(!confirm('Remove '+name+' from the switchboard\'s tools?'))return;
+ await fetch('/api/vox/mcp/'+id,{method:'DELETE'});loadTelMCP();
 }
 
 const savePhrases =()=>saveCfgFields(TEL_PHRASES,'tel-pmsg');
