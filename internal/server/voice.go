@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 
 	"prism/internal/agent"
@@ -459,4 +460,81 @@ func (s *Server) voiceInternalPersonality(ctx context.Context, u *memory.User) s
 		return p
 	}
 	return defaultInternalVoicePersonality
+}
+
+// ── The switchboard's knowledge base, read from Vox ─────────────────────────────
+
+// voiceSearchLimit caps how much a single lookup returns. A caller cannot skim,
+// and the agent has to turn whatever comes back into one or two spoken sentences,
+// so a wider net just costs time on a line where silence is expensive.
+const voiceSearchLimit = 5
+
+// handleVoiceSearch (POST /api/voice/search {query}) searches the switchboard's
+// reserved knowledge base and returns the matching passages.
+//
+// It exists because the switchboard now runs on Vox's own brain, while the
+// knowledge stays here — configured once, in one place, by an admin who should
+// not have to think about which stack stores what.
+//
+// The request carries TEXT, never a vector, and that is not negotiable: the query
+// has to be embedded by the same model that indexed the corpus. A vector produced
+// by Vox's own embedder would describe a different space and come back with
+// confident nonsense.
+func (s *Server) handleVoiceSearch(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil || !s.isAdminUser(r.Context(), u) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var b struct {
+		Query string `json:"query"`
+	}
+	if json.NewDecoder(r.Body).Decode(&b) != nil || strings.TrimSpace(b.Query) == "" {
+		writeErr(w, http.StatusBadRequest, "query required")
+		return
+	}
+	if s.ragStore == nil || s.ragEmbedder == nil {
+		writeErr(w, http.StatusServiceUnavailable, "no knowledge base on this deployment")
+		return
+	}
+
+	embedding, err := s.ragEmbedder.Embed(r.Context(), strings.TrimSpace(b.Query))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "could not embed the question: "+err.Error())
+		return
+	}
+
+	// The switchboard reads one reserved scope and nothing else. Searching every
+	// collection in it (rather than asking the caller to name one) is what makes
+	// "one knowledge base, configured once" true from the agent's side.
+	cols, err := s.ragStore.ListCollections(r.Context(), voiceGuestScope)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type hit struct {
+		Content  string  `json:"content"`
+		Source   string  `json:"source"`
+		Score    float64 `json:"score"`
+		pageless bool
+	}
+	var hits []hit
+	for _, c := range cols {
+		res, err := s.ragStore.Search(r.Context(), c.Name, embedding, voiceSearchLimit)
+		if err != nil {
+			continue
+		}
+		for _, x := range res {
+			hits = append(hits, hit{Content: x.Content, Source: x.Filename, Score: x.Score})
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	if len(hits) > voiceSearchLimit {
+		hits = hits[:voiceSearchLimit]
+	}
+	writeJSON(w, map[string]interface{}{"hits": hits})
 }
