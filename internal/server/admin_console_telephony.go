@@ -48,6 +48,16 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       <div class="hint">Everyone who can receive a transferred call: approved accounts with a phone number on their profile. Nobody else is transferable — that is the rule, not a limitation. <b>Blind</b> puts the caller straight through. <b>Attended</b> asks their name and reason first, announces them, and lets the recipient decline. Each person sets this on their own profile; you can override it here.</div>
       <div id="tel-dir">Loading…</div>
 
+      <h2 style="margin-top:26px;font-size:15px">Outbound directory</h2>
+      <div class="hint">People and businesses the agent can <b>call</b> — the plumber, a supplier, a customer. Ask it in plain words ("appelle le plombier et prends rendez-vous") and it looks the number up here. Separate from the transfer directory above on purpose: these contacts receive calls, they never receive transfers.</div>
+      <div id="tel-out">Loading…</div>
+      <div class="row" style="gap:6px;margin-top:8px">
+        <input id="tel-outname" placeholder="Name, e.g. le plombier" style="flex:1">
+        <input id="tel-outphone" placeholder="+596696…" style="width:170px">
+        <button onclick="addOutContact()">Add</button>
+        <span id="tel-outmsg" class="hint" style="margin:0"></span>
+      </div>
+
       <h2 style="margin-top:26px;font-size:15px">Spoken phrases</h2>
       <div class="hint">Fixed lines the call itself speaks, in French — not the agent improvising. Three of them are <b>always</b> used (hold, transfer, connecting): they cover network latency right before an irreversible action, where a hallucinated name would betray the caller. The others are fallbacks the agent normally supersedes. <code>%s</code> is a placeholder — keep it.</div>
       <div id="tel-phrases"></div>
@@ -114,6 +124,7 @@ async function loadTelephony(){
  if(v)$('tel-persona').value=v.personality||'';
  loadVoiceKB();
  loadTelDirectory();       // who can receive a transfer, and how
+ loadOutContacts();        // who the agent can call by name
  loadTelVoiceGreeting();   // voice list + clone controls (needs the TTS backend)
  loadPhoneCfg();           // greeting + phrases + dictionary + call handling
  const s=await jget('/api/vox/sip');
@@ -254,6 +265,29 @@ async function setTelTransfer(id,kind){
  const r=await jpost('/api/admin/users',{id,action:kind==='attended'?'transfer_attended':'transfer_blind'});
  if(!r.ok)alert('Could not save: HTTP '+r.status);
  loadTelDirectory();
+}
+
+// The outbound directory lives in Vox — it is telephony data, and Vox resolves
+// the name when a call is placed. Edited here because Prism is the only console.
+async function loadOutContacts(){
+ const box=$('tel-out');if(!box)return;
+ const d=await jget('/api/vox/contacts');const rows=Array.isArray(d)?d:((d&&d.items)||[]);
+ if(!rows.length){box.innerHTML='<div class="hint">Nobody yet. Add a contact below and the agent can call them by name.</div>';return;}
+ box.innerHTML='<table><tr><th>Name</th><th>Number</th><th></th></tr>'+rows.map(c=>
+  '<tr><td>'+esc(c.name)+'</td><td>'+esc(c.phone_number||'')+'</td>'+
+  '<td style="text-align:right"><button onclick="rmOutContact('+c.id+',\''+esc(c.name).replace(/'/g,"\\'")+'\')">Remove</button></td></tr>').join('')+'</table>';
+}
+async function addOutContact(){
+ const m=$('tel-outmsg');const name=$('tel-outname').value.trim();const phone=$('tel-outphone').value.trim();
+ if(!name||!phone){m.textContent='Name and number required';return;}
+ m.textContent='Saving…';
+ const r=await fetch('/api/vox/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,phone_number:phone})});
+ if(r.ok){$('tel-outname').value='';$('tel-outphone').value='';m.textContent='✓ Added';setTimeout(()=>m.textContent='',1500);loadOutContacts();}
+ else m.textContent='Failed ('+r.status+')';
+}
+async function rmOutContact(id,name){
+ if(!confirm('Remove '+name+' from the outbound directory? The agent will no longer be able to call them by name.'))return;
+ await fetch('/api/vox/contacts/'+id,{method:'DELETE'});loadOutContacts();
 }
 
 const savePhrases =()=>saveCfgFields(TEL_PHRASES,'tel-pmsg');
