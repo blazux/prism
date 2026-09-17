@@ -56,6 +56,9 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			FirstName   string `json:"firstName"`
 			LastName    string `json:"lastName"`
 			Phone       string `json:"phone"`
+			// Empty = leave the transfer preference alone. A client that does not
+			// know about the field must not silently reset it to blind.
+			Transfer string `json:"transfer"`
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
@@ -67,6 +70,12 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		if dn == "" {
 			dn = u.DisplayName
+		}
+		if t := strings.TrimSpace(b.Transfer); t != "" {
+			if err := ms.SetTransferType(r.Context(), u.ID, t); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
 		}
 		if err := ms.UpdateProfile(r.Context(), u.ID, dn, strings.TrimSpace(b.FirstName), strings.TrimSpace(b.LastName), strings.TrimSpace(b.Phone)); err != nil {
 			http.Error(w, err.Error(), 500)

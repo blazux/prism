@@ -187,10 +187,10 @@ func voiceDirectoryText(entries []memory.DirEntry) string {
 // "Vincent Dupont". The match must be unique: with "Jean Dupont" and "Jean
 // Martin" listed, "Jean" resolves to nothing and the agent has to ask — it must
 // never pick a colleague at random.
-func resolveTransferName(entries []memory.DirEntry, query string) (name, phone string, ok bool) {
+func resolveTransferName(entries []memory.DirEntry, query string) (memory.DirEntry, bool) {
 	q := normalizeDirectoryName(query)
 	if q == "" {
-		return "", "", false
+		return memory.DirEntry{}, false
 	}
 	for _, exact := range []bool{true, false} {
 		var match *memory.DirEntry
@@ -202,16 +202,16 @@ func resolveTransferName(entries []memory.DirEntry, query string) (name, phone s
 			}
 			if matches {
 				if match != nil {
-					return "", "", false // ambiguous
+					return memory.DirEntry{}, false // ambiguous
 				}
 				match = &entries[i]
 			}
 		}
 		if match != nil {
-			return match.Name, match.Phone, true
+			return *match, true
 		}
 	}
-	return "", "", false
+	return memory.DirEntry{}, false
 }
 
 func normalizeDirectoryName(s string) string {
@@ -374,9 +374,14 @@ func (s *Server) handleVoiceDirectory(w http.ResponseWriter, r *http.Request) {
 	entries := s.voiceDirectory(r.Context())
 	out := make([]map[string]interface{}, 0, len(entries))
 	for _, e := range entries {
-		// Per-entry transfer type (attended/blind) joins this payload with the
-		// user-profile flag; until then Vox applies its own default.
-		out = append(out, map[string]interface{}{"name": e.Name, "phone": e.Phone})
+		out = append(out, map[string]interface{}{
+			"name": e.Name, "phone": e.Phone,
+			// How to hand the call over, decided by each person on their own profile.
+			"transfer": e.Transfer,
+			// The id is for Prism's own admin table, which edits these rows; Vox
+			// ignores it. One list, read by both, beats a near-duplicate endpoint.
+			"id": e.UserID,
+		})
 	}
 	writeJSON(w, map[string]interface{}{"entries": out})
 }

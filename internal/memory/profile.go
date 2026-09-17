@@ -19,18 +19,22 @@ type Profile struct {
 	FirstName   string `json:"firstName"`
 	LastName    string `json:"lastName"`
 	Phone       string `json:"phone"`
-	AvatarVer   int64  `json:"avatarVer"`
+	// Transfer is how the switchboard puts a call through to this person:
+	// "blind" (straight through) or "attended" (announced first, refusable).
+	Transfer  string `json:"transfer"`
+	AvatarVer int64  `json:"avatarVer"`
 }
 
 func (s *Store) GetProfile(ctx context.Context, userID int64) (Profile, error) {
 	var p Profile
 	err := s.pool.QueryRow(ctx, `
 		SELECT u.id, u.email, u.display_name, u.first_name, u.last_name, u.phone,
+		       COALESCE(NULLIF(u.transfer_type, ''), 'blind'),
 		       COALESCE(EXTRACT(EPOCH FROM a.updated_at)::bigint, 0)
 		FROM users u
 		LEFT JOIN avatars a ON a.scope = 'u' || u.id::text
 		WHERE u.id = $1
-	`, userID).Scan(&p.UserID, &p.Email, &p.DisplayName, &p.FirstName, &p.LastName, &p.Phone, &p.AvatarVer)
+	`, userID).Scan(&p.UserID, &p.Email, &p.DisplayName, &p.FirstName, &p.LastName, &p.Phone, &p.Transfer, &p.AvatarVer)
 	return p, err
 }
 
@@ -39,6 +43,17 @@ func (s *Store) UpdateProfile(ctx context.Context, userID int64, displayName, fi
 		UPDATE users SET display_name = $1, first_name = $2, last_name = $3, phone = $4
 		WHERE id = $5
 	`, displayName, firstName, lastName, phone, userID)
+	return err
+}
+
+// SetTransferType records how the switchboard should put a call through to this
+// person. Anything that is not "attended" is stored as "blind": an unreadable
+// value must not silently turn into an announcement dialogue on a live call.
+func (s *Store) SetTransferType(ctx context.Context, userID int64, kind string) error {
+	if kind != TransferAttended {
+		kind = TransferBlind
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE users SET transfer_type = $1 WHERE id = $2`, kind, userID)
 	return err
 }
 

@@ -401,14 +401,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			// a separate contacts table. Resolve here, pass Vox a pre-resolved number.
 			if name == "transfer_call" {
 				dest, _ := args["destination"].(string)
-				cname, phone, ok := resolveTransferName(voiceDir, dest)
+				entry, ok := resolveTransferName(voiceDir, dest)
 				if !ok {
 					// Not in the directory → don't dial; let the agent offer a near
 					// match from the list or take a message.
 					return fmt.Sprintf("Aucune correspondance unique pour %q : nom absent ou ambigu. Aucun transfert demandé. Demande le nom complet et utilise l'annuaire pour proposer les personnes possibles.", dest), nil
 				}
-				args["destination"] = cname
-				args["dial_number"] = phone // pre-resolved for Vox
+				args["destination"] = entry.Name
+				args["dial_number"] = entry.Phone // pre-resolved for Vox
+				// How the recipient wants to be reached. Vox holds the announcement
+				// machinery; without this it would have to guess, and guessing means
+				// putting a stranger straight onto someone's mobile.
+				args["transfer_type"] = entry.Transfer
 			}
 			client.sendJSON(map[string]interface{}{"type": "telephony", "tool": name, "args": args})
 			log.Printf("[voice] relaying telephony tool %q to Vox: %v", name, args)

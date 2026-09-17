@@ -368,6 +368,10 @@ func (s *Store) initSchema(ctx context.Context) error {
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_reasoning TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT NOT NULL DEFAULT ''`,
+		// How the switchboard hands a call over to this person: 'blind' puts them
+		// straight through, 'attended' announces the caller first and lets them
+		// decline. Blind by default — that is what a desk extension expects.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS transfer_type TEXT NOT NULL DEFAULT 'blind'`,
 		// Avatars for users and agents, keyed by scope: "u<id>" (user),
 		// "agent-u<id>" (a user's personal agent), "agent-g<id>" (a group's shared
 		// agent). Stored as bytes + mime; served via /api/avatar, versioned by updated_at.

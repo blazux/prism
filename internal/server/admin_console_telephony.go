@@ -44,6 +44,10 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       </div>
       <div class="row"><button class="primary" onclick="saveTelVoice()">Save switchboard</button><span id="tel-vmsg" class="hint" style="margin:0"></span></div>
 
+      <h2 style="margin-top:26px;font-size:15px">Transfer directory</h2>
+      <div class="hint">Everyone who can receive a transferred call: approved accounts with a phone number on their profile. Nobody else is transferable — that is the rule, not a limitation. <b>Blind</b> puts the caller straight through. <b>Attended</b> asks their name and reason first, announces them, and lets the recipient decline. Each person sets this on their own profile; you can override it here.</div>
+      <div id="tel-dir">Loading…</div>
+
       <h2 style="margin-top:26px;font-size:15px">Spoken phrases</h2>
       <div class="hint">Fixed lines the call itself speaks, in French — not the agent improvising. Three of them are <b>always</b> used (hold, transfer, connecting): they cover network latency right before an irreversible action, where a hallucinated name would betray the caller. The others are fallbacks the agent normally supersedes. <code>%s</code> is a placeholder — keep it.</div>
       <div id="tel-phrases"></div>
@@ -109,6 +113,7 @@ async function loadTelephony(){
  const v=await jget('/api/voice');
  if(v)$('tel-persona').value=v.personality||'';
  loadVoiceKB();
+ loadTelDirectory();       // who can receive a transfer, and how
  loadTelVoiceGreeting();   // voice list + clone controls (needs the TTS backend)
  loadPhoneCfg();           // greeting + phrases + dictionary + call handling
  const s=await jget('/api/vox/sip');
@@ -229,6 +234,28 @@ async function saveCfgFields(spec,msgId){
  if(r.ok)Object.assign(TEL_CFG,values);
  setTimeout(()=>m.textContent='',2500);
 }
+// The transfer directory is Prism's own user list, not a telephony table: being
+// transferable means having an account here with a number on it. Shown where an
+// admin thinks about transfers rather than buried in the Users tab, which does
+// not display phone numbers at all.
+async function loadTelDirectory(){
+ const box=$('tel-dir');if(!box)return;
+ const d=await jget('/api/voice/directory');const rows=(d&&d.entries)||[];
+ if(!rows.length){box.innerHTML='<div class="hint">Nobody has a phone number on their profile yet, so no call can be transferred. Add one in Settings → Profile.</div>';return;}
+ box.innerHTML='<table><tr><th>Name</th><th>Number</th><th>Transfer</th></tr>'+rows.map(e=>{
+  const att=e.transfer==='attended';
+  return '<tr><td>'+esc(e.name)+'</td><td>'+esc(e.phone)+'</td><td>'+
+   '<select onchange="setTelTransfer('+e.id+',this.value)">'+
+   '<option value="blind"'+(att?'':' selected')+'>Blind — put straight through</option>'+
+   '<option value="attended"'+(att?' selected':'')+'>Attended — announce first</option>'+
+   '</select></td></tr>';}).join('')+'</table>';
+}
+async function setTelTransfer(id,kind){
+ const r=await jpost('/api/admin/users',{id,action:kind==='attended'?'transfer_attended':'transfer_blind'});
+ if(!r.ok)alert('Could not save: HTTP '+r.status);
+ loadTelDirectory();
+}
+
 const savePhrases =()=>saveCfgFields(TEL_PHRASES,'tel-pmsg');
 const saveDict    =()=>saveCfgFields(TEL_DICT,'tel-dmsg');
 const saveHandling=()=>saveCfgFields(TEL_HANDLING,'tel-hmsg');
