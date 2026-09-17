@@ -1,6 +1,6 @@
 package server
 
-// Voice-channel identity (Vortex megazord).
+// Voice-channel identity (Prism Vox dock).
 //
 // A phone call docks in through Vox using the service token, and in auth.go that
 // token authenticates as a *global admin*. Left alone, that means anyone who dials
@@ -269,7 +269,7 @@ func (s *Server) voiceRAGScope(ctx context.Context) string {
 // handleVoiceConfig (GET/PUT /api/voice) manages the switchboard persona shown to
 // unknown callers and the public RAG scope they may read. Admin-only; it shapes
 // what every anonymous caller experiences. Lives behind the Téléphonie app, which
-// only appears in Vortex mode.
+// only appears when a Prism Vox stack is docked.
 func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	if u == nil || !s.isAdminUser(r.Context(), u) {
@@ -289,7 +289,7 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 			"personality":        s.voicePersonality(r.Context()), // effective (stored or default)
 			"defaultPersonality": defaultVoicePersonality,
 			"ragScope":           rawScope, // "" = isolated (callers read nothing)
-			"vortexMode":         s.cfg.VoxURL != "",
+			"voxDocked":          s.cfg.VoxURL != "",
 		})
 
 	case http.MethodPut:

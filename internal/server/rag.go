@@ -185,7 +185,7 @@ func (s *Server) ragEnabled(w http.ResponseWriter) bool {
 // RAG, mirroring /api/group/mcp. Without the param, the caller's own scope.
 // A ?group= request is always management-grade, so no further canManage check.
 func (s *Server) ragScopeForRequest(r *http.Request) (scope string, manage, ok bool) {
-	// Reserved scope (Vortex): the phone switchboard's own dedicated knowledge base.
+	// Reserved scope: the phone switchboard's own dedicated knowledge base.
 	// Global admins manage it here; it is what an unknown caller's rag_search reads
 	// (voice.go voiceGuestScope). Not tied to any group or user.
 	if r.URL.Query().Get("scope") == voiceGuestScope {

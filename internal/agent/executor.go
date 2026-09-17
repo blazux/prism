@@ -60,7 +60,7 @@ type ToolExecutor struct {
 	onSecretRequest       func(ctx context.Context, name, description string) error
 	toolGuard             ToolGuard // optional per-caller authorization gate (e.g. Webex sender permissions)
 
-	// Telephony (Vortex): tools the agent can request but only Vox can perform.
+	// Telephony: tools the agent can request but only Prism Vox can perform.
 	// Set on voice calls; their execution is relayed instead of run locally.
 	telephonyTools []ollama.Tool
 	telephonyRelay TelephonyRelay
@@ -327,7 +327,7 @@ func (e *ToolExecutor) mcpStorageScope() string {
 func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
 	tools := e.CustomOllamaTools()
 	tools = append(tools, e.telephonyTools...)
-	// Outbound calls exist only when a Vox stack is docked (Vortex): the agent can
+	// Outbound calls exist only when a Prism Vox stack is docked: the agent can
 	// place one from any channel, list the queue, and cancel one it hasn't dialled
 	// yet. Admin-only by policy — they dial real people and cost money.
 	if e.HasVox() {

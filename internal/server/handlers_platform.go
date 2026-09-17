@@ -77,9 +77,9 @@ func (s *Server) handlePlatform(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]interface{}{
 		"disabledApps": disabled,
-		// Vortex mode: this Cortex is docked with a Vox telephony stack, so the
-		// Téléphonie app is available. Empty VoxURL = standalone Cortex, no telephony.
-		"vortexMode": s.cfg.VoxURL != "",
+		// Docked with a Prism Vox telephony stack, so the Téléphonie app is
+		// available. Empty VoxURL = standalone Prism, no telephony.
+		"voxDocked": s.cfg.VoxURL != "",
 	})
 }
 

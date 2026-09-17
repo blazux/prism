@@ -116,7 +116,7 @@ code{font-size:12px}
       <h2 style="margin-top:26px">Models</h2><div class="hint">Choose which chat models users can pick. <b>None selected = all models available.</b> Group-level grants (Groups pane) can tighten this further. Global admins always see every model.</div>
       <div id="pmodels" class="tool-box"></div>
       <div class="row" style="margin-top:12px"><span id="pf-st" class="st"></span></div></div>
-    <div class="pane" data-pane="telephony"><h2>Telephony</h2><div class="hint">This deployment is docked with a phone stack (Vortex). The agent also answers the phone: a known caller (number on their profile) gets their own agent, an unknown one gets the switchboard configured here.</div>
+    <div class="pane" data-pane="telephony"><h2>Telephony</h2><div class="hint">This deployment is docked with a Prism Vox phone stack. The agent also answers the phone: a known caller (number on their profile) gets their own agent, an unknown one gets the switchboard configured here.</div>
 
       <h2 style="margin-top:18px;font-size:15px">Voice &amp; greeting — every call</h2>
       <div class="hint">How the agent sounds, and the first thing it says when it picks up. This applies to <em>every</em> caller — known or not — so it sits above the switchboard, which only shapes what it says to strangers.</div>
@@ -559,7 +559,7 @@ async function loadUsage(){const days=$('us-days').value;const d=await jget('/ap
  $('us-audit').innerHTML=(d.audit&&d.audit.length)?d.audit.map(fmt).join(''):'<div class="hint">No audit events yet.</div>';
  $('us-errors').innerHTML=(d.errors&&d.errors.length)?d.errors.map(fmt).join(''):'<div class="hint">No errors recorded. 🎉</div>';
    loadTelephonyUsage();}
-// Vortex: telephony activity (from the docked Vox stack) shown alongside the rest of usage.
+// Telephony activity (from the docked Vox stack) shown alongside the rest of usage.
 async function loadTelephonyUsage(){
  const box=$('us-tel');if(!box)return;
  const s=await jget('/api/vox/runtime-status');if(!s){box.style.display='none';return;}
@@ -592,7 +592,7 @@ async function loadLogs(){const f=$('lg-filter').value.trim();const d=await jget
  out.textContent=(d.lines||[]).join('\n')||'(empty)';if(atEnd)out.scrollTop=out.scrollHeight;}
 function autoLogs(){clearInterval(window._lgI);if($('lg-auto').checked)window._lgI=setInterval(loadLogs,4000);}
 
-// ── Telephony (Vortex): switchboard persona (Cortex /api/voice) + SIP trunk (proxied Vox /api/vox/sip) ──
+// ── Telephony: switchboard persona (Prism /api/voice) + SIP trunk (proxied Vox /api/vox/sip) ──
 const SIP_FIELDS=['registrar','registrar_ip','username','domain','tls_port','callerid_name','transfer_method'];
 // The switchboard reads a dedicated, reserved RAG scope ("voice"); documents are
 // managed right here, so it's independent from any group.
@@ -745,7 +745,7 @@ const savePhrases =()=>saveCfgFields(TEL_PHRASES,'tel-pmsg');
 const saveDict    =()=>saveCfgFields(TEL_DICT,'tel-dmsg');
 const saveHandling=()=>saveCfgFields(TEL_HANDLING,'tel-hmsg');
 
-// Outbound calls are deliberately NOT an admin form here. In Vortex you place a call
+// Outbound calls are deliberately NOT an admin form here. When docked you place a call
 // by asking the agent — that is what its place_call tool is for. A form would be a
 // second, dumber door onto the same queue.
 
@@ -790,9 +790,9 @@ async function init(){
  if(isGA){try{const g=await jget('/api/admin/groups');ALLGROUPS=(g&&g.groups)||[];}catch(e){}}
  const nav=$('adm-nav');const items=[];
  if(isGA){items.push(['users','Users'],['groups','Groups'],['tools','Tools'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
- // Vortex: telephony admin (switchboard persona + SIP trunk) — only when docked with Vox.
- let VORTEX=false;try{VORTEX=!!(await fetch('/api/platform').then(r=>r.json())).vortexMode;}catch(e){}
- if(isGA&&VORTEX){items.push(['telephony','Telephony']);}
+ // Telephony admin (switchboard persona + SIP trunk) — only when docked with Vox.
+ let DOCKED=false;try{DOCKED=!!(await fetch('/api/platform').then(r=>r.json())).voxDocked;}catch(e){}
+ if(isGA&&DOCKED){items.push(['telephony','Telephony']);}
  if(adminGroups().length){items.push(['agent','Shared agent'],['rag','RAG'],['mcp','MCP'],['secrets','Secrets'],['access','Tool access']);}
  if(!items.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
  nav.innerHTML=items.map(([p,l])=>'<div class="nav-item" data-pane="'+p+'">'+l+'</div>').join('');

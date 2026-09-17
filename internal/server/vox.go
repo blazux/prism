@@ -1,15 +1,15 @@
 package server
 
-// Vox proxy (Vortex megazord).
+// Prism Vox proxy.
 //
 // The telephony data lives in Vox, not here: call logs, outbound call tasks, SIP
-// status, live stats, the directory. Rather than duplicate them, Cortex proxies
+// status, live stats, the directory. Rather than duplicate them, Prism proxies
 // Vox's own API — that is what VOX_URL is for. The Téléphonie app and the admin
 // telephony settings both talk to /api/vox/<path>, which forwards to
 // <VOX_URL>/api/<path> with Vox's credentials.
 //
 // Admin-only: call history, outbound dialling and trunk config are an admin
-// surface. Unavailable (503) when this Cortex is not docked with a Vox.
+// surface. Unavailable (503) when this Prism is not docked with a Vox.
 
 import (
 	"context"
@@ -40,7 +40,7 @@ func isCallTaskID(id string) bool { return strings.HasPrefix(id, callTaskPrefix)
 // voxPendingCallTasks returns the outbound calls that are still going to happen —
 // queued, or being dialled right now — rendered as task items.
 //
-// Vortex: an outbound call *is* a task ("call the plumber and book a slot"), so it
+// An outbound call *is* a task ("call the plumber and book a slot"), so it
 // belongs in the Tasks list next to the user's own, not in a telephony silo. They are
 // read-only here: the agent owns the verbs (place_call / cancel_call). Finished calls
 // are not tasks any more — they live in the call history.

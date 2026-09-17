@@ -152,7 +152,7 @@ func main() {
 		EmbedModel:       embedModel,
 		AuthToken:        authToken,
 		MultiUser:        multiUser,
-		VoxURL:           os.Getenv("VOX_URL"), // set → Vortex mode (Téléphonie app appears)
+		VoxURL:           os.Getenv("VOX_URL"), // set → docked with Prism Vox (Téléphonie app appears)
 		VoxUser:          os.Getenv("VOX_USER"),
 		VoxPassword:      os.Getenv("VOX_PASSWORD"),
 		WebFS:            webFS,

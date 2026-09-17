@@ -54,10 +54,10 @@ type Config struct {
 	// in exactly one place, withAuth; everything downstream reads the identity that
 	// puts in the request, and the service identity already means "global".
 	MultiUser bool
-	// VoxURL, when set, means this Cortex is docked with a Vox telephony stack
-	// (megazord = Vortex). It flips the UI into Vortex mode: the Téléphonie app
-	// appears, and /api/vox/* proxies Vox's API (call logs, outbound calls, SIP,
-	// directory). Empty = standalone Cortex, no telephony surface.
+	// VoxURL, when set, means this Prism is docked with a Prism Vox telephony
+	// stack: the Téléphonie app appears, and /api/vox/* proxies Vox's API (call
+	// logs, outbound calls, SIP, directory). Empty = standalone Prism, no
+	// telephony surface.
 	// VoxUser/VoxPassword are Vox's HTTP Basic credentials, used by that proxy.
 	VoxURL      string
 	VoxUser     string

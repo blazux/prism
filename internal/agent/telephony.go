@@ -1,6 +1,6 @@
 package agent
 
-// Telephony tools (Vortex megazord). Cortex is the brain but has no phone line —
+// Telephony tools. Prism is the brain but has no phone line —
 // only Vox can transfer, take a message or hang up. These tools are exposed to the
 // agent ONLY on a voice call; when the agent calls one, the executor does not run
 // it locally, it relays it over the WebSocket to Vox, which performs it with its

@@ -139,7 +139,7 @@ type DirEntry struct {
 }
 
 // DirectoryEntries lists approved users who have a phone number on their profile —
-// the live phone directory (Vortex: transfer_call resolves against this, not a
+// the live phone directory (transfer_call resolves against this, not a
 // separate contacts table).
 func (s *Store) DirectoryEntries(ctx context.Context) ([]DirEntry, error) {
 	rows, err := s.pool.Query(ctx, `

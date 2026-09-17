@@ -100,7 +100,7 @@ type ChatFile struct {
 type WSMessage struct {
 	Type string `json:"type"`
 	// Channel names the surface the message comes from. Empty = the browser
-	// dashboard; "voice" = a phone call docked from Vox (Vortex megazord), which
+	// dashboard; "voice" = a phone call docked from Prism Vox, which
 	// makes the agent answer in spoken form and skip extended reasoning.
 	Channel        string          `json:"channel,omitempty"`
 	Content        string          `json:"content,omitempty"`
@@ -167,7 +167,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	wsUser := currentUser(r)
 
-	// Vortex (megazord): a phone call docks through Vox with the service token,
+	// A phone call docks through Prism Vox with the service token,
 	// which auth.go resolves to a GLOBAL ADMIN. Re-identify it, or a stranger who
 	// dials the number gets an admin agent — exec_command, docker, mail, secrets,
 	// and the owner's whole knowledge base. Until the caller is identified, a call
@@ -178,7 +178,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// THEIR memory and knowledge — inter-channel continuity — but still only the
 	// voice-safe tools. An unknown caller stays a public switchboard guest.
 	var voiceUser *memory.User
-	var voiceDir []memory.DirEntry // the phone directory = Cortex user profiles
+	var voiceDir []memory.DirEntry // the phone directory = Prism user profiles
 	if voiceCall {
 		voiceUser = s.resolveVoiceCaller(r.Context(), r.URL.Query().Get("caller"))
 		voiceDir = s.voiceDirectory(r.Context())
@@ -265,7 +265,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		personality = s.voicePersonality(r.Context())
 	}
 	if voiceCall {
-		// Give the agent the live directory (Cortex profiles) so it only offers to
+		// Give the agent the live directory (Prism profiles) so it only offers to
 		// transfer to real people; the relay resolves the chosen name to a number.
 		personality += voiceDirectoryText(voiceDir)
 	}
@@ -392,12 +392,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		client.sendJSON(map[string]interface{}{"type": "progress", "content": text})
 	})
 
-	// Vortex: on a voice call, expose the telephony tools and relay their calls to
+	// On a voice call, expose the telephony tools and relay their calls to
 	// Vox over this WS. Vox performs the transfer/message/hang-up with its ARI/SIP
 	// machinery, exactly as it does for its own agent.
 	if voiceCall {
 		executor.SetTelephony(agent.TelephonyTools, func(name string, args map[string]interface{}) (string, error) {
-			// transfer_call resolves against the Cortex directory (user profiles), not
+			// transfer_call resolves against the Prism directory (user profiles), not
 			// a separate contacts table. Resolve here, pass Vox a pre-resolved number.
 			if name == "transfer_call" {
 				dest, _ := args["destination"].(string)
@@ -893,8 +893,8 @@ func (s *Server) handleChat(ctx context.Context, client *Client, content string,
 		}
 	}
 
-	// Deterministic end-of-turn marker for non-browser clients (the Vortex voice
-	// dock reads this to know Cortex's reply is complete). The browser ignores it.
+	// Deterministic end-of-turn marker for non-browser clients (the voice
+	// dock reads this to know Prism's reply is complete). The browser ignores it.
 	client.sendJSONReliable(map[string]interface{}{"type": "turn_complete"})
 
 	// Usage: one chat turn, tokens estimated (chars/4 in+out) until backend

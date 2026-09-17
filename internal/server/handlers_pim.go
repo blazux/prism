@@ -383,7 +383,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		// Vortex: outbound calls the agent still has to place are tasks too — show them
+		// Outbound calls the agent still has to place are tasks too — show them
 		// in the same list (read-only; the agent places and cancels them).
 		//
 		// Admins only. Tasks are scoped per user (session_id = "u<id>"), but Vox's call
