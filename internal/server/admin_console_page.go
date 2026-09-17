@@ -41,6 +41,8 @@ html,body{height:100%;overflow:hidden;margin:0}
 .nav-item{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;color:var(--text3);font-size:13px;font-weight:500;transition:color .15s,background .15s;user-select:none}
 .nav-item:hover{color:var(--text);background:var(--bg2)}
 .nav-item.active{color:var(--text);background:var(--bg3)}
+.nav-head{padding:14px 18px 5px;color:var(--text3);font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;user-select:none}
+.nav-head:first-child{padding-top:2px}
 #adm-content{flex:1;overflow-y:auto;padding:20px 24px 40px;min-width:0}
 .pane{display:none;max-width:760px}
 .pane.active{display:block}
@@ -583,21 +585,28 @@ async function init(){
  // Global admin: load every group so the shared-agent / tool-access tabs and
  // group pickers cover all of them, not just the admin's own memberships.
  if(isGA){try{const g=await jget('/api/admin/groups');ALLGROUPS=(g&&g.groups)||[];}catch(e){}}
- const nav=$('adm-nav');const items=[];
- if(isGA){items.push(['users','Users'],['groups','Groups'],['tools','Tools'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
+ // The nav has two sections, and saying so is what makes the panes readable:
+ // everything under "Your groups" is scoped to a group you administer — the
+ // shared agent, the knowledge base, the MCP servers, the secrets, the tool
+ // access. Without the heading that scope is invisible, and "RAG" reads as if
+ // it were a deployment-wide setting sitting next to "Platform".
+ // A heading is an entry with no pane; only real entries are clickable.
+ const nav=$('adm-nav');const items=[];const head=t=>['',t];
+ if(isGA){items.push(head('Deployment'),['users','Users'],['groups','Groups'],['tools','Tools'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
  // Telephony admin (switchboard persona + SIP trunk) — only when docked with Vox.
  let DOCKED=false;try{DOCKED=!!(await fetch('/api/platform').then(r=>r.json())).voxDocked;}catch(e){}
  if(isGA&&DOCKED){items.push(['telephony','Telephony']);}
- if(adminGroups().length){items.push(['agent','Shared agent'],['rag','RAG'],['mcp','MCP'],['secrets','Secrets'],['access','Tool access']);}
- if(!items.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
- nav.innerHTML=items.map(([p,l])=>'<div class="nav-item" data-pane="'+p+'">'+l+'</div>').join('');
+ if(adminGroups().length){items.push(head('Your groups'),['agent','Shared agent'],['rag','RAG'],['mcp','MCP'],['secrets','Secrets'],['access','Tool access']);}
+ const panes=items.filter(([p])=>p);
+ if(!panes.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
+ nav.innerHTML=items.map(([p,l])=>p?'<div class="nav-item" data-pane="'+p+'">'+l+'</div>':'<div class="nav-head">'+l+'</div>').join('');
  nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=()=>{const p=el.dataset.pane;show(p);
   if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
  $('ag-group').onchange=()=>{loadAgent();loadWebex();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
  $('ag-model').innerHTML='<option value="">(server default)</option>'+MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');
  fillGroupPickers();
- show(items[0][0]);
- const first=items[0][0];
+ show(panes[0][0]);
+ const first=panes[0][0];
  if(first==='users')loadUsers();else if(first==='agent'){loadAgent();loadWebex();}
 }
 init();
