@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"prism/internal/agent"
 	"prism/internal/memory"
 	"strings"
 	"testing"
@@ -62,5 +63,27 @@ func TestInternalPersonaNeverFallsBackToSwitchboard(t *testing.T) {
 	}
 	if s.voiceInternalPersonality(context.Background(), nil) != defaultInternalVoicePersonality {
 		t.Fatal("an unidentified caller must still get a usable persona, never an empty prompt")
+	}
+}
+
+// The switchboard reads ONE collection, the one an admin pointed at. Storing the
+// fully-scoped name matters: it is what gets searched, and "horaires" in the
+// reserved scope is not the same corpus as "horaires" in a group.
+func TestVoiceKBCollectionIsStoredScoped(t *testing.T) {
+	for _, tc := range []struct{ scope, name, want string }{
+		{voiceGuestScope, "horaires", "voice--horaires"},
+		{"g3", "procédures", "g3--procédures"},
+	} {
+		got := agent.ScopeCollection(tc.scope, tc.name)
+		if got != tc.want {
+			t.Fatalf("ScopeCollection(%q, %q) = %q, want %q", tc.scope, tc.name, got, tc.want)
+		}
+		if back := agent.UnscopeCollection(tc.scope, got); back != tc.name {
+			t.Fatalf("round trip lost the name: %q", back)
+		}
+	}
+	// Two collections that display the same but are not the same corpus.
+	if agent.ScopeCollection(voiceGuestScope, "faq") == agent.ScopeCollection("g3", "faq") {
+		t.Fatal("a group collection and a switchboard collection collapsed to one name")
 	}
 }

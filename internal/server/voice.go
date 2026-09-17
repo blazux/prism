@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sort"
 	"strings"
 
 	"prism/internal/agent"
@@ -93,6 +92,11 @@ const (
 	// default must not have their old words pushed back over it.
 	cfgVoicePersonaMigrated = "voice_personality_migrated"
 	cfgVoiceRAGScope        = "voice_rag_scope"
+	// The ONE collection the switchboard reads, stored under its full scoped name
+	// ("voice--horaires", "g3--procédures"). One and only one on purpose: an
+	// admin points at a base, rather than the switchboard quietly inheriting
+	// whatever happens to sit in a scope.
+	cfgVoiceRAGCollection = "voice_rag_collection"
 )
 
 // defaultVoicePersonality is the switchboard persona used when no
@@ -497,7 +501,8 @@ func (s *Server) handleVoiceSearch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "query required")
 		return
 	}
-	if s.ragStore == nil || s.ragEmbedder == nil {
+	ms := s.store()
+	if ms == nil || s.ragStore == nil || s.ragEmbedder == nil {
 		writeErr(w, http.StatusServiceUnavailable, "no knowledge base on this deployment")
 		return
 	}
@@ -508,12 +513,16 @@ func (s *Server) handleVoiceSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The switchboard reads one reserved scope and nothing else. Searching every
-	// collection in it (rather than asking the caller to name one) is what makes
-	// "one knowledge base, configured once" true from the agent's side.
-	cols, err := s.ragStore.ListCollections(r.Context(), voiceGuestScope)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	// One collection, the one an admin picked in Telephony. Not "every collection
+	// in a scope": a knowledge base that grows a document because someone uploaded
+	// it nearby is a knowledge base nobody can vouch for, and this one is read out
+	// loud to strangers.
+	chosen, _, _ := ms.GetConfig(r.Context(), cfgVoiceRAGCollection)
+	chosen = strings.TrimSpace(chosen)
+	if chosen == "" {
+		// Not an error: no base is a legitimate configuration. The agent is told
+		// plainly so it says it doesn't know, instead of inventing.
+		writeJSON(w, map[string]interface{}{"hits": []any{}, "reason": "no knowledge base configured for the switchboard"})
 		return
 	}
 	type hit struct {
@@ -522,19 +531,94 @@ func (s *Server) handleVoiceSearch(w http.ResponseWriter, r *http.Request) {
 		Score    float64 `json:"score"`
 		pageless bool
 	}
-	var hits []hit
-	for _, c := range cols {
-		res, err := s.ragStore.Search(r.Context(), c.Name, embedding, voiceSearchLimit)
-		if err != nil {
-			continue
-		}
-		for _, x := range res {
-			hits = append(hits, hit{Content: x.Content, Source: x.Filename, Score: x.Score})
-		}
+	res, err := s.ragStore.Search(r.Context(), chosen, embedding, voiceSearchLimit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
-	if len(hits) > voiceSearchLimit {
-		hits = hits[:voiceSearchLimit]
+	hits := make([]hit, 0, len(res))
+	for _, x := range res {
+		hits = append(hits, hit{Content: x.Content, Source: x.Filename, Score: x.Score})
 	}
 	writeJSON(w, map[string]interface{}{"hits": hits})
+}
+
+// handleVoiceKB (GET/PUT /api/voice/kb) picks the ONE collection the switchboard
+// reads, and lists what there is to pick from.
+//
+// Two origins, deliberately in one list because they are one decision:
+//   - the reserved "voice" scope: isolated, belongs to nobody, safe by
+//     construction — nothing a group owns is exposed by choosing it;
+//   - the collections of groups the caller administers, uploaded the usual way in
+//     RAG, which is how an admin avoids maintaining the same documents twice.
+//
+// They do NOT carry the same consequence, so each option says which it is: what
+// the switchboard reads, an unknown caller can hear.
+func (s *Server) handleVoiceKB(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil || !s.isAdminUser(r.Context(), u) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	ms := s.store()
+	if ms == nil || s.ragStore == nil {
+		writeErr(w, http.StatusServiceUnavailable, "no knowledge base on this deployment")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		chosen, _, _ := ms.GetConfig(r.Context(), cfgVoiceRAGCollection)
+		type choice struct {
+			Value  string `json:"value"`  // stored name, what gets searched
+			Label  string `json:"label"`  // what an admin recognises
+			Origin string `json:"origin"` // "switchboard" | "group"
+			Docs   int    `json:"docs"`
+		}
+		choices := []choice{}
+		add := func(scope, origin string) {
+			cols, err := s.ragStore.ListCollections(r.Context(), scope)
+			if err != nil {
+				return
+			}
+			for _, c := range cols {
+				choices = append(choices, choice{
+					Value:  c.Name,
+					Label:  agent.UnscopeCollection(scope, c.Name),
+					Origin: origin,
+					Docs:   c.DocCount,
+				})
+			}
+		}
+		add(voiceGuestScope, "switchboard")
+		if groups, err := ms.UserGroups(r.Context(), u.ID); err == nil {
+			for _, g := range groups {
+				if !s.isGroupAdminOf(r.Context(), u, g.GroupID) {
+					continue
+				}
+				add(fmt.Sprintf("g%d", g.GroupID), "group")
+			}
+		}
+		writeJSON(w, map[string]interface{}{"selected": strings.TrimSpace(chosen), "choices": choices})
+
+	case http.MethodPut:
+		var b struct {
+			Collection string `json:"collection"`
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			writeErr(w, http.StatusBadRequest, "bad body")
+			return
+		}
+		// "" clears it: no base at all is a legitimate switchboard, and it must be
+		// reachable without deleting anything.
+		if err := ms.SetConfig(r.Context(), cfgVoiceRAGCollection, strings.TrimSpace(b.Collection)); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		s.audit(r, "voice_kb_collection", map[string]interface{}{"collection": b.Collection})
+		writeJSON(w, map[string]any{"ok": true})
+
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }

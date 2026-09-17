@@ -36,13 +36,20 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       <h2 style="margin-top:26px;font-size:15px">Switchboard — unknown callers</h2>
       <div class="hint">Role and tone for a caller the agent doesn't recognise. Never any access to tools/files/personal data.</div>
       <label>Personality</label><textarea id="tel-persona" placeholder="Loading…" style="min-height:150px"></textarea>
-      <label>Switchboard knowledge base <span class="hint" style="margin:0">— its own dedicated base; what it may tell unknown callers (hours, prices, FAQ…)</span></label>
-      <div id="tel-kb" class="hint">Loading…</div>
-      <div class="row" style="gap:8px;margin-top:6px;align-items:center">
+      <label>Knowledge base <span class="hint" style="margin:0">— the one collection the switchboard may read, and read out loud to strangers</span></label>
+      <select id="tel-kbsel" style="width:100%" onchange="saveVoiceKBChoice()"><option>Loading…</option></select>
+      <div class="row" style="gap:8px;margin-top:4px;align-items:center">
+        <span id="tel-kbmsg" class="hint" style="margin:0"></span>
+        <button id="tel-kbdel" class="mini" style="display:none" onclick="deleteSelectedVoiceKB()">Delete this collection</button>
+      </div>
+      <div class="hint" style="margin-top:8px">Pick an existing collection — group collections are the ones you upload to as usual in RAG, so the same documents serve your members and the switchboard. <b>Anything you point at here is readable by unknown callers</b>, so a group collection is a deliberate choice, not a shortcut.</div>
+      <div class="hint" style="margin-top:8px">Or keep a base that belongs to the switchboard alone and to nobody else:</div>
+      <div class="row" style="gap:8px;margin-top:4px;align-items:center">
         <span class="filebtn"><input type="file" id="tel-kbfile" accept=".pdf,.txt,.md,.docx,.html,.csv" onchange="showPicked('tel-kbfile','tel-kbfilename')"><button type="button" onclick="document.getElementById('tel-kbfile').click()">Choose a file…</button></span>
         <span id="tel-kbfilename" class="filename"></span>
-        <button class="primary" onclick="uploadVoiceKB()">Upload document</button>
-        <span id="tel-kbmsg" class="hint" style="margin:0"></span>
+        <input id="tel-kbcol" placeholder="Collection name" style="width:150px">
+        <button class="primary" onclick="uploadVoiceKB()">Upload</button>
+        <span id="tel-kbupmsg" class="hint" style="margin:0"></span>
       </div>
       <div class="row"><button class="primary" onclick="saveTelVoice()">Save switchboard</button><span id="tel-vmsg" class="hint" style="margin:0"></span></div>
 
@@ -75,17 +82,6 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       <div id="tel-handling"></div>
       <div class="row"><button class="primary" onclick="saveHandling()">Save call handling</button><span id="tel-hmsg" class="hint" style="margin:0"></span></div>
 
-      <h2 style="margin-top:26px;font-size:15px">Switchboard tools (MCP)</h2>
-      <div class="hint">Extra tools for the <b>switchboard agent</b> — the one that answers unknown callers. Distinct from the group MCP servers in the MCP tab, which serve your members' agents: different agent, different list. Leave empty unless the switchboard needs to look something up beyond its knowledge base.</div>
-      <div id="tel-mcp">Loading…</div>
-      <div class="row" style="gap:6px;margin-top:8px">
-        <input id="tel-mcpname" placeholder="Name" style="width:150px">
-        <select id="tel-mcptype" style="width:90px"><option value="http">http</option><option value="sse">sse</option></select>
-        <input id="tel-mcpurl" placeholder="https://…/mcp/" style="flex:1">
-        <button onclick="addTelMCP()">Add</button>
-        <span id="tel-mcpmsg" class="hint" style="margin:0"></span>
-      </div>
-
       <h2 style="margin-top:26px;font-size:15px">SIP trunk</h2>
       <div class="hint" id="tel-sipstatus">Loading status…</div>
       <label>Registrar (host)</label><input id="sip-registrar" style="width:100%">
@@ -111,22 +107,50 @@ const adminTelephonyJS = `// ── Telephony: switchboard persona (Prism /api/v
 const SIP_FIELDS=['registrar','registrar_ip','username','domain','tls_port','callerid_name','transfer_method'];
 // The switchboard reads a dedicated, reserved RAG scope ("voice"); documents are
 // managed right here, so it's independent from any group.
+// One collection, chosen — not "whatever sits in a scope". The two origins are in
+// one list because it is one decision, but each option says which it is: what the
+// switchboard reads, an unknown caller can hear.
 async function loadVoiceKB(){
- const box=$('tel-kb');const d=await jget('/api/rag/collections?scope=voice');const list=Array.isArray(d)?d:[];
- if(!list.length){box.innerHTML='<span class="hint">Empty — the switchboard has no information to give unknown callers. Upload documents (hours, prices, services, FAQ…).</span>';return;}
- box.innerHTML=list.map(c=>'<div style="padding:3px 0;display:flex;justify-content:space-between;align-items:center"><span><b>'+esc(c.name)+'</b> <span style="color:var(--text3)">'+(c.doc_count||0)+' docs</span></span><button class="mini" onclick="deleteVoiceKB(\''+esc(c.name)+'\')">delete</button></div>').join('');
+ const sel=$('tel-kbsel');if(!sel)return;
+ const d=await jget('/api/voice/kb');const choices=(d&&d.choices)||[];
+ const own=choices.filter(c=>c.origin==='switchboard'), grp=choices.filter(c=>c.origin==='group');
+ const opt=c=>'<option value="'+esc(c.value)+'"'+(c.value===(d&&d.selected)?' selected':'')+'>'+esc(c.label)+' ('+(c.docs||0)+' docs)</option>';
+ let html='<option value=""'+(!(d&&d.selected)?' selected':'')+'>— none: the switchboard answers from its personality alone —</option>';
+ if(own.length)html+='<optgroup label="Switchboard only — isolated, nobody else can read it">'+own.map(opt).join('')+'</optgroup>';
+ if(grp.length)html+='<optgroup label="Group collections — readable by unknown callers once chosen">'+grp.map(opt).join('')+'</optgroup>';
+ sel.innerHTML=html;
+ const m=$('tel-kbmsg');
+ if(m)m.textContent=(d&&d.selected)?'':'No base selected — the switchboard will say it does not have the information.';
+ // Deletable only when the switchboard owns it. A group's collection is the
+ // group's, managed in RAG — unselecting it here must never destroy it.
+ const sc=choices.find(c=>c.value===(d&&d.selected));
+ const del=$('tel-kbdel');
+ if(del)del.style.display=(sc&&sc.origin==='switchboard')?'':'none';
+}
+async function deleteSelectedVoiceKB(){
+ const sel=$('tel-kbsel');const label=sel.options[sel.selectedIndex].text.replace(/ \(\d+ docs\)$/,'');
+ await deleteVoiceKB(label);
+ await fetch('/api/voice/kb',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({collection:''})});
+ loadVoiceKB();
+}
+async function saveVoiceKBChoice(){
+ const m=$('tel-kbmsg');m.textContent='Saving…';
+ const r=await fetch('/api/voice/kb',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({collection:$('tel-kbsel').value})});
+ m.textContent=r.ok?'✓ Saved':'Failed ('+r.status+')';
+ if(r.ok)setTimeout(()=>m.textContent='',1800);
 }
 async function uploadVoiceKB(){
- const f=$('tel-kbfile').files[0];const m=$('tel-kbmsg');
+ const f=$('tel-kbfile').files[0];const m=$('tel-kbupmsg');
+ const name=($('tel-kbcol').value||'switchboard').trim();
  if(!f){m.textContent='Pick a file first.';return;}
  m.textContent='Uploading & indexing…';
  // Ensure the collection carries a description so the agent knows when to search it.
- await fetch('/api/rag/collections?scope=voice',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'switchboard',description:'Public information for phone callers: opening hours, prices, services offered, and frequently asked questions.'})});
- const fd=new FormData();fd.append('collection','switchboard');fd.append('file',f);
+ await fetch('/api/rag/collections?scope=voice',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,description:'Public information for phone callers: opening hours, prices, services offered, and frequently asked questions.'})});
+ const fd=new FormData();fd.append('collection',name);fd.append('file',f);
  let r;try{r=await fetch('/api/rag/upload?scope=voice',{method:'POST',body:fd});}catch(e){m.textContent='Failed: '+e.message;return;}
- m.textContent=r.ok?'✓ Added':'Failed ('+r.status+')';
+ m.textContent=r.ok?'✓ Added — select it above to put it on the line':'Failed ('+r.status+')';
  $('tel-kbfile').value='';$('tel-kbfilename').textContent='';
- loadVoiceKB();setTimeout(()=>m.textContent='',3500);
+ loadVoiceKB();setTimeout(()=>m.textContent='',4000);
 }
 async function deleteVoiceKB(name){
  if(!await PrismModal.confirm('Delete "'+name+'" and all its documents?',{danger:true}))return;
@@ -138,7 +162,6 @@ async function loadTelephony(){
  loadVoiceKB();
  loadTelDirectory();       // who can receive a transfer, and how
  loadOutContacts();        // who the agent can call by name
- loadTelMCP();             // extra tools for the switchboard agent
  loadTelVoiceGreeting();   // voice list + clone controls (needs the TTS backend)
  loadPhoneCfg();           // greeting + phrases + dictionary + call handling
  const s=await jget('/api/vox/sip');
@@ -303,30 +326,6 @@ async function addOutContact(){
 async function rmOutContact(id,name){
  if(!confirm('Remove '+name+' from the outbound directory? The agent will no longer be able to call them by name.'))return;
  await fetch('/api/vox/contacts/'+id,{method:'DELETE'});loadOutContacts();
-}
-
-// MCP servers belonging to the switchboard agent, stored in Vox. Same concept as
-// the group MCP tab, a different agent — the way the voice RAG scope is the same
-// concept as a group's collections.
-async function loadTelMCP(){
- const box=$('tel-mcp');if(!box)return;
- const d=await jget('/api/vox/mcp');const rows=Array.isArray(d)?d:((d&&d.items)||[]);
- if(!rows.length){box.innerHTML='<div class="hint">None. The switchboard answers from its knowledge base alone.</div>';return;}
- box.innerHTML='<table><tr><th>Name</th><th>Type</th><th>Endpoint</th><th></th></tr>'+rows.map(m=>
-  '<tr><td>'+esc(m.name)+'</td><td>'+esc(m.type||'')+'</td><td style="word-break:break-all">'+esc(m.url||(m.command||[]).join(' '))+'</td>'+
-  '<td style="text-align:right"><button onclick="rmTelMCP('+m.id+',\''+esc(m.name).replace(/'/g,"\\'")+'\')">Remove</button></td></tr>').join('')+'</table>';
-}
-async function addTelMCP(){
- const m=$('tel-mcpmsg');const name=$('tel-mcpname').value.trim();const url=$('tel-mcpurl').value.trim();
- if(!name||!url){m.textContent='Name and endpoint required';return;}
- m.textContent='Saving…';
- const r=await fetch('/api/vox/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,type:$('tel-mcptype').value,url})});
- if(r.ok){$('tel-mcpname').value='';$('tel-mcpurl').value='';m.textContent='✓ Added';setTimeout(()=>m.textContent='',1500);loadTelMCP();}
- else m.textContent='Failed ('+r.status+')';
-}
-async function rmTelMCP(id,name){
- if(!confirm('Remove '+name+' from the switchboard\'s tools?'))return;
- await fetch('/api/vox/mcp/'+id,{method:'DELETE'});loadTelMCP();
 }
 
 const savePhrases =()=>saveCfgFields(TEL_PHRASES,'tel-pmsg');

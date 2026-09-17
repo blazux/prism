@@ -217,6 +217,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/voice/caller", s.handleVoiceCaller)       // Vox: who is calling?
 	mux.HandleFunc("/api/voice/directory", s.handleVoiceDirectory) // Vox: who can I transfer to?
 	mux.HandleFunc("/api/voice/search", s.handleVoiceSearch)       // Vox: what do we know?
+	mux.HandleFunc("/api/voice/kb", s.handleVoiceKB)               // which collection the switchboard reads
 	mux.HandleFunc(voxProxyPrefix, s.handleVoxProxy)               // /api/vox/* → Vox's API
 	mux.HandleFunc("/api/platform", s.handlePlatform)
 	mux.HandleFunc("/api/admin/platform", s.handleAdminPlatform)
