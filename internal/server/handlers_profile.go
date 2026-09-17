@@ -15,6 +15,15 @@ import (
 	"prism/internal/memory"
 )
 
+// profileResponse is the profile plus what the page needs to render the
+// default-group picker: the groups to choose from, and which one currently
+// speaks for this user (their pick, or the automatic fallback).
+type profileResponse struct {
+	memory.Profile
+	Groups         []memory.Membership `json:"groups"`
+	DefaultGroupID int64               `json:"defaultGroupId"`
+}
+
 const maxAvatarBytes = 1 << 20 // 1 MiB — clients downscale to ~256px before upload
 
 var allowedAvatarMIME = map[string]bool{
@@ -49,7 +58,12 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			// default so the profile page and the avatar scope (u<id>) still work.
 			p = memory.Profile{UserID: u.ID, DisplayName: u.DisplayName}
 		}
-		writeJSON(w, p)
+		// The groups come with the profile so the page can offer the default-group
+		// picker without a second round trip, and hide it entirely for the many
+		// users who are in one group or none.
+		groups, _ := ms.UserGroups(r.Context(), u.ID)
+		defaultGroup, _ := ms.DefaultGroupID(r.Context(), u.ID)
+		writeJSON(w, profileResponse{Profile: p, Groups: groups, DefaultGroupID: defaultGroup})
 	case "POST":
 		var b struct {
 			DisplayName string `json:"displayName"`
@@ -59,6 +73,9 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			// Empty = leave the transfer preference alone. A client that does not
 			// know about the field must not silently reset it to blind.
 			Transfer string `json:"transfer"`
+			// nil = leave the default group alone; 0 = clear it and go back to the
+			// automatic one. The pointer is what tells those two apart.
+			DefaultGroupID *int64 `json:"defaultGroupId"`
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
@@ -77,12 +94,20 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if b.DefaultGroupID != nil {
+			if err := ms.SetDefaultGroup(r.Context(), u.ID, *b.DefaultGroupID); err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		if err := ms.UpdateProfile(r.Context(), u.ID, dn, strings.TrimSpace(b.FirstName), strings.TrimSpace(b.LastName), strings.TrimSpace(b.Phone)); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		p, _ := ms.GetProfile(r.Context(), u.ID)
-		writeJSON(w, p)
+		groups, _ := ms.UserGroups(r.Context(), u.ID)
+		defaultGroup, _ := ms.DefaultGroupID(r.Context(), u.ID)
+		writeJSON(w, profileResponse{Profile: p, Groups: groups, DefaultGroupID: defaultGroup})
 	default:
 		http.Error(w, "method not allowed", 405)
 	}

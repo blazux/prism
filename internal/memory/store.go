@@ -372,6 +372,11 @@ func (s *Store) initSchema(ctx context.Context) error {
 		// straight through, 'attended' announces the caller first and lets them
 		// decline. Blind by default — that is what a desk extension expects.
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS transfer_type TEXT NOT NULL DEFAULT 'blind'`,
+		// Which group speaks for a user when something is group-scoped but the
+		// situation names only a person — a phone call, most obviously. No foreign
+		// key on purpose: the resolver checks membership anyway, so a deleted group
+		// or a dropped membership falls back on its own instead of dangling.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS default_group_id BIGINT`,
 		// Avatars for users and agents, keyed by scope: "u<id>" (user),
 		// "agent-u<id>" (a user's personal agent), "agent-g<id>" (a group's shared
 		// agent). Stored as bytes + mime; served via /api/avatar, versioned by updated_at.
