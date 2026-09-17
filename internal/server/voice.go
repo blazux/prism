@@ -312,3 +312,71 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
+
+// ── What Prism tells Vox about people ──────────────────────────────────────────
+//
+// Two questions, two endpoints, both read-only and both answered from the user
+// table. They exist because the routing decision belongs to Vox — it must know
+// who is calling BEFORE it picks a brain and before it speaks its greeting — while
+// the answer only exists here.
+//
+// Admin-gated, which the service token satisfies (auth.go resolves it to a
+// synthetic global admin): a phone directory is not member-readable.
+
+// handleVoiceCaller (GET /api/voice/caller?number=…) answers the single question
+// Vox must settle before it answers the line: is this one of ours?
+//
+// A match is *not* authentication — caller ID is trivially forged. It decides
+// which agent picks up and which greeting is spoken, nothing more; every
+// dangerous tool stays off the voice channel whoever is calling (see the top of
+// this file).
+func (s *Server) handleVoiceCaller(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil || !s.isAdminUser(r.Context(), u) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	caller := s.resolveVoiceCaller(r.Context(), r.URL.Query().Get("number"))
+	if caller == nil {
+		writeJSON(w, map[string]interface{}{"known": false})
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"known": true,
+		// The display name is what Vox greets them with. It never sends back an
+		// email or an id: Vox has no use for either, and a switchboard should not
+		// hold a copy of the user table.
+		"name": caller.DisplayName,
+	})
+}
+
+// handleVoiceDirectory (GET /api/voice/directory) lists who a call can be
+// transferred to: approved users with a phone number, and nobody else.
+//
+// This is the whole transfer surface. Vox's own contacts table is for people it
+// CALLS (see its outbound directory) — being transferable means having an account
+// here. The two lists are deliberately separate and must never be merged into one
+// prompt, or the switchboard will offer to put a caller through to a supplier.
+func (s *Server) handleVoiceDirectory(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil || !s.isAdminUser(r.Context(), u) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	entries := s.voiceDirectory(r.Context())
+	out := make([]map[string]interface{}, 0, len(entries))
+	for _, e := range entries {
+		// Per-entry transfer type (attended/blind) joins this payload with the
+		// user-profile flag; until then Vox applies its own default.
+		out = append(out, map[string]interface{}{"name": e.Name, "phone": e.Phone})
+	}
+	writeJSON(w, map[string]interface{}{"entries": out})
+}
