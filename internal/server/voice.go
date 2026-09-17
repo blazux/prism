@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -86,7 +87,11 @@ const (
 	voiceChannelName = "voice"
 
 	cfgVoicePersonality = "voice_personality"
-	cfgVoiceRAGScope    = "voice_rag_scope"
+	// Set once the persona above has been handed to Vox, which owns it from then
+	// on. A flag, not a text comparison: an admin who deliberately reverted to the
+	// default must not have their old words pushed back over it.
+	cfgVoicePersonaMigrated = "voice_personality_migrated"
+	cfgVoiceRAGScope        = "voice_rag_scope"
 )
 
 // defaultVoicePersonality is the switchboard persona used when no
@@ -285,8 +290,19 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		rawScope, _, _ := ms.GetConfig(r.Context(), cfgVoiceRAGScope)
+		// Docked, the switchboard runs on Vox with Vox's prompt, so that is the one
+		// to show and edit — anything else would be a form that changes nothing.
+		persona := s.voicePersonality(r.Context())
+		if s.cfg.VoxURL != "" {
+			s.migrateVoicePersonaToVox(r.Context())
+			if p, err := s.voxSystemPrompt(r.Context()); err == nil {
+				persona = p
+			} else {
+				log.Printf("[voice] Vox unreachable, showing the local persona: %v", err)
+			}
+		}
 		writeJSON(w, map[string]any{
-			"personality":        s.voicePersonality(r.Context()), // effective (stored or default)
+			"personality":        persona,
 			"defaultPersonality": defaultVoicePersonality,
 			"ragScope":           rawScope, // "" = isolated (callers read nothing)
 			"voxDocked":          s.cfg.VoxURL != "",
@@ -302,7 +318,18 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		// The switchboard's knowledge base is a fixed reserved scope (voiceGuestScope),
 		// managed via the RAG endpoints — no scope to set here, only the persona.
-		if err := ms.SetConfig(r.Context(), cfgVoicePersonality, strings.TrimSpace(b.Personality)); err != nil {
+		persona := strings.TrimSpace(b.Personality)
+		if s.cfg.VoxURL != "" {
+			// One store, Vox's. Writing here as well would leave two copies to
+			// disagree, and the one that answers the phone would not be this one.
+			if err := s.setVoxSystemPrompt(r.Context(), persona); err != nil {
+				writeErr(w, http.StatusBadGateway, "the phone stack did not accept the change: "+err.Error())
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
+			return
+		}
+		if err := ms.SetConfig(r.Context(), cfgVoicePersonality, persona); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
