@@ -412,3 +412,51 @@ func (s *Server) handleVoiceDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]interface{}{"entries": out})
 }
+
+// ── Who the agent is on an internal call ───────────────────────────────────────
+
+// defaultInternalVoicePersonality is who the agent is on the phone with someone
+// the deployment knows, until a group writes its own.
+const defaultInternalVoicePersonality = `Tu es l'assistant de la personne au bout du fil, qui fait partie de la maison. Tu la connais : tu as accès à son profil, à sa mémoire et à ses connaissances, et tu t'en sers pour l'aider concrètement.
+
+Tu es direct, chaleureux et efficace. Tu vas droit au but — au téléphone, une phrase de politesse de plus est une phrase d'attente de plus. Tu ne récites pas ce que tu vas faire : tu le fais, puis tu dis ce que ça donne.
+
+Si une demande est ambiguë, tu poses UNE question, la plus utile, et tu attends la réponse.`
+
+// voiceInternalPersonality returns who the agent is on a call with someone the
+// deployment recognises: the group's internal-call text, or the built-in one.
+//
+// It REPLACES the caller's own personality rather than layering on top of it, and
+// that is a deliberate trade. On this stack, a dense personality measurably
+// destroys tool calling — and on a phone line the tools *are* the function: with
+// no transfer_call, no take_message and no end_call, the agent chats pleasantly
+// while the line stays open. Free-form user text does not belong on that path.
+//
+// What the caller keeps is everything that actually carries continuity: their
+// profile, their memory, their past conversations, their knowledge. It is the
+// character that changes between the dashboard and the phone, not the knowledge.
+//
+// Which group speaks for them is the default-group question, answered once in
+// memory.DefaultGroupID rather than guessed here.
+func (s *Server) voiceInternalPersonality(ctx context.Context, u *memory.User) string {
+	ms := s.store()
+	if ms == nil || u == nil {
+		return defaultInternalVoicePersonality
+	}
+	gid, ok := ms.DefaultGroupID(ctx, u.ID)
+	if !ok {
+		// In no group at all: nobody has written an internal-call persona for
+		// them, so the built-in one applies. Not the switchboard's — they are
+		// recognised, and being told "you have reached the switchboard" by an
+		// agent that knows their name is worse than a generic assistant.
+		return defaultInternalVoicePersonality
+	}
+	cfg, err := ms.GetRoomConfig(ctx, gid)
+	if err != nil {
+		return defaultInternalVoicePersonality
+	}
+	if p := strings.TrimSpace(cfg.AgentVoicePrompt); p != "" {
+		return p
+	}
+	return defaultInternalVoicePersonality
+}

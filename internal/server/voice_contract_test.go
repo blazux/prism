@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"prism/internal/memory"
 	"strings"
 	"testing"
@@ -43,5 +44,23 @@ func TestGatewayContextOnlyOnVoice(t *testing.T) {
 	}
 	if got := voiceTurnContent("Bonjour", facts, true); !strings.Contains(got, facts[0]) || !strings.Contains(got, "Appelant : Bonjour") {
 		t.Fatal("voice facts lost or confused with caller speech")
+	}
+}
+
+// An internal call must never fall back to the switchboard persona: being told
+// "you have reached the switchboard" by an agent that just greeted you by name is
+// worse than a generic assistant. With no store, no group and no configured text,
+// the built-in internal persona is what must come out.
+func TestInternalPersonaNeverFallsBackToSwitchboard(t *testing.T) {
+	s := &Server{}
+	got := s.voiceInternalPersonality(context.Background(), &memory.User{ID: 1, DisplayName: "Vincent"})
+	if got != defaultInternalVoicePersonality {
+		t.Fatalf("internal persona = %q, want the built-in internal text", got)
+	}
+	if strings.Contains(got, "standardiste") {
+		t.Fatal("a recognised caller was handed the switchboard persona")
+	}
+	if s.voiceInternalPersonality(context.Background(), nil) != defaultInternalVoicePersonality {
+		t.Fatal("an unidentified caller must still get a usable persona, never an empty prompt")
 	}
 }

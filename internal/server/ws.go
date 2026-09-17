@@ -259,8 +259,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	//  - dashboard → this session's personality.
 	personality := loadPersonality(r.Context(), ms, sessionID)
 	if voiceCall && voiceUser != nil {
+		// Their own personality is deliberately NOT used here — see
+		// voiceInternalPersonality. Their memory, profile and knowledge still are:
+		// that is where the continuity actually lives.
 		personality = voiceKnownPersonaNote(voiceUser.DisplayName) +
-			loadPersonality(r.Context(), ms, fmt.Sprintf("u%d-default", voiceUser.ID))
+			s.voiceInternalPersonality(r.Context(), voiceUser)
 	} else if voiceCall {
 		personality = s.voicePersonality(r.Context())
 	}
