@@ -35,6 +35,31 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Header pill buttons (admin / shared widgets / settings).
+   One class rather than the same inline style copied onto each, because it was
+   copied onto two different ELEMENTS: <a> inherits the body's font and
+   line-height, <button> does not — browsers apply their own font shorthand to
+   form controls, so the button rendered a hair smaller than its neighbours.
+   font:inherit is what actually makes them identical; the rest was already the
+   same. */
+.hdr-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.5;
+  padding: 4px 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  color: var(--text3);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.hdr-btn:hover { color: var(--text); border-color: var(--accent); }
+
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 
 #app {
