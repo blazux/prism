@@ -23,8 +23,11 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
         <button class="mini" onclick="previewVoice()">Preview</button>
       </div>
       <div id="tel-voicehint" class="hint" style="margin-top:4px"></div>
-      <label style="margin-top:10px">Greeting <span class="hint" style="margin:0">— spoken on pickup</span></label>
+      <label style="margin-top:10px">Greeting — unknown caller <span class="hint" style="margin:0">— spoken on pickup, before the agent thinks at all</span></label>
       <textarea id="tel-greeting" placeholder="Loading…" style="min-height:60px"></textarea>
+      <label style="margin-top:10px">Greeting — someone we recognise <span class="hint" style="margin:0">— when the number matches a profile. <code>%s</code> = their name; leave it out and the line is spoken as written.</span></label>
+      <textarea id="tel-greeting-known" placeholder="Loading…" style="min-height:60px"></textarea>
+      <div class="hint" style="margin-top:4px">Two greetings because the caller is told who picked up before a single word is generated: a colleague should not hear "you have reached the switchboard". This one also tells you, on the very first second of a test call, which brain took it.</div>
       <div class="row" style="gap:8px;margin-top:6px;align-items:center" id="tel-clonebox">
         <span class="filebtn"><input type="file" id="tel-clonefile" accept="audio/*" onchange="showPicked('tel-clonefile','tel-clonefilename')"><button type="button" onclick="document.getElementById('tel-clonefile').click()">Choose a voice sample…</button></span>
         <span id="tel-clonefilename" class="filename"></span>
@@ -200,7 +203,9 @@ async function saveTelVoiceGreeting(){
   const rv=await fetch('/api/vox/tts/voice',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
   if(!rv.ok){m.textContent='Voice failed ('+rv.status+')';return;}
  }
- const rc=await fetch('/api/vox/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:{greeting:$('tel-greeting').value}})});
+ const rc=await fetch('/api/vox/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:{
+  greeting:$('tel-greeting').value,
+  greeting_known:$('tel-greeting-known').value}})});
  m.textContent=rc.ok?'✓ Saved':'Greeting failed ('+rc.status+')';
  setTimeout(()=>m.textContent='',2500);
 }
@@ -274,7 +279,12 @@ async function loadPhoneCfg(){
  renderCfgFields('tel-dict',TEL_DICT);
  renderCfgFields('tel-handling',TEL_HANDLING);
  $('tel-greeting').value=TEL_CFG.greeting||'';
+ // Empty in the config table = the compiled-in default is in force. Showing it
+ // rather than an empty box is what makes the field editable instead of a
+ // mystery: an admin sees the sentence their callers actually hear.
+ $('tel-greeting-known').value=TEL_CFG.greeting_known||DEFAULT_GREETING_KNOWN;
 }
+const DEFAULT_GREETING_KNOWN="Bonjour %s, c'est votre assistant. Que puis-je faire pour vous ?";
 async function saveCfgFields(spec,msgId){
  const m=$(msgId);m.textContent='Saving…';
  const values={};spec.forEach(([k])=>{const el=$('cf-'+k);if(el)values[k]=el.value;});
