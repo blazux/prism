@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"prism/internal/docker"
 )
 
 // cronOwner is the tag under which the current session's cron jobs are recorded,
@@ -122,9 +124,9 @@ func displayCommand(command string) string {
 }
 
 func (e *ToolExecutor) cronList(ctx context.Context) (string, error) {
-	raw, err := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)
+	raw, err := e.docker.Exec(ctx, docker.ReadCrontabCommand, 10*time.Second)
 	if err != nil {
-		return "(no jobs scheduled)", nil
+		return "", fmt.Errorf("cannot read crontab: %w", err)
 	}
 	owner := e.cronOwner()
 	var out []string
@@ -171,7 +173,10 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 	}
 	description = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(description, "\n", " "), "\r", " "))
 
-	current, _ := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)
+	current, err := e.docker.Exec(ctx, docker.ReadCrontabCommand, 10*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("cannot read crontab: %w", err)
+	}
 	current = strings.TrimSpace(current)
 
 	marker := "# agent-job: " + name
@@ -238,7 +243,7 @@ func (e *ToolExecutor) cronCommandLine(command string) string {
 // enabled. Owner check as in cronRemove: a job that belongs to another user is
 // never touched. Mirrors server/handlers_cron.go's mutateJob.
 func (e *ToolExecutor) cronEditBlock(ctx context.Context, name string, edit func(desc, line string, enabled bool) (string, string, bool)) (*CronJob, string, error) {
-	current, err := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)
+	current, err := e.docker.Exec(ctx, docker.ReadCrontabCommand, 10*time.Second)
 	if err != nil {
 		// A failed exec is NOT an empty crontab: reporting "no cron jobs yet"
 		// here made the model conclude the job did not exist.
@@ -409,7 +414,7 @@ func (e *ToolExecutor) cronUpdate(ctx context.Context, name, schedule, command, 
 }
 
 func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, error) {
-	current, err := e.docker.Exec(ctx, "crontab -l 2>/dev/null || true", 10*time.Second)
+	current, err := e.docker.Exec(ctx, docker.ReadCrontabCommand, 10*time.Second)
 	if err != nil {
 		return "", fmt.Errorf("cannot read crontab: %w", err)
 	}

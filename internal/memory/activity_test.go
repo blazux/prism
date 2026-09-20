@@ -17,8 +17,8 @@ func TestBuildActivityQuery(t *testing.T) {
 	if args[1].(int) != 50 {
 		t.Errorf("limit not defaulted to 50: %v", args[1])
 	}
-	if got := args[0].([]string); len(got) != 4 {
-		t.Errorf("default kinds should be the 4 human-relevant ones, got %v", got)
+	if got := args[0].([]string); len(got) != 6 {
+		t.Errorf("default kinds should be the 6 human-relevant ones, got %v", got)
 	}
 
 	// Every filter set: $N indexing must stay consistent and LIMIT must be last.

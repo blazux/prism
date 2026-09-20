@@ -2,7 +2,7 @@
 
 A secret is a named value (API key, password, token) stored **encrypted** in
 Prism's database and handed to the agent's scripts as an environment variable —
-without ever appearing in the chat. Secrets need Postgres; without it the tab
+without sending the entered value through the chat. Secrets need Postgres; without it the tab
 shows *Indisponible (Postgres requis)*.
 
 ## Settings → Secrets
@@ -10,7 +10,10 @@ shows *Indisponible (Postgres requis)*.
   **Save**. Each row shows the name and the environment variable it becomes
   (`$MY_API_KEY`). Values are never shown again; **✕** deletes.
 - The env var name is the secret name uppercased, with anything that is not a
-  letter or digit turned into `_` (`openai_key` → `$OPENAI_KEY`).
+  letter or digit turned into `_` (`openai_key` → `$OPENAI_KEY`). Use a name
+  such as `MY_API_KEY`, and reuse its exact spelling. Prism refuses two different
+  names mapping to the same variable (`my-key` and `my_key`, for example).
+  `PRISM_*` variables and built-in integration names are reserved.
 
 In a shared deployment the tab has two sections:
 
@@ -81,3 +84,19 @@ by the HTTP endpoint above, cannot be used as an MCP server's bearer token, and
 cannot be created as or shared to a group secret by a plain member. Manage
 them from their own tabs (Email, Calendar, Channels) or, for a group, from the
 Admin console.
+
+## Errors and local backups
+If loading or decrypting secrets fails, Prism stops the script and reports the
+error instead of running with missing credentials. Existing conflicting names
+must be removed or recreated under distinct names in Settings → Secrets.
+No existing secrets are renamed automatically.
+
+Back up the database together with the workspace's `.secret_key`, and protect
+that backup: both are required to restore encrypted credentials. Never delete
+or replace `.secret_key` to resolve a read error; restore access to the original
+file or restore its backup.
+
+Scripts receive usable credentials, so do not print environment variables,
+secret values, or authorization headers. The secure input dialog avoids putting
+the value into chat; encryption at rest does not stop a script from exposing
+it in its output.

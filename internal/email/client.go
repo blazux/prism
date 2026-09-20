@@ -30,6 +30,8 @@ import (
 )
 
 type Config struct {
+	Folder   string // request scope; empty means INBOX
+	Offset   int    // list pagination
 	IMAPHost string
 	IMAPPort int
 	SMTPHost string
@@ -57,6 +59,8 @@ func (c Config) from() string {
 }
 
 type Message struct {
+	BodyIsHTML  bool         `json:"-"` // MIME format, used only for agent-readable conversion.
+	Folder      string       `json:"folder"`
 	UID         uint32       `json:"uid"`
 	Subject     string       `json:"subject"`
 	From        string       `json:"from"`
@@ -165,7 +169,9 @@ func (c Config) fetchByUIDs(cl *imapclient.Client, uids []imap.UID) ([]Message, 
 	out := make([]Message, 0, len(uids))
 	for _, u := range uids {
 		if m := byUID[u]; m != nil {
-			out = append(out, toMessage(m))
+			msg := toMessage(m)
+			msg.Folder = c.mailbox()
+			out = append(out, msg)
 		}
 	}
 	return out, nil
@@ -173,6 +179,12 @@ func (c Config) fetchByUIDs(cl *imapclient.Client, uids []imap.UID) ([]Message, 
 
 // List returns up to `limit` most recent messages in INBOX, newest first.
 func (c Config) List(limit int) ([]Message, error) {
+	if limit > 500 {
+		limit = 500
+	}
+	if c.Offset < 0 {
+		c.Offset = 0
+	}
 	if limit <= 0 {
 		limit = 20
 	}
@@ -182,7 +194,7 @@ func (c Config) List(limit int) ([]Message, error) {
 	}
 	defer cl.Close()
 
-	sel, err := cl.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait()
+	sel, err := cl.Select(c.mailbox(), &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {
 		return nil, fmt.Errorf("select inbox: %w", err)
 	}
@@ -197,6 +209,10 @@ func (c Config) List(limit int) ([]Message, error) {
 			SortCriteria:   []imapclient.SortCriterion{{Key: imapclient.SortKeyDate, Reverse: true}},
 		}).Wait()
 		if serr == nil && len(nums) > 0 {
+			if c.Offset >= len(nums) {
+				return []Message{}, nil
+			}
+			nums = nums[c.Offset:]
 			if len(nums) > limit {
 				nums = nums[:limit]
 			}
@@ -220,12 +236,18 @@ func (c Config) List(limit int) ([]Message, error) {
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
 	sort.Slice(metas, func(i, j int) bool { return msgDate(metas[i]).After(msgDate(metas[j])) })
+	if c.Offset >= len(metas) {
+		return []Message{}, nil
+	}
+	metas = metas[c.Offset:]
 	if len(metas) > limit {
 		metas = metas[:limit]
 	}
 	out := make([]Message, 0, len(metas))
 	for _, m := range metas {
-		out = append(out, toMessage(m))
+		msg := toMessage(m)
+		msg.Folder = c.mailbox()
+		out = append(out, msg)
 	}
 	return out, nil
 }
@@ -238,7 +260,7 @@ func (c Config) UnreadCount() (int, error) {
 		return 0, err
 	}
 	defer cl.Close()
-	data, err := cl.Status("INBOX", &imap.StatusOptions{NumUnseen: true}).Wait()
+	data, err := cl.Status(c.mailbox(), &imap.StatusOptions{NumUnseen: true}).Wait()
 	if err != nil {
 		return 0, err
 	}
@@ -255,7 +277,7 @@ func (c Config) Read(uid uint32) (Message, error) {
 		return Message{}, err
 	}
 	defer cl.Close()
-	if _, err := cl.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+	if _, err := cl.Select(c.mailbox(), &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
 		return Message{}, fmt.Errorf("select inbox: %w", err)
 	}
 
@@ -274,8 +296,9 @@ func (c Config) Read(uid uint32) (Message, error) {
 		return Message{}, fmt.Errorf("message uid %d not found", uid)
 	}
 	m := toMessage(msgs[0])
+	m.Folder = c.mailbox()
 	if raw := msgs[0].FindBodySection(&imap.FetchItemBodySection{}); raw != nil {
-		m.Body, m.Attachments = parseBody(raw)
+		m.Body, m.Attachments, m.BodyIsHTML = parseBodyContent(raw)
 	}
 	return m, nil
 }
@@ -287,7 +310,7 @@ func (c Config) Attachment(uid uint32, index int) (filename, contentType string,
 		return "", "", nil, err
 	}
 	defer cl.Close()
-	if _, err = cl.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+	if _, err = cl.Select(c.mailbox(), &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
 		return "", "", nil, fmt.Errorf("select inbox: %w", err)
 	}
 	uidSet := imap.UIDSetNum(imap.UID(uid))
@@ -354,7 +377,7 @@ func (c Config) Search(query string, limit int) ([]Message, error) {
 		return nil, err
 	}
 	defer cl.Close()
-	if _, err := cl.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+	if _, err := cl.Select(c.mailbox(), &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
 		return nil, fmt.Errorf("select inbox: %w", err)
 	}
 
@@ -375,7 +398,9 @@ func (c Config) Search(query string, limit int) ([]Message, error) {
 	}
 	out := make([]Message, 0, len(msgs))
 	for _, m := range msgs {
-		out = append(out, toMessage(m))
+		msg := toMessage(m)
+		msg.Folder = c.mailbox()
+		out = append(out, msg)
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
@@ -426,15 +451,25 @@ func extractEmails(s string) []string {
 
 // SetSeen marks a message read (\Seen) or unread on the server.
 func (c Config) SetSeen(uid uint32, seen bool) error {
+	if uid == 0 {
+		return fmt.Errorf("uid from email list is required")
+	}
 	cl, err := c.dial()
 	if err != nil {
 		return err
 	}
 	defer cl.Close()
-	if _, err := cl.Select("INBOX", nil).Wait(); err != nil {
+	if _, err := cl.Select(c.mailbox(), nil).Wait(); err != nil {
 		return fmt.Errorf("select inbox: %w", err)
 	}
 	op := imap.StoreFlagsAdd
+	msgs, err := cl.Fetch(imap.UIDSetNum(imap.UID(uid)), &imap.FetchOptions{UID: true}).Collect()
+	if err != nil {
+		return err
+	}
+	if len(msgs) == 0 {
+		return fmt.Errorf("message no longer exists; refresh the folder")
+	}
 	if !seen {
 		op = imap.StoreFlagsDel
 	}
@@ -456,12 +491,17 @@ func usablePart(err error) bool {
 }
 
 func parseBody(raw []byte) (string, []Attachment) {
+	body, attachments, _ := parseBodyContent(raw)
+	return body, attachments
+}
+
+func parseBodyContent(raw []byte) (string, []Attachment, bool) {
 	mr, err := gomail.CreateReader(bytes.NewReader(raw))
 	if err != nil && !usablePart(err) {
-		return string(raw), nil
+		return string(raw), nil, false
 	}
 	if mr == nil {
-		return string(raw), nil
+		return string(raw), nil, false
 	}
 	var text, htmlFallback strings.Builder
 	var atts []Attachment
@@ -497,12 +537,12 @@ func parseBody(raw []byte) (string, []Attachment) {
 		}
 	}
 	if text.Len() > 0 {
-		return text.String(), atts
+		return text.String(), atts, false
 	}
 	if htmlFallback.Len() > 0 {
-		return htmlFallback.String(), atts
+		return htmlFallback.String(), atts, true
 	}
-	return string(raw), atts
+	return string(raw), atts, false
 }
 
 // ─── SMTP ─────────────────────────────────────────────────────────────────────

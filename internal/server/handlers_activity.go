@@ -33,6 +33,8 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 	f.Before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
 
 	switch q.Get("view") {
+	case "actions":
+		f.Kinds = []string{"action", "audit", "webhook", "mail_rule"}
 	case "errors":
 		f.Kinds = []string{"audit"}
 		f.Items = []string{"tool_error", "tool_denied"}

@@ -75,8 +75,15 @@ func (s *Server) handleGroupSecrets(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusForbidden, "group admin only for this name")
 			return
 		}
-		if err := scoped.SetSecret(r.Context(), b.Name, b.Value); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+		var saveErr error
+		if agent.IsReservedSecretName(b.Name) {
+			// Preserve the existing group-admin integration management path.
+			saveErr = scoped.SetSecret(r.Context(), b.Name, b.Value)
+		} else {
+			saveErr = scoped.SetScriptSecret(r.Context(), b.Name, b.Value)
+		}
+		if saveErr != nil {
+			writeSecretStoreError(w, saveErr)
 			return
 		}
 		writeJSON(w, map[string]interface{}{"ok": true})

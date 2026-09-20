@@ -234,6 +234,19 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 		return "", nil, fmt.Errorf("title %q has no usable characters for a widget id — add a plain-alphanumeric word to it", title)
 	}
 
+	metaPath := filepath.Join(e.pluginDir, id+".meta.json")
+	if data, err := os.ReadFile(metaPath); err == nil {
+		var existing pluginMeta
+		if err := json.Unmarshal(data, &existing); err != nil {
+			return "", nil, fmt.Errorf("corrupt widget meta: %w", err)
+		}
+		if existing.Locked {
+			return "", nil, fmt.Errorf("widget '%s' is locked by the user and cannot be replaced", id)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", nil, fmt.Errorf("read widget meta: %w", err)
+	}
+
 	pluginPath := filepath.Join(e.pluginDir, id+".html")
 	_, statErr := os.Stat(pluginPath)
 	replaced := statErr == nil // same title → same id → silent clobber unless we say so
@@ -242,7 +255,9 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 	}
 
 	meta, _ := json.Marshal(pluginMeta{Title: title, Cols: cols, Height: height})
-	os.WriteFile(filepath.Join(e.pluginDir, id+".meta.json"), meta, 0644)
+	if err := os.WriteFile(metaPath, meta, 0644); err != nil {
+		return "", nil, fmt.Errorf("write widget meta: %w", err)
+	}
 
 	if e.onPluginAdd != nil {
 		e.onPluginAdd(id, title, content, cols, height)

@@ -7,6 +7,8 @@
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
 <script src="/apiclient.js"></script>
+<script src="/modal.js"></script>
+<script src="/editor-bridge.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -17,6 +19,8 @@
 </script>
 <style>
   html, body { height: 100%; }
+  select {background:var(--bg2);color:var(--text);border:1px solid var(--border);padding:7px;border-radius:6px;max-width:180px}
+  .toolbar {flex-wrap:wrap}
   body { padding: 0; overflow: hidden; }
   .app { height: 100%; display: flex; flex-direction: column; }
 
@@ -45,6 +49,7 @@
   .toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
   .toolbar .search { flex: 1; }
   .mail { flex: 1; display: flex; min-height: 0; }
+  .mail-list-pane {display:flex;flex-direction:column;min-width:260px;width:35%}
   .mlist { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border); overflow-y: auto; }
   .mrow { display: flex; gap: 11px; align-items: flex-start; padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .12s; }
   .mrow:hover { background: var(--bg2); }
@@ -105,19 +110,20 @@
   .att-x:hover { color: var(--red); }
   .err { color: var(--red); font-size: 12px; }
 
-  @media (max-width: 620px) { .mlist { width: 100%; } .mail.reading-open .mlist { display: none; } }
+  @media (max-width:620px){.mail-list-pane{width:100%;min-width:0}.mail .reading{display:none}.mail.reading-open .mail-list-pane{display:none}.mail.reading-open .reading{display:flex}}
 </style>
+<link rel="stylesheet" href="/apps/email.css">
 </head>
 <body>
   <div class="app" id="app"></div>
 
   <div class="overlay" id="overlay">
-    <div class="compose">
+    <div class="compose" role="dialog" aria-modal="true" aria-labelledby="compose-title">
       <div class="compose-head" id="compose-title">New message</div>
       <div class="compose-body">
-        <input id="c-to" placeholder="To">
-        <input id="c-subject" placeholder="Subject">
-        <textarea id="c-body" placeholder="Write your message…"></textarea>
+        <label class="compose-field"><span>To</span><input id="c-to" placeholder="name@example.com" aria-label="Recipients"></label>
+        <label class="compose-field"><span>Subject</span><input id="c-subject" placeholder="Add a subject" aria-label="Subject"></label>
+        <textarea id="c-body" aria-label="Message" placeholder="Write your message…"></textarea>
         <div id="c-atts" class="c-atts"></div>
         <div class="err" id="c-err"></div>
       </div>
@@ -125,7 +131,7 @@
         <label class="btn" title="Attach files">📎 Attach<input type="file" id="c-file" multiple style="display:none"></label>
         <span style="flex:1"></span>
         <button class="btn" onclick="closeCompose()">Cancel</button>
-        <button class="btn btn-accent" onclick="doSend()">Send</button>
+        <button class="btn btn-accent" id="send-mail" onclick="doSend()">Send</button>
       </div>
     </div>
   </div>
@@ -134,6 +140,7 @@
 const J = (r) => r.json();
 function suggest(items) { try { parent.postMessage({ type: 'suggest', items }, '*'); } catch (_) {} }
 function fmtSize(n) { n = n || 0; if (n < 1024) return ' · ' + n + ' B'; if (n < 1048576) return ' · ' + (n / 1024).toFixed(0) + ' KB'; return ' · ' + (n / 1048576).toFixed(1) + ' MB'; }
+let folder = "INBOX", mailOffset=0, mailLoadGeneration=0, unreadOnly=false, searchQuery='';
 let cfg = null, messages = [], current = null, replyUid = 0, mailTags = {}, activeFilter = '';
 let showAllTags = false, tagSearch = '', tagEntriesCache = [];
 const TOP_TAGS = 5;
@@ -172,22 +179,53 @@ function renderNotConfigured() {
 // ── Inbox ───────────────────────────────────────────────────────────────────
 function renderInbox() {
   document.getElementById('app').innerHTML = `
-    <div class="toolbar">
-      <button class="btn btn-accent" onclick="compose()">＋ Compose</button>
-      <button class="btn" onclick="loadInbox()" title="Refresh">⟳</button>
-      <button class="btn" id="triage-btn" onclick="triage()" title="Categorize the inbox with AI">✨ Categorize</button>
-      <input class="search" id="search" placeholder="Search mail… (Enter)">
-      <button class="btn" onclick="openSettings()" title="Mailbox settings">⚙</button>
-    </div>
-    <div class="mfilter" id="mfilter" style="display:none"></div>
-    <div class="mail" id="mail">
-      <div class="mlist" id="mlist"></div>
-      <div class="reading" id="reading"><div class="placeholder">Select a message</div></div>
+    <header class="mail-topbar">
+      <button class="icon-btn folders-toggle" onclick="toggleFolders()" aria-label="Show folders">${mailIcon('menu')}</button>
+      <div class="mail-brand">${mailIcon('mail')}<span>Mail</span></div>
+      <form class="mail-search" onsubmit="event.preventDefault();runMailSearch()" role="search">
+        ${mailIcon('search')}<input id="search" type="search" placeholder="Search this folder" aria-label="Search this folder">
+        <button class="icon-btn" type="submit" aria-label="Search">${mailIcon('arrow')}</button>
+      </form>
+      <div class="folder-actions" aria-label="Folder actions">
+      <details class="filter-menu" id="mail-filters" ontoggle="if(this.open)toggleFolders(false)">
+        <summary class="btn filter-summary" id="filter-summary" title="Filter by category or tag">${mailIcon('rules')}<span class="filter-name">Filters</span><span id="filter-active" class="filter-active" hidden>1</span></summary>
+        <div class="filter-panel"><div class="filter-panel-heading"><strong>Categories &amp; tags</strong><button class="text-btn" id="reset-mail-filter" onclick="setFilter('')">Clear</button></div><p>Filter messages on the loaded page.</p><div class="mfilter" id="mfilter"></div></div>
+      </details>
+      <button class="btn categorize-btn" onclick="triage('all')" title="Categorize uncategorized messages across this folder, including older pages">Categorize all</button>
+      <button class="btn" onclick="askMailAgent('Summarize the unread messages in this folder.')">Summarize unread</button>
+      </div>
+      <button class="icon-btn" onclick="refreshMail()" title="Refresh folder" aria-label="Refresh folder">${mailIcon('refresh')}</button>
+      <button class="btn mobile-compose" onclick="compose()">${mailIcon('compose')}<span>New message</span></button>
+    </header>
+    <div class="triage-status" role="status"><span id="triage-progress"></span><button id="triage-stop" class="text-btn" onclick="stopTriage()" hidden>Stop</button></div>
+    <div class="mail-shell" id="mail-shell">
+      <button class="folder-scrim" onclick="toggleFolders(false)" aria-label="Close folders"></button>
+      <aside class="mail-sidebar" aria-label="Mailbox navigation">
+        <button class="btn btn-accent new-message" onclick="compose();toggleFolders(false)">${mailIcon('compose')} New message</button>
+        <div class="sidebar-label"><span>Folders</span><button class="icon-btn" onclick="manageFolders()" title="Manage folders" aria-label="Manage folders">${mailIcon('settings')}</button></div>
+        <nav id="folder-nav" aria-label="Mail folders"><div class="sidebar-loading">Loading folders…</div></nav>
+        <div class="sidebar-bottom">
+          <button class="nav-item" onclick="manageRules();toggleFolders(false)">${mailIcon('rules')}<span>Inbox rules</span></button>
+          <div class="mail-account" title="${esc(cfg.user||'')}">${esc(cfg.user||'Connected mailbox')}</div>
+        </div>
+      </aside>
+      <div class="mail" id="mail">
+        <section class="mail-list-pane" aria-label="Message list">
+          <div class="list-heading"><div><h1 id="folder-title">Inbox</h1><span id="mail-count" aria-live="polite">Loading…</span></div>
+            <details class="action-menu"><summary class="icon-btn" aria-label="Folder actions">${mailIcon('more')}</summary><div class="menu-panel">
+              <button onclick="manageFolders(folder)">Manage this folder</button>
+            </div></details>
+          </div>
+          <div class="list-tabs" aria-label="Filter loaded messages"><button class="on" id="tab-all" onclick="setUnreadOnly(false)">All</button><button id="tab-unread" onclick="setUnreadOnly(true)">Unread</button><button class="clear-search" id="clear-search" onclick="clearMailSearch()" hidden>Clear search</button></div>
+          <div class="mlist" id="mlist" aria-live="polite"></div>
+          <div class="mail-pagination"><span id="page-label">Latest messages</span><button class="icon-btn" id="newer-mail" onclick="mailOffset=Math.max(0,mailOffset-inboxLimit());loadInbox(true)" title="Newer messages" aria-label="Newer messages">${mailIcon('left')}</button><button class="icon-btn" id="older-mail" onclick="olderMail()" title="Older messages" aria-label="Older messages">${mailIcon('right')}</button></div>
+        </section>
+        <section class="reading" id="reading" aria-label="Message"><div class="reading-empty">${mailIcon('mail')}<h2>Select a message</h2><p>Select a message to read it here.</p></div></section>
+      </div>
     </div>`;
-  document.getElementById('search').addEventListener('keydown', e => {
-    if (e.key === 'Enter') { const q = e.target.value.trim(); q ? search(q) : loadInbox(); }
-  });
+  document.getElementById('search').addEventListener('search', () => {if(!document.getElementById('search').value)clearMailSearch();});
   suggest([{ label: '📋 Summarize unread', prompt: 'Summarize my unread emails', send: true }]);
+  loadFolders();
   loadInbox();
 }
 
@@ -203,24 +241,34 @@ function errBox(msg) {
   </div>`;
 }
 
-async function loadInbox() {
+async function loadInbox(keepOffset=false) {
+  if (!keepOffset) mailOffset=0;
+  searchQuery='';updateMailHeading();
+  const gen=++mailLoadGeneration, requestedFolder=folder;
+  ++readingGeneration;
+  current=null;
+  document.getElementById('mail').classList.remove('reading-open');
+  document.getElementById('reading').innerHTML=emptyReading();
   setList('<div class="placeholder" style="padding:30px">Loading…</div>');
   try {
-    mailTags = await fetch('/api/email/tags').then(J).catch(() => ({}));
-    const res = await fetch('/api/email/list?limit=' + inboxLimit());
-    if (!res.ok) { setList(errBox(await res.text())); return; }
-    messages = (await res.json()).messages || [];
-    renderList();
-  } catch (e) { setList(errBox(e.message)); }
+    const tags=await PrismAPI.api(mailURL('/api/email/tags'));
+    const data=await PrismAPI.api(mailURL('/api/email/list')+'&limit='+inboxLimit()+'&offset='+mailOffset);
+    if(gen!==mailLoadGeneration || folder!==requestedFolder)return;
+    mailTags=tags;messages=data.messages||[];renderList();updateMailHeading();
+    document.getElementById('older-mail').disabled=messages.length<inboxLimit();
+    document.getElementById('newer-mail').disabled=mailOffset===0;
+    publishMailContext();
+  } catch(e) {if(gen===mailLoadGeneration)setList(errBox(e.message));}
 }
 async function search(q) {
+  searchQuery=q;mailOffset=0;updateMailHeading();
+  const gen=++mailLoadGeneration;
   setList('<div class="placeholder" style="padding:30px">Searching…</div>');
   try {
-    const res = await fetch('/api/email/search?q=' + encodeURIComponent(q) + '&limit=' + inboxLimit());
-    if (!res.ok) { setList(errBox(await res.text())); return; }
-    messages = (await res.json()).messages || [];
-    renderList();
-  } catch (e) { setList(errBox(e.message)); }
+    const data=await PrismAPI.api(mailURL('/api/email/search')+'&q='+encodeURIComponent(q)+'&limit='+inboxLimit());
+    if(gen!==mailLoadGeneration)return;
+    messages=data.messages||[];renderList();updateMailHeading();document.getElementById('older-mail').disabled=true;document.getElementById('newer-mail').disabled=true;
+  } catch(e){if(gen===mailLoadGeneration)setList(errBox(e.message));}
 }
 
 function setList(html) { const l = document.getElementById('mlist'); if (l) l.innerHTML = html; }
@@ -229,6 +277,7 @@ function setList(html) { const l = document.getElementById('mlist'); if (l) l.in
 function renderFilters() {
   const host = document.getElementById('mfilter');
   if (!host) return;
+  updateFilterIndicator();
   const catCount = {}, tagCount = {};
   for (const m of messages) {
     const t = mailTags[m.uid]; if (!t) continue;
@@ -239,7 +288,7 @@ function renderFilters() {
   // Tags sorted by frequency (most common first).
   tagEntriesCache = Object.entries(tagCount).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   host.innerHTML = '';
-  if (!cats.length && !tagEntriesCache.length) { host.style.display = 'none'; return; }
+  if (!cats.length && !tagEntriesCache.length) { host.style.display='block';host.innerHTML='<div class="filter-empty">No categories or tags on this page yet. Use Categorize to add them.</div>';return; }
   host.style.display = 'flex';
   const mkChip = (label, val, color) => {
     const b = document.createElement('button');
@@ -252,10 +301,10 @@ function renderFilters() {
   // In the expanded tag view, put the filter field first so it's easy to spot.
   if (showAllTags && tagEntriesCache.length) {
     const inp = document.createElement('input');
-    inp.className = 'ftag-search'; inp.placeholder = '🔍 Filter tags…'; inp.value = tagSearch;
+    inp.className = 'ftag-search'; inp.setAttribute('aria-label','Find a tag'); inp.placeholder = '🔍 Filter tags…'; inp.value = tagSearch;
     inp.oninput = () => { tagSearch = inp.value; renderTagChips(); };
     host.appendChild(inp);
-    setTimeout(() => inp.focus(), 0);
+    if(document.getElementById('mail-filters').open)setTimeout(() => {if(inp.isConnected&&document.getElementById('mail-filters').open)inp.focus();}, 0);
   }
   host.appendChild(mkChip(`All (${messages.length})`, ''));
   for (const c of cats) host.appendChild(mkChip(`${c} (${catCount[c]})`, c, CAT_COLORS[c] || 'var(--text3)'));
@@ -297,8 +346,9 @@ function renderTagChips() {
     wrap.appendChild(b);
   }
 }
-function setFilter(f) { activeFilter = f; renderFilters(); renderList(); }
+function setFilter(f) { activeFilter=f;renderList();const panel=document.getElementById('mail-filters');if(panel){panel.open=false;document.getElementById('filter-summary').focus();} }
 function passesFilter(m) {
+  if(unreadOnly && m.seen)return false;
   if (!activeFilter) return true;
   const t = mailTags[m.uid]; if (!t) return false;
   if (activeFilter.slice(0, 4) === 'tag:') return (t.tags || []).includes(activeFilter.slice(4));
@@ -306,7 +356,7 @@ function passesFilter(m) {
 }
 
 function renderList() {
-  renderFilters();
+  renderFilters();updateMailHeading();
   if (!messages.length) { setList('<div class="placeholder" style="padding:30px">No messages</div>'); return; }
   const l = document.getElementById('mlist'); l.innerHTML = '';
   // Newest first, by actual message date.
@@ -334,18 +384,25 @@ function renderList() {
         <div class="msub">${esc(m.subject) || '(no subject)'}</div>
         ${tagsHTML}
       </div>`;
+    row.tabIndex=0;row.setAttribute('role','button');row.setAttribute('aria-label',(m.seen?'':'Unread: ')+nm+', '+(m.subject||'No subject'));
     row.onclick = () => openMessage(m.uid);
+    row.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openMessage(m.uid);}};
     l.appendChild(row);
   }
 }
 
+let readingGeneration=0;
 async function openMessage(uid) {
+  const readingID=++readingGeneration;
   document.getElementById('mail').classList.add('reading-open');
   const reading = document.getElementById('reading');
   reading.innerHTML = '<div class="placeholder">Loading…</div>';
   try {
-    current = (await fetch('/api/email/read?uid=' + uid).then(J)).message;
-    try { parent.postMessage({ type: 'context', text: `Reading an email — from ${current.from}, subject "${current.subject}", UID ${current.uid}` }, '*'); } catch (_) {}
+    const selectedFolder=folder;
+    const msg=(await PrismAPI.api(mailURL('/api/email/read')+'&uid='+uid)).message;
+    if(folder!==selectedFolder||readingID!==readingGeneration)return;
+    current=msg;
+    try { publishMailContext(); } catch (_) {}
     suggest([
       { label: '✅ Make a task', prompt: 'Turn this email into a task', send: true },
       { label: '📅 Add to calendar', prompt: 'Add this email to my calendar as an event', send: true },
@@ -354,19 +411,28 @@ async function openMessage(uid) {
     if (!current.seen) markSeen(current.uid, true);   // opening = mark read
     renderList();
     reading.innerHTML = `
+      <div class="reading-toolbar">
+        <button class="icon-btn reading-back" onclick="document.getElementById('mail').classList.remove('reading-open')" aria-label="Back to messages">${mailIcon('left')}</button>
+        <button class="btn" onclick="mailAction('archive')">${mailIcon('archive')}<span>Archive</span></button>
+        <button class="btn" onclick="moveMessage()">${mailIcon('folder')}<span>Move</span></button>
+        <button class="icon-btn" onclick="mailAction('trash')" title="Move to Trash" aria-label="Move to Trash">${mailIcon('trash')}</button>
+        <button class="btn categorize-btn" onclick="triage('message')">Categorize</button>
+        <button class="btn" onclick="aiSummarize()">Summarize</button>
+        <span class="toolbar-spacer"></span>
+        <details class="action-menu"><summary class="icon-btn" aria-label="More message actions">${mailIcon('more')}</summary><div class="menu-panel">
+          <button onclick="markUnread()">Mark unread</button><button onclick="forward()">Forward</button>
+        </div></details>
+      </div>
       <div class="rhead">
-        <div class="rsub">${esc(current.subject) || '(no subject)'}</div>
-        <div class="rmeta" title="${esc(current.from)}">${esc(senderName(current.from))} · ${fmtDate(current.date)}</div>
-        <div class="ractions">
-          <button class="btn" onclick="reply()">↩ Reply</button>
-          <button class="btn" onclick="replyAll()">↩↩ Reply all</button>
-          <button class="btn" onclick="forward()">➡ Forward</button>
-          <button class="btn" onclick="markUnread()">● Mark unread</button>
-          <button class="btn" onclick="aiSummarize()">✨ Summarize</button>
-          <button class="btn" onclick="aiReply()">✨ AI reply</button>
-        </div>
-        ${current.attachments && current.attachments.length ? `<div class="ratts">${current.attachments.map((a, i) => `<a class="att-chip" href="/api/email/attachment?uid=${current.uid}&i=${i}" download="${esc(a.filename)}" title="${esc(a.filename)} — ${fmtSize(a.size)}">📎 ${esc(a.filename)}<span class="att-sz">${fmtSize(a.size)}</span></a>`).join('')}</div>` : ''}
+        <h2 class="rsub">${esc(current.subject) || '(no subject)'}</h2>
+        <div class="sender-line"><div class="mavatar" style="background:${avatarColor(current.from||'')}">${esc(initial(senderName(current.from)))}</div><div class="sender-details"><strong>${esc(senderName(current.from))}</strong><span>${esc(current.from)}</span></div><time>${esc(new Date(current.date).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}))}</time></div>
+        <details class="recipient-details"><summary>To ${esc(current.to || cfg.user || 'me')}</summary><div>From: ${esc(current.from)}<br>To: ${esc(current.to||'')}${current.cc?'<br>Cc: '+esc(current.cc):''}</div></details>
+        <div class="ractions"><button class="btn btn-accent" onclick="reply()">${mailIcon('reply')} Reply</button><button class="btn" onclick="replyAll()">Reply all</button><button class="btn" onclick="aiReply()">Draft reply</button></div>
+        <div class="followup-actions"><button class="btn" onclick="askMailAgent('Create a task from this message.',true)">Create task</button><button class="btn" onclick="askMailAgent('Create a calendar event from this message.',true)">Add to calendar</button></div>
+        <span id="message-category"></span>
+        ${current.attachments && current.attachments.length ? `<div class="ratts">${current.attachments.map((a, i) => `<a class="att-chip" href="/api/email/attachment?folder=${encodeURIComponent(folder)}&uid=${current.uid}&i=${i}" download="${esc(a.filename)}" title="${esc(a.filename)} — ${fmtSize(a.size)}">📎 ${esc(a.filename)}<span class="att-sz">${fmtSize(a.size)}</span></a>`).join('')}</div>` : ''}
       </div>`;
+    updateTriageUI();
     const raw = current.body || '';
     if (looksHTML(raw)) {
       // Render untrusted HTML in a locked-down sandbox: no scripts, no same-origin.
@@ -381,7 +447,7 @@ async function openMessage(uid) {
       div.textContent = raw || '(empty)';
       reading.appendChild(div);
     }
-  } catch { reading.innerHTML = '<div class="placeholder">Could not load message</div>'; }
+  } catch(e) {if(readingID===readingGeneration)reading.innerHTML='<div class="mail-err"><p>Could not load message</p><button class="btn" onclick="openMessage('+Number(uid)+')">Try again</button></div>';}
 }
 
 // ── AI features (in-app, one-shot via /api/ai/assist) ────────────────────────
@@ -405,7 +471,7 @@ async function aiSummarize() {
   let box = reading.querySelector('.ai-box');
   if (!box) {
     box = document.createElement('div'); box.className = 'ai-box';
-    reading.querySelector('.rhead').after(box);
+    reading.querySelector('.message-ai').after(box);
   }
   box.innerHTML = '<div class="ai-h">✨ Summary</div>Summarizing…';
   try { box.innerHTML = '<div class="ai-h">✨ Summary</div>' + esc(await assist('email_summary', emailPlain())); }
@@ -416,45 +482,67 @@ async function aiReply() {
   if (!current) return;
   replyUid = current.uid;
   openCompose('AI reply draft', current.from, reSubject(current.subject), 'Drafting…');
+  const generation = composeGeneration;
   const ta = document.getElementById('c-body');
-  try { ta.value = await assist('email_reply', emailPlain()); }
-  catch (e) { ta.value = ''; document.getElementById('c-err').textContent = 'Draft failed: ' + e.message; }
+  const snapshot = () => JSON.stringify(['c-to','c-subject','c-body'].map(id => document.getElementById(id).value));
+  const initialDraft = snapshot();
+  const active = () => generation === composeGeneration && snapshot() === initialDraft;
+  try {
+    const draft = await assist('email_reply', emailPlain());
+    if (active()) { ta.value = draft; publishMailContext(); }
+  } catch (e) {
+    if (active()) { ta.value = ''; document.getElementById('c-err').textContent = 'Draft failed: ' + e.message; publishMailContext(); }
+  }
 }
 
-// AI categorize: classify the not-yet-categorized mails into categories + tags.
-async function triage() {
-  if (!messages.length) return;
-  const btn = document.getElementById('triage-btn');
-  const label = btn.textContent;
-  // Only the mails without tags yet — saves time on re-runs.
-  const todo = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).filter(m => !mailTags[m.uid]);
-  if (!todo.length) {
-    btn.textContent = '✓ All categorized';
-    setTimeout(() => { btn.textContent = label; }, 2000);
-    return;
+// Categorization runs in small batches and persists each completed batch.
+let triageState=null,triageStatus='';
+function askMailAgent(prompt,withMessage=false){
+ const context=' Email folder: '+JSON.stringify(folder)+(withMessage&&current?', message UID: '+current.uid+', subject: '+JSON.stringify(current.subject):'');
+ parent.postMessage({type:'sendChat',text:prompt+context},'*');
+}
+function updateTriageUI(){
+ document.querySelectorAll('.categorize-btn').forEach(b=>b.disabled=!!triageState);
+ const progress=document.getElementById('triage-progress');if(progress)progress.textContent=triageStatus;
+ const stop=document.getElementById('triage-stop');if(stop){stop.hidden=!triageState;stop.disabled=!!triageState?.cancel;}
+ const category=document.getElementById('message-category'),tag=current&&mailTags[current.uid];
+ if(category)category.textContent=tag?[tag.category,...(tag.tags||[])].filter(Boolean).join(' · '):'';
+}
+function stopTriage(){if(triageState){triageState.cancel=true;triageStatus='Stopping after the current batch…';updateTriageUI();}}
+async function triage(scope='all'){
+ if(triageState || (scope==='message'&&!current))return;
+ const state={source:folder,done:0,cancel:false};triageState=state;
+ const selected=scope==='message'?{...current}:null;
+ triageStatus='Preparing categorization…';updateTriageUI();
+ try{
+  const tags=await PrismAPI.api('/api/email/tags?folder='+encodeURIComponent(state.source));
+  let offset=0,hasMore=true;const visited=new Set();
+  while(hasMore&&!state.cancel){
+   const page=selected?[selected]:(await PrismAPI.api('/api/email/list?folder='+encodeURIComponent(state.source)+'&limit=100&offset='+offset)).messages||[];
+   hasMore=!selected&&page.length===100;offset+=page.length;
+   const todo=page.filter(m=>{if(visited.has(m.uid))return false;visited.add(m.uid);return selected||!tags[m.uid];});
+   for(let i=0;i<todo.length&&!state.cancel;i+=20){
+    const batch=todo.slice(i,i+20);
+    triageStatus=state.source+' · '+state.done+' categorized…';updateTriageUI();
+    const payload=batch.map((m,i)=>({i,from:senderName(m.from),subject:(m.subject||'').slice(0,140)}));
+    const out=await assist('email_triage',JSON.stringify(payload));
+    let arr;try{arr=JSON.parse(out.replace(/```json|```/g,'').trim());}catch{throw new Error('AI returned an unexpected format.');}
+    if(!Array.isArray(arr))throw new Error('AI returned an unexpected format.');
+    const updates={};
+    for(const it of arr){
+     const m=Number.isInteger(it.i)&&batch[it.i];if(!m||typeof it.category!=='string'||!it.category.trim())continue;
+     updates[m.uid]={category:it.category,tags:Array.isArray(it.tags)?it.tags.filter(t=>typeof t==='string').slice(0,2):[]};
+    }
+    if(!Object.keys(updates).length)throw new Error('No valid categories returned; try again.');
+    await PrismAPI.api('/api/email/tags?folder='+encodeURIComponent(state.source),PrismAPI.body('POST',updates));
+    Object.assign(tags,updates);state.done+=Object.keys(updates).length;
+    if(folder===state.source){Object.assign(mailTags,updates);renderList();}
+    if(Object.keys(updates).length!==batch.length)throw new Error('Some messages were not categorized. Run again to finish.');
+   }
   }
-  btn.textContent = '✨ Categorizing…'; btn.disabled = true;
-  try {
-    const payload = todo.map((m, i) => ({ i, from: senderName(m.from), subject: (m.subject || '').slice(0, 140) }));
-    const out = await assist('email_triage', JSON.stringify(payload));
-    let arr;
-    try { arr = JSON.parse(out.replace(/```json|```/g, '').trim()); } catch { throw new Error('AI returned an unexpected format.'); }
-    const updates = {};
-    for (const it of (arr || [])) {
-      const m = todo[it.i]; if (!m) continue;
-      const rec = { category: it.category || '', tags: Array.isArray(it.tags) ? it.tags.slice(0, 2) : [] };
-      mailTags[m.uid] = rec; updates[m.uid] = rec;
-    }
-    if (Object.keys(updates).length) {
-      // Unsaved categories used to appear, then vanish on the next reload.
-      await PrismAPI.api('/api/email/tags', PrismAPI.body('POST', updates));
-    }
-    renderList();
-    btn.textContent = label;
-  } catch (e) {
-    btn.textContent = '✨ Categorize failed';
-    setTimeout(() => { btn.textContent = label; }, 2500);
-  } finally { btn.disabled = false; }
+  triageStatus=state.source+' · '+state.done+' categorized'+(state.cancel?' · stopped':state.done?'':' · already up to date');
+ }catch(e){triageStatus=state.source+' · '+state.done+' saved. '+e.message;PrismAPI.toast(e.message);}
+ finally{triageState=null;updateTriageUI();}
 }
 
 function compose() { replyUid = 0; openCompose('New message', '', '', ''); }
@@ -482,15 +570,23 @@ function forward() {
   const quoted = `\n\n---------- Forwarded message ----------\nFrom: ${current.from}\nDate: ${new Date(current.date).toLocaleString()}\nSubject: ${current.subject}\nTo: ${current.to || ''}\n\n${body}`;
   openCompose('Forward', '', sub, quoted);
 }
+let replyFolder="INBOX";
+let composeSnapshot='', sendingMail=false;
+let composeGeneration = 0;
 let composeAtts = []; // File objects to attach
 function openCompose(title, to, subject, body) {
+  composeGeneration++;
+  replyFolder=folder;
   document.getElementById('compose-title').textContent = title;
   document.getElementById('c-to').value = to || '';
   document.getElementById('c-subject').value = subject || '';
   document.getElementById('c-body').value = body || '';
   document.getElementById('c-err').textContent = '';
   composeAtts = []; renderComposeAtts();
+  composeSnapshot=JSON.stringify([to||'',subject||'',body||'']);
   document.getElementById('overlay').classList.add('open');
+  document.getElementById(to?'c-body':'c-to').focus();
+  publishMailContext();
 }
 function renderComposeAtts() {
   const host = document.getElementById('c-atts');
@@ -505,19 +601,21 @@ document.getElementById('c-file').addEventListener('change', e => {
 
 // ── Read state ──────────────────────────────────────────────────────────────
 function notifyBadge() { try { parent.postMessage({ type: 'mail-unread-changed' }, '*'); } catch (_) {} }
-function setLocalSeen(uid, seen) {
+function setLocalSeen(uid, seen, source=folder) {
+  if(folder!==source)return;
   const m = messages.find(x => x.uid === uid); if (m) m.seen = seen;
   if (current && current.uid === uid) current.seen = seen;
   renderList(); notifyBadge();
 }
 async function markSeen(uid, seen) {
+  const source=folder;
   setLocalSeen(uid, seen);   // optimistic
   try {
-    await PrismAPI.api('/api/email/markseen', PrismAPI.body('POST', { uid, seen }));
+    await PrismAPI.api(mailURL('/api/email/markseen'), PrismAPI.body('POST', { uid, seen }));
   } catch (e) {
     // IMAP refused: put the message and the unread badge back where they were,
     // instead of leaving a reminder the server never recorded.
-    setLocalSeen(uid, !seen);
+    setLocalSeen(uid, !seen,source);
     PrismAPI.toast('Could not mark the message: ' + e.message);
   }
 }
@@ -529,21 +627,42 @@ function stripHtml(s) {
     return (doc.body.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
   } catch { return (s || '').replace(/<[^>]+>/g, ' ').trim(); }
 }
-function closeCompose() { document.getElementById('overlay').classList.remove('open'); }
+async function closeCompose(force=false) {
+  if(sendingMail&&!force)return;
+  const now=JSON.stringify(['c-to','c-subject','c-body'].map(id=>document.getElementById(id).value));
+  if(!force&&(now!==composeSnapshot||composeAtts.length)&&!await PrismModal.confirm('Discard this draft? Your changes will be lost.',{danger:true,okLabel:'Discard'}))return;
+  composeGeneration++;
+  document.getElementById('overlay').classList.remove('open');
+  publishMailContext();
+}
+
+function publishMailContext() { if (typeof mailEditor !== 'undefined') mailEditor.publish(); }
+const mailEditor = PrismEditor.connect({
+  fields:['to','subject','body'],
+  read:() => {
+    if (!document.getElementById('overlay').classList.contains('open')) return null;
+    return {app:'email',id:String(composeGeneration),to:document.getElementById('c-to').value,subject:document.getElementById('c-subject').value,body:document.getElementById('c-body').value,reply_to:replyUid?{folder:replyFolder,uid:replyUid}:null,attachments:composeAtts.map(f=>({name:f.name,size:f.size})),readonly:sendingMail};
+  },
+  context:s => `Editing ${s.reply_to?'a reply':'a new email'} in the composer (not sent). To: ${s.to || '(empty)'}. Subject: ${s.subject || '(empty)'}.${s.reply_to?' Original message: '+JSON.stringify(s.reply_to)+'.':''}`,
+  idleContext:() => current ? `Reading email UID ${current.uid}, folder ${folder}, subject ${current.subject}.` : `Viewing email folder ${folder}.`,
+  update:patch => { for (const [key,value] of Object.entries(patch)) document.getElementById('c-'+key).value=value; }
+});
 
 async function doSend() {
-  const body = document.getElementById('c-body').value;
-  if (!body.trim()) { document.getElementById('c-err').textContent = 'Message is empty.'; return; }
-  const fd = new FormData();
-  fd.append('to', document.getElementById('c-to').value.trim());
-  fd.append('subject', document.getElementById('c-subject').value);
-  fd.append('body', body);
-  if (replyUid) fd.append('uid', String(replyUid));
-  for (const f of composeAtts) fd.append('file', f, f.name);
-  const res = await fetch('/api/email/send', { method: 'POST', body: fd });
-  if (!res.ok) { document.getElementById('c-err').textContent = 'Send failed: ' + (await res.text()); return; }
-  composeAtts = [];
-  closeCompose();
+  if(sendingMail)return;
+  const body=document.getElementById('c-body').value,to=document.getElementById('c-to').value.trim(),error=document.getElementById('c-err');
+  error.textContent='';
+  if(!to){error.textContent='Add a recipient.';document.getElementById('c-to').focus();return;}
+  if(!body.trim()){error.textContent='Message is empty.';return;}
+  const fd=new FormData();fd.append('to',to);fd.append('subject',document.getElementById('c-subject').value);fd.append('body',body);
+  if(replyUid)fd.append('uid',String(replyUid));for(const f of composeAtts)fd.append('file',f,f.name);
+  sendingMail=true;const button=document.getElementById('send-mail');button.disabled=true;button.textContent='Sending…';
+  try{
+    const res=await fetch('/api/email/send?folder='+encodeURIComponent(replyFolder),{method:'POST',body:fd});
+    if(!res.ok)throw new Error(await res.text());
+    composeAtts=[];await closeCompose(true);PrismAPI.toast('Message sent');
+  }catch(e){error.textContent='Send failed: '+e.message;}
+  finally{sendingMail=false;button.disabled=false;button.textContent='Send';}
 }
 
 // Relative date bucket for the list group headers.
@@ -585,7 +704,10 @@ function looksHTML(s) {
 }
 function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-init();
+addEventListener('message',e=>{if(e.data?.type==='data-changed'){loadFolders();loadInbox(true);}});
 </script>
+<script src="/apps/email-ui.js"></script>
+<script src="/apps/email-manage.js"></script>
+<script>init();</script>
 </body>
 </html>

@@ -76,7 +76,11 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 	}
 	// Personal secrets plus the group's shared tier (personal wins on a name
 	// collision); reserved integration credentials never reach the env.
-	for name, value := range e.secretsEnv(ctx) {
+	secretEnv, err := e.secretsEnv(ctx)
+	if err != nil {
+		return "", err
+	}
+	for name, value := range secretEnv {
 		env[name] = value
 	}
 	out, err := e.docker.ExecWithEnv(ctx, "cd /workspace && "+command, 2*time.Minute, env)

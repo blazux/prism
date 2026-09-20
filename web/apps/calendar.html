@@ -8,6 +8,8 @@
 <script src="/theme.js"></script>
 <script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
+<script src="/editor-bridge.js"></script>
+<script src="/pim-editor.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -124,7 +126,8 @@
     <div class="form">
       <div class="form-title" id="form-title">New event</div>
       <label>Title<input id="f-title" placeholder="Event title"></label>
-      <label>Date<input id="f-date" type="date"></label>
+      <label>Start date<input id="f-date" type="date"></label>
+      <label>End date<input id="f-enddate" type="date"></label>
       <label class="row"><input type="checkbox" id="f-allday"> All day</label>
       <div class="times" id="f-times">
         <label>Start<input id="f-start" type="time"></label>
@@ -162,10 +165,10 @@ function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<':
 function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
 function weekStart(d) { const x = startOfDay(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
 function shortDate(d) { return MONTHS[d.getMonth()].slice(0, 3) + ' ' + d.getDate(); }
-function isAllDay(ev) {
-  const s = new Date(ev.startAt), e = ev.endAt ? new Date(ev.endAt) : null;
-  return !(s.getHours() || s.getMinutes()) && !(e && (e.getHours() || e.getMinutes()));
-}
+function isAllDay(ev) { return ev.allDay===true; }
+function eventStart(ev){return new Date(isAllDay(ev)?ev.startAt.slice(0,10)+'T00:00:00':ev.startAt);}
+function eventEnd(ev){return ev.endAt?new Date(isAllDay(ev)?ev.endAt.slice(0,10)+'T00:00:00':ev.endAt):new Date(eventStart(ev).getTime()+30*60000);}
+function occursOn(ev,d){const next=startOfDay(d);next.setDate(next.getDate()+1);return eventStart(ev)<next && eventEnd(ev)>startOfDay(d);}
 function minutesOf(d) { return d.getHours() * 60 + d.getMinutes(); }
 
 function setMode(m) {
@@ -174,7 +177,7 @@ function setMode(m) {
   load();
 }
 function move(n) {
-  if (mode === 'month') view.setMonth(view.getMonth() + n);
+  if (mode === 'month') {view.setDate(1);view.setMonth(view.getMonth() + n);}
   else if (mode === 'week') view.setDate(view.getDate() + 7 * n);
   else if (mode === 'day') view.setDate(view.getDate() + n);
   else view.setDate(view.getDate() + AGENDA_DAYS * n);
@@ -187,7 +190,9 @@ function setSourceBadge(src) {
   const L = { google: 'Google', microsoft: 'Microsoft', caldav: 'CalDAV', todoist: 'Todoist', vault: 'Vault' };
   if (src && L[src]) { el.textContent = '◦ ' + L[src]; el.style.display = 'inline-block'; } else { el.style.display = 'none'; }
 }
+let loadGeneration=0;
 async function load() {
+  const generation=++loadGeneration;
   document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.m === mode));
   let from, to, title;
   const y = view.getFullYear(), m = view.getMonth();
@@ -207,12 +212,14 @@ async function load() {
     title = 'Agenda';
   }
   $('title').textContent = title;
-  try { parent.postMessage({ type: 'context', text: `Viewing the calendar (${mode} view) — ${title}` }, '*'); } catch (_) {}
+    publishCalendarContext();
   try {
-    const data = await fetch(`/api/events?session=${encodeURIComponent(session)}&from=${ymd(from)}&to=${ymd(to)} 23:59`).then(r => r.json());
+    const endRange=new Date(to);endRange.setHours(23,59,59,999);
+    const data = await PrismAPI.api(`/api/events?session=${encodeURIComponent(session)}&from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(endRange.toISOString())}`);
+    if(generation!==loadGeneration)return;
     events = data.events || [];
     setSourceBadge(data.source);
-  } catch { events = []; }
+  } catch(e) {if(generation!==loadGeneration)return;PrismAPI.toast("Could not load calendar: "+e.message);return;}
   render();
 }
 
@@ -235,7 +242,7 @@ function renderMonth(cal) {
   const gridStart = new Date(y, m, 1 - ((new Date(y, m, 1).getDay() + 6) % 7));
   const todayStr = ymd(new Date());
   const byDay = {};
-  for (const ev of events) (byDay[ymd(new Date(ev.startAt))] = byDay[ymd(new Date(ev.startAt))] || []).push(ev);
+  for (const ev of events) (byDay[ymd(eventStart(ev))] = byDay[ymd(eventStart(ev))] || []).push(ev);
 
   for (let i = 0; i < 42; i++) {
     const d = new Date(gridStart); d.setDate(gridStart.getDate() + i);
@@ -243,11 +250,11 @@ function renderMonth(cal) {
     const cell = el('div', 'cell' + (d.getMonth() !== m ? ' dim' : '') + (key === todayStr ? ' today' : ''));
     cell.onclick = () => openForm(key);
     const num = el('div', 'dnum'); num.textContent = d.getDate(); cell.appendChild(num);
-    const dayEvents = (byDay[key] || []).sort((a, b) => a.startAt.localeCompare(b.startAt));
+    const dayEvents = events.filter(ev=>occursOn(ev,d)).sort((a, b) => a.startAt.localeCompare(b.startAt));
     for (const ev of dayEvents.slice(0, 3)) {
       const chip = el('div', 'ev');
-      const t = new Date(ev.startAt);
-      const time = (t.getHours() || t.getMinutes()) ? `<span class="t">${pad(t.getHours())}:${pad(t.getMinutes())}</span> ` : '';
+      const t = eventStart(ev);
+      const time = !isAllDay(ev) ? `<span class="t">${pad(t.getHours())}:${pad(t.getMinutes())}</span> ` : '';
       chip.innerHTML = time + esc(ev.title);
       chip.title = `${ev.title} · ${evRange(ev)}${ev.location ? ' @ ' + ev.location : ''}`;
       chip.onclick = (e) => { e.stopPropagation(); openEvent(ev); };
@@ -260,11 +267,11 @@ function renderMonth(cal) {
 
 // ── Time grid (week / day) ──
 // Pack overlapping events into side-by-side columns.
-function layout(evs) {
+function layout(evs,day) {
   const items = evs.map(ev => {
-    const s = new Date(ev.startAt), e = ev.endAt ? new Date(ev.endAt) : new Date(s.getTime() + 30 * 60000);
-    const start = minutesOf(s);
-    return { ev, start, end: Math.max(minutesOf(e), start + 20) };
+    const s=eventStart(ev),e=eventEnd(ev),next=new Date(day);next.setDate(next.getDate()+1);
+    const start=s<day?0:minutesOf(s);
+    return {ev,start,end:e>=next?1440:Math.max(minutesOf(e),start+20)};
   }).sort((a, b) => a.start - b.start || a.end - b.end);
   let cluster = [], clusterEnd = -1;
   const flush = () => {
@@ -311,7 +318,7 @@ function renderTimeGrid(cal, ndays) {
     const key = ymd(d);
     const cell = el('div', 'tg-adcell');
     cell.onclick = (e) => { if (e.target === cell) openForm(key, null, true); };
-    for (const ev of events.filter(e => isAllDay(e) && ymd(new Date(e.startAt)) === key)) {
+    for (const ev of events.filter(e => isAllDay(e) && occursOn(e,d))) {
       const c = el('div', 'ad-ev'); c.textContent = ev.title; c.title = ev.title + (ev.location ? ' @ ' + ev.location : '');
       c.onclick = (e) => { e.stopPropagation(); openEvent(ev); };
       cell.appendChild(c);
@@ -335,8 +342,8 @@ function renderTimeGrid(cal, ndays) {
       const mins = Math.max(0, Math.min(23 * 60 + 30, Math.round(e.offsetY / HOUR_H * 60 / 30) * 30));
       openForm(key, pad(Math.floor(mins / 60)) + ':' + pad(mins % 60));
     };
-    for (const it of layout(events.filter(ev => !isAllDay(ev) && ymd(new Date(ev.startAt)) === key))) {
-      const ev = it.ev, s = new Date(ev.startAt);
+    for (const it of layout(events.filter(ev => !isAllDay(ev) && occursOn(ev,d)),d)) {
+      const ev = it.ev, s = eventStart(ev);
       const box = el('div', 'tg-ev');
       box.style.top = (it.start / 60 * HOUR_H) + 'px';
       box.style.height = Math.max(15, (it.end - it.start) / 60 * HOUR_H - 2) + 'px';
@@ -364,11 +371,11 @@ function renderAgenda(cal) {
   const ag = el('div', 'agenda');
   const todayStr = ymd(new Date());
   const bound = startOfDay(view).getTime();
-  const list = events.filter(ev => new Date(ev.startAt).getTime() >= bound).sort((a, b) => a.startAt.localeCompare(b.startAt));
+  const list = events.filter(ev => eventEnd(ev).getTime() > bound).sort((a, b) => a.startAt.localeCompare(b.startAt));
   if (!list.length) { ag.innerHTML = '<div class="ag-empty">No upcoming events</div>'; cal.appendChild(ag); return; }
   let curKey = null;
   for (const ev of list) {
-    const d = new Date(ev.startAt), key = ymd(d);
+    const d = eventStart(ev), key = ymd(d);
     if (key !== curKey) {
       curKey = key;
       const h = el('div', 'ag-day' + (key === todayStr ? ' today' : ''));
@@ -384,10 +391,10 @@ function renderAgenda(cal) {
 
 // Human time range "09:00–10:30", "09:00" (no end), or "All day".
 function evRange(ev) {
-  if (isAllDay(ev)) return 'All day';
-  const s = new Date(ev.startAt);
+  if (isAllDay(ev)) {const last=eventEnd(ev);last.setDate(last.getDate()-1);return ymd(last)===ymd(eventStart(ev))?'All day':'All day · '+shortDate(eventStart(ev))+'–'+shortDate(last);}
+  const s = eventStart(ev);
   let str = `${pad(s.getHours())}:${pad(s.getMinutes())}`;
-  if (ev.endAt) { const e = new Date(ev.endAt); str += `–${pad(e.getHours())}:${pad(e.getMinutes())}`; }
+  if (ev.endAt) { const e = new Date(ev.endAt); str += `–${ymd(e)!==ymd(s)?shortDate(e)+' ':''}${pad(e.getHours())}:${pad(e.getMinutes())}`; }
   return str;
 }
 
@@ -397,7 +404,10 @@ function toggleTimes() { $('f-times').style.display = $('f-allday').checked ? 'n
 $('f-allday').addEventListener('change', toggleTimes);
 $('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeForm(); });
 
+let calendarEditorGeneration = 0, calendarSaving = false;
+function publishCalendarContext() { if (typeof calendarEditor !== 'undefined') calendarEditor.publish(); }
 function openForm(dateKey, start, allday) {
+  calendarEditorGeneration++;
   editing = null;
   $('form-title').textContent = 'New event';
   $('f-del').style.display = 'none';
@@ -405,31 +415,37 @@ function openForm(dateKey, start, allday) {
   const [hh, mm] = s.split(':').map(Number);
   const endM = hh * 60 + mm + 60;
   const end = pad(Math.floor(endM / 60) % 24) + ':' + pad(endM % 60);
-  setFields({ title: '', date: dateKey, allday: !!allday, start: s, end, loc: '', desc: '' });
+  const last = new Date(dateKey+'T00:00');
+  if (!allday && endM >= 1440) last.setDate(last.getDate()+1);
+  setFields({ title: '', date: dateKey, enddate: ymd(last), allday: !!allday, start: s, end, loc: '', desc: '' });
   $('f-err').textContent = '';
   $('overlay').classList.add('open');
+  publishCalendarContext();
   setTimeout(() => $('f-title').focus(), 30);
 }
 function openEvent(ev) {
+  calendarEditorGeneration++;
   editing = ev;
   $('form-title').textContent = 'Edit event';
   $('f-del').style.display = '';
-  const s = new Date(ev.startAt), e = ev.endAt ? new Date(ev.endAt) : null;
+  const s=eventStart(ev), e=ev.endAt?eventEnd(ev):null;
+  if(isAllDay(ev)&&e)e.setDate(e.getDate()-1);
   setFields({
-    title: ev.title || '', date: ymd(s), allday: isAllDay(ev),
+    title: ev.title || '', date: ymd(s), enddate:e?ymd(e):ymd(s), allday: isAllDay(ev),
     start: `${pad(s.getHours())}:${pad(s.getMinutes())}`,
     end: e ? `${pad(e.getHours())}:${pad(e.getMinutes())}` : '',
     loc: ev.location || '', desc: ev.description || '',
   });
   $('f-err').textContent = '';
   $('overlay').classList.add('open');
+  publishCalendarContext();
   try {
-    parent.postMessage({ type: 'context', text: `Viewing calendar event #${ev.id}: "${ev.title}" on ${ymd(s)} ${evRange(ev)}${ev.location ? ' @ ' + ev.location : ''}. To act on "this event" use the calendar tool with id=${ev.id}.` }, '*');
+    publishCalendarContext();
     parent.postMessage({ type: 'suggest', items: [{ label: '✅ Make a task', prompt: 'Create a task to prepare for this event', send: true }] }, '*');
   } catch (_) {}
 }
 function setFields(v) {
-  $('f-title').value = v.title; $('f-date').value = v.date;
+  $('f-title').value = v.title; $('f-date').value = v.date; $('f-enddate').value=v.enddate||v.date;
   $('f-allday').checked = v.allday;
   $('f-start').value = v.start; $('f-end').value = v.end;
   $('f-loc').value = v.loc; $('f-desc').value = v.desc;
@@ -438,27 +454,32 @@ function setFields(v) {
 function closeForm() {
   $('overlay').classList.remove('open');
   try {
-    parent.postMessage({ type: 'context', text: `Viewing the calendar — ${$('title').textContent}` }, '*');
+    publishCalendarContext();
     parent.postMessage({ type: 'suggest', items: [] }, '*');
   } catch (_) {}
 }
 
 async function saveForm() {
+  if (calendarSaving) return;
   const title = $('f-title').value.trim(), date = $('f-date').value;
   if (!title) { $('f-err').textContent = 'Title is required.'; return; }
   if (!date) { $('f-err').textContent = 'Date is required.'; return; }
-  let start, end = '';
-  if ($('f-allday').checked) { start = `${date}T00:00`; }
-  else { start = `${date}T${$('f-start').value || '00:00'}`; if ($('f-end').value) end = `${date}T${$('f-end').value}`; }
-  const body = { title, start, end, location: $('f-loc').value.trim(), description: $('f-desc').value.trim() };
+  let start, end='';const enddate=$('f-enddate').value||date;
+  const all_day=$('f-allday').checked;
+  if(all_day){start=date;const exclusive=new Date(enddate+'T00:00');exclusive.setDate(exclusive.getDate()+1);end=ymd(exclusive);}
+  else {start=new Date(`${date}T${$('f-start').value||'00:00'}`).toISOString();if($('f-end').value)end=new Date(`${enddate}T${$('f-end').value}`).toISOString();}
+  if(end && new Date(end)<=new Date(start)){$('f-err').textContent='End must be after start.';return;}
+  const body={title,start,end,all_day,location:$('f-loc').value.trim(),description:$('f-desc').value.trim()};
   // In-place update (PUT) when editing — no more delete-then-recreate, which
   // lost the event outright if the second call (the recreate) ever failed.
   const url = editing
     ? `/api/events?session=${encodeURIComponent(session)}&id=${encodeURIComponent(editing.id)}`
     : `/api/events?session=${encodeURIComponent(session)}`;
-  const res = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!res.ok) { $('f-err').textContent = 'Failed: ' + (await res.text()); return; }
-  closeForm(); load();
+  calendarSaving=true;
+  try{await PrismAPI.api(url,PrismAPI.body(editing?'PUT':'POST',body));closeForm();load();}
+  catch(e){$('f-err').textContent=e.message;}
+  finally{calendarSaving=false;}
+
 }
 async function deleteEvent() {
   if (!editing) return;
@@ -466,11 +487,27 @@ async function deleteEvent() {
   // The result was ignored: a refused delete (one occurrence of a recurring
   // series) closed the form as if it had worked, and the event came back on
   // the next load with no explanation.
-  const res = await fetch(`/api/events?session=${encodeURIComponent(session)}&id=${encodeURIComponent(editing.id)}`, { method: 'DELETE' });
-  if (!res.ok) { $('f-err').textContent = 'Failed: ' + (await res.text()); return; }
-  closeForm(); load();
+  try{await PrismAPI.api(`/api/events?session=${encodeURIComponent(session)}&id=${encodeURIComponent(editing.id)}`,{method:'DELETE'});closeForm();load();}
+  catch(e){$('f-err').textContent=e.message;}
+
 }
 function addToday() { openForm(ymd(new Date())); }
+
+const calendarEditor = PrismEditor.connect({
+  fields:['title','start','end','all_day','location','description'], types:{all_day:'boolean'},
+  read:() => {
+    if (!$('overlay').classList.contains('open')) return null;
+    const all=$('f-allday').checked, start=$('f-date').value, end=$('f-enddate').value;
+    return {app:'calendar',id:String(calendarEditorGeneration),event_id:editing?.id||null,title:$('f-title').value,start:all?start:start+'T'+($('f-start').value||'00:00'),end:all?(end?PrismPIM.shift(end,1):''):(end&&$('f-end').value?end+'T'+$('f-end').value:''),all_day:all,location:$('f-loc').value,description:$('f-desc').value,timezone:PrismPIM.timezone(),readonly:calendarSaving,persistence:'form only; user must Save'};
+  },
+  context:s=>`Editing ${s.event_id?'event '+s.event_id:'a new calendar event'}: ${s.title || '(empty)'}. Changes stay in the form until Save.`,
+  idleContext:()=>`Viewing the calendar — ${$('title').textContent}`,
+  update:patch=>{
+    const next=PrismPIM.calendarPatch(calendarEditor.snapshot(),patch);
+    setFields({title:next.title,date:next.start.slice(0,10),enddate:next.end?(next.all_day?PrismPIM.shift(next.end,-1):next.end.slice(0,10)):next.start.slice(0,10),allday:next.all_day,start:next.all_day?$('f-start').value:next.start.slice(11,16),end:next.all_day?$('f-end').value:next.end.slice(11,16),loc:next.location,desc:next.description});
+    $('f-err').textContent='';
+  }
+});
 
 // Reload when the agent changes calendar data via chat.
 addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') load(); });

@@ -135,6 +135,7 @@ func (s *Server) Start() error {
 					s.mu.Unlock()
 					s.mcpMgr.SetStore(ms)
 					log.Printf("[memory] store initialized")
+					s.startEmailRules()
 					s.startChannels() // launch configured messaging bridges (telegram, slack)
 					return
 				}

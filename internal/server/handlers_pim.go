@@ -393,6 +393,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		if u := currentUser(r); u != nil && s.isAdminUser(r.Context(), u) {
 			items = append(s.voxPendingCallTasks(r.Context()), items...)
 		}
+		items, err = tasks.Filter(items, r.URL.Query().Get("query"), r.URL.Query().Get("filter"), time.Now())
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
 		writeJSON(w, map[string]interface{}{"tasks": items, "source": prov.Kind()})
 	case "POST":
 		var b struct {
@@ -418,12 +423,45 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]interface{}{"id": b.ID})
 			return
 		}
-		id, err := prov.Add(r.Context(), b.Title, b.Priority, parsePIMTime(b.Due))
+		if b.ID != "" {
+			writeErr(w, 400, "use PUT to edit a task")
+			return
+		}
+		if b.Priority == "" {
+			b.Priority = "normal"
+		}
+		patch := tasks.Patch{Title: &b.Title, Priority: &b.Priority, Due: &b.Due}
+		if err := patch.Validate(); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		due, _ := patch.Deadline()
+		id, err := prov.Add(r.Context(), b.Title, b.Priority, due)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		writeJSON(w, map[string]interface{}{"id": id})
+	case "PUT":
+		id := r.URL.Query().Get("id")
+		if id == "" || isCallTaskID(id) {
+			writeErr(w, 400, "an editable task id is required")
+			return
+		}
+		var patch tasks.Patch
+		if json.NewDecoder(r.Body).Decode(&patch) != nil {
+			writeErr(w, 400, "invalid task")
+			return
+		}
+		if err := patch.Validate(); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if err := prov.Update(r.Context(), id, patch); err != nil {
+			writeErr(w, 502, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"id": id})
 	case "DELETE":
 		if id := r.URL.Query().Get("id"); isCallTaskID(id) {
 			writeErr(w, http.StatusBadRequest, callTaskReadOnlyMsg)
@@ -457,6 +495,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]interface{}{"events": items, "source": prov.Kind()})
 	case "POST":
 		var b struct {
+			AllDay      bool   `json:"all_day"`
 			Title       string `json:"title"`
 			Description string `json:"description"`
 			Location    string `json:"location"`
@@ -472,7 +511,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "valid start time required", 400)
 			return
 		}
-		id, err := prov.Add(r.Context(), b.Title, b.Description, b.Location, *start, parsePIMTime(b.End))
+		end, err := calendar.ParseTime(b.End)
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		event, err := (calendar.Patch{}).Merge(calendar.Item{Title: b.Title, StartAt: *start, EndAt: end, AllDay: b.AllDay})
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		id, err := prov.Add(r.Context(), b.Title, b.Description, b.Location, event.StartAt, event.EndAt, event.AllDay)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -484,24 +533,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "id required", 400)
 			return
 		}
-		var b struct {
-			Title       string `json:"title"`
-			Description string `json:"description"`
-			Location    string `json:"location"`
-			Start       string `json:"start"`
-			End         string `json:"end"`
-		}
-		if json.NewDecoder(r.Body).Decode(&b) != nil {
-			http.Error(w, "bad body", 400)
+		var patch calendar.Patch
+		if json.NewDecoder(r.Body).Decode(&patch) != nil {
+			writeErr(w, 400, "invalid event")
 			return
 		}
-		start := parsePIMTime(b.Start)
-		if start == nil {
-			http.Error(w, "valid start time required", 400)
-			return
-		}
-		if err := prov.Update(r.Context(), id, b.Title, b.Description, b.Location, *start, parsePIMTime(b.End)); err != nil {
-			http.Error(w, err.Error(), 500)
+		if err := calendar.Update(r.Context(), prov, id, patch); err != nil {
+			writeErr(w, 400, err.Error())
 			return
 		}
 		writeJSON(w, map[string]interface{}{"ok": true})

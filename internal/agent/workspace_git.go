@@ -44,6 +44,8 @@ tmp_*
 *.tmp
 __pycache__/
 *.pyc
+.secret_key
+.secret-key-*
 .env
 .env.*
 *.key
@@ -94,7 +96,10 @@ func (e *ToolExecutor) initWorkspaceRepo(ctx context.Context) bool {
 		log.Printf("[workspace-git] init failed, versioning disabled: %v", err)
 		return false
 	}
-	if _, err := e.git(ctx, "add -A", 120*time.Second); err != nil {
+	if !e.protectWorkspaceKey(ctx) {
+		return false
+	}
+	if _, err := e.git(ctx, "add -A -- . ':(exclude).secret_key' ':(exclude).secret-key-*'", 120*time.Second); err != nil {
 		log.Printf("[workspace-git] baseline add failed: %v", err)
 		return false
 	}
@@ -119,7 +124,10 @@ func (e *ToolExecutor) CommitWorkspace(ctx context.Context, turnMsg string) {
 			return // git unavailable / init failed — versioning silently off
 		}
 	}
-	if _, err := e.git(ctx, "add -A", 120*time.Second); err != nil {
+	if !e.protectWorkspaceKey(ctx) {
+		return
+	}
+	if _, err := e.git(ctx, "add -A -- . ':(exclude).secret_key' ':(exclude).secret-key-*'", 120*time.Second); err != nil {
 		log.Printf("[workspace-git] add failed: %v", err)
 		return
 	}
@@ -183,4 +191,19 @@ func (e *ToolExecutor) workspaceRestore(ctx context.Context, commit, path string
 	e.git(ctx, "add -A", 60*time.Second)
 	e.git(ctx, "commit -q -m "+shellEscape(fmt.Sprintf("restore %s from %s", path, commit)), 30*time.Second)
 	return fmt.Sprintf("Restored %s from commit %s. The state you're replacing is still in history if you need it back.", path, commit), nil
+}
+
+// Keep mandatory exclusions separate from a user's .gitignore, and untrack the
+// live key without deleting it or rewriting earlier commits.
+func (e *ToolExecutor) protectWorkspaceKey(ctx context.Context) bool {
+	const command = "cd /workspace && mkdir -p .git/info && (grep -qxF '/.secret_key' .git/info/exclude 2>/dev/null || printf '\n/.secret_key\n/.secret-key-*\n' >> .git/info/exclude)"
+	if _, err := e.docker.Exec(ctx, command, 15*time.Second); err != nil {
+		log.Printf("[workspace-git] key exclusion failed: %v", err)
+		return false
+	}
+	if _, err := e.git(ctx, "rm --cached --ignore-unmatch -- .secret_key", 15*time.Second); err != nil {
+		log.Printf("[workspace-git] key untracking failed: %v", err)
+		return false
+	}
+	return true
 }

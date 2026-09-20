@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"prism/internal/mcp"
+	"prism/internal/memory"
 )
 
 func (e *ToolExecutor) scheduleNotification(title, message, level string, delaySeconds int) (string, error) {
@@ -55,26 +56,9 @@ func (e *ToolExecutor) sendNotification(title, message, level string) (string, e
 // tell them apart — these must never be handed to arbitrary script execution.
 // Exported: internal/server's secrets handlers apply the same rule to decide
 // which group secrets a non-admin member may create or delete.
-func IsReservedSecretName(name string) bool {
-	switch name {
-	case "email_password", "caldav_password", "todoist_token",
-		"telegram_bot_token", "slack_bot_token", "slack_app_token":
-		return true
-	}
-	return strings.HasPrefix(name, "webex_bot_token:") || strings.HasPrefix(name, "mcp_oauth_")
-}
+func IsReservedSecretName(name string) bool { return memory.IsIntegrationSecret(name) }
 
-func toEnvVarName(name string) string {
-	var sb strings.Builder
-	for _, r := range strings.ToUpper(name) {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			sb.WriteRune(r)
-		} else {
-			sb.WriteRune('_')
-		}
-	}
-	return strings.Trim(sb.String(), "_")
-}
+func toEnvVarName(name string) string { return memory.SecretEnvName(name) }
 
 // groupScopeRe matches a group tenant scope ("g<id>") — and only that: "global"
 // or a board id starting with g must not be mistaken for a group's secrets.
@@ -96,47 +80,73 @@ func (e *ToolExecutor) groupSecretsScope() string {
 // group's shared tier first (when there is one), overlaid by the session's own
 // scope so a personal secret with the same name wins. Reserved integration
 // credentials (email, OAuth, …) never leak into script execution.
-func (e *ToolExecutor) secretsEnv(ctx context.Context) map[string]string {
+func (e *ToolExecutor) secretsEnv(ctx context.Context) (map[string]string, error) {
 	env := map[string]string{}
 	if e.memStore == nil {
-		return env
+		return env, nil
 	}
 	scopes := []string{e.SecretsScope()}
 	if g := e.groupSecretsScope(); g != "" {
 		scopes = []string{g, e.SecretsScope()}
 	}
+	merged := map[string]string{}
 	for _, scope := range scopes {
 		secrets, err := e.memStore.ScopedSecrets(ctx, scope)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("load secrets for execution: %w", err)
 		}
 		for name, value := range secrets {
-			if IsReservedSecretName(name) {
-				continue
-			}
-			env[toEnvVarName(name)] = value
+			merged[name] = value
 		}
 	}
-	return env
+	return scriptSecretsEnv(merged)
+}
+
+func scriptSecretsEnv(secrets map[string]string) (map[string]string, error) {
+	env := map[string]string{}
+	names := map[string]string{}
+	for name, value := range secrets {
+		if IsReservedSecretName(name) {
+			continue
+		}
+		if err := memory.ValidateScriptSecretName(name); err != nil {
+			return nil, err
+		}
+		key := toEnvVarName(name)
+		if other, exists := names[key]; exists {
+			return nil, fmt.Errorf("secrets %q and %q both map to %s; remove a duplicate in Settings → Secrets", other, name, key)
+		}
+		names[key], env[key] = name, value
+	}
+	return env, nil
 }
 
 func (e *ToolExecutor) requestSecret(ctx context.Context, name, description string) (string, error) {
-	if name == "" {
-		return "", fmt.Errorf("name is required")
+	name = strings.TrimSpace(name)
+	if err := memory.ValidateScriptSecretName(name); err != nil {
+		return "", err
 	}
-	// Normalize name
-	name = strings.ToLower(strings.TrimSpace(name))
 	envVar := toEnvVarName(name)
-
-	if us := e.userStore(); us != nil {
-		if _, exists, _ := us.GetSecret(ctx, name); exists {
-			return fmt.Sprintf("Secret '%s' already stored. Available as os.environ['%s'] / $%s. Use delete_secret to replace it.", name, envVar, envVar), nil
-		}
+	us := e.userStore()
+	if us == nil {
+		return "", fmt.Errorf("secret store not available (Postgres required); no secret was requested or stored")
 	}
-	// The group's shared tier counts as "already stored" too — don't make the
-	// user re-enter a credential the whole group already shares.
-	if g := e.groupSecretsScope(); g != "" && e.memStore != nil {
-		if _, exists, _ := e.memStore.ConfigScope(g).GetSecret(ctx, name); exists && !IsReservedSecretName(name) {
+	if err := us.CheckScriptSecretName(ctx, name); err != nil {
+		return "", err
+	}
+	if _, exists, err := us.GetSecret(ctx, name); err != nil {
+		return "", err
+	} else if exists {
+		return fmt.Sprintf("Secret '%s' already stored. Available as os.environ['%s'] / $%s. Use delete_secret to replace it.", name, envVar, envVar), nil
+	}
+	if g := e.groupSecretsScope(); g != "" {
+		gs := e.memStore.ConfigScope(g)
+		if err := gs.CheckScriptSecretName(ctx, name); err != nil {
+			return "", err
+		}
+		if _, exists, err := gs.GetSecret(ctx, name); err != nil {
+			return "", err
+		} else if exists {
 			return fmt.Sprintf("Secret '%s' is already shared by your group. Available as os.environ['%s'] / $%s.", name, envVar, envVar), nil
 		}
 	}
@@ -155,27 +165,18 @@ func (e *ToolExecutor) listSecrets(ctx context.Context) (string, error) {
 	if us == nil {
 		return "Secret store not available (Postgres not configured).", nil
 	}
-	// personalScope() is "" for single-user/legacy sessions (no group, no
-	// user identity) — ListScopedSecretNames deliberately returns nothing for
-	// an empty scope (it's meant for already-scoped u<id>/g<id> stores only),
-	// so fall back to the old unscoped listing there to keep single-user mode
-	// byte-for-byte unchanged.
-	var names []string
-	var err error
-	if e.SecretsScope() == "" {
-		names, err = e.memStore.ListSecretNames(ctx)
-	} else {
-		names, err = us.ListScopedSecretNames(ctx)
-	}
+	names, err := us.ListScriptSecretNames(ctx)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err), nil
+		return "", err
 	}
 	// Group secrets are shared with every member: list them alongside the
 	// personal tier (reserved integration credentials stay hidden — they are
 	// never exposed to scripts, so listing them would only mislead).
 	var groupNames []string
 	if g := e.groupSecretsScope(); g != "" {
-		if gn, gerr := e.memStore.ConfigScope(g).ListScopedSecretNames(ctx); gerr == nil {
+		if gn, gerr := e.memStore.ConfigScope(g).ListScriptSecretNames(ctx); gerr != nil {
+			return "", gerr
+		} else {
 			for _, n := range gn {
 				if !IsReservedSecretName(n) {
 					groupNames = append(groupNames, n)
@@ -208,9 +209,12 @@ func (e *ToolExecutor) deleteSecret(ctx context.Context, name string) (string, e
 	if name == "" {
 		return "", fmt.Errorf("name is required")
 	}
+	if IsReservedSecretName(name) {
+		return "", fmt.Errorf("reserved integration credential; manage it in the integration's settings")
+	}
 	deleted, err := us.RemoveSecret(ctx, name)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err), nil
+		return "", err
 	}
 	if !deleted {
 		// Nothing was removed: a typo, or a GROUP secret — shared with every member
@@ -246,14 +250,14 @@ func (e *ToolExecutor) shareSecret(ctx context.Context, name, group string) (str
 	}
 	val, exists, err := us.GetSecret(ctx, name)
 	if err != nil {
-		return fmt.Sprintf("Error: %v", err), nil
+		return "", err
 	}
 	if !exists {
 		listing, _ := e.listSecrets(ctx)
 		return fmt.Sprintf("No personal secret named %q — nothing was shared (a group secret is already shared).\n%s", name, listing), nil
 	}
-	if err := e.memStore.ConfigScope(fmt.Sprintf("g%d", g.GroupID)).SetSecret(ctx, name, val); err != nil {
-		return fmt.Sprintf("Error: %v", err), nil
+	if err := e.memStore.ConfigScope(fmt.Sprintf("g%d", g.GroupID)).SetScriptSecret(ctx, name, val); err != nil {
+		return "", err
 	}
 	if err := us.DeleteSecret(ctx, name); err != nil {
 		// The group copy is written; report the leftover honestly instead of

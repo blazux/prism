@@ -5,21 +5,34 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 // LoadOrGenerateKey reads a 32-byte AES-256 key from path (base64-encoded),
 // creating and persisting a random one if the file does not exist.
 func LoadOrGenerateKey(path string) ([]byte, error) {
-	if data, err := os.ReadFile(path); err == nil {
-		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
-		if err != nil || len(key) != 32 {
-			return nil, fmt.Errorf("secret key file %s is corrupt (expected 32-byte base64)", path)
+	data, err := os.ReadFile(path)
+	if err == nil {
+		return decodeKey(path, data)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("read secret key: %w", err)
+	}
+	// A dangling symlink is not a missing key file. Never replace it.
+	if _, err := os.Lstat(path); err == nil {
+		// A concurrent creator may have published a complete key since ReadFile.
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read existing secret key: %w", err)
 		}
-		return key, nil
+		return decodeKey(path, data)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect secret key: %w", err)
 	}
 
 	key := make([]byte, 32)
@@ -27,9 +40,34 @@ func LoadOrGenerateKey(path string) ([]byte, error) {
 		return nil, fmt.Errorf("generate key: %w", err)
 	}
 	encoded := base64.StdEncoding.EncodeToString(key) + "\n"
-	if err := os.WriteFile(path, []byte(encoded), 0600); err != nil {
+	// Publish a complete, flushed file without overwriting a key created by
+	// another process. A failed write leaves the destination untouched.
+	f, err := os.CreateTemp(filepath.Dir(path), ".secret-key-*")
+	if err != nil {
+		return nil, fmt.Errorf("create key file: %w", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if _, err := f.WriteString(encoded); err != nil {
 		return nil, fmt.Errorf("write key file: %w", err)
 	}
+	if err := f.Sync(); err != nil {
+		return nil, fmt.Errorf("sync key file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("close key file: %w", err)
+	}
+	if err := os.Link(f.Name(), path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil, fmt.Errorf("read existing secret key: %w", readErr)
+			}
+			return decodeKey(path, data)
+		}
+		return nil, fmt.Errorf("publish key file: %w", err)
+	}
+
 	return key, nil
 }
 
@@ -74,4 +112,12 @@ func decryptValue(key []byte, encoded string) (string, error) {
 		return "", fmt.Errorf("decrypt: %w", err)
 	}
 	return string(plaintext), nil
+}
+
+func decodeKey(path string, data []byte) ([]byte, error) {
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
+	if err != nil || len(key) != 32 {
+		return nil, fmt.Errorf("secret key file %s is corrupt (expected 32-byte base64); restore the original key from backup", path)
+	}
+	return key, nil
 }

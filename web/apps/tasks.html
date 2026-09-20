@@ -8,6 +8,8 @@
 <script src="/theme.js"></script>
 <script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
+<script src="/editor-bridge.js"></script>
+<script src="/pim-editor.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -101,7 +103,7 @@
 <body>
   <div class="app">
     <div class="head">
-      <h1>Tasks</h1>
+      <h1>Tasks</h1><button class="btn" title="Ask the agent for help" onclick="parent.postMessage({type:'sendChat',text:'Explain how to use tasks in Prism, using its built-in help.'},'*')">?</button>
       <div class="tabs">
         <button class="tab active" data-tab="todo" onclick="switchTab('todo')">✓ To-do</button>
         <button class="tab" data-tab="cron" onclick="switchTab('cron')">⏱ Scheduled</button>
@@ -119,6 +121,7 @@
         <button class="btn btn-accent" onclick="addTodo()">Add</button>
         <button class="btn" onclick="openBreakdown()" title="Break an objective into tasks with AI">✨ Break down</button>
       </div>
+      <div class="todo-add"><input id="task-search" type="search" aria-label="Search tasks" placeholder="Search tasks…" oninput="renderTodos()"><select id="task-filter" aria-label="Filter tasks" onchange="renderTodos()"><option value="all">All</option><option value="today">Today</option><option value="overdue">Overdue</option><option value="upcoming">Upcoming</option><option value="high">High priority</option></select></div>
       <div class="todo-list" id="todo-list"></div>
       <div class="todofilter"><label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="show-done" onchange="renderTodos()"> Show completed</label></div>
     </div>
@@ -180,9 +183,12 @@ const $ = id => document.getElementById(id);
 function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function pad(x) { return String(x).padStart(2, '0'); }
 
-let tab = 'todo';
+let tab = 'todo', taskEditorGeneration = 0, taskEditForm = null, taskCreateActive = false, taskAdding = false;
+function publishTaskContext() { if (typeof taskEditor !== 'undefined') taskEditor.publish(); }
 function switchTab(t) {
   tab = t;
+  if(t !== 'todo') taskCreateActive=false;
+  publishTaskContext();
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
   $('todo-view').style.display = t === 'todo' ? 'flex' : 'none';
   $('cron-view').style.display = t === 'cron' ? 'flex' : 'none';
@@ -193,6 +199,7 @@ function switchTab(t) {
 // Announce the open to-do items so the agent can act on "this task" / "the X task".
 function postTodoContext() {
   if (tab !== 'todo') return;
+  if (taskEditForm || taskCreateActive) { publishTaskContext(); return; }
   const open = todos.filter(t => !t.done).slice(0, 12);
   const list = open.map(t => `#${t.id} "${t.title}"${t.priority && t.priority !== 'normal' ? ' [' + t.priority + ']' : ''}`).join('; ');
   const text = open.length
@@ -243,7 +250,15 @@ function renderTodos() {
     (a.done - b.done) ||
     ((PRANK[a.priority] ?? 1) - (PRANK[b.priority] ?? 1)) ||
     String(a.dueAt || '9999').localeCompare(String(b.dueAt || '9999')));
-  if (!showDone) items = items.filter(t => !t.done);
+  if (!showDone) items = items.filter(t => !t.done && !t.cancelled);
+  const query=$('task-search').value.trim().toLowerCase(), filter=$('task-filter').value;
+  items=items.filter(t=>t.title.toLowerCase().includes(query)).filter(t=>{
+    if(filter==='high')return t.priority==='high';
+    if(filter==='overdue')return isOverdue(t);
+    if(filter==='today')return t.dueAt && new Date(t.dueAt).toDateString()===new Date().toDateString();
+    if(filter==='upcoming'){const tomorrow=new Date();tomorrow.setHours(24,0,0,0);return t.dueAt && new Date(t.dueAt)>=tomorrow;}
+    return true;
+  });
   if (!items.length) {
     host.innerHTML = loadFailed
       ? '<div class="empty"><div class="big">⚠</div><div>Could not load your tasks</div><div style="font-size:12px">This is a connection problem, not an empty list. Retry in a moment.</div></div>'
@@ -258,7 +273,10 @@ function renderTodos() {
       <button class="check ${t.done ? 'on' : ''}" title="Toggle done"></button>
       <div class="todo-main"><div class="todo-title">${esc(t.title)}</div>${due}</div>
       <span class="prio p-${esc(t.priority || 'normal')}">${esc(t.priority || 'normal')}</span>
+      <button class="ico-btn edit" title="Edit">✎</button>
       <button class="ico-btn del" title="Delete">🗑</button>`;
+    row.querySelector('.edit').onclick=()=>editTodo(t);
+    if(String(t.id).startsWith('call:')){for(const b of row.querySelectorAll('button'))b.disabled=true;}
     row.querySelector('.check').onclick = () => toggleTodo(t);
     row.querySelector('.del').onclick = () => removeTodo(t);
     host.appendChild(row);
@@ -266,9 +284,11 @@ function renderTodos() {
   updateCount();
 }
 async function addTodo() {
+  if(taskAdding)return;
   const title = $('t-title').value.trim();
   if (!title) return;
   const body = { title, priority: $('t-prio').value, due: $('t-due').value || '' };
+  taskAdding=true;
   try {
     await PrismAPI.api('/api/tasks', PrismAPI.body('POST', body));
   } catch (e) {
@@ -276,8 +296,10 @@ async function addTodo() {
     // typed title away with nothing to show for it.
     PrismAPI.toast('Task not added: ' + e.message);
     return;
-  }
+  } finally { taskAdding=false; }
+  taskCreateActive=false;taskEditorGeneration++;
   $('t-title').value = ''; $('t-due').value = '';
+  publishTaskContext();
   loadTodos();
 }
 async function toggleTodo(t) {
@@ -291,12 +313,27 @@ async function toggleTodo(t) {
   loadTodos();
 }
 async function removeTodo(t) {
+  if(!await PrismModal.confirm(`Delete "${t.title}"?`,{danger:true}))return;
   try {
     await PrismAPI.api('/api/tasks?id=' + encodeURIComponent(t.id), { method: 'DELETE' });
   } catch (e) {
     PrismAPI.toast(e.message);
   }
   loadTodos();
+}
+
+function editTodo(t){
+  taskEditorGeneration++;taskCreateActive=false;
+  const d=document.createElement('dialog');d.style.cssText='width:min(440px,92vw);background:var(--bg1);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:18px';
+  d.innerHTML='<form class="form" style="padding:0;border:0;width:100%"><div class="form-title">Edit task</div><label>Title<input name="title" required></label><label>Priority<select name="priority"><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></label><label>Due (optional)<input name="due" type="datetime-local"></label><div class="err"></div><div class="form-foot"><button type="button" class="btn cancel">Cancel</button><button class="btn btn-accent" type="submit">Save</button></div></form>';
+  const f=d.querySelector('form');f.elements.title.value=t.title;f.elements.priority.value=t.priority||'normal';
+  if(t.dueAt){const dt=new Date(t.dueAt);f.elements.due.value=dt.getFullYear()+'-'+pad(dt.getMonth()+1)+'-'+pad(dt.getDate())+'T'+pad(dt.getHours())+':'+pad(dt.getMinutes());}
+  d.querySelector('.cancel').onclick=()=>d.close();d.onclose=()=>{if(taskEditForm?.dialog===d)taskEditForm=null;d.remove();publishTaskContext();postTodoContext();};document.body.appendChild(d);d.showModal();
+  taskEditForm={dialog:d,form:f,id:t.id};publishTaskContext();
+  f.onsubmit=async e=>{e.preventDefault();const b=f.querySelector('[type=submit]');b.disabled=true;
+    try{await PrismAPI.api('/api/tasks?id='+encodeURIComponent(t.id),PrismAPI.body('PUT',{title:f.elements.title.value.trim(),priority:f.elements.priority.value,due:f.elements.due.value?new Date(f.elements.due.value).toISOString():''}));d.close();loadTodos();}
+    catch(e){d.querySelector('.err').textContent=e.message;}finally{b.disabled=false;}
+  };
 }
 
 // ── AI breakdown ──
@@ -307,9 +344,10 @@ function openBreakdown() {
   $('bd-input').style.display = ''; $('bd-review').style.display = 'none';
   $('bd-go').textContent = 'Generate';
   $('bd-overlay').classList.add('open');
+  publishTaskContext();
   setTimeout(() => $('bd-obj').focus(), 30);
 }
-function closeBreakdown() { $('bd-overlay').classList.remove('open'); }
+function closeBreakdown() { $('bd-overlay').classList.remove('open'); publishTaskContext(); }
 async function runBreakdown() {
   if (bdSuggestions) { return addBreakdown(); }
   const obj = $('bd-obj').value.trim();
@@ -563,6 +601,27 @@ async function saveForm() {
   closeForm();
   loadJobs();
 }
+
+for (const id of ['t-title','t-prio','t-due']) $(id).addEventListener('focus',()=>{
+  if(!taskCreateActive){taskCreateActive=true;taskEditorGeneration++;}
+  publishTaskContext();
+});
+const taskEditor = PrismEditor.connect({
+  fields:['title','priority','due'],
+  read:()=>{
+    if(tab!=='todo' || $('bd-overlay').classList.contains('open'))return null;
+    if(taskEditForm){if(!taskEditForm.dialog.open)return null;const f=taskEditForm.form;return {app:'tasks',id:String(taskEditorGeneration),task_id:taskEditForm.id,title:f.elements.title.value,priority:f.elements.priority.value,due:f.elements.due.value,readonly:f.querySelector('[type=submit]').disabled,timezone:PrismPIM.timezone(),due_precision:'minute',persistence:'form only; user must Save'};}
+    if(!taskCreateActive)return null;
+    return {app:'tasks',id:String(taskEditorGeneration),task_id:null,title:$('t-title').value,priority:$('t-prio').value,due:$('t-due').value,readonly:taskAdding,timezone:PrismPIM.timezone(),due_precision:'date',persistence:'form only; user must Add'};
+  },
+  context:s=>`Editing ${s.task_id?'task '+s.task_id:'a new task'}: ${s.title || '(empty)'}. Changes stay in the form until ${s.task_id?'Save':'Add'}.`,
+  idleContext:()=>tab==='todo'?'Viewing the task list. Open a task with its edit button, or focus Add a task to work on a new task.':'Viewing scheduled jobs; use the cron tool.',
+  update:patch=>{
+    const state=taskEditor.snapshot(),next=PrismPIM.taskPatch(state,patch,state.due_precision==='date');
+    if(taskEditForm){const f=taskEditForm.form;for(const key of ['title','priority','due'])f.elements[key].value=next[key];taskEditForm.dialog.querySelector('.err').textContent='';}
+    else{$('t-title').value=next.title;$('t-prio').value=next.priority;$('t-due').value=next.due;}
+  }
+});
 
 // Reload when the agent changes tasks/cron via chat.
 addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') { loadTodos(); loadJobs(); } });

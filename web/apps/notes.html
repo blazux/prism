@@ -8,6 +8,7 @@
 <script src="/theme.js"></script>
 <script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
+<script src="/editor-bridge.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <script src="/vendor/purify.min.js"></script>
 <script>
@@ -141,6 +142,10 @@
           <button class="btn" id="save-btn" onclick="saveNote()">Save</button>
           <button class="btn" id="del-btn" onclick="deleteNote()" title="Delete" style="color:var(--red)">🗑</button>
         </div>
+        <div id="note-conflict" hidden role="status" style="padding:10px;border-bottom:1px solid var(--border);font-size:12px">This note changed elsewhere. Your edits are still here.
+          <button class="btn" onclick="resolveNoteUpdate(false)">Load updated note</button>
+          <button class="btn" onclick="resolveNoteUpdate(true)">Keep my edits</button>
+        </div>
         <input class="tags-in" id="e-tags" placeholder="tags, comma, separated">
         <div class="ai-bar">
           <span class="ai-lbl">✨ AI</span>
@@ -198,6 +203,8 @@
 const session = new URLSearchParams(location.search).get('session') || 'default';
 const api = (path, opts) => PrismAPI.api(`/api/notes${path}`, opts);
 const $ = id => document.getElementById(id);
+let savedNoteDraft = '', noteSaveQueue = Promise.resolve(true), notesLoadVersion = 0, notesSyncRequested = false, pendingNoteUpdate = null;
+function noteDraft() { return JSON.stringify([$('e-title').value, $('e-body').value, noteTags({tags:$('e-tags').value}).join(', ')]); }
 let notes = [], selectedId = null, filter = '', tagFilter = '', mode = 'edit', lastTarget = null;
 
 // Capabilities, resolved once at startup:
@@ -237,6 +244,8 @@ function setSourceBadge(src) {
 // note you have open keeps showing the pre-agent text until a reload. Routine loads leave
 // the editor alone so a background refresh can't yank the field you're typing in.
 async function load(syncEditor = false) {
+  const version = ++notesLoadVersion;
+  notesSyncRequested ||= syncEditor;
   let data;
   try {
     data = await api(`?session=${encodeURIComponent(session)}`);
@@ -245,22 +254,33 @@ async function load(syncEditor = false) {
     PrismAPI.toast('Could not load your notes: ' + e.message);
     return;
   }
+  if (version !== notesLoadVersion) return;
   notes = data.notes || [];
   setSourceBadge(data.source);
   render();
-  if (syncEditor) syncEditorFromServer();
+  if (notesSyncRequested) { notesSyncRequested = false; syncEditorFromServer(); }
 }
 
-// Pull the open note's fields back from the server copy. By design the agent's version
-// WINS over unsaved local edits: you ask it to complete a note, you want to see its work
-// — if it got it wrong, tell it. The view mode (edit/split/preview) is preserved.
+// Refresh saved notes after agent edits, preserving unsaved local input.
 function syncEditorFromServer() {
   if (!selectedId) return;
   const n = notes.find(x => x.id === selectedId);
+  if (noteDraft() !== savedNoteDraft) {
+    const remote = n ? JSON.stringify([n.title || '', n.body || '', noteTags(n).join(', ')]) : null;
+    if (remote !== savedNoteDraft) {
+      pendingNoteUpdate = n || {deleted:true};
+      $('note-conflict').hidden = false;
+      publishNoteContext();
+    }
+    return;
+  }
+  pendingNoteUpdate = null; $('note-conflict').hidden = true;
   if (!n) { selectedId = null; closeEditor(); return; } // the agent deleted the open note
   $('e-title').value = n.title || '';
-  $('e-tags').value = n.tags || '';
+  $('e-tags').value = noteTags(n).join(', ');
   $('e-body').value = n.body || '';
+  savedNoteDraft = noteDraft();
+  publishNoteContext();
   applyNoteChrome(n);
   if (mode !== 'edit') updatePreview();
 }
@@ -328,7 +348,7 @@ function updatePreview() {
   pv.querySelectorAll('.wikilink').forEach(a => a.addEventListener('click', e => { e.preventDefault(); openWikiLink(a.dataset.note); }));
 }
 async function openWikiLink(title) {
-  if (selectedId) await saveNote();
+  if (selectedId && !await saveNote()) return;
   const n = notes.find(x => (x.title || '').toLowerCase() === title.toLowerCase());
   if (n) { select(n.id); return; }
   if (await PrismModal.confirm(`Note "${title}" doesn't exist yet. Create it?`, { okLabel: 'Create' })) {
@@ -349,7 +369,7 @@ async function openWikiLink(title) {
 async function addToKnowledge() {
   if (!selectedId) return;
   if (!$('e-body').value.trim()) { flashKn('🧠', 'Empty'); return; }
-  await saveNote();
+  if (!await saveNote()) return;
   const sel = $('kn-col'); sel.innerHTML = '';
   $('kn-err').textContent = ''; $('kn-new').style.display = 'none'; $('kn-new').value = '';
   let cols = [];
@@ -393,7 +413,10 @@ function flashKn(icon, msg) {
   setTimeout(() => { btn.textContent = '🧠'; btn.title = "Add this note to the agent's knowledge base (RAG)"; }, 2000);
 }
 
-function select(id) {
+async function select(id) {
+  if (id === selectedId) return;
+  if (!await saveNote()) return;
+  pendingNoteUpdate = null; $('note-conflict').hidden = true;
   selectedId = id;
   const n = notes.find(x => x.id === id);
   if (!n) return;
@@ -409,8 +432,10 @@ function select(id) {
   $('empty').style.display = 'none';
   $('editor').style.display = 'flex';
   $('e-title').value = n.title || '';
-  $('e-tags').value = n.tags || '';
+  $('e-tags').value = noteTags(n).join(', ');
   $('e-body').value = n.body || '';
+  savedNoteDraft = noteDraft();
+  publishNoteContext();
   closeResult();
   setMode('edit');
   applyNoteChrome(n);
@@ -456,7 +481,7 @@ async function toggleShare() {
   const n = currentNote();
   if (!n || n.scope !== 'personal') return;
   const btn = $('share-btn');
-  await saveNote(); // push latest edits before sharing
+  if (!await saveNote()) return; // push latest edits before sharing
   try {
     const r = await fetch(`/api/notes/share?id=${encodeURIComponent(n.id)}`, { method: 'POST' });
     if (!r.ok) throw new Error(await r.text());
@@ -469,6 +494,7 @@ async function toggleShare() {
 }
 
 async function newNote() {
+  if (!await saveNote()) return;
   let id;
   try {
     ({ id } = await api(`?session=${encodeURIComponent(session)}`, {
@@ -480,26 +506,39 @@ async function newNote() {
     return;
   }
   await load();
-  select(id);
+  await select(id);
   $('e-title').focus(); $('e-title').select();
 }
 
-async function saveNote() {
-  if (!selectedId) return;
-  const n = currentNote();
-  if (n && n.scope === 'group' && !n.canEdit) return; // read-only shared note
-  const body = { id: selectedId, title: $('e-title').value, body: $('e-body').value, tags: $('e-tags').value };
-  if (n && n.scope === 'group') body.scope = 'group';
-  try {
-    await api(`?session=${encodeURIComponent(session)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-    });
-  } catch (e) {
-    // Keep what the user typed on screen; only say it is not saved yet.
-    PrismAPI.toast('Not saved: ' + e.message);
-    return;
+// Serialize blur, Save and navigation so older writes cannot finish last.
+function saveNote() {
+  const pending = noteSaveQueue.then(persistNote);
+  noteSaveQueue = pending.catch(() => false);
+  return pending;
+}
+async function persistNote() {
+  while (selectedId) {
+    if (pendingNoteUpdate) { PrismAPI.toast('Resolve the updated note before saving your edits.'); return false; }
+    const n = currentNote();
+    if (n && n.scope === 'group' && !n.canEdit) return true;
+    const draft = noteDraft();
+    if (draft === savedNoteDraft) return true;
+    const body = { id: selectedId, title: $('e-title').value, body: $('e-body').value, tags: $('e-tags').value };
+    if (n && n.scope === 'group') body.scope = 'group';
+    try {
+      await api(`?session=${encodeURIComponent(session)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+    } catch (e) {
+      PrismAPI.toast('Not saved: ' + e.message);
+      return false;
+    }
+    if (selectedId !== body.id) return false;
+    savedNoteDraft = draft;
+    await load();
+    // Typing may have continued during the request. Save those edits before leaving.
   }
-  await load();
+  return true;
 }
 
 async function deleteNote() {
@@ -519,7 +558,11 @@ async function deleteNote() {
   await load();
 }
 
-function closeEditor() {
+async function closeEditor() {
+  if (!await saveNote()) return;
+  selectedId = null;
+  pendingNoteUpdate = null; $('note-conflict').hidden = true;
+  publishNoteContext();
   $('editor').style.display = 'none';
   $('empty').style.display = 'flex';
   $('app').classList.remove('editing');
@@ -598,7 +641,35 @@ $('search').addEventListener('input', e => { filter = e.target.value; render(); 
 ['e-title', 'e-tags', 'e-body'].forEach(id => $(id).addEventListener('blur', () => { if (selectedId) saveNote(); }));
 
 // Reload when the agent changes notes via chat.
-addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') load(true); });
+addEventListener('message', e => { if (e.source === parent && e.origin === location.origin && e.data?.type === 'data-changed' && (!e.data.app || e.data.app === 'notes')) load(true); });
+
+function publishNoteContext() { if (typeof noteEditor !== 'undefined') noteEditor.publish(); }
+async function resolveNoteUpdate(keepLocal) {
+  const remote = pendingNoteUpdate;
+  if (!remote) return;
+  if (keepLocal && remote.deleted) { PrismAPI.toast('The note was deleted elsewhere. Copy your text before leaving this editor.'); return; }
+  pendingNoteUpdate = null; $('note-conflict').hidden = true;
+  if (keepLocal) { savedNoteDraft = JSON.stringify([remote.title || '',remote.body || '',noteTags(remote).join(', ')]); await saveNote(); }
+  else { savedNoteDraft = noteDraft(); syncEditorFromServer(); }
+  publishNoteContext();
+}
+const noteEditor = PrismEditor.connect({
+  fields:['title','body','tags'],
+  read:() => {
+    if (!selectedId) return null;
+    const n = currentNote();
+    return {app:'notes',id:String(selectedId),title:$('e-title').value,body:$('e-body').value,tags:$('e-tags').value,readonly:!!(n?.scope === 'group' && !n.canEdit),conflict:!!pendingNoteUpdate};
+  },
+  context:s => `Editing note ${s.id}, title: ${s.title || '(empty)'}.${s.readonly?' This note is read-only.':''}${s.conflict?' There are unresolved local and remote edits.':''}`,
+  idleContext:() => 'Viewing the Notes app; no note is open.',
+  update:async patch => {
+    if (pendingNoteUpdate) throw Error('The note has conflicting edits. Ask the user to resolve them first.');
+    for (const [key,value] of Object.entries(patch)) $('e-'+key).value=value;
+    if (mode !== 'edit') updatePreview();
+    publishNoteContext();
+    if (!await saveNote()) throw Error('The changes are visible in the editor but could not be saved. They are preserved on screen; do not claim they were saved.');
+  }
+});
 
 loadCaps().then(load);
 </script>

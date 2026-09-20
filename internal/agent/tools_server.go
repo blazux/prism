@@ -24,3 +24,6 @@ func (e *ToolExecutor) serverTool(ctx context.Context, name string, args map[str
 	}
 	return fmt.Sprintf("%s is not available in this context: it acts on a signed-in user's own settings, and this session (a shared/group agent, voice call or guest) has none. Ask the user to do it from Settings, or to ask their personal agent.", name), nil
 }
+
+// SetEditor connects the active browser editor without granting access to other tabs.
+func (e *ToolExecutor) SetEditor(fn ServerTool) { e.editorToolFn = fn }

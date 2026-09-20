@@ -150,6 +150,14 @@ func (s *Store) initSchema(ctx context.Context) error {
 			return fmt.Errorf("exec %q: %w", stmt[:min(40, len(stmt))], err)
 		}
 	}
+	var storedDim int
+	if err := s.pool.QueryRow(ctx, `SELECT atttypmod FROM pg_attribute WHERE attrelid = 'rag_chunks'::regclass AND attname = 'embedding' AND NOT attisdropped`).Scan(&storedDim); err != nil {
+		return fmt.Errorf("read embedding dimension: %w", err)
+	}
+	if storedDim != s.dim {
+		return fmt.Errorf("embedding dimension mismatch: database uses %d, configured model produces %d. Restore the previous EMBED_MODEL, or back up and rebuild only the RAG index with the new model; do not delete the workspace or the whole database", storedDim, s.dim)
+	}
+
 	return nil
 }
 

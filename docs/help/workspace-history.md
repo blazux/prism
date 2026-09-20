@@ -54,3 +54,8 @@ If you wrote your own `.gitignore` in the workspace, it is respected as-is.
   `git diff` in `/workspace` directly — it is a normal repository.
 - History is about *files in the workspace*. Notes, tasks, events, widgets on a
   board and chat history are stored elsewhere and are not covered by it.
+
+The encryption key `.secret_key` is excluded from new snapshots, including in
+existing workspace repositories. Prism removes it from Git's index without
+deleting the live file. Older commits are not rewritten automatically: do not
+publish an old workspace repository as a way to share files.

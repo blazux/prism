@@ -39,7 +39,7 @@ func (s *Server) handleUserSecrets(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		names, err := ms.ListScopedSecretNames(r.Context())
+		names, err := ms.ListScriptSecretNames(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -76,8 +76,8 @@ func (s *Server) handleUserSecrets(w http.ResponseWriter, r *http.Request) {
 			}
 			ms = gs.ConfigScope(fmt.Sprintf("g%d", b.Group))
 		}
-		if err := ms.SetSecret(r.Context(), b.Name, b.Value); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+		if err := ms.SetScriptSecret(r.Context(), b.Name, b.Value); err != nil {
+			writeSecretStoreError(w, err)
 			return
 		}
 		writeJSON(w, map[string]interface{}{"ok": true})
@@ -158,6 +158,12 @@ func (s *Server) handleUserSecretByName(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "missing name")
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
+	if agent.IsReservedSecretName(name) {
+		writeErr(w, http.StatusForbidden, "reserved integration credential; manage it in the integration's settings")
+		return
+	}
+
 	ms := s.userStore(r)
 	if ms == nil {
 		writeErr(w, http.StatusServiceUnavailable, "memory store not available")
@@ -181,10 +187,6 @@ func (s *Server) handleUserSecretByName(w http.ResponseWriter, r *http.Request) 
 		// the result mirrors what that session already gets in its sandbox env
 		// (ToolExecutor.secretsEnv): personal tier first, then the group's
 		// shared tier. See resolveSecretScopes for the authorization gate.
-		if agent.IsReservedSecretName(name) {
-			writeErr(w, http.StatusForbidden, "reserved name — integration credentials are not served to scripts")
-			return
-		}
 		personalStore, groupScopes := s.resolveSecretScopes(r)
 		if val, ok, err := personalStore.GetSecret(r.Context(), name); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
@@ -195,7 +197,10 @@ func (s *Server) handleUserSecretByName(w http.ResponseWriter, r *http.Request) 
 		}
 		if gs := s.store(); gs != nil {
 			for _, scope := range groupScopes {
-				if gv, gok, _ := gs.ConfigScope(scope).GetSecret(r.Context(), name); gok {
+				if gv, gok, err := gs.ConfigScope(scope).GetSecret(r.Context(), name); err != nil {
+					writeSecretStoreError(w, err)
+					return
+				} else if gok {
 					writeJSON(w, map[string]interface{}{"name": name, "value": gv, "source": "group"})
 					return
 				}
@@ -248,8 +253,8 @@ func (s *Server) handleUserSecretByName(w http.ResponseWriter, r *http.Request) 
 			writeErr(w, http.StatusServiceUnavailable, "memory store not available")
 			return
 		}
-		if err := gs.ConfigScope(fmt.Sprintf("g%d", b.Group)).SetSecret(r.Context(), name, val); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+		if err := gs.ConfigScope(fmt.Sprintf("g%d", b.Group)).SetScriptSecret(r.Context(), name, val); err != nil {
+			writeSecretStoreError(w, err)
 			return
 		}
 		if err := ms.DeleteSecret(r.Context(), name); err != nil {
