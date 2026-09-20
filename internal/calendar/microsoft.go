@@ -40,6 +40,7 @@ func (t *msDateTime) parse() (time.Time, bool) {
 }
 
 type msEvent struct {
+	AllDay   bool        `json:"isAllDay"`
 	ID       string      `json:"id,omitempty"`
 	Subject  string      `json:"subject,omitempty"`
 	Body     *msBody     `json:"body,omitempty"`
@@ -51,11 +52,11 @@ type msEvent struct {
 
 type msBody struct {
 	ContentType string `json:"contentType,omitempty"`
-	Content     string `json:"content,omitempty"`
+	Content     string `json:"content"`
 }
 
 type msLocation struct {
-	DisplayName string `json:"displayName,omitempty"`
+	DisplayName string `json:"displayName"`
 }
 
 func (p *MicrosoftProvider) doJSON(ctx context.Context, method, u string, body, out interface{}) error {
@@ -109,28 +110,13 @@ func (p *MicrosoftProvider) List(ctx context.Context, from, to *time.Time) ([]It
 	}
 	out := make([]Item, 0, len(res.Value))
 	for _, e := range res.Value {
-		it := Item{ID: e.ID, Title: e.Subject}
-		if e.Body != nil {
-			it.Description = e.Body.Content
-		}
-		if e.Location != nil {
-			it.Location = e.Location.DisplayName
-		}
-		if st, ok := e.Start.parse(); ok {
-			it.StartAt = st
-		}
-		if et, ok := e.End.parse(); ok {
-			it.EndAt = &et
-		}
-		if c, err := time.Parse(time.RFC3339, e.Created); err == nil {
-			it.CreatedAt = c
-		}
+		it := e.item()
 		out = append(out, it)
 	}
 	return out, nil
 }
 
-func (p *MicrosoftProvider) Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time) (string, error) {
+func (p *MicrosoftProvider) Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time, allDay ...bool) (string, error) {
 	e := start.Add(time.Hour)
 	if end != nil {
 		e = *end
@@ -146,6 +132,7 @@ func (p *MicrosoftProvider) Add(ctx context.Context, title, description, locatio
 	if location != "" {
 		ev.Location = &msLocation{DisplayName: location}
 	}
+	setMicrosoftAllDay(&ev, start, e, allDay)
 	var created msEvent
 	if err := p.doJSON(ctx, "POST", graphBase+"/me/events", ev, &created); err != nil {
 		return "", err
@@ -153,7 +140,7 @@ func (p *MicrosoftProvider) Add(ctx context.Context, title, description, locatio
 	return created.ID, nil
 }
 
-func (p *MicrosoftProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time) error {
+func (p *MicrosoftProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time, allDay ...bool) error {
 	e := start.Add(time.Hour)
 	if end != nil {
 		e = *end
@@ -163,15 +150,40 @@ func (p *MicrosoftProvider) Update(ctx context.Context, id, title, description, 
 		Start:   &msDateTime{DateTime: start.UTC().Format("2006-01-02T15:04:05"), TimeZone: "UTC"},
 		End:     &msDateTime{DateTime: e.UTC().Format("2006-01-02T15:04:05"), TimeZone: "UTC"},
 	}
-	if description != "" {
-		ev.Body = &msBody{ContentType: "text", Content: description}
-	}
-	if location != "" {
-		ev.Location = &msLocation{DisplayName: location}
-	}
+	ev.Body = &msBody{ContentType: "text", Content: description}
+	ev.Location = &msLocation{DisplayName: location}
+	setMicrosoftAllDay(&ev, start, e, allDay)
 	return p.doJSON(ctx, "PATCH", graphBase+"/me/events/"+url.PathEscape(id), ev, nil)
 }
 
 func (p *MicrosoftProvider) Delete(ctx context.Context, id string) error {
 	return p.doJSON(ctx, "DELETE", graphBase+"/me/events/"+url.PathEscape(id), nil, nil)
+}
+
+func (e msEvent) item() Item {
+	it := Item{AllDay: e.AllDay, ID: e.ID, Title: e.Subject}
+	if e.Body != nil {
+		it.Description = e.Body.Content
+	}
+	if e.Location != nil {
+		it.Location = e.Location.DisplayName
+	}
+	if st, ok := e.Start.parse(); ok {
+		it.StartAt = st
+	}
+	if et, ok := e.End.parse(); ok {
+		it.EndAt = &et
+	}
+	if c, err := time.Parse(time.RFC3339, e.Created); err == nil {
+		it.CreatedAt = c
+	}
+	return it
+}
+
+func setMicrosoftAllDay(ev *msEvent, start, end time.Time, flag []bool) {
+	if len(flag) > 0 && flag[0] {
+		ev.AllDay = true
+		ev.Start = &msDateTime{DateTime: start.Format("2006-01-02") + "T00:00:00", TimeZone: "UTC"}
+		ev.End = &msDateTime{DateTime: end.Format("2006-01-02") + "T00:00:00", TimeZone: "UTC"}
+	}
 }

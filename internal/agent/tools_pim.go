@@ -303,14 +303,22 @@ func taskLookup(ctx context.Context, prov tasks.Provider, id string) (*tasks.Ite
 
 // ─── task ─────────────────────────────────────────────────────────────────────
 
-func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, priority, due string, includeDone bool) (string, error) {
+func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, priority, due string, includeDone bool, filters ...string) (string, error) {
 	if e.memStore == nil {
 		return "", fmt.Errorf("tasks unavailable: no database")
 	}
 	prov := tasks.ProviderFor(ctx, e.userStore(), e.pimSessionScope())
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
-		id, err := prov.Add(ctx, title, priority, parseTimePtr(due))
+		if priority == "" {
+			priority = "normal"
+		}
+		patch := tasks.Patch{Title: &title, Priority: &priority, Due: &due}
+		if err := patch.Validate(); err != nil {
+			return "", err
+		}
+		deadline, _ := patch.Deadline()
+		id, err := prov.Add(ctx, title, priority, deadline)
 		if err != nil {
 			return "", err
 		}
@@ -319,6 +327,12 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 		items, err := prov.List(ctx, includeDone)
 		if err != nil {
 			return "", err
+		}
+		if len(filters) == 2 {
+			items, err = tasks.Filter(items, filters[0], filters[1], time.Now())
+			if err != nil {
+				return "", err
+			}
 		}
 		if len(items) == 0 {
 			return "No tasks.", nil
@@ -369,7 +383,7 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 
 // ─── calendar ─────────────────────────────────────────────────────────────────
 
-func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, description, location, start, end, from, to string) (string, error) {
+func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, description, location, start, end, from, to string, allDay ...bool) (string, error) {
 	if e.memStore == nil {
 		return "", fmt.Errorf("calendar unavailable: no database")
 	}
@@ -380,7 +394,15 @@ func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, d
 		if err != nil {
 			return "", fmt.Errorf("add requires a valid start time: %w", err)
 		}
-		id, err := prov.Add(ctx, title, description, location, st, parseTimePtr(end))
+		et, err := calendar.ParseTime(end)
+		if err != nil {
+			return "", err
+		}
+		event, err := (calendar.Patch{}).Merge(calendar.Item{Title: title, StartAt: st, EndAt: et, AllDay: len(allDay) > 0 && allDay[0]})
+		if err != nil {
+			return "", err
+		}
+		id, err := prov.Add(ctx, title, description, location, event.StartAt, event.EndAt, event.AllDay)
 		if err != nil {
 			return "", err
 		}

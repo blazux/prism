@@ -391,7 +391,7 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments json.RawMe
 	}
 	out := sb.String()
 	if resp.IsError {
-		return "ERROR: " + out, nil
+		return "", fmt.Errorf("MCP tool %q failed: %s", name, out)
 	}
 	return out, nil
 }

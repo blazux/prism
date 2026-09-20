@@ -126,6 +126,8 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 
 	case "list", "inbox", "":
 		cfg, err := e.loadEmailConfig(ctx)
+		cfg.Folder = str("folder")
+		cfg.Offset = num("offset")
 		if err != nil {
 			return "", err
 		}
@@ -135,12 +137,14 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 			return "", err
 		}
 		if len(msgs) == 0 {
-			return "Inbox is empty.", nil
+			return "Folder is empty.", nil
 		}
 		return jsonResult(msgs), nil
 
 	case "read", "open":
 		cfg, err := e.loadEmailConfig(ctx)
+		cfg.Folder = str("folder")
+		cfg.Offset = num("offset")
 		if err != nil {
 			return "", err
 		}
@@ -152,13 +156,12 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		if err != nil {
 			return "", err
 		}
-		if len(msg.Body) > 8000 {
-			msg.Body = msg.Body[:8000] + "\n…(truncated)"
-		}
-		return jsonResult(msg), nil
+		return emailReadResult(msg, num("offset"))
 
 	case "search":
 		cfg, err := e.loadEmailConfig(ctx)
+		cfg.Folder = str("folder")
+		cfg.Offset = num("offset")
 		if err != nil {
 			return "", err
 		}
@@ -177,6 +180,8 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 
 	case "send":
 		cfg, err := e.loadEmailConfig(ctx)
+		cfg.Folder = str("folder")
+		cfg.Offset = num("offset")
 		if err != nil {
 			return "", err
 		}
@@ -191,6 +196,8 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 
 	case "reply":
 		cfg, err := e.loadEmailConfig(ctx)
+		cfg.Folder = str("folder")
+		cfg.Offset = num("offset")
 		if err != nil {
 			return "", err
 		}
@@ -215,6 +222,129 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 			return "", err
 		}
 		return fmt.Sprintf("Reply sent to %s.", to), nil
+
+	case "rules", "rule_save", "rule_delete", "rule_preview", "rules_apply":
+		action := str("action")
+		if action == "rules" {
+			rules, err := email.LoadRules(ctx, e.userStore())
+			return jsonResult(rules), err
+		}
+		if action == "rule_delete" {
+			return "Rule deleted.", email.DeleteRule(ctx, e.userStore(), str("name"))
+		}
+		cfg, err := e.loadEmailConfig(ctx)
+		if err != nil {
+			return "", err
+		}
+		rules, err := email.LoadRules(ctx, e.userStore())
+		if err != nil {
+			return "", err
+		}
+		if action == "rule_save" || (action == "rule_preview" && str("rule_field") != "") {
+			rule := email.Rule{Name: str("name"), Field: str("rule_field"), Contains: str("rule_contains"), Action: str("rule_action"), Target: str("target"), Enabled: true}
+			// A partial save modifies only the fields supplied by the caller.
+			for _, r := range rules {
+				if r.Name == rule.Name {
+					rule = r
+					break
+				}
+			}
+			if v, ok := args["enabled"].(bool); ok {
+				rule.Enabled = v
+			}
+			for key, dst := range map[string]*string{"rule_field": &rule.Field, "rule_contains": &rule.Contains, "rule_action": &rule.Action, "target": &rule.Target} {
+				if v, ok := args[key].(string); ok {
+					*dst = v
+				}
+			}
+			if err = rule.Validate(); err != nil {
+				return "", err
+			}
+			if rule.Action == "move" {
+				fs, err := cfg.Folders()
+				if err != nil {
+					return "", err
+				}
+				found := false
+				for _, f := range fs {
+					if f.Name == rule.Target && f.Selectable {
+						found = true
+					}
+				}
+				if !found {
+					return "", fmt.Errorf("target folder not found; use folders or create_folder first")
+				}
+			}
+			if action == "rule_save" {
+				return "Rule saved. Enabled rules run every minute on INBOX, including existing matching mail, while Prism is running.", email.SaveRule(ctx, e.userStore(), rule)
+			}
+			rule.Enabled = true
+			rules = []email.Rule{rule}
+		} else if str("name") != "" {
+			selected := []email.Rule{}
+			for _, r := range rules {
+				if r.Name == str("name") {
+					r.Enabled = true
+					selected = append(selected, r)
+				}
+			}
+			if len(selected) == 0 {
+				return "", fmt.Errorf("rule not found; use rules")
+			}
+			rules = selected
+		}
+		result, err := cfg.RunRules(ctx, rules, action == "rule_preview")
+		if action == "rules_apply" && e.memStore != nil {
+			for _, r := range result {
+				if r.Applied > 0 || r.Error != "" {
+					e.memStore.AddUsage(ctx, 0, e.sessionID, "mail_rule", r.Name, int64(r.Applied), map[string]any{"applied": r.Applied, "error": r.Error})
+				}
+			}
+		}
+		return jsonResult(result), err
+
+	case "folders":
+		cfg, err := e.loadEmailConfig(ctx)
+		if err != nil {
+			return "", err
+		}
+		fs, err := cfg.Folders()
+		return jsonResult(fs), err
+	case "create_folder", "rename_folder", "delete_folder":
+		cfg, err := e.loadEmailConfig(ctx)
+		if err != nil {
+			return "", err
+		}
+		resolved, err := cfg.ManageFolderWithRules(ctx, e.userStore(), str("action"), str("folder"), str("target"))
+		if err != nil {
+			return "", err
+		}
+		return jsonResult(map[string]string{"folder": resolved, "status": "updated"}), nil
+	case "move", "archive", "trash", "mark_read", "mark_unread":
+		cfg, err := e.loadEmailConfig(ctx)
+		if err != nil {
+			return "", err
+		}
+		cfg.Folder = str("folder")
+		uid := uint32(num("uid"))
+		if uid == 0 {
+			return "", fmt.Errorf("uid from list or search is required")
+		}
+		action := str("action")
+		if action == "mark_read" || action == "mark_unread" {
+			return "Message flag updated.", cfg.SetSeen(uid, action == "mark_read")
+		}
+		target := str("target")
+		if action == "archive" || action == "trash" {
+			target, err = cfg.SpecialFolder(action)
+			if err != nil {
+				return "", err
+			}
+		}
+		if err = cfg.Move(uid, target); err != nil {
+			return "", err
+		}
+		return "Message moved to " + target + ". Its UID may have changed; list that folder to find it.", nil
 
 	default:
 		return "", fmt.Errorf("email: unknown action %q (config, list, read, search, send, reply)", str("action"))

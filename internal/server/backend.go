@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -98,31 +99,37 @@ func (s *Server) otherChatBackends() []ollama.Backend {
 // chatModels returns the union of selectable chat models: the primary backend's
 // list merged with every other configured server's, so one picker offers the
 // full menu. A server that can't be reached is skipped rather than fatal — only
-// the primary failing is an error.
+// all configured backends failing is an error.
 func (s *Server) chatModels(ctx context.Context) ([]string, error) {
-	models, err := s.newChatBackend().ListModels(ctx)
-	if err != nil {
-		return nil, err
+	backends := append([]ollama.Backend{s.newChatBackend()}, s.otherChatBackends()...)
+	type answer struct {
+		models []string
+		err    error
 	}
-	seen := make(map[string]bool, len(models))
-	for _, m := range models {
-		seen[m] = true
+	pending := make([]chan answer, len(backends))
+	for i, backend := range backends {
+		pending[i] = make(chan answer, 1)
+		go func(b ollama.Backend, ch chan answer) { models, err := b.ListModels(ctx); ch <- answer{models, err} }(backend, pending[i])
 	}
-	for _, backend := range s.otherChatBackends() {
-		extra, e := backend.ListModels(ctx)
-		if e != nil {
-			// Say so rather than silently shortening the picker: a configured
-			// backend whose models never appear, with nothing in the log, reads as
-			// Prism ignoring the config instead of the server refusing us.
-			log.Printf("[models] %T unavailable, its models are not offered: %v", backend, e)
+	models := []string{}
+	seen := map[string]bool{}
+	var failures []error
+	for _, ch := range pending {
+		result := <-ch
+		if result.err != nil {
+			failures = append(failures, result.err)
+			log.Printf("[models] backend unavailable: %v", result.err)
 			continue
 		}
-		for _, m := range extra {
+		for _, m := range result.models {
 			if !seen[m] {
 				seen[m] = true
 				models = append(models, m)
 			}
 		}
+	}
+	if len(failures) == len(backends) {
+		return nil, errors.Join(failures...)
 	}
 	return models, nil
 }
@@ -166,6 +173,19 @@ func (s *Server) localBackendFor(model string) ollama.Backend {
 			}
 		}
 		return ollama.NewClient(s.cfg.OllamaURL) // otherwise it's an Ollama model
+	}
+	// A healthy secondary remains selectable when the primary is down.
+	if s.cfg.OllamaURL != "" {
+		local := ollama.NewClient(s.cfg.OllamaURL)
+		probe, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		if models, err := local.ListModels(probe); err == nil {
+			for _, served := range models {
+				if served == model {
+					return local
+				}
+			}
+		}
 	}
 	// openai server unreachable: fall back to the primary chat backend — except
 	// when that is Anthropic, where a local model name is a guaranteed 404.

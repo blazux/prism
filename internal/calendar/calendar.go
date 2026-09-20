@@ -16,6 +16,7 @@ import (
 )
 
 type Item struct {
+	AllDay      bool       `json:"allDay"`
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`
 	Description string     `json:"description"`
@@ -35,11 +36,11 @@ type Item struct {
 
 type Provider interface {
 	List(ctx context.Context, from, to *time.Time) ([]Item, error)
-	Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time) (string, error)
+	Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time, allDay ...bool) (string, error)
 	// Update overwrites an existing event in place. Editing used to be
 	// Delete-then-Add at the HTTP layer, which loses the event outright if
 	// the second call fails — every implementation below replaces that.
-	Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time) error
+	Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time, allDay ...bool) error
 	Delete(ctx context.Context, id string) error
 	Kind() string
 }
@@ -131,23 +132,23 @@ func (p *DBProvider) List(ctx context.Context, from, to *time.Time) ([]Item, err
 	for _, e := range evs {
 		out = append(out, Item{
 			ID: strconv.FormatInt(e.ID, 10), Title: e.Title, Description: e.Description,
-			StartAt: e.StartAt, EndAt: e.EndAt, Location: e.Location, CreatedAt: e.CreatedAt,
+			StartAt: e.StartAt, EndAt: e.EndAt, Location: e.Location, CreatedAt: e.CreatedAt, AllDay: storedAllDay(e),
 		})
 	}
 	return out, nil
 }
 
-func (p *DBProvider) Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time) (string, error) {
-	id, err := p.Store.AddEvent(ctx, p.Session, title, description, location, start, end)
+func (p *DBProvider) Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time, allDay ...bool) (string, error) {
+	id, err := p.Store.AddEvent(ctx, p.Session, title, description, location, start, end, allDay...)
 	return strconv.FormatInt(id, 10), err
 }
 
-func (p *DBProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time) error {
+func (p *DBProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time, allDay ...bool) error {
 	iid, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		return err
 	}
-	return p.Store.UpdateEvent(ctx, p.Session, iid, title, description, location, start, end)
+	return p.Store.UpdateEvent(ctx, p.Session, iid, title, description, location, start, end, allDay...)
 }
 
 func (p *DBProvider) Delete(ctx context.Context, id string) error {
@@ -170,10 +171,19 @@ func (p *unavailableProvider) Kind() string { return "unavailable" }
 func (p *unavailableProvider) List(context.Context, *time.Time, *time.Time) ([]Item, error) {
 	return nil, p.fail()
 }
-func (p *unavailableProvider) Add(context.Context, string, string, string, time.Time, *time.Time) (string, error) {
+func (p *unavailableProvider) Add(context.Context, string, string, string, time.Time, *time.Time, ...bool) (string, error) {
 	return "", p.fail()
 }
-func (p *unavailableProvider) Update(context.Context, string, string, string, string, time.Time, *time.Time) error {
+func (p *unavailableProvider) Update(context.Context, string, string, string, string, time.Time, *time.Time, ...bool) error {
 	return p.fail()
 }
 func (p *unavailableProvider) Delete(context.Context, string) error { return p.fail() }
+
+// Old rows predate explicit all-day storage. Preserve their former display.
+func storedAllDay(e memory.Event) bool {
+	if e.AllDay != nil {
+		return *e.AllDay
+	}
+	st := e.StartAt.In(time.Local)
+	return st.Hour() == 0 && st.Minute() == 0 && (e.EndAt == nil || (e.EndAt.In(time.Local).Hour() == 0 && e.EndAt.In(time.Local).Minute() == 0))
+}

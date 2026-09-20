@@ -1,6 +1,6 @@
 package tasks
 
-// TodoistProvider talks to the Todoist REST API v2 using a personal API token
+// TodoistProvider talks to the Todoist API v1 using a personal API token
 // (Settings → Integrations → Developer in Todoist) — no OAuth needed. Todoist's
 // REST API only returns active tasks, so completed ones are not listed.
 
@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"prism/internal/memory"
@@ -18,7 +19,7 @@ import (
 
 const (
 	TodoistTokenSecret = "todoist_token"
-	todoistBase        = "https://api.todoist.com/rest/v2"
+	todoistBase        = "https://api.todoist.com/api/v1"
 )
 
 func todoistToken(ctx context.Context, store *memory.Store) (string, error) {
@@ -69,6 +70,8 @@ type todoistTask struct {
 	Priority    int    `json:"priority"`
 	IsCompleted bool   `json:"is_completed"`
 	CreatedAt   string `json:"created_at"`
+	AddedAt     string `json:"added_at"`
+	Checked     bool   `json:"checked"`
 	Due         *struct {
 		Date     string `json:"date"`
 		Datetime string `json:"datetime"`
@@ -76,26 +79,63 @@ type todoistTask struct {
 }
 
 // List returns the ACTIVE tasks. Todoist's REST task endpoint has no completed
-// tasks to give (they live behind the Sync API), so includeDone cannot be
+// tasks to give (completed history has a separate endpoint), so includeDone cannot be
 // honoured here: an absent task is not proof that it does not exist, which is
 // why taskLookup no longer guards non-local providers.
 func (p *TodoistProvider) List(ctx context.Context, includeDone bool) ([]Item, error) {
 	_ = includeDone
-	resp, err := p.do(ctx, "GET", "/tasks", nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, todoistErr(resp)
-	}
 	var ts []todoistTask
-	if err := json.NewDecoder(resp.Body).Decode(&ts); err != nil {
-		return nil, err
+	cursor := ""
+	seen := map[string]bool{}
+	for {
+		path := "/tasks"
+		if cursor != "" {
+			path += "?cursor=" + url.QueryEscape(cursor)
+		}
+		resp, err := p.do(ctx, "GET", path, nil)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != 200 {
+			err = todoistErr(resp)
+			resp.Body.Close()
+			return nil, err
+		}
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		// The array shape remains accepted for existing compatible proxies.
+		if bytes.HasPrefix(bytes.TrimSpace(raw), []byte("[")) {
+			if err = json.Unmarshal(raw, &ts); err != nil {
+				return nil, err
+			}
+			break
+		}
+		var page struct {
+			Results []todoistTask `json:"results"`
+			Next    string        `json:"next_cursor"`
+		}
+		if err = json.Unmarshal(raw, &page); err != nil {
+			return nil, err
+		}
+		ts = append(ts, page.Results...)
+		if page.Next == "" {
+			break
+		}
+		if seen[page.Next] {
+			return nil, fmt.Errorf("Todoist repeated its pagination cursor")
+		}
+		seen[page.Next] = true
+		cursor = page.Next
 	}
 	out := make([]Item, 0, len(ts))
 	for _, t := range ts {
-		it := Item{ID: t.ID, Title: t.Content, Done: t.IsCompleted, Priority: fromTodoistPriority(t.Priority)}
+		it := Item{ID: t.ID, Title: t.Content, Done: t.IsCompleted || t.Checked, Priority: fromTodoistPriority(t.Priority)}
+		if t.CreatedAt == "" {
+			t.CreatedAt = t.AddedAt
+		}
 		if c, err := time.Parse(time.RFC3339, t.CreatedAt); err == nil {
 			it.CreatedAt = c
 		}
@@ -108,6 +148,10 @@ func (p *TodoistProvider) List(ctx context.Context, includeDone bool) ([]Item, e
 			if d, err := time.Parse(time.RFC3339, t.Due.Datetime); t.Due.Datetime != "" && err == nil {
 				it.DueAt = &d
 			} else if d, err := time.ParseInLocation("2006-01-02T15:04:05", t.Due.Datetime, time.Local); t.Due.Datetime != "" && err == nil {
+				it.DueAt = &d
+			} else if d, err := time.Parse(time.RFC3339, t.Due.Date); err == nil {
+				it.DueAt = &d
+			} else if d, err := time.ParseInLocation("2006-01-02T15:04:05", t.Due.Date, time.Local); err == nil {
 				it.DueAt = &d
 			} else if d, err := time.ParseInLocation("2006-01-02", t.Due.Date, time.Local); t.Due.Date != "" && err == nil {
 				it.DueAt = &d

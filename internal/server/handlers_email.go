@@ -47,6 +47,7 @@ func (s *Server) loadEmailCfg(r *http.Request) (email.Config, bool) {
 	}
 	pass, _, _ := s.userStore(r).GetSecret(r.Context(), emailPasswordSecret)
 	return email.Config{
+		Folder:   r.URL.Query().Get("folder"),
 		IMAPHost: sc.IMAPHost, IMAPPort: sc.IMAPPort,
 		SMTPHost: sc.SMTPHost, SMTPPort: sc.SMTPPort,
 		User: sc.User, From: sc.From, Pass: pass,
@@ -111,6 +112,14 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 
 const emailTagsKey = "email_tags"
 
+func emailTagsScope(r *http.Request) string {
+	f := r.URL.Query().Get("folder")
+	if f == "" || strings.EqualFold(f, "INBOX") {
+		return emailTagsKey
+	}
+	return emailTagsKey + ":" + f
+}
+
 // GET /api/email/tags -> stored {uid: {category, tags}} map.
 // POST a {uid: {category, tags}} map to merge it in (used by AI triage + manual).
 func (s *Server) handleEmailTags(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +128,7 @@ func (s *Server) handleEmailTags(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case "GET":
-		raw, _, _ := s.userStore(r).GetConfig(r.Context(), emailTagsKey)
+		raw, _, _ := s.userStore(r).GetConfig(r.Context(), emailTagsScope(r))
 		if raw == "" {
 			raw = "{}"
 		}
@@ -132,7 +141,7 @@ func (s *Server) handleEmailTags(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cur := map[string]json.RawMessage{}
-		if raw, ok, _ := s.userStore(r).GetConfig(r.Context(), emailTagsKey); ok && raw != "" {
+		if raw, ok, _ := s.userStore(r).GetConfig(r.Context(), emailTagsScope(r)); ok && raw != "" {
 			json.Unmarshal([]byte(raw), &cur)
 		}
 		for k, v := range incoming {
@@ -143,7 +152,7 @@ func (s *Server) handleEmailTags(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		out, _ := json.Marshal(cur)
-		if err := s.userStore(r).SetConfig(r.Context(), emailTagsKey, string(out)); err != nil {
+		if err := s.userStore(r).SetConfig(r.Context(), emailTagsScope(r), string(out)); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -198,6 +207,7 @@ func (s *Server) handleEmailList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	cfg.Offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
 	msgs, err := cfg.List(limit)
 	if err != nil {
 		http.Error(w, err.Error(), 502)

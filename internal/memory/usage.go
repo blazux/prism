@@ -180,7 +180,7 @@ type ActivityFilter struct {
 // defaultActivityKinds is what "what did my agent do" means: tool calls, the
 // audit trail (tool_error / tool_denied / server actions), chat turns and
 // webhook fires. Aggregate counters and internal bookkeeping stay out.
-var defaultActivityKinds = []string{"tool_call", "audit", "chat_turn", "webhook"}
+var defaultActivityKinds = []string{"action", "tool_call", "audit", "chat_turn", "webhook", "mail_rule"}
 
 // ActivityFeed returns a chronological (newest-first) slice of usage_events for
 // the human-facing activity log, with keyset pagination by id.

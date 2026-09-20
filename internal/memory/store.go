@@ -104,7 +104,7 @@ func (s *Store) migrateUserScopedConfig(ctx context.Context) {
 	}
 	prefix := fmt.Sprintf("u%d:", adminID)
 	cfgKeys := []string{
-		"email_config", "notes_provider", "notes_vault_path",
+		"email_config", "email_rules", "email_tags", "notes_provider", "notes_vault_path",
 		"caldav_config", "tasks_provider", "calendar_provider",
 		"agent_name", KeyPersonalityBase, KeyAgentMaxIterations, KeyAgentThinking, KeyAgentLeanPrompt, KeyAgentReasoningEffort,
 		"oauth_google_client_id", "oauth_microsoft_client_id",
@@ -282,6 +282,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 			location    TEXT NOT NULL DEFAULT '',
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		`ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS all_day BOOLEAN`,
 		`CREATE INDEX IF NOT EXISTS calendar_session_idx ON calendar_events(session_id, start_at)`,
 		// ─── Multi-user identity (Prism heavy) ──────────────────────────────────
 		// Users authenticate with email + bcrypt password. The first user to sign
@@ -623,7 +624,7 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	// single-char wildcard: deleting a session named "id" also wiped
 	// oauth_google_client_id, and "b" took system_prompt_personality_ab with it.
 	if _, err := tx.Exec(ctx, `DELETE FROM agent_config WHERE key = ANY($1)`,
-		[]string{KeyPersonality + "_" + id, summaryKey(id)}); err != nil {
+		[]string{KeyPersonality + "_" + id, summaryKey(id), liveCompactionKey(id)}); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM mcp_servers WHERE session_id = $1`, id); err != nil {
@@ -727,12 +728,19 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID, role, content stri
 // ClearHistory deletes all messages, the running summary and the live
 // compaction record for a session.
 func (s *Store) ClearHistory(ctx context.Context, sessionID string) error {
-	if _, err := s.pool.Exec(ctx, `DELETE FROM conversation_history WHERE session_id = $1`, sessionID); err != nil {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `DELETE FROM agent_config WHERE key = ANY($1)`,
-		[]string{summaryKey(sessionID), liveCompactionKey(sessionID)})
-	return err
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `DELETE FROM conversation_history WHERE session_id = $1`, sessionID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM agent_config WHERE key = ANY($1)`, []string{summaryKey(sessionID), liveCompactionKey(sessionID)}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+
 }
 
 // LiveCompaction is what the agent's live-context compaction leaves behind so
@@ -900,8 +908,14 @@ func (s *Store) MaybeSummarize(ctx context.Context, sessionID string, ollamaClie
 	}
 	defer tx.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx, `DELETE FROM conversation_history WHERE id = ANY($1)`, ids); err != nil {
+	deleted, err := tx.Exec(ctx, `DELETE FROM conversation_history WHERE id = ANY($1)`, ids)
+	if err != nil {
 		log.Printf("[memory] summarize delete: %v", err)
+		return
+	}
+	// A reset/deletion or another summarizer won while the model was running.
+	// Never resurrect that old context after its source rows have disappeared.
+	if deleted.RowsAffected() != int64(len(ids)) {
 		return
 	}
 

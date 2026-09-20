@@ -20,6 +20,8 @@ import (
 )
 
 type Client struct {
+	editorPending     map[string]chan json.RawMessage
+	editorSequence    uint64
 	conn              *websocket.Conn
 	send              chan []byte
 	ag                *agent.Agent
@@ -28,11 +30,12 @@ type Client struct {
 	sessionID         string
 	user              *memory.User // authenticated user for this connection (nil in legacy/no-DB mode)
 	lastNotifID       int64        // last notification ID pushed to this client
-	pendingSecretCh   chan string  // non-nil while agent is waiting for secret input
-	approvalManual    bool         // manual tool approval toggle (approval_mode message)
-	pendingApproval   chan bool    // non-nil while agent is waiting for a tool verdict
-	pendingApprovalID string       // tool ID the pending verdict belongs to
-	viewContext       string       // what the user is currently looking at (UI -> agent)
+	turnDone          chan struct{}
+	pendingSecretCh   chan string // non-nil while agent is waiting for secret input
+	approvalManual    bool        // manual tool approval toggle (approval_mode message)
+	pendingApproval   chan bool   // non-nil while agent is waiting for a tool verdict
+	pendingApprovalID string      // tool ID the pending verdict belongs to
+	viewContext       string      // what the user is currently looking at (UI -> agent)
 }
 
 // wsFileOpsAllowed mirrors requireAdminUser for the editor's WebSocket file
@@ -80,11 +83,18 @@ func (c *Client) wireApproval(ag *agent.Agent) {
 // cancelActive cancels the in-flight agent turn (if any) under the client mutex.
 func (c *Client) cancelActive() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.cancelFn != nil {
-		c.cancelFn()
-		c.cancelFn = nil
+	cancel, done := c.cancelFn, c.turnDone
+	c.cancelFn = nil
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
+	// Drain the old turn (including outgoing events and persistence) before a
+	// reset or a new turn can reuse this agent.
+	if done != nil {
+		<-done
+	}
+
 }
 
 // ─── WebSocket ───────────────────────────────────────────────────────────────
@@ -249,6 +259,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		user: wsUser,
 	}
 
+	if !voiceCall {
+		executor.SetEditor(client.editorTool)
+	}
+
 	model := s.cfg.Model
 
 	// Personality per identity:
@@ -374,15 +388,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if val == "" {
 				return fmt.Errorf("secret input cancelled by user")
 			}
-			s.mu.RLock()
-			curMS := s.memStore
-			s.mu.RUnlock()
-			if curMS != nil {
-				if err := curMS.ConfigScope(executor.SecretsScope()).SetSecret(context.Background(), name, val); err != nil {
-					return fmt.Errorf("store secret: %w", err)
-				}
-			}
-			return nil
+			return s.saveRequestedSecret(ctx, executor.SecretsScope(), name, val)
+
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(5 * time.Minute):
@@ -626,6 +633,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		switch msg.Type {
 		case "chat":
+			client.cancelActive()
 			ctx, cancel := context.WithCancel(context.Background())
 			client.mu.Lock()
 			// Cancel previous if running
@@ -633,6 +641,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				client.cancelFn()
 			}
 			client.cancelFn = cancel
+			turnDone := make(chan struct{})
+			client.turnDone = turnDone
 			client.mu.Unlock()
 
 			client.ag.SetActiveTools(msg.DisabledTools)
@@ -643,7 +653,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				// sent back {Text, Path}; here we only build the preamble.
 				content = attachmentPreamble(attachment{Name: f.Name, Text: f.Text, Path: f.Path}) + "\n\n" + content
 			}
-			go s.handleChat(ctx, client, content, msg.Images, msg.Model)
+			go func() { defer close(turnDone); s.handleChat(ctx, client, content, msg.Images, msg.Model) }()
 
 		case "cancel":
 			client.cancelActive()
@@ -729,6 +739,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		// set_context records what the user is currently viewing so the agent
 		// can resolve "this email/note/event" on the next turn.
+		case "editor_response":
+			client.editorResponse(msg.ID, msg.Data)
 		case "set_context":
 			client.mu.Lock()
 			client.viewContext = msg.Content
@@ -762,7 +774,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "reset_chat":
-			client.ag.ResetHistory()
+			client.cancelActive()
+			if err := client.ag.ResetHistory(); err != nil {
+				client.sendJSON(map[string]interface{}{"type": "error", "content": err.Error()})
+				continue
+			}
 			client.sendJSON(map[string]interface{}{"type": "chat_reset"})
 
 		case "secret_response":
@@ -972,3 +988,16 @@ func (c *Client) writePump() {
 }
 
 // ─── Workspace proxy ──────────────────────────────────────────────────────────
+
+// Recheck availability when the user submits: the store may have changed while
+// the dialog was open. Never acknowledge a credential that was not persisted.
+func (s *Server) saveRequestedSecret(ctx context.Context, scope, name, value string) error {
+	ms := s.store()
+	if ms == nil {
+		return fmt.Errorf("secret store unavailable; secret was not saved")
+	}
+	if err := ms.ConfigScope(scope).SetScriptSecret(ctx, name, value); err != nil {
+		return fmt.Errorf("store secret: %w", err)
+	}
+	return nil
+}

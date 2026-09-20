@@ -148,11 +148,15 @@ function send(obj) {
 
 // When the agent uses a PIM tool, refresh the matching app iframe if it's open
 // so changes the agent makes via chat show up without a manual reload.
-const PIM_TOOL_APP = { calendar: 'calendar', event: 'calendar', events: 'calendar', note: 'notes', notes: 'notes', task: 'tasks', tasks: 'tasks', cron: 'tasks' }
+const PIM_TOOL_APP = { email:'email', calendar: 'calendar', event: 'calendar', events: 'calendar', note: 'notes', notes: 'notes', task: 'tasks', tasks: 'tasks', cron: 'tasks' }
 const pendingPimTools = {}
-function trackPimTool(msg) { const app = PIM_TOOL_APP[msg.tool]; if (app) pendingPimTools[msg.id] = app }
+function trackPimTool(msg) {
+  if(msg.tool==='email'){let args=msg.input||{};if(typeof args==='string'){try{args=JSON.parse(args)}catch(_){args={}}}if(['list','read','search','folders','rules','rule_preview'].includes(args.action))return;}
+  const app = PIM_TOOL_APP[msg.tool]; if (app) pendingPimTools[msg.id] = app }
 function maybeRefreshApp(msg) {
-  const app = pendingPimTools[msg.id]
+  // File/custom tools can also edit a connected notes vault. Refresh the open
+  // Notes app after any completed tool, not only the dedicated note tool.
+  const app = pendingPimTools[msg.id] || (currentView?.type === 'app' && currentView.name === 'notes' ? 'notes' : null)
   if (!app) return
   delete pendingPimTools[msg.id]
   if (currentView?.type === 'app' && currentView.name === app) {
@@ -163,10 +167,25 @@ function maybeRefreshApp(msg) {
   document.querySelectorAll('.widget-body iframe').forEach(f => f.contentWindow?.postMessage({ type: 'data-changed', app }, '*'))
 }
 
+// Only the currently displayed built-in app can answer this browser's editor RPC.
+const pendingEditorRequests = new Map()
+function requestActiveEditor(msg) {
+  const frame = document.getElementById('app-frame')
+  if (currentView?.type !== 'app' || !['email','notes','tasks','calendar'].includes(currentView.name) || !frame?.contentWindow) {
+    send({type:'editor_response', id:msg.id, data:{error:'Open a note, email composer, task form or calendar form in this browser first.'}})
+    return
+  }
+  const source = frame.contentWindow, socket = ws
+  const timer = setTimeout(() => pendingEditorRequests.delete(msg.id), Math.max(0, msg.expires_at - Date.now()))
+  pendingEditorRequests.set(msg.id, {source, socket, timer})
+  source.postMessage({...msg, type:'editor-request'}, location.origin)
+}
+
 // ─── Server messages ──────────────────────────────────────────────────────────
 
 function handleServerMsg(msg) {
   switch (msg.type) {
+    case 'editor_request': requestActiveEditor(msg); break
     case 'stream':          appendStream(msg.content); break
     case 'stream_end':      finalizeStream(); break
     case 'attachment':      pendingAttachments.push(...(msg.images || [])); break
@@ -2214,7 +2233,13 @@ window.addEventListener('message', e => {
   if (e.origin !== location.origin) return
   const d = e.data
   if (!d || !d.type) return
-  if (d.type === 'openFile' && d.path) {
+  if (d.type === 'editor-response') {
+    const pending = pendingEditorRequests.get(d.id)
+    if (!pending || pending.source !== e.source || pending.socket !== ws) return
+    clearTimeout(pending.timer); pendingEditorRequests.delete(d.id)
+    const active = document.getElementById('app-frame')?.contentWindow === e.source && currentView?.type === 'app'
+    send({type:'editor_response', id:d.id, data:active ? d.result : {error:'The active app changed. Read the editor again.'}})
+  } else if (d.type === 'openFile' && d.path) {
     send({ type: 'file_open', path: d.path.replace(/^\/workspace\//, '') })
   } else if (d.type === 'close-settings') {
     setView({ type: 'board', workspace: lastWorkspace })

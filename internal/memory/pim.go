@@ -6,6 +6,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -37,6 +38,7 @@ type Task struct {
 }
 
 type Event struct {
+	AllDay      *bool      `json:"allDay,omitempty"`
 	ID          int64      `json:"id"`
 	SessionID   string     `json:"sessionId"`
 	Title       string     `json:"title"`
@@ -109,7 +111,7 @@ func (s *Store) ShareNote(ctx context.Context, session string, ownerID, originID
 	var id int64
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO notes (session_id, owner_id, origin_id, title, body, tags)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
 	`, session, ownerID, originID, title, body, tags).Scan(&id)
 	return id, err
 }
@@ -176,19 +178,19 @@ func (s *Store) DeleteTask(ctx context.Context, session string, id int64) error 
 
 // ─── Calendar ─────────────────────────────────────────────────────────────────
 
-func (s *Store) AddEvent(ctx context.Context, session, title, description, location string, start time.Time, end *time.Time) (int64, error) {
+func (s *Store) AddEvent(ctx context.Context, session, title, description, location string, start time.Time, end *time.Time, allDay ...bool) (int64, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO calendar_events (session_id, title, description, location, start_at, end_at)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
-	`, session, title, description, location, start, end).Scan(&id)
+		INSERT INTO calendar_events (session_id, title, description, location, start_at, end_at, all_day)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+	`, session, title, description, location, start, end, optionalBool(allDay)).Scan(&id)
 	return id, err
 }
 
 // ListEvents returns events overlapping [from, to]. Nil bounds are unbounded.
 func (s *Store) ListEvents(ctx context.Context, session string, from, to *time.Time) ([]Event, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, session_id, title, description, start_at, end_at, location, created_at
+		SELECT id, session_id, title, description, start_at, end_at, location, created_at, all_day
 		FROM calendar_events
 		WHERE session_id = $1
 		  AND ($2::timestamptz IS NULL OR COALESCE(end_at, start_at) >= $2)
@@ -202,7 +204,7 @@ func (s *Store) ListEvents(ctx context.Context, session string, from, to *time.T
 	var out []Event
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.Title, &e.Description, &e.StartAt, &e.EndAt, &e.Location, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Title, &e.Description, &e.StartAt, &e.EndAt, &e.Location, &e.CreatedAt, &e.AllDay); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -219,11 +221,27 @@ func (s *Store) DeleteEvent(ctx context.Context, session string, id int64) error
 // calendar.Provider interface's Update method — the UI previously worked
 // around its absence with DELETE-then-Add, which loses the row entirely if
 // the second call fails.
-func (s *Store) UpdateEvent(ctx context.Context, session string, id int64, title, description, location string, start time.Time, end *time.Time) error {
+func (s *Store) UpdateEvent(ctx context.Context, session string, id int64, title, description, location string, start time.Time, end *time.Time, allDay ...bool) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE calendar_events
-		SET title = $3, description = $4, location = $5, start_at = $6, end_at = $7
+		SET title = $3, description = $4, location = $5, start_at = $6, end_at = $7, all_day = COALESCE($8,all_day)
 		WHERE id = $1 AND session_id = $2
-	`, id, session, title, description, location, start, end)
+	`, id, session, title, description, location, start, end, optionalBool(allDay))
 	return err
+}
+
+// PatchTask never changes completion or fields omitted by the caller.
+func (s *Store) PatchTask(ctx context.Context, session string, id int64, title, priority *string, setDue bool, due *time.Time) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE tasks SET title=COALESCE($3,title), priority=COALESCE($4,priority), due_at=CASE WHEN $5 THEN $6 ELSE due_at END WHERE id=$1 AND session_id=$2`, id, session, title, priority, setDue, due)
+	if err == nil && tag.RowsAffected() == 0 {
+		return fmt.Errorf("task not found")
+	}
+	return err
+}
+
+func optionalBool(v []bool) *bool {
+	if len(v) == 0 {
+		return nil
+	}
+	return &v[0]
 }

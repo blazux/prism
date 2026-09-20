@@ -12,12 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/calendar"
 	"prism/internal/customtools"
 	"prism/internal/docker"
 	"prism/internal/mcp"
 	"prism/internal/memory"
 	"prism/internal/ollama"
 	"prism/internal/rag"
+	"prism/internal/tasks"
 )
 
 type ToolExecutor struct {
@@ -32,10 +34,11 @@ type ToolExecutor struct {
 	multiUser             bool                             // MULTI_USER: retires the personal RAG/MCP fallback (group scope only)
 	helpFn                HelpFn                           // Prism's bundled docs (prism_help); nil = not wired
 	integrationsStatusFn  func(ctx context.Context) string // what this caller has configured; nil = unknown
-	serverTools           map[string]ServerTool            // webhook / pim_source / channel, injected per caller
-	globalAdmin           bool                             // caller is a global admin (MCP group management)
-	ragReadOnly           bool                             // group knowledge base is admin-curated: this caller may only search it
-	rawResults            bool                             // programmatic caller (/api/builtin → prismTool, cron): never truncate a result
+	editorToolFn          ServerTool
+	serverTools           map[string]ServerTool // webhook / pim_source / channel, injected per caller
+	globalAdmin           bool                  // caller is a global admin (MCP group management)
+	ragReadOnly           bool                  // group knowledge base is admin-curated: this caller may only search it
+	rawResults            bool                  // programmatic caller (/api/builtin → prismTool, cron): never truncate a result
 	ragStore              *rag.Store
 	ragEmbedder           *rag.Embedder
 	ragCaptioner          *rag.Captioner
@@ -627,10 +630,23 @@ func canonicalToolName(name string) string {
 // work is prioritised on. The model sees exactly the same result and error as
 // before; this is observation, not behaviour.
 func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, []string, error) {
+	started := time.Now()
 	res, images, err := e.execute(ctx, name, rawArgs)
 	if err != nil && e.memStore != nil {
 		e.memStore.AddUsage(ctx, 0, e.sessionID, "audit", "tool_error",
 			1, map[string]interface{}{"tool": name, "error": truncateForAudit(err.Error())})
+	}
+	if e.memStore != nil {
+		meta, meaningful := activityDetails(name, rawArgs)
+		meta["duration_ms"] = time.Since(started).Milliseconds()
+		meta["status"] = "completed"
+		if err != nil {
+			meta["status"] = "failed"
+		}
+		e.memStore.AddUsage(ctx, 0, e.sessionID, "tool_call", canonicalToolName(name), 1, meta)
+		if meaningful && err == nil {
+			e.memStore.AddUsage(ctx, 0, e.sessionID, "action", canonicalToolName(name), 1, meta)
+		}
 	}
 	return e.capResult(res), images, err
 }
@@ -734,10 +750,6 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			}
 			return "", nil, err
 		}
-	}
-	// Usage: one event per tool call (fire-and-forget).
-	if e.memStore != nil {
-		e.memStore.AddUsage(ctx, 0, e.sessionID, "tool_call", policyName, 1, nil)
 	}
 
 	// Telephony tools are performed by Vox, not here: relay and return its result
@@ -867,6 +879,11 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.prismHelp(ctx, str("topic")))
 	case "agent_settings":
 		return wrap(e.agentSettings(ctx, str("action"), args))
+	case "editor":
+		if e.editorToolFn == nil {
+			return "", nil, fmt.Errorf("no live editor connected; use this tool from the browser chat with a note or email draft open")
+		}
+		return wrap(e.editorToolFn(ctx, args))
 	case "webhook", "pim_source", "channel":
 		return wrap(e.serverTool(ctx, name, args))
 	case "install_packages":
@@ -984,9 +1001,36 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.noteTool(ctx, str("action"), idArg(args), args))
 	case "task":
 		includeDone, _ := args["include_done"].(bool)
-		return wrap(e.taskTool(ctx, str("action"), idArg(args), str("title"), str("priority"), str("due"), includeDone))
+		if str("action") == "update" || str("action") == "edit" {
+			var patch tasks.Patch
+			if err := json.Unmarshal(rawArgs, &patch); err != nil {
+				return "", nil, err
+			}
+			if err := patch.Validate(); err != nil {
+				return "", nil, err
+			}
+			if idArg(args) == "" {
+				return "", nil, fmt.Errorf("update requires id from task list")
+			}
+			prov := tasks.ProviderFor(ctx, e.userStore(), e.pimSessionScope())
+			if err := prov.Update(ctx, idArg(args), patch); err != nil {
+				return "", nil, err
+			}
+			return "Task updated.", nil, nil
+		}
+		return wrap(e.taskTool(ctx, str("action"), idArg(args), str("title"), str("priority"), str("due"), includeDone, str("query"), str("filter")))
 	case "calendar":
-		return wrap(e.calendarTool(ctx, str("action"), idArg(args), str("title"), str("description"), str("location"), str("start"), str("end"), str("from"), str("to")))
+		if str("action") == "update" || str("action") == "edit" {
+			patch, err := calendar.DecodePatch(rawArgs)
+			if err != nil {
+				return "", nil, err
+			}
+			if err := calendar.Update(ctx, calendar.ProviderFor(ctx, e.userStore(), e.pimSessionScope()), idArg(args), patch); err != nil {
+				return "", nil, err
+			}
+			return "Event updated.", nil, nil
+		}
+		return wrap(e.calendarTool(ctx, str("action"), idArg(args), str("title"), str("description"), str("location"), str("start"), str("end"), str("from"), str("to"), args["all_day"] == true))
 	case "email":
 		return wrap(e.emailTool(ctx, args))
 	case "browser_get":

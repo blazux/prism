@@ -90,7 +90,7 @@ func itemsFromEvents(objectPath string, modTime time.Time, evs []ical.Event) []I
 		desc, _ := ev.Props.Text(ical.PropDescription)
 		loc, _ := ev.Props.Text(ical.PropLocation)
 		st, _ := ev.DateTimeStart(time.Local)
-		it := Item{ID: objectPath, Title: title, Description: desc, Location: loc, StartAt: st, CreatedAt: modTime}
+		it := Item{AllDay: ev.Props.Get(ical.PropDateTimeStart) != nil && ev.Props.Get(ical.PropDateTimeStart).ValueType() == ical.ValueDate, ID: objectPath, Title: title, Description: desc, Location: loc, StartAt: st, CreatedAt: modTime}
 		if et, err := ev.DateTimeEnd(time.Local); err == nil && !et.IsZero() {
 			it.EndAt = &et
 		}
@@ -116,7 +116,7 @@ func itemsFromEvents(objectPath string, modTime time.Time, evs []ical.Event) []I
 	return out
 }
 
-func (p *CalDAVProvider) Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time) (string, error) {
+func (p *CalDAVProvider) Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time, allDay ...bool) (string, error) {
 	conn, err := p.cfg.Connect(ctx)
 	if err != nil {
 		return "", err
@@ -139,6 +139,12 @@ func (p *CalDAVProvider) Add(ctx context.Context, title, description, location s
 	if end != nil {
 		ev.Props.SetDateTime(ical.PropDateTimeEnd, *end)
 	}
+	if len(allDay) > 0 && allDay[0] {
+		ev.Props.SetDate(ical.PropDateTimeStart, start)
+		if end != nil {
+			ev.Props.SetDate(ical.PropDateTimeEnd, *end)
+		}
+	}
 	path := caldav.ObjectPath(conn.EventPath, uid)
 	if _, err := conn.Client.PutCalendarObject(ctx, path, caldav.WrapCalendar(ev.Component)); err != nil {
 		return "", err
@@ -151,7 +157,7 @@ func (p *CalDAVProvider) Add(ctx context.Context, title, description, location s
 // resource, so rebuilding a bare VEVENT out of the five edited fields — what
 // this used to do — silently dropped the recurrence rule, every overridden
 // occurrence, the attendees and the alarms. A weekly meeting became a one-off.
-func (p *CalDAVProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time) error {
+func (p *CalDAVProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time, allDay ...bool) error {
 	objectPath, occurrence := caldav.SplitOccurrenceID(id)
 	if occurrence != "" {
 		return caldav.ErrSingleOccurrence("edit")
@@ -172,7 +178,7 @@ func (p *CalDAVProvider) Update(ctx context.Context, id, title, description, loc
 	if obj == nil || obj.Data == nil {
 		return fmt.Errorf("no event found at %s", objectPath)
 	}
-	if err := applyEventEdit(obj.Data, title, description, location, start, end); err != nil {
+	if err := applyEventEdit(obj.Data, title, description, location, start, end, allDay...); err != nil {
 		return err
 	}
 	_, err = conn.Client.PutCalendarObject(ctx, objectPath, obj.Data)
@@ -182,7 +188,7 @@ func (p *CalDAVProvider) Update(ctx context.Context, id, title, description, loc
 // applyEventEdit changes in place only the fields the edit form owns, on the
 // series master (the component with no RECURRENCE-ID). Everything else the
 // object carries is left exactly as the server sent it.
-func applyEventEdit(cal *ical.Calendar, title, description, location string, start time.Time, end *time.Time) error {
+func applyEventEdit(cal *ical.Calendar, title, description, location string, start time.Time, end *time.Time, allDay ...bool) error {
 	evs := cal.Events()
 	var master *ical.Component
 	for i := range evs {
@@ -210,6 +216,12 @@ func applyEventEdit(cal *ical.Calendar, title, description, location string, sta
 		master.Props.Del(ical.PropDateTimeEnd)
 	}
 	master.Props.SetDateTime(ical.PropDateTimeStamp, time.Now().UTC())
+	if len(allDay) > 0 && allDay[0] {
+		master.Props.SetDate(ical.PropDateTimeStart, start)
+		if end != nil {
+			master.Props.SetDate(ical.PropDateTimeEnd, *end)
+		}
+	}
 	return nil
 }
 

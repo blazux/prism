@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"prism/internal/docker"
 )
 
 const cronJobMarker = "# agent-job: "
@@ -59,23 +61,31 @@ func scanJobBlock(lines []string, start int) (owner, desc string, jobIdx int) {
 	return owner, desc, -1
 }
 
-func (s *Server) readCrontab() string {
-	out, err := s.docker.Exec(context.Background(), "crontab -l 2>/dev/null || true", 10*time.Second)
-	if err != nil {
-		// Some Exec implementations dislike a nil ctx; retry below is unnecessary
-		// since the handler passes context — kept defensive.
-		return ""
-	}
-	return out
+func (s *Server) readCrontab() (string, error) {
+	return s.docker.Exec(context.Background(), docker.ReadCrontabCommand, 10*time.Second)
 }
 
 func (s *Server) applyCrontab(content string) error {
-	path := filepath.Join(s.cfg.WorkspaceDir, ".crontab")
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+	// Keep the last working restart copy until cron accepts the replacement.
+	// Unique staging files also prevent simultaneous installs sharing a temp file.
+	file, err := os.CreateTemp(s.cfg.WorkspaceDir, ".crontab-stage-*")
+	if err != nil {
 		return err
 	}
-	_, err := s.docker.Exec(context.Background(), "crontab /workspace/.crontab", 10*time.Second)
-	return err
+	staged := file.Name()
+	defer os.Remove(staged)
+	if _, err := file.WriteString(content); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	command := "crontab /workspace/" + filepath.Base(staged)
+	if _, err := s.docker.Exec(context.Background(), command, 10*time.Second); err != nil {
+		return err
+	}
+	return os.Rename(staged, filepath.Join(s.cfg.WorkspaceDir, ".crontab"))
 }
 
 // splitSchedule separates a cron schedule (5 fields, or a single @keyword) from
@@ -126,7 +136,10 @@ func parseCronJobs(raw string) []CronJob {
 // job. fn receives the current (un-prefixed) line and returns the new line, or
 // "" to drop the job (and its marker).
 func (s *Server) mutateJob(name string, fn func(line string) string) error {
-	raw := s.readCrontab()
+	raw, err := s.readCrontab()
+	if err != nil {
+		return fmt.Errorf("cannot read crontab: %w", err)
+	}
 	lines := strings.Split(raw, "\n")
 	var out []string
 	for i := 0; i < len(lines); i++ {
@@ -184,7 +197,10 @@ func (s *Server) mutateJob(name string, fn func(line string) string) error {
 // editJobBlock rewrites an existing job's block (schedule + command + optional
 // description) in place, re-enabling it. An empty desc keeps the current one.
 func (s *Server) editJobBlock(name, schedule, command, desc string) error {
-	raw := s.readCrontab()
+	raw, err := s.readCrontab()
+	if err != nil {
+		return fmt.Errorf("cannot read crontab: %w", err)
+	}
 	lines := strings.Split(raw, "\n")
 	var out []string
 	for i := 0; i < len(lines); i++ {
@@ -229,7 +245,10 @@ func (s *Server) upsertCronJob(name, schedule, command, desc, owner string) erro
 	if strings.ContainsAny(name+schedule+command+desc+owner, "\n\r") {
 		return fmt.Errorf("fields must not contain newlines")
 	}
-	raw := s.readCrontab()
+	raw, err := s.readCrontab()
+	if err != nil {
+		return fmt.Errorf("cannot read crontab: %w", err)
+	}
 	for _, j := range parseCronJobs(raw) {
 		if j.Name == name {
 			return s.editJobBlock(name, schedule, command, desc)
@@ -264,8 +283,13 @@ func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 		mine = fmt.Sprintf("u%d", u.ID)
 	}
 	canTouch := func(owner string) bool { return admin || (mine != "" && owner == mine) }
+	raw, err := s.readCrontab()
+	if err != nil {
+		http.Error(w, "cannot read crontab: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	findJob := func(name string) (CronJob, bool) {
-		for _, j := range parseCronJobs(s.readCrontab()) {
+		for _, j := range parseCronJobs(raw) {
 			if j.Name == name {
 				return j, true
 			}
@@ -275,7 +299,7 @@ func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		all := parseCronJobs(s.readCrontab())
+		all := parseCronJobs(raw)
 		jobs := []CronJob{}
 		for _, j := range all {
 			if admin || (mine != "" && j.Owner == mine) {

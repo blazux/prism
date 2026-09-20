@@ -187,7 +187,7 @@ To embed a service the agent has started, a widget uses a plain iframe:
 
 An assistant that can't see your actual life is just a fancy autocomplete. So Prism plugs into the boring-but-essential stuff, and the agent drives all of it from chat — or you can, from the command palette (**Ctrl+K**):
 
-- **Email** — reads and sends through your IMAP/SMTP mailbox (a ProtonMail Bridge container is included, because of course you use ProtonMail). Tag and triage, search, reply, send **with attachments**, get your inbox summarized, or turn an email into a task or a calendar event. Pair it with cron and it'll DM you a morning digest over Telegram. It is a communication *aid*, not a mail client — there are deliberately no folders to obsess over.
+- **Email** — reads and sends through your IMAP/SMTP mailbox (a ProtonMail Bridge container is included, because of course you use ProtonMail). Tag and triage, search, reply, send **with attachments**, get your inbox summarized, or turn an email into a task or a calendar event. Pair it with cron and it'll DM you a morning digest over Telegram. Browse and manage folders, move/archive/trash messages, and set simple inbox rules that run without a model call.
 - **Calendar & Tasks** — events and to-dos in Prism's own database out of the box; connect **CalDAV** (Apple iCloud, Nextcloud, Fastmail) or **Todoist** for tasks, and **Google** or **Microsoft** for your calendar. "Add lunch with Sam Friday at noon" does what you'd hope.
 - **Notes** — Markdown with `[[wikilinks]]`, a split editor with an AI toolbar, and an "Add to knowledge" button that shoves a note straight into a RAG collection. Lives in Prism's database, or in your existing **Obsidian / Logseq vault** (just a folder of `.md` files).
 - **Terminal** — a real, full TTY into the agent's workspace container. Toggle with **Ctrl+Enter**. `vim`, `htop`, colours, package installs — all work. For when you trust the agent right up until you don't.
@@ -322,7 +322,7 @@ Things that aren't env vars — the agent's name and personality, its **turn bud
 - **Reasoning effort has no effect behind LiteLLM.** `drop_params: true` strips `reasoning_effort` before it reaches the model — add `allowed_openai_params: ["reasoning_effort"]` to the route's `litellm_params`.
 - **"Iteration limit reached".** The agent hit its per-message cap on a long task — not a bug, a budget. Raise it in **Settings → Agent → Turn budget** (default 75, up to 500), or just say "continue".
 - **Widget previews look wrong / the agent says it can't see.** Text-only chat model: set `CHAT_VISION=false` and optionally `VISION_MODEL` to a small vision model for captions.
-- **You changed `EMBED_MODEL`.** The vector dimension is fixed per table — reset the RAG data (`docker compose down -v` wipes everything, or drop the `rag_*` tables) and re-index.
+- **You changed `EMBED_MODEL`.** The vector dimension is fixed per table. Prism refuses initialization if the configured model has a different dimension. Restore the previous `EMBED_MODEL`, or back up your database and rebuild only the RAG index before re-indexing your documents. Do not remove the workspace volume or the whole database.
 - **Upgrading.** `docker compose pull && docker compose up -d` (or `--build` if you build locally). Schema migrations run at start, nothing to do — [docs/UPGRADING.md](docs/UPGRADING.md) is the contract.
 - **Timezone.** `TZ` accepts IANA names; for a fixed offset use `Etc/GMT+4` — POSIX inverts the sign, so that's UTC-4.
 

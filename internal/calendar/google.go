@@ -47,8 +47,8 @@ func (t *gcalTime) parse() (time.Time, bool) {
 type gcalEvent struct {
 	ID          string    `json:"id,omitempty"`
 	Summary     string    `json:"summary,omitempty"`
-	Description string    `json:"description,omitempty"`
-	Location    string    `json:"location,omitempty"`
+	Description string    `json:"description"`
+	Location    string    `json:"location"`
 	Start       *gcalTime `json:"start,omitempty"`
 	End         *gcalTime `json:"end,omitempty"`
 	Created     string    `json:"created,omitempty"`
@@ -105,22 +105,13 @@ func (p *GoogleProvider) List(ctx context.Context, from, to *time.Time) ([]Item,
 	}
 	out := make([]Item, 0, len(res.Items))
 	for _, e := range res.Items {
-		it := Item{ID: e.ID, Title: e.Summary, Description: e.Description, Location: e.Location}
-		if st, ok := e.Start.parse(); ok {
-			it.StartAt = st
-		}
-		if et, ok := e.End.parse(); ok {
-			it.EndAt = &et
-		}
-		if c, err := time.Parse(time.RFC3339, e.Created); err == nil {
-			it.CreatedAt = c
-		}
+		it := e.item()
 		out = append(out, it)
 	}
 	return out, nil
 }
 
-func (p *GoogleProvider) Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time) (string, error) {
+func (p *GoogleProvider) Add(ctx context.Context, title, description, location string, start time.Time, end *time.Time, allDay ...bool) (string, error) {
 	e := start.Add(time.Hour)
 	if end != nil {
 		e = *end
@@ -130,6 +121,7 @@ func (p *GoogleProvider) Add(ctx context.Context, title, description, location s
 		Start: &gcalTime{DateTime: start.Format(time.RFC3339)},
 		End:   &gcalTime{DateTime: e.Format(time.RFC3339)},
 	}
+	setGoogleAllDay(&ev, start, e, allDay)
 	var created gcalEvent
 	if err := p.doJSON(ctx, "POST", gcalEventsURL, ev, &created); err != nil {
 		return "", err
@@ -137,7 +129,7 @@ func (p *GoogleProvider) Add(ctx context.Context, title, description, location s
 	return created.ID, nil
 }
 
-func (p *GoogleProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time) error {
+func (p *GoogleProvider) Update(ctx context.Context, id, title, description, location string, start time.Time, end *time.Time, allDay ...bool) error {
 	e := start.Add(time.Hour)
 	if end != nil {
 		e = *end
@@ -147,9 +139,31 @@ func (p *GoogleProvider) Update(ctx context.Context, id, title, description, loc
 		Start: &gcalTime{DateTime: start.Format(time.RFC3339)},
 		End:   &gcalTime{DateTime: e.Format(time.RFC3339)},
 	}
+	setGoogleAllDay(&ev, start, e, allDay)
 	return p.doJSON(ctx, "PATCH", gcalEventsURL+"/"+url.PathEscape(id), ev, nil)
 }
 
 func (p *GoogleProvider) Delete(ctx context.Context, id string) error {
 	return p.doJSON(ctx, "DELETE", gcalEventsURL+"/"+url.PathEscape(id), nil, nil)
+}
+
+func (e gcalEvent) item() Item {
+	it := Item{AllDay: e.Start != nil && e.Start.Date != "", ID: e.ID, Title: e.Summary, Description: e.Description, Location: e.Location}
+	if st, ok := e.Start.parse(); ok {
+		it.StartAt = st
+	}
+	if et, ok := e.End.parse(); ok {
+		it.EndAt = &et
+	}
+	if c, err := time.Parse(time.RFC3339, e.Created); err == nil {
+		it.CreatedAt = c
+	}
+	return it
+}
+
+func setGoogleAllDay(ev *gcalEvent, start, end time.Time, flag []bool) {
+	if len(flag) > 0 && flag[0] {
+		ev.Start = &gcalTime{Date: start.Format("2006-01-02")}
+		ev.End = &gcalTime{Date: end.Format("2006-01-02")}
+	}
 }

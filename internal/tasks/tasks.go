@@ -32,6 +32,7 @@ type Item struct {
 type Provider interface {
 	List(ctx context.Context, includeDone bool) ([]Item, error)
 	Add(ctx context.Context, title, priority string, due *time.Time) (string, error)
+	Update(ctx context.Context, id string, patch Patch) error
 	SetDone(ctx context.Context, id string, done bool) error
 	Delete(ctx context.Context, id string) error
 	Kind() string

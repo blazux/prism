@@ -67,7 +67,8 @@
   <div class="head">
     <h1>Activity</h1>
     <div class="tabs" id="tabs">
-      <button class="tab active" data-view="">All</button>
+      <button class="tab active" data-view="actions">Actions</button>
+      <button class="tab" data-view="">Details</button>
       <button class="tab" data-view="errors">Errors</button>
       <button class="tab" data-view="tools">Tools</button>
       <button class="tab" data-view="chat">Chat</button>
@@ -89,7 +90,7 @@
 const feed = document.getElementById('feed');
 const statusEl = document.getElementById('status');
 const moreBtn = document.getElementById('more');
-let view = '', before = 0, loading = false;
+let view = 'actions', before = 0, loading = false;
 
 fetch('/api/me').then(r => r.json()).then(me => {
   if (me && me.user && me.user.role === 'global_admin') {
@@ -98,6 +99,8 @@ fetch('/api/me').then(r => r.json()).then(me => {
 }).catch(() => {});
 
 const KIND = {
+  action: {badge:'completed',cls:'ok'},
+  mail_rule: {badge:'mail rule',cls:'ok'},
   tool_call: { badge: 'tool', cls: 'info' },
   chat_turn: { badge: 'chat', cls: 'info' },
   webhook:   { badge: 'webhook', cls: 'ok' },
@@ -126,8 +129,10 @@ function classify(ev) {
   }
   const k = KIND[ev.kind] || { badge: ev.kind, cls: '' };
   let detail = '';
+  if(ev.kind==='action' || ev.kind==='tool_call'){detail=['title','id','folder','target','name','path'].filter(k=>meta[k]).map(k=>k+': '+meta[k]).join(' · ');if(meta.duration_ms!=null)detail+=(detail?' · ':'')+(meta.duration_ms/1000).toFixed(1)+'s';}
+  if(ev.kind==='mail_rule')detail=meta.error||((meta.applied||0)+' messages processed');
   if (ev.kind === 'webhook') detail = (meta.status && meta.status !== 'ok') ? meta.status : '';
-  return { badge: k.badge, cls: (ev.kind === 'webhook' && detail) ? 'err' : k.cls, item: ev.item || k.badge, detail };
+  return {badge:meta.status==='failed'?'failed':k.badge,cls:meta.error||meta.status==='failed'||(ev.kind==='webhook'&&detail)?'err':k.cls,item:meta.label||ev.item||k.badge,detail};
 }
 
 function row(ev) {
@@ -170,7 +175,7 @@ async function load(reset) {
     moreBtn.style.display = before ? 'block' : 'none';
   } catch (e) {
     statusEl.style.display = '';
-    statusEl.innerHTML = 'Could not load the activity feed: ' + String((e && e.message) || e).slice(0, 300);
+    statusEl.textContent = 'Could not load the activity feed: ' + String((e && e.message) || e).slice(0, 300);
   } finally { loading = false; }
 }
 
@@ -183,6 +188,7 @@ document.getElementById('scopeAll').addEventListener('change', () => load(true))
 document.getElementById('refresh').addEventListener('click', () => load(true));
 moreBtn.addEventListener('click', () => load(false));
 load(true);
+setInterval(()=>{if(!document.hidden && !before)load(true);},30000);
 </script>
 </body>
 </html>

@@ -2,8 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
+
+	"prism/internal/memory"
 )
 
 // Team-shared secrets live unscoped; per-user/group ones are "u<id>:name" /
@@ -30,18 +33,10 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		all, err := ms.ListSecretNames(r.Context())
+		names, err := ms.ListScriptSecretNames(r.Context())
 		if err != nil {
-			http.Error(w, err.Error(), 500)
+			writeSecretStoreError(w, err)
 			return
-		}
-		// Hide feature-internal scoped secrets ("u<id>:email_password", …) — the
-		// Secrets tab manages the team-shared, user-created ones only.
-		names := []string{}
-		for _, n := range all {
-			if !strings.Contains(n, ":") {
-				names = append(names, n)
-			}
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"secrets": names})
 
@@ -58,8 +53,8 @@ func (s *Server) handleSecrets(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid secret name", 400)
 			return
 		}
-		if err := ms.SetSecret(r.Context(), body.Name, body.Value); err != nil {
-			http.Error(w, err.Error(), 500)
+		if err := ms.SetScriptSecret(r.Context(), body.Name, body.Value); err != nil {
+			writeSecretStoreError(w, err)
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
@@ -84,6 +79,12 @@ func (s *Server) handleSecretByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if memory.IsIntegrationSecret(name) {
+		http.Error(w, "reserved integration credential; manage it in the integration's settings", http.StatusForbidden)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+
 	s.mu.RLock()
 	ms := s.memStore
 	s.mu.RUnlock()
@@ -96,7 +97,11 @@ func (s *Server) handleSecretByName(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 		w.Header().Set("Content-Type", "application/json")
 		val, ok, err := ms.GetSecret(r.Context(), name)
-		if err != nil || !ok {
+		if err != nil {
+			writeSecretStoreError(w, err)
+			return
+		}
+		if !ok {
 			http.Error(w, "secret not found", 404)
 			return
 		}
@@ -112,4 +117,10 @@ func (s *Server) handleSecretByName(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ─── MCP API ──────────────────────────────────────────────────────────────────
+func writeSecretStoreError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	if errors.Is(err, memory.ErrSecretName) {
+		status = http.StatusBadRequest
+	}
+	writeErr(w, status, err.Error())
+}

@@ -135,7 +135,11 @@ func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Too
 	}
 	// Personal secrets plus the group's shared tier (personal wins on a name
 	// collision); reserved integration credentials never reach the env.
-	for name, value := range e.secretsEnv(ctx) {
+	secretEnv, err := e.secretsEnv(ctx)
+	if err != nil {
+		return "", err
+	}
+	for name, value := range secretEnv {
 		env[name] = value
 	}
 	// Pass the JSON payload via stdin to avoid shell argument-length limits (ARG_MAX).
@@ -146,7 +150,7 @@ func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Too
 	)
 	out, err := e.docker.ExecWithStdin(ctx, cmd, []byte(rawArgs), 2*time.Minute, env)
 	if err != nil {
-		return fmt.Sprintf("ERROR: %v\nOutput: %s", err, out), nil
+		return "", fmt.Errorf("custom tool %q failed: %w", tool.Name, err)
 	}
 	// Model-context cap only: a programmatic caller (prismTool / cron) gets the
 	// whole output, as /api/tool/ always did — see SetRawResults.

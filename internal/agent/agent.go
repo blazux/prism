@@ -410,18 +410,22 @@ func (a *Agent) loadProfile() {
 }
 
 // ResetHistory clears in-memory history and, if a memory store is configured, the DB history too.
-func (a *Agent) ResetHistory() {
+func (a *Agent) ResetHistory() error {
 	a.histMu.Lock()
+	defer a.histMu.Unlock()
+	if a.memStore != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.memStore.ClearHistory(ctx, a.sessionID); err != nil {
+			return fmt.Errorf("clear history: %w", err)
+		}
+	}
 	a.history = []ollama.Message{}
 	a.toolSeq = 0
 	a.historyLoaded = false
 	a.historyGen++
-	a.histMu.Unlock()
-	if a.memStore != nil {
-		if err := a.memStore.ClearHistory(context.Background(), a.sessionID); err != nil {
-			log.Printf("[agent] clear history: %v", err)
-		}
-	}
+	return nil
+
 }
 
 // SetSession switches the agent to a different session, resetting in-memory state.
@@ -683,9 +687,10 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 	}
 	a.history = append([]ollama.Message{{Role: "user", Content: note}}, tail...)
 	a.historyGen++
-	a.histMu.Unlock()
-
+	// Serialize persistence with ResetHistory, so an old background compaction
+	// cannot be written back after the reset has cleared the database.
 	a.persistLiveCompaction(note, beforeID)
+	a.histMu.Unlock()
 
 	if err == nil {
 		log.Printf("[agent] session=%s compacted live context: dropped %d messages, kept %d (summary %d chars)", a.sessionID, len(dropped), len(tail), len(summary))
@@ -1193,6 +1198,10 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		a.compactLiveContextIfNeeded(ctx, events)
 
 		fullContent, toolCalls, doneReason, err := a.callOllama(ctx, learningsCtx, events)
+		if ctx.Err() != nil {
+			events <- Event{Type: "stream_end"}
+			return
+		}
 		if err != nil {
 			// Intentional cancel (user clicked stop, sent new message, or closed tab):
 			// close the bubble cleanly without showing an error message.
