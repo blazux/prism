@@ -32,15 +32,16 @@ var PlaceCallTool = ollama.Tool{
 	Function: ollama.ToolFunction{
 		Name: "place_call",
 		Description: "Place an outbound phone call carried out by an AI voice agent. Use it when the user asks you to call someone (e.g. \"appelle le plombier et prends rendez-vous\"). " +
+			"Give either contact_name (a name from the outbound directory — the phone system looks the number up) or phone_number, or both. " +
 			"The call is queued and placed shortly; you are told the outcome afterwards — you do not wait on the line. Give a clear, self-contained mission: the agent on the call only knows what you write here.",
 		Parameters: ollama.ToolParameters{
 			Type: "object",
 			Properties: map[string]ollama.ToolProperty{
-				"phone_number": {Type: "string", Description: "Number to call, in international format (e.g. +596696...)."},
-				"contact_name": {Type: "string", Description: "Optional name of the person/company being called, for the logs."},
+				"phone_number": {Type: "string", Description: "Number to call, in international format (e.g. +596696...). Omit it when contact_name is in the directory."},
+				"contact_name": {Type: "string", Description: "Name of the person/company to call, e.g. \"le plombier\". Looked up in the outbound directory when no number is given."},
 				"mission":      {Type: "string", Description: "What the calling agent must accomplish and say — a clear, standalone brief (goal, key info to convey, what to obtain)."},
 			},
-			Required: []string{"phone_number", "mission"},
+			Required: []string{"mission"},
 		},
 	},
 }

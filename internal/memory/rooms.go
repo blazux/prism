@@ -42,6 +42,10 @@ type RoomConfig struct {
 	// AgentReasoning bounds the reasoning budget ("low"/"medium"/"high"/"xhigh");
 	// "" = the server default.
 	AgentReasoning string `json:"agentReasoning"`
+	// AgentVoicePrompt is who the agent is on a phone call with a member of this
+	// group. "" = the built-in text. It replaces the member's own personality for
+	// the duration of the call; their memory and knowledge are untouched.
+	AgentVoicePrompt string `json:"agentVoicePrompt"`
 }
 
 // AddRoomMessage appends a message (human or agent) to a group's room. replyTo is
@@ -153,8 +157,8 @@ func (s *Store) RoomMessageGroup(ctx context.Context, msgID int64) int64 {
 func (s *Store) GetRoomConfig(ctx context.Context, groupID int64) (RoomConfig, error) {
 	c := RoomConfig{GroupID: groupID, AgentName: "Assistant", AgentThinking: true}
 	err := s.pool.QueryRow(ctx, `
-		SELECT agent_name, agent_prompt, agent_model, agent_max_iter, agent_thinking, agent_lean, agent_reasoning FROM room_config WHERE group_id = $1
-	`, groupID).Scan(&c.AgentName, &c.AgentPrompt, &c.AgentModel, &c.AgentMaxIter, &c.AgentThinking, &c.AgentLean, &c.AgentReasoning)
+		SELECT agent_name, agent_prompt, agent_model, agent_max_iter, agent_thinking, agent_lean, agent_reasoning, agent_voice_prompt FROM room_config WHERE group_id = $1
+	`, groupID).Scan(&c.AgentName, &c.AgentPrompt, &c.AgentModel, &c.AgentMaxIter, &c.AgentThinking, &c.AgentLean, &c.AgentReasoning, &c.AgentVoicePrompt)
 	if err != nil {
 		// No row yet → return defaults (not an error).
 		return RoomConfig{GroupID: groupID, AgentName: "Assistant", AgentThinking: true}, nil
@@ -168,8 +172,8 @@ func (s *Store) SetRoomConfig(ctx context.Context, c RoomConfig) error {
 		c.AgentName = "Assistant"
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO room_config (group_id, agent_name, agent_prompt, agent_model, agent_max_iter, agent_thinking, agent_lean, agent_reasoning)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO room_config (group_id, agent_name, agent_prompt, agent_model, agent_max_iter, agent_thinking, agent_lean, agent_reasoning, agent_voice_prompt)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (group_id) DO UPDATE SET
 			agent_name = EXCLUDED.agent_name,
 			agent_prompt = EXCLUDED.agent_prompt,
@@ -177,7 +181,8 @@ func (s *Store) SetRoomConfig(ctx context.Context, c RoomConfig) error {
 			agent_max_iter = EXCLUDED.agent_max_iter,
 			agent_thinking = EXCLUDED.agent_thinking,
 			agent_lean = EXCLUDED.agent_lean,
-			agent_reasoning = EXCLUDED.agent_reasoning
-	`, c.GroupID, c.AgentName, c.AgentPrompt, c.AgentModel, c.AgentMaxIter, c.AgentThinking, c.AgentLean, c.AgentReasoning)
+			agent_reasoning = EXCLUDED.agent_reasoning,
+			agent_voice_prompt = EXCLUDED.agent_voice_prompt
+	`, c.GroupID, c.AgentName, c.AgentPrompt, c.AgentModel, c.AgentMaxIter, c.AgentThinking, c.AgentLean, c.AgentReasoning, c.AgentVoicePrompt)
 	return err
 }

@@ -450,6 +450,13 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 			err = ms.SetUserRole(r.Context(), b.ID, memory.RoleGlobalAdmin)
 		case "make_member":
 			err = ms.SetUserRole(r.Context(), b.ID, memory.RoleMember)
+		// How the switchboard puts a call through to them. Theirs to set on their
+		// profile; an admin can override it here because the person who gets the
+		// transfers is not always the person who reads the settings page.
+		case "transfer_blind":
+			err = ms.SetTransferType(r.Context(), b.ID, memory.TransferBlind)
+		case "transfer_attended":
+			err = ms.SetTransferType(r.Context(), b.ID, memory.TransferAttended)
 		default:
 			writeErr(w, http.StatusBadRequest, "unknown action")
 			return

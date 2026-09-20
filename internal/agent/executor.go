@@ -207,9 +207,18 @@ func (e *ToolExecutor) placeCall(args map[string]interface{}) (string, error) {
 	phone, _ := args["phone_number"].(string)
 	mission, _ := args["mission"].(string)
 	name, _ := args["contact_name"].(string)
-	phone, mission = strings.TrimSpace(phone), strings.TrimSpace(mission)
-	if phone == "" || mission == "" {
-		return "", fmt.Errorf("phone_number and mission are required")
+	phone, mission, name = strings.TrimSpace(phone), strings.TrimSpace(mission), strings.TrimSpace(name)
+	if mission == "" {
+		return "", fmt.Errorf("mission is required")
+	}
+	// "Appelle le plombier" is the whole point of this tool, and a name is what
+	// the user says — never a number. Vox owns the outbound directory, so it does
+	// the lookup: it already refuses an ambiguous name rather than picking someone.
+	if phone == "" {
+		if name == "" {
+			return "", fmt.Errorf("give a contact_name (looked up in the outbound directory) or a phone_number")
+		}
+		return e.placeCallByName(name, mission)
 	}
 	if _, err := e.voxDo("place_call", "POST", "/api/calls", map[string]interface{}{
 		"phone_number": phone, "contact_name": strings.TrimSpace(name), "mission": mission,
@@ -1134,3 +1143,82 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 // ─── Existing tools ───────────────────────────────────────────────────────────
 
 // ─── Docker service tools ─────────────────────────────────────────────────────
+
+// placeCallByName queues an outbound call to someone named rather than numbered.
+//
+// The lookup happens in Vox, not here, because Vox owns the outbound directory —
+// and because its resolver already refuses an ambiguous name instead of picking a
+// contact at random. Duplicating that judgement on this side would mean two
+// implementations of "did we mean the right person", which is exactly the kind of
+// question you only want answered once.
+//
+// Note which directory this is: the outbound one, the people Vox CALLS. Transfers
+// resolve against Prism's own users, and the two are deliberately separate — a
+// caller must never be offered a transfer to a supplier.
+func (e *ToolExecutor) placeCallByName(name, mission string) (string, error) {
+	b, err := e.voxDo("place_call", "GET", "/api/contacts", nil)
+	if err != nil {
+		return "", fmt.Errorf("could not read the outbound directory: %w", err)
+	}
+	var contacts []struct {
+		Name        string `json:"name"`
+		PhoneNumber string `json:"phone_number"`
+		Enabled     *bool  `json:"enabled"`
+	}
+	if err := json.Unmarshal(b, &contacts); err != nil {
+		var wrapped struct {
+			Items []struct {
+				Name        string `json:"name"`
+				PhoneNumber string `json:"phone_number"`
+				Enabled     *bool  `json:"enabled"`
+			} `json:"items"`
+		}
+		if err2 := json.Unmarshal(b, &wrapped); err2 != nil {
+			return "", fmt.Errorf("could not read the outbound directory: %w", err)
+		}
+		for _, c := range wrapped.Items {
+			contacts = append(contacts, struct {
+				Name        string `json:"name"`
+				PhoneNumber string `json:"phone_number"`
+				Enabled     *bool  `json:"enabled"`
+			}(c))
+		}
+	}
+
+	want := normalizeContactName(name)
+	var matches []string
+	var phone, matched string
+	for _, c := range contacts {
+		if c.Enabled != nil && !*c.Enabled {
+			continue
+		}
+		n := normalizeContactName(c.Name)
+		if n == want || strings.Contains(" "+n+" ", " "+want+" ") {
+			matches = append(matches, c.Name)
+			phone, matched = c.PhoneNumber, c.Name
+		}
+	}
+	switch {
+	case len(matches) == 0:
+		return "", fmt.Errorf("%q is not in the outbound directory — add them in Telephony, or give a phone number", name)
+	case len(matches) > 1:
+		// Never guess: dialling the wrong person is not a recoverable mistake, it
+		// is a stranger's phone ringing.
+		return "", fmt.Errorf("%q matches several contacts (%s) — say which one", name, strings.Join(matches, ", "))
+	}
+
+	if _, err := e.voxDo("place_call", "POST", "/api/calls", map[string]interface{}{
+		"phone_number": phone, "contact_name": matched, "mission": mission,
+	}); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Outbound call to %s (%s) has been queued. It will be placed shortly and I'll be told the outcome.", matched, phone), nil
+}
+
+// normalizeContactName lowercases and flattens a name for matching, so "Le
+// Plombier" and "le plombier" are the same person.
+func normalizeContactName(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.NewReplacer("-", " ", "'", " ", "  ", " ").Replace(s)
+	return strings.Join(strings.Fields(s), " ")
+}

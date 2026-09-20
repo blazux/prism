@@ -132,10 +132,21 @@ func (s *Store) UserByPhone(ctx context.Context, digits string) (*User, error) {
 	return &u, nil
 }
 
+// Transfer types. A destination is either put straight through, or announced to
+// the recipient first — who may decline. Blind is the default everywhere: it is
+// what a desk extension expects, and what a missing value must degrade to.
+const (
+	TransferBlind    = "blind"
+	TransferAttended = "attended"
+)
+
 // DirEntry is one line of the phone directory: an approved user with a phone.
 type DirEntry struct {
-	Name  string
-	Phone string
+	UserID int64
+	Name   string
+	Phone  string
+	// Transfer is TransferBlind or TransferAttended.
+	Transfer string
 }
 
 // DirectoryEntries lists approved users who have a phone number on their profile —
@@ -143,7 +154,9 @@ type DirEntry struct {
 // separate contacts table).
 func (s *Store) DirectoryEntries(ctx context.Context) ([]DirEntry, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT COALESCE(NULLIF(BTRIM(display_name),''),email), BTRIM(phone) FROM users
+		SELECT id, COALESCE(NULLIF(BTRIM(display_name),''),email), BTRIM(phone),
+		       COALESCE(NULLIF(transfer_type,''),'blind')
+		FROM users
 		WHERE status = 'approved' AND BTRIM(phone) <> ''
 		ORDER BY display_name`)
 	if err != nil {
@@ -153,7 +166,7 @@ func (s *Store) DirectoryEntries(ctx context.Context) ([]DirEntry, error) {
 	var out []DirEntry
 	for rows.Next() {
 		var e DirEntry
-		if err := rows.Scan(&e.Name, &e.Phone); err != nil {
+		if err := rows.Scan(&e.UserID, &e.Name, &e.Phone, &e.Transfer); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

@@ -367,8 +367,21 @@ func (s *Store) initSchema(ctx context.Context) error {
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_thinking BOOLEAN NOT NULL DEFAULT TRUE`,
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_lean BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_reasoning TEXT NOT NULL DEFAULT ''`,
+		// Who the agent is when it answers the phone to someone this group knows.
+		// Replaces the member's own personality for that call rather than layering
+		// over it — see voiceInternalPersonality.
+		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_voice_prompt TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT NOT NULL DEFAULT ''`,
+		// How the switchboard hands a call over to this person: 'blind' puts them
+		// straight through, 'attended' announces the caller first and lets them
+		// decline. Blind by default — that is what a desk extension expects.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS transfer_type TEXT NOT NULL DEFAULT 'blind'`,
+		// Which group speaks for a user when something is group-scoped but the
+		// situation names only a person — a phone call, most obviously. No foreign
+		// key on purpose: the resolver checks membership anyway, so a deleted group
+		// or a dropped membership falls back on its own instead of dangling.
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS default_group_id BIGINT`,
 		// Avatars for users and agents, keyed by scope: "u<id>" (user),
 		// "agent-u<id>" (a user's personal agent), "agent-g<id>" (a group's shared
 		// agent). Stored as bytes + mime; served via /api/avatar, versioned by updated_at.

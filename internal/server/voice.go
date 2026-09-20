@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -86,7 +87,16 @@ const (
 	voiceChannelName = "voice"
 
 	cfgVoicePersonality = "voice_personality"
-	cfgVoiceRAGScope    = "voice_rag_scope"
+	// Set once the persona above has been handed to Vox, which owns it from then
+	// on. A flag, not a text comparison: an admin who deliberately reverted to the
+	// default must not have their old words pushed back over it.
+	cfgVoicePersonaMigrated = "voice_personality_migrated"
+	cfgVoiceRAGScope        = "voice_rag_scope"
+	// The ONE collection the switchboard reads, stored under its full scoped name
+	// ("voice--horaires", "g3--procédures"). One and only one on purpose: an
+	// admin points at a base, rather than the switchboard quietly inheriting
+	// whatever happens to sit in a scope.
+	cfgVoiceRAGCollection = "voice_rag_collection"
 )
 
 // defaultVoicePersonality is the switchboard persona used when no
@@ -187,10 +197,10 @@ func voiceDirectoryText(entries []memory.DirEntry) string {
 // "Vincent Dupont". The match must be unique: with "Jean Dupont" and "Jean
 // Martin" listed, "Jean" resolves to nothing and the agent has to ask — it must
 // never pick a colleague at random.
-func resolveTransferName(entries []memory.DirEntry, query string) (name, phone string, ok bool) {
+func resolveTransferName(entries []memory.DirEntry, query string) (memory.DirEntry, bool) {
 	q := normalizeDirectoryName(query)
 	if q == "" {
-		return "", "", false
+		return memory.DirEntry{}, false
 	}
 	for _, exact := range []bool{true, false} {
 		var match *memory.DirEntry
@@ -202,16 +212,16 @@ func resolveTransferName(entries []memory.DirEntry, query string) (name, phone s
 			}
 			if matches {
 				if match != nil {
-					return "", "", false // ambiguous
+					return memory.DirEntry{}, false // ambiguous
 				}
 				match = &entries[i]
 			}
 		}
 		if match != nil {
-			return match.Name, match.Phone, true
+			return *match, true
 		}
 	}
-	return "", "", false
+	return memory.DirEntry{}, false
 }
 
 func normalizeDirectoryName(s string) string {
@@ -285,8 +295,19 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		rawScope, _, _ := ms.GetConfig(r.Context(), cfgVoiceRAGScope)
+		// Docked, the switchboard runs on Vox with Vox's prompt, so that is the one
+		// to show and edit — anything else would be a form that changes nothing.
+		persona := s.voicePersonality(r.Context())
+		if s.cfg.VoxURL != "" {
+			s.migrateVoicePersonaToVox(r.Context())
+			if p, err := s.voxSystemPrompt(r.Context()); err == nil {
+				persona = p
+			} else {
+				log.Printf("[voice] Vox unreachable, showing the local persona: %v", err)
+			}
+		}
 		writeJSON(w, map[string]any{
-			"personality":        s.voicePersonality(r.Context()), // effective (stored or default)
+			"personality":        persona,
 			"defaultPersonality": defaultVoicePersonality,
 			"ragScope":           rawScope, // "" = isolated (callers read nothing)
 			"voxDocked":          s.cfg.VoxURL != "",
@@ -302,10 +323,299 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		// The switchboard's knowledge base is a fixed reserved scope (voiceGuestScope),
 		// managed via the RAG endpoints — no scope to set here, only the persona.
-		if err := ms.SetConfig(r.Context(), cfgVoicePersonality, strings.TrimSpace(b.Personality)); err != nil {
+		persona := strings.TrimSpace(b.Personality)
+		if s.cfg.VoxURL != "" {
+			// One store, Vox's. Writing here as well would leave two copies to
+			// disagree, and the one that answers the phone would not be this one.
+			if err := s.setVoxSystemPrompt(r.Context(), persona); err != nil {
+				writeErr(w, http.StatusBadGateway, "the phone stack did not accept the change: "+err.Error())
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
+			return
+		}
+		if err := ms.SetConfig(r.Context(), cfgVoicePersonality, persona); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		writeJSON(w, map[string]any{"ok": true})
+
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// ── What Prism tells Vox about people ──────────────────────────────────────────
+//
+// Two questions, two endpoints, both read-only and both answered from the user
+// table. They exist because the routing decision belongs to Vox — it must know
+// who is calling BEFORE it picks a brain and before it speaks its greeting — while
+// the answer only exists here.
+//
+// Admin-gated, which the service token satisfies (auth.go resolves it to a
+// synthetic global admin): a phone directory is not member-readable.
+
+// handleVoiceCaller (GET /api/voice/caller?number=…) answers the single question
+// Vox must settle before it answers the line: is this one of ours?
+//
+// A match is *not* authentication — caller ID is trivially forged. It decides
+// which agent picks up and which greeting is spoken, nothing more; every
+// dangerous tool stays off the voice channel whoever is calling (see the top of
+// this file).
+func (s *Server) handleVoiceCaller(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil || !s.isAdminUser(r.Context(), u) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	caller := s.resolveVoiceCaller(r.Context(), r.URL.Query().Get("number"))
+	if caller == nil {
+		writeJSON(w, map[string]interface{}{"known": false})
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"known": true,
+		// The display name is what Vox greets them with. It never sends back an
+		// email or an id: Vox has no use for either, and a switchboard should not
+		// hold a copy of the user table.
+		"name": caller.DisplayName,
+	})
+}
+
+// handleVoiceDirectory (GET /api/voice/directory) lists who a call can be
+// transferred to: approved users with a phone number, and nobody else.
+//
+// This is the whole transfer surface. Vox's own contacts table is for people it
+// CALLS (see its outbound directory) — being transferable means having an account
+// here. The two lists are deliberately separate and must never be merged into one
+// prompt, or the switchboard will offer to put a caller through to a supplier.
+func (s *Server) handleVoiceDirectory(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil || !s.isAdminUser(r.Context(), u) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	entries := s.voiceDirectory(r.Context())
+	out := make([]map[string]interface{}, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, map[string]interface{}{
+			"name": e.Name, "phone": e.Phone,
+			// How to hand the call over, decided by each person on their own profile.
+			"transfer": e.Transfer,
+			// The id is for Prism's own admin table, which edits these rows; Vox
+			// ignores it. One list, read by both, beats a near-duplicate endpoint.
+			"id": e.UserID,
+		})
+	}
+	writeJSON(w, map[string]interface{}{"entries": out})
+}
+
+// ── Who the agent is on an internal call ───────────────────────────────────────
+
+// defaultInternalVoicePersonality is who the agent is on the phone with someone
+// the deployment knows, until a group writes its own.
+const defaultInternalVoicePersonality = `Tu es l'assistant de la personne au bout du fil, qui fait partie de la maison. Tu la connais : tu as accès à son profil, à sa mémoire et à ses connaissances, et tu t'en sers pour l'aider concrètement.
+
+Tu es direct, chaleureux et efficace. Tu vas droit au but — au téléphone, une phrase de politesse de plus est une phrase d'attente de plus. Tu ne récites pas ce que tu vas faire : tu le fais, puis tu dis ce que ça donne.
+
+Si une demande est ambiguë, tu poses UNE question, la plus utile, et tu attends la réponse.`
+
+// voiceInternalPersonality returns who the agent is on a call with someone the
+// deployment recognises: the group's internal-call text, or the built-in one.
+//
+// It REPLACES the caller's own personality rather than layering on top of it, and
+// that is a deliberate trade. On this stack, a dense personality measurably
+// destroys tool calling — and on a phone line the tools *are* the function: with
+// no transfer_call, no take_message and no end_call, the agent chats pleasantly
+// while the line stays open. Free-form user text does not belong on that path.
+//
+// What the caller keeps is everything that actually carries continuity: their
+// profile, their memory, their past conversations, their knowledge. It is the
+// character that changes between the dashboard and the phone, not the knowledge.
+//
+// Which group speaks for them is the default-group question, answered once in
+// memory.DefaultGroupID rather than guessed here.
+func (s *Server) voiceInternalPersonality(ctx context.Context, u *memory.User) string {
+	ms := s.store()
+	if ms == nil || u == nil {
+		return defaultInternalVoicePersonality
+	}
+	gid, ok := ms.DefaultGroupID(ctx, u.ID)
+	if !ok {
+		// In no group at all: nobody has written an internal-call persona for
+		// them, so the built-in one applies. Not the switchboard's — they are
+		// recognised, and being told "you have reached the switchboard" by an
+		// agent that knows their name is worse than a generic assistant.
+		return defaultInternalVoicePersonality
+	}
+	cfg, err := ms.GetRoomConfig(ctx, gid)
+	if err != nil {
+		return defaultInternalVoicePersonality
+	}
+	if p := strings.TrimSpace(cfg.AgentVoicePrompt); p != "" {
+		return p
+	}
+	return defaultInternalVoicePersonality
+}
+
+// ── The switchboard's knowledge base, read from Vox ─────────────────────────────
+
+// voiceSearchLimit caps how much a single lookup returns. A caller cannot skim,
+// and the agent has to turn whatever comes back into one or two spoken sentences,
+// so a wider net just costs time on a line where silence is expensive.
+const voiceSearchLimit = 5
+
+// handleVoiceSearch (POST /api/voice/search {query}) searches the switchboard's
+// reserved knowledge base and returns the matching passages.
+//
+// It exists because the switchboard now runs on Vox's own brain, while the
+// knowledge stays here — configured once, in one place, by an admin who should
+// not have to think about which stack stores what.
+//
+// The request carries TEXT, never a vector, and that is not negotiable: the query
+// has to be embedded by the same model that indexed the corpus. A vector produced
+// by Vox's own embedder would describe a different space and come back with
+// confident nonsense.
+func (s *Server) handleVoiceSearch(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil || !s.isAdminUser(r.Context(), u) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var b struct {
+		Query string `json:"query"`
+	}
+	if json.NewDecoder(r.Body).Decode(&b) != nil || strings.TrimSpace(b.Query) == "" {
+		writeErr(w, http.StatusBadRequest, "query required")
+		return
+	}
+	ms := s.store()
+	if ms == nil || s.ragStore == nil || s.ragEmbedder == nil {
+		writeErr(w, http.StatusServiceUnavailable, "no knowledge base on this deployment")
+		return
+	}
+
+	embedding, err := s.ragEmbedder.Embed(r.Context(), strings.TrimSpace(b.Query))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "could not embed the question: "+err.Error())
+		return
+	}
+
+	// One collection, the one an admin picked in Telephony. Not "every collection
+	// in a scope": a knowledge base that grows a document because someone uploaded
+	// it nearby is a knowledge base nobody can vouch for, and this one is read out
+	// loud to strangers.
+	chosen, _, _ := ms.GetConfig(r.Context(), cfgVoiceRAGCollection)
+	chosen = strings.TrimSpace(chosen)
+	if chosen == "" {
+		// Not an error: no base is a legitimate configuration. The agent is told
+		// plainly so it says it doesn't know, instead of inventing.
+		writeJSON(w, map[string]interface{}{"hits": []any{}, "reason": "no knowledge base configured for the switchboard"})
+		return
+	}
+	type hit struct {
+		Content  string  `json:"content"`
+		Source   string  `json:"source"`
+		Score    float64 `json:"score"`
+		pageless bool
+	}
+	res, err := s.ragStore.Search(r.Context(), chosen, embedding, voiceSearchLimit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	hits := make([]hit, 0, len(res))
+	for _, x := range res {
+		hits = append(hits, hit{Content: x.Content, Source: x.Filename, Score: x.Score})
+	}
+	writeJSON(w, map[string]interface{}{"hits": hits})
+}
+
+// handleVoiceKB (GET/PUT /api/voice/kb) picks the ONE collection the switchboard
+// reads, and lists what there is to pick from.
+//
+// Two origins, deliberately in one list because they are one decision:
+//   - the reserved "voice" scope: isolated, belongs to nobody, safe by
+//     construction — nothing a group owns is exposed by choosing it;
+//   - the collections of groups the caller administers, uploaded the usual way in
+//     RAG, which is how an admin avoids maintaining the same documents twice.
+//
+// They do NOT carry the same consequence, so each option says which it is: what
+// the switchboard reads, an unknown caller can hear.
+func (s *Server) handleVoiceKB(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if u == nil || !s.isAdminUser(r.Context(), u) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	ms := s.store()
+	if ms == nil || s.ragStore == nil {
+		writeErr(w, http.StatusServiceUnavailable, "no knowledge base on this deployment")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		chosen, _, _ := ms.GetConfig(r.Context(), cfgVoiceRAGCollection)
+		type choice struct {
+			Value  string `json:"value"`  // stored name, what gets searched
+			Label  string `json:"label"`  // what an admin recognises
+			Origin string `json:"origin"` // "switchboard" | "group"
+			Docs   int    `json:"docs"`
+		}
+		choices := []choice{}
+		add := func(scope, origin string) {
+			cols, err := s.ragStore.ListCollections(r.Context(), scope)
+			if err != nil {
+				return
+			}
+			for _, c := range cols {
+				choices = append(choices, choice{
+					Value:  c.Name,
+					Label:  agent.UnscopeCollection(scope, c.Name),
+					Origin: origin,
+					Docs:   c.DocCount,
+				})
+			}
+		}
+		add(voiceGuestScope, "switchboard")
+		if groups, err := ms.UserGroups(r.Context(), u.ID); err == nil {
+			for _, g := range groups {
+				if !s.isGroupAdminOf(r.Context(), u, g.GroupID) {
+					continue
+				}
+				add(fmt.Sprintf("g%d", g.GroupID), "group")
+			}
+		}
+		writeJSON(w, map[string]interface{}{"selected": strings.TrimSpace(chosen), "choices": choices})
+
+	case http.MethodPut:
+		var b struct {
+			Collection string `json:"collection"`
+		}
+		if json.NewDecoder(r.Body).Decode(&b) != nil {
+			writeErr(w, http.StatusBadRequest, "bad body")
+			return
+		}
+		// "" clears it: no base at all is a legitimate switchboard, and it must be
+		// reachable without deleting anything.
+		if err := ms.SetConfig(r.Context(), cfgVoiceRAGCollection, strings.TrimSpace(b.Collection)); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		s.audit(r, "voice_kb_collection", map[string]interface{}{"collection": b.Collection})
 		writeJSON(w, map[string]any{"ok": true})
 
 	default:

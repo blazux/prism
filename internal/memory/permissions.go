@@ -6,6 +6,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -257,4 +258,61 @@ func (s *Store) AllowedModelsForUser(ctx context.Context, userID int64) (set map
 		}
 	}
 	return set, false, nil
+}
+
+// ── Default group ──────────────────────────────────────────────────────────────
+//
+// Group-scoped resources meet single users all the time: a phone rings, and the
+// caller is a person, not a group. Rather than invent a rule per feature ("first
+// match", "any admin group", "ask"), every such case asks the same question here.
+
+// DefaultGroupID returns the group that speaks for this user, and whether they
+// are in one at all.
+//
+// Their explicit choice wins, but only while they are still a member of it —
+// otherwise the earliest group they belong to. That makes the common case (one
+// group, no choice made) work with nothing to configure, and makes a removed
+// membership or a deleted group degrade quietly instead of pointing at nothing.
+func (s *Store) DefaultGroupID(ctx context.Context, userID int64) (int64, bool) {
+	var chosen *int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT default_group_id FROM users WHERE id = $1`, userID).Scan(&chosen); err != nil {
+		return 0, false
+	}
+	if chosen != nil {
+		var ok bool
+		if err := s.pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM group_members WHERE user_id = $1 AND group_id = $2)`,
+			userID, *chosen).Scan(&ok); err == nil && ok {
+			return *chosen, true
+		}
+	}
+	var first int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT group_id FROM group_members WHERE user_id = $1 ORDER BY group_id LIMIT 1`,
+		userID).Scan(&first); err != nil {
+		return 0, false
+	}
+	return first, true
+}
+
+// SetDefaultGroup records a user's choice. Passing 0 clears it, which returns
+// them to the fallback above. A group they do not belong to is refused rather
+// than stored and silently ignored later.
+func (s *Store) SetDefaultGroup(ctx context.Context, userID, groupID int64) error {
+	if groupID == 0 {
+		_, err := s.pool.Exec(ctx, `UPDATE users SET default_group_id = NULL WHERE id = $1`, userID)
+		return err
+	}
+	var member bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM group_members WHERE user_id = $1 AND group_id = $2)`,
+		userID, groupID).Scan(&member); err != nil {
+		return err
+	}
+	if !member {
+		return errors.New("not a member of that group")
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE users SET default_group_id = $1 WHERE id = $2`, groupID, userID)
+	return err
 }

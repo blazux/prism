@@ -482,6 +482,7 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 			AgentThinking                      *bool  // absent = keep reasoning on
 			AgentLean                          bool   // absent = guided profile
 			AgentReasoning                     string // "" = server default
+			AgentVoicePrompt                   string // "" = built-in internal-call text
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			writeErr(w, http.StatusBadRequest, "bad body")
@@ -491,7 +492,8 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 		if err := ms.SetRoomConfig(r.Context(), memory.RoomConfig{
 			GroupID: groupID, AgentName: b.AgentName, AgentPrompt: b.AgentPrompt, AgentModel: b.AgentModel,
 			AgentMaxIter: agent.ClampIterations(b.AgentMaxIter), AgentThinking: thinking, AgentLean: b.AgentLean,
-			AgentReasoning: agent.NormalizeReasoningEffort(b.AgentReasoning),
+			AgentReasoning:   agent.NormalizeReasoningEffort(b.AgentReasoning),
+			AgentVoicePrompt: strings.TrimSpace(b.AgentVoicePrompt),
 		}); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return

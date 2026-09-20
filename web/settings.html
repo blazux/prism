@@ -2436,6 +2436,18 @@ async function renderProfileTab(container) {
         <input class="pf-field" type="email" value="${escHtml(p.email || '')}" readonly style="width:100%;margin-top:4px;opacity:.6"></label>
       <label style="font-size:12px;color:var(--text2)">Phone
         <input id="pf-phone" class="pf-field" type="tel" autocomplete="off" value="${escHtml(p.phone || '')}" placeholder="+33…" style="width:100%;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--text2)">Incoming transfers
+        <select id="pf-transfer" class="pf-field" style="width:100%;margin-top:4px">
+          <option value="blind"${(p.transfer || 'blind') === 'attended' ? '' : ' selected'}>Put callers straight through</option>
+          <option value="attended"${(p.transfer || 'blind') === 'attended' ? ' selected' : ''}>Announce them first — I can decline</option>
+        </select></label>
+      <div style="grid-column:1/3;font-size:11.5px;color:var(--text3);margin-top:-6px;line-height:1.5">How the switchboard hands you a call. Announce first means it asks who is calling and why, tells you, and only connects you if you accept. Only matters if your number is filled in above — that is also what lets the agent recognise you when you call in.</div>
+      ${(p.groups || []).length > 1 ? `
+      <label style="grid-column:1/3;font-size:12px;color:var(--text2)">Main group
+        <select id="pf-group" class="pf-field" style="width:100%;margin-top:4px">
+          ${(p.groups || []).map(g => `<option value="${g.groupId}"${g.groupId === p.defaultGroupId ? ' selected' : ''}>${escHtml(g.groupName)}</option>`).join('')}
+        </select></label>
+      <div style="grid-column:1/3;font-size:11.5px;color:var(--text3);margin-top:-6px;line-height:1.5">You belong to several groups. This one speaks for you when something is set per group but the situation only knows you — a phone call, for instance.</div>` : ''}
     </div>
     <div style="margin-top:20px;display:flex;align-items:center;gap:12px">
       <button class="btn btn-primary" id="pf-save">Save</button>
@@ -2461,7 +2473,10 @@ async function renderProfileTab(container) {
   $('pf-save').onclick = async () => {
     $('pf-status').textContent = 'Saving…'
     try {
-      const body = { displayName: $('pf-display').value, firstName: $('pf-first').value, lastName: $('pf-last').value, phone: $('pf-phone').value }
+      const body = { displayName: $('pf-display').value, firstName: $('pf-first').value, lastName: $('pf-last').value, phone: $('pf-phone').value, transfer: $('pf-transfer').value }
+      // Only sent when the picker is on screen: omitting it leaves the choice
+      // alone, which is what a single-group user wants.
+      if ($('pf-group')) body.defaultGroupId = Number($('pf-group').value)
       const r = await fetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       if (!r.ok) throw new Error(await r.text())
       $('pf-status').textContent = '✓ Saved'
