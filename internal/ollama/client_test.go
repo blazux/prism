@@ -1,8 +1,10 @@
 package ollama
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -130,5 +132,109 @@ func TestListModels_NonOKStatusIsError(t *testing.T) {
 	models, err := c.ListModels(context.Background())
 	if err == nil {
 		t.Errorf("expected error for 404 response, got nil (models=%v)", models)
+	}
+}
+
+// --- NoThinking on the Ollama wire ------------------------------------------
+
+// thinkProbe stands in for Ollama: it records what /api/chat received and answers
+// /api/show with the capabilities the test wants.
+type thinkProbe struct {
+	caps      []string
+	gotThink  *bool
+	sawThink  bool
+	showCalls int
+}
+
+func (p *thinkProbe) server(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/show":
+			p.showCalls++
+			json.NewEncoder(w).Encode(map[string]any{"capabilities": p.caps})
+		case "/api/chat":
+			var body struct {
+				Think *bool `json:"think"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &body)
+			p.gotThink = body.Think
+			p.sawThink = bytes.Contains(raw, []byte(`"think"`))
+			json.NewEncoder(w).Encode(map[string]any{
+				"message": map[string]any{"role": "assistant", "content": "ok"}, "done": true,
+			})
+		}
+	}))
+}
+
+func drain(c *Client, req ChatRequest) {
+	ch := make(chan StreamEvent, 16)
+	go func() { c.Chat(context.Background(), req, ch); close(ch) }()
+	for range ch {
+	}
+}
+
+func TestChatSuppressesThinkingWhenTheModelSupportsIt(t *testing.T) {
+	thinkCap.Clear()
+	p := &thinkProbe{caps: []string{"completion", "tools", "thinking"}}
+	srv := p.server(t)
+	defer srv.Close()
+
+	drain(NewClient(srv.URL), ChatRequest{Model: "reasoner", NoThinking: true,
+		Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	if p.gotThink == nil || *p.gotThink != false {
+		t.Fatalf("a no-thinking turn must send think:false, got %v", p.gotThink)
+	}
+}
+
+func TestChatOmitsThinkForAModelThatCannotThink(t *testing.T) {
+	// Ollama rejects the field outright ("does not support thinking"), which would
+	// fail the very turns that asked for silence — voice and history compaction.
+	thinkCap.Clear()
+	p := &thinkProbe{caps: []string{"completion", "tools"}}
+	srv := p.server(t)
+	defer srv.Close()
+
+	drain(NewClient(srv.URL), ChatRequest{Model: "plain", NoThinking: true,
+		Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	if p.sawThink {
+		t.Errorf("think must not reach a model without the capability, got %v", p.gotThink)
+	}
+}
+
+func TestChatNeverAsksAboutThinkingOnAnOrdinaryTurn(t *testing.T) {
+	// The capability probe is a round trip; a normal chat turn must not pay it.
+	thinkCap.Clear()
+	p := &thinkProbe{caps: []string{"thinking"}}
+	srv := p.server(t)
+	defer srv.Close()
+
+	drain(NewClient(srv.URL), ChatRequest{Model: "reasoner",
+		Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	if p.showCalls != 0 {
+		t.Errorf("expected no /api/show on an ordinary turn, got %d", p.showCalls)
+	}
+	if p.sawThink {
+		t.Error("an ordinary turn must leave the model's own default alone")
+	}
+}
+
+func TestThinkingCapabilityIsCachedAcrossClients(t *testing.T) {
+	// Callers build a fresh Client per turn, so the cache has to outlive one.
+	thinkCap.Clear()
+	p := &thinkProbe{caps: []string{"thinking"}}
+	srv := p.server(t)
+	defer srv.Close()
+
+	for i := 0; i < 3; i++ {
+		drain(NewClient(srv.URL), ChatRequest{Model: "reasoner", NoThinking: true,
+			Messages: []Message{{Role: "user", Content: "hi"}}})
+	}
+	if p.showCalls != 1 {
+		t.Errorf("expected the capability to be asked once, got %d", p.showCalls)
 	}
 }
