@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"prism/internal/ollama"
 	"strings"
 	"time"
 )
@@ -23,6 +24,7 @@ const widgetPrompt = `You are inspecting a screenshot of a rendered dashboard wi
 // it hits /api/chat; with the "openai" backend (SGLang/vLLM/…) it hits
 // /v1/chat/completions with the image inlined as a data: URL.
 type Captioner struct {
+	chat    ollama.Backend
 	backend string // "ollama" (default) or "openai"
 	baseURL string // for openai: includes the /v1 suffix
 	apiKey  string // optional, openai backend only
@@ -51,6 +53,11 @@ func NewOpenAICaptioner(baseURL, apiKey, model string) *Captioner {
 	}
 }
 
+// NewBackendCaptioner supports the same providers as conversation, including Anthropic.
+func NewBackendCaptioner(backend ollama.Backend, model string) *Captioner {
+	return &Captioner{chat: backend, model: model}
+}
+
 // describe sends an image to the vision model with the given prompt and returns
 // the raw model text (trimmed).
 func (c *Captioner) describe(ctx context.Context, imagePath, prompt string) (string, error) {
@@ -59,6 +66,27 @@ func (c *Captioner) describe(ctx context.Context, imagePath, prompt string) (str
 		return "", err
 	}
 	b64 := base64.StdEncoding.EncodeToString(data)
+	if c.chat != nil {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		events := make(chan ollama.StreamEvent, 16)
+		go func() {
+			c.chat.Chat(ctx, ollama.ChatRequest{Model: c.model, Messages: []ollama.Message{{Role: "user", Content: prompt, Images: []string{b64}}}, NoThinking: true, Options: ollama.Options{NumPredict: 1024}}, events)
+			close(events)
+		}()
+		var text strings.Builder
+		failed := false
+		for ev := range events {
+			if ev.Err != nil {
+				failed = true
+			}
+			text.WriteString(ev.Content)
+		}
+		if failed || ctx.Err() != nil || strings.TrimSpace(text.String()) == "" {
+			return "", fmt.Errorf("vision request failed; check model image support and provider access")
+		}
+		return strings.TrimSpace(text.String()), nil
+	}
 
 	var url string
 	var body []byte

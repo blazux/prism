@@ -36,9 +36,10 @@ func (s *Server) serverToolsFor(u *memory.User) map[string]agent.ServerTool {
 		whScope = fmt.Sprintf("u%d", u.ID)
 	}
 	return map[string]agent.ServerTool{
-		"webhook":    s.webhookTool(ms, whScope),
-		"pim_source": s.pimSourceTool(us),
-		"channel":    s.channelTool(ms, us),
+		"agent_settings": s.aiSettingsTool(u),
+		"webhook":        s.webhookTool(ms, whScope),
+		"pim_source":     s.pimSourceTool(us),
+		"channel":        s.channelTool(ms, us),
 	}
 }
 

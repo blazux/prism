@@ -22,14 +22,16 @@ import (
 )
 
 type Config struct {
-	Port          string
-	WorkspaceDir  string
-	PluginDir     string
-	OllamaURL     string
-	Model         string
-	LLMBackend    string // "ollama" (default), "openai" (SGLang/vLLM/…) or "anthropic" (Claude, API key)
-	OpenAIBaseURL string // /v1 root, used when LLMBackend == "openai"
-	OpenAIAPIKey  string // optional bearer token for the openai backend
+	AISources       []aiSource
+	AIDefaultSource string
+	Port            string
+	WorkspaceDir    string
+	PluginDir       string
+	OllamaURL       string
+	Model           string
+	LLMBackend      string // "ollama" (default), "openai" (SGLang/vLLM/…) or "anthropic" (Claude, API key)
+	OpenAIBaseURL   string // /v1 root, used when LLMBackend == "openai"
+	OpenAIAPIKey    string // optional bearer token for the openai backend
 	// AnthropicToken is the console API key for the Claude backend. A Pro/Max
 	// subscription token is not an option — see internal/anthropic/credential.go.
 	AnthropicToken   string
@@ -68,24 +70,25 @@ type Config struct {
 }
 
 type Server struct {
-	cfg            Config
-	docker         *docker.Manager
-	upgrader       websocket.Upgrader
-	clients        map[*Client]struct{}
-	mu             sync.RWMutex
-	ragStore       *rag.Store
-	ragEmbedder    *rag.Embedder
-	ragCaptioner   *rag.Captioner
-	ingest         *ingestTracker // live progress of synchronous RAG ingestions
-	customMgr      *customtools.Manager
-	memStore       *memory.Store
-	mcpMgr         *mcp.Manager
-	socketSessions sync.Map           // socket.io sid → targetHost (for WebSocket upgrade routing)
-	channels       map[string]Channel // messaging bridges (telegram, slack, …)
-	chanCancel     context.CancelFunc // cancels the running channel receive loops
-	oauthStates    sync.Map           // CSRF state → oauthState (pending OAuth authorizations)
-	rooms          *roomHub           // shared group chat rooms (Phase 4)
-	toolLimiter    *toolLimiter       // caps concurrent tool execs so a runaway widget can't OOM the host
+	cfg             Config
+	docker          *docker.Manager
+	upgrader        websocket.Upgrader
+	clients         map[*Client]struct{}
+	mu              sync.RWMutex
+	activeEmbedding *aiProfile // embedding configuration in use until restart; protected by mu
+	ragStore        *rag.Store
+	ragEmbedder     *rag.Embedder
+	ragCaptioner    *rag.Captioner
+	ingest          *ingestTracker // live progress of synchronous RAG ingestions
+	customMgr       *customtools.Manager
+	memStore        *memory.Store
+	mcpMgr          *mcp.Manager
+	socketSessions  sync.Map           // socket.io sid → targetHost (for WebSocket upgrade routing)
+	channels        map[string]Channel // messaging bridges (telegram, slack, …)
+	chanCancel      context.CancelFunc // cancels the running channel receive loops
+	oauthStates     sync.Map           // CSRF state → oauthState (pending OAuth authorizations)
+	rooms           *roomHub           // shared group chat rooms (Phase 4)
+	toolLimiter     *toolLimiter       // caps concurrent tool execs so a runaway widget can't OOM the host
 }
 
 func New(cfg Config) *Server {
@@ -204,6 +207,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/exec", s.handleExec)
 	mux.HandleFunc("/api/terminal", s.handleTerminal)
 	mux.HandleFunc("/api/models", s.handleModels)
+	mux.HandleFunc("/api/ai/config", s.handleAIProfile)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/tools", s.handleTools)
 	mux.HandleFunc("/api/tool/", s.handleToolCall)

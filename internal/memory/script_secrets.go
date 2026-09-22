@@ -27,7 +27,7 @@ func SecretEnvName(name string) string {
 func IsIntegrationSecret(name string) bool {
 	n := SecretEnvName(name)
 	switch n {
-	case "EMAIL_PASSWORD", "CALDAV_PASSWORD", "TODOIST_TOKEN", "TELEGRAM_BOT_TOKEN", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN":
+	case "PRISM_AI_PROFILE", "EMAIL_PASSWORD", "CALDAV_PASSWORD", "TODOIST_TOKEN", "TELEGRAM_BOT_TOKEN", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN":
 		return true
 	}
 	return strings.HasPrefix(n, "WEBEX_BOT_TOKEN_") || strings.HasPrefix(n, "MCP_OAUTH_") || strings.HasPrefix(strings.ToLower(name), "webex_bot_token:") || strings.HasPrefix(strings.ToLower(name), "mcp_oauth_")

@@ -108,7 +108,12 @@ func (s *Server) handleAdminPlatform(w http.ResponseWriter, r *http.Request) {
 		// The unfiltered model list, so the admin can choose from everything.
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		all, _ := s.chatModels(ctx)
+		ai, err := s.aiConfigFor(ctx, requestUserID(r))
+		if err != nil {
+			writeErr(w, 503, err.Error())
+			return
+		}
+		all, _ := ai.chatModels(ctx)
 		writeJSON(w, map[string]interface{}{
 			"apps": knownApps, "disabledApps": disabled,
 			"allModels": all, "allowedModels": allowed,

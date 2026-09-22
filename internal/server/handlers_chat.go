@@ -225,17 +225,32 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	ms := s.memStore
 	s.mu.RUnlock()
 
+	ai, err := s.aiConfigFor(ctx, cc.ActingUserID)
+	if err != nil {
+		return "", err
+	}
+	// A shared group agent retains the deployment backend, not an individual's key.
+
 	if model == "" {
-		model = s.cfg.Model
+		model = ai.cfg.Model
+	}
+	if cc.ActingUserID > 0 && ms != nil {
+		u, err := ms.GetUserByID(ctx, cc.ActingUserID)
+		if err != nil || u == nil {
+			return "", fmt.Errorf("cannot resolve AI owner")
+		}
+		if !s.userCanUseModel(ctx, u, model) {
+			return "", fmt.Errorf("model not allowed")
+		}
 	}
 
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	os.MkdirAll(sessionPluginDir, 0755)
 
-	ollamaClient := s.chatBackendFor(model)
+	ollamaClient := ai.chatBackendFor(model)
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
 	executor.SetLLM(ollamaClient, model)
-	executor.SetChatBlind(!s.cfg.ChatVision)
+	executor.SetChatBlind(!ai.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 
 	if s.ragStore != nil {

@@ -878,6 +878,9 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 	case "prism_help":
 		return wrap(e.prismHelp(ctx, str("topic")))
 	case "agent_settings":
+		if strings.HasPrefix(str("action"), "ai_") {
+			return wrap(e.serverTool(ctx, name, args))
+		}
 		return wrap(e.agentSettings(ctx, str("action"), args))
 	case "editor":
 		if e.editorToolFn == nil {

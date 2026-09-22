@@ -26,6 +26,8 @@ const adminConsoleHead = `<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Admin — PRISM</title>
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/ai-settings.css">
+<script src="/ai-settings.js"></script>
 <script src="/theme.js"></script>
 <script src="/modal.js"></script>
 <style>
@@ -100,6 +102,7 @@ code{font-size:12px}
 <div id="adm-main">
   <div id="adm-nav"></div>
   <div id="adm-content">
+    <div class="pane" data-pane="ai"><div id="admin-ai-settings"></div></div>
     <div class="pane" data-pane="users"><h2>Users</h2><div class="hint">Approve accounts and manage roles.</div>
       <table id="utbl"><thead><tr><th>User</th><th>Status</th><th>Role</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
     <div class="pane" data-pane="groups"><h2>Groups</h2><div class="hint">Create groups, manage members and per-group model access.</div>
@@ -592,7 +595,7 @@ async function init(){
  // it were a deployment-wide setting sitting next to "Platform".
  // A heading is an entry with no pane; only real entries are clickable.
  const nav=$('adm-nav');const items=[];const head=t=>['',t];
- if(isGA){items.push(head('Deployment'),['users','Users'],['groups','Groups'],['tools','Tools'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
+ if(isGA){items.push(head('Deployment'),['users','Users'],['groups','Groups'],['tools','Tools'],['ai','AI provider'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
  // Telephony admin (switchboard persona + SIP trunk) — only when docked with Vox.
  let DOCKED=false;try{DOCKED=!!(await fetch('/api/platform').then(r=>r.json())).voxDocked;}catch(e){}
  if(isGA&&DOCKED){items.push(['telephony','Telephony']);}
@@ -601,7 +604,7 @@ async function init(){
  if(!panes.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
  nav.innerHTML=items.map(([p,l])=>p?'<div class="nav-item" data-pane="'+p+'">'+l+'</div>':'<div class="nav-head">'+l+'</div>').join('');
  nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=()=>{const p=el.dataset.pane;show(p);
-  if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
+  if(p==='ai')renderAITab($('admin-ai-settings'),{admin:true});if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
  $('ag-group').onchange=()=>{loadAgent();loadWebex();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
  $('ag-model').innerHTML='<option value="">(server default)</option>'+MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');
  fillGroupPickers();

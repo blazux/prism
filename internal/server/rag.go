@@ -83,20 +83,53 @@ func (s *Server) initRAG(ctx context.Context) {
 		log.Println("[rag] POSTGRES_URL not set — RAG disabled")
 		return
 	}
-	if s.cfg.EmbedModel == "" {
-		ragInitStatus.Store("disabled: EMBED_MODEL not set")
-		log.Println("[rag] EMBED_MODEL not set — RAG disabled")
+	// The encrypted profile lives in the memory store, which starts separately.
+	for s.store() == nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
+	p, err := loadAIProfile(ctx, s.store())
+	if err != nil {
+		ragInitStatus.Store("cannot load AI settings")
 		return
 	}
-
-	embedder := s.newEmbedder()
+	legacy := s.environmentAIProfile()
+	if p == nil {
+		p = legacy
+	} else if p.ServerDefaults {
+		confirm := p.Embedding != nil && p.Embedding.Reindex && p.Embedding.ReindexFor == embeddingIdentity(legacy.effectiveEmbedding())
+		p = legacy
+		p.Embedding.Reindex = confirm
+		if confirm {
+			p.Embedding.ReindexFor = embeddingIdentity(p.effectiveEmbedding())
+		}
+	}
+	if p.Embedding == nil {
+		p.Embedding = legacy.Embedding
+	}
+	s.mu.Lock()
+	s.activeEmbedding = p
+	s.mu.Unlock()
+	ep := p.effectiveEmbedding()
+	if ep == nil || ep.Model == "" {
+		ragInitStatus.Store("disabled: no embedding model configured")
+		return
+	}
+	if ep.Provider == "anthropic" {
+		ragInitStatus.Store("Anthropic has no embedding endpoint; select another provider")
+		return
+	}
+	embedder := ep.embedder()
 
 	// Probe embedding dimension (retry — model may need to load)
 	var dim int
 	for attempt := 1; ; attempt++ {
 		probeCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		ragInitStatus.Store(fmt.Sprintf("probing embed model (attempt %d)…", attempt))
-		log.Printf("[rag] probing embedding dim for %s (attempt %d)…", s.cfg.EmbedModel, attempt)
+		log.Printf("[rag] probing embedding dim for %s (attempt %d)…", ep.Model, attempt)
 		var err error
 		dim, err = embedder.Dim(probeCtx)
 		cancel()
@@ -113,6 +146,16 @@ func (s *Server) initRAG(ctx context.Context) {
 		}
 	}
 	log.Printf("[rag] embedding dim=%d", dim)
+
+	ragInitStatus.Store("checking document index…")
+	if err := rag.PrepareEmbeddingIndex(ctx, s.cfg.PostgresURL, embedder, dim, embeddingIdentity(ep), embeddingIdentity(legacy.effectiveEmbedding()), p.Embedding.Reindex && p.Embedding.ReindexFor == embeddingIdentity(ep), func(done int) { ragInitStatus.Store(fmt.Sprintf("rebuilding document index: %d chunks…", done)) }); err != nil {
+		log.Printf("[rag] index preparation failed: %v", err)
+		ragInitStatus.Store("document index preparation failed; original index retained. Check server logs and AI provider settings, then restart.")
+		return
+	}
+	s.mu.Lock()
+	s.activeEmbedding = p
+	s.mu.Unlock()
 
 	// Connect to Postgres (retry — container may still be starting)
 	var store *rag.Store
@@ -139,6 +182,15 @@ func (s *Server) initRAG(ctx context.Context) {
 	s.ragEmbedder = embedder
 	s.ragStore = store
 	s.ragCaptioner = s.newCaptioner()
+	// UI profiles use the conversation model for widget inspection, independent of
+	// the embedding server. Legacy .env deployments keep VISION_MODEL routing.
+	if !p.ServerDefaults && p != legacy && p.ChatVision != nil {
+		if *p.ChatVision {
+			s.ragCaptioner = rag.NewBackendCaptioner(p.backendConfig().newChatBackend(), p.Model)
+		} else {
+			s.ragCaptioner = nil
+		}
+	}
 	ragInitStatus.Store("ready")
 	log.Println("[rag] ready")
 

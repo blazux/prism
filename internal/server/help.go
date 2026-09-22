@@ -127,6 +127,17 @@ func (s *Server) integrationsStatusFor(u *memory.User) func(ctx context.Context)
 		var sb strings.Builder
 		row := func(what, state string) { fmt.Fprintf(&sb, "- %s: %s\n", what, state) }
 
+		location := "Settings → AI provider"
+		if s.cfg.MultiUser {
+			location = "Admin → AI provider (global admin only)"
+		}
+		if p, err := loadAIProfile(ctx, s.store()); err != nil {
+			row("AI", "configuration unavailable — "+location)
+		} else if p != nil {
+			row("AI", "configured provider "+p.Provider+", model "+p.Model+" — agent_settings action=ai_get for details")
+		} else {
+			row("AI", "server defaults — "+location)
+		}
 		if has(us, "email_config") {
 			row("Email", "connected (the email tool works; Settings → Email to change the account)")
 		} else {

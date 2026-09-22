@@ -605,7 +605,7 @@ function setLocalSeen(uid, seen, source=folder) {
   if(folder!==source)return;
   const m = messages.find(x => x.uid === uid); if (m) m.seen = seen;
   if (current && current.uid === uid) current.seen = seen;
-  renderList(); notifyBadge();
+  renderList();
 }
 async function markSeen(uid, seen) {
   const source=folder;
@@ -617,6 +617,9 @@ async function markSeen(uid, seen) {
     // instead of leaving a reminder the server never recorded.
     setLocalSeen(uid, !seen,source);
     PrismAPI.toast('Could not mark the message: ' + e.message);
+  } finally {
+    // Refresh only after IMAP completes, even if the user changed folders.
+    notifyBadge();
   }
 }
 function markUnread() { if (current) markSeen(current.uid, false); }

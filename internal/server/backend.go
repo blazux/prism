@@ -22,6 +22,9 @@ const anthropicModelPrefix = "claude-"
 // to Ollama; "openai" targets any OpenAI-compatible server (SGLang, vLLM, …) and
 // "anthropic" targets Claude with a console API key.
 func (s *Server) newChatBackend() ollama.Backend {
+	if len(s.cfg.AISources) > 0 {
+		return &sourcesBackend{sources: s.cfg.AISources, primary: s.cfg.AIDefaultSource}
+	}
 	switch s.cfg.LLMBackend {
 	case "anthropic":
 		return s.newAnthropicBackend()
@@ -101,6 +104,9 @@ func (s *Server) otherChatBackends() []ollama.Backend {
 // full menu. A server that can't be reached is skipped rather than fatal — only
 // all configured backends failing is an error.
 func (s *Server) chatModels(ctx context.Context) ([]string, error) {
+	if len(s.cfg.AISources) > 0 {
+		return s.newChatBackend().ListModels(ctx)
+	}
 	backends := append([]ollama.Backend{s.newChatBackend()}, s.otherChatBackends()...)
 	type answer struct {
 		models []string
@@ -138,8 +144,11 @@ func (s *Server) chatModels(ctx context.Context) ([]string, error) {
 // single picker route each choice to the right server. An empty model means "the
 // default", which is the configured primary.
 func (s *Server) chatBackendFor(model string) ollama.Backend {
+	if len(s.cfg.AISources) > 0 {
+		return s.newChatBackend()
+	}
 	if s.cfg.LLMBackend == "anthropic" {
-		if model == "" || strings.HasPrefix(model, anthropicModelPrefix) {
+		if model == "" || strings.HasPrefix(model, anthropicModelPrefix) || (s.cfg.OllamaURL == "" && s.cfg.OpenAIBaseURL == "") {
 			return s.newAnthropicBackend()
 		}
 		return s.localBackendFor(model) // a local model chosen alongside Claude

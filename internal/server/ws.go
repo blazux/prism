@@ -162,11 +162,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	os.MkdirAll(sessionPluginDir, 0755)
 
-	ollamaClient := s.newChatBackend()
+	ai, err := s.aiConfigFor(r.Context(), requestUserID(r))
+	if err != nil {
+		conn.WriteJSON(map[string]any{"type": "error", "content": err.Error()})
+		conn.Close()
+		return
+	}
+	ollamaClient := ai.newChatBackend()
 
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
-	executor.SetLLM(ollamaClient, s.cfg.Model)
-	executor.SetChatBlind(!s.cfg.ChatVision)
+	executor.SetLLM(ollamaClient, ai.cfg.Model)
+	executor.SetChatBlind(!ai.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 	if s.ragStore != nil {
 		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
@@ -263,7 +269,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		executor.SetEditor(client.editorTool)
 	}
 
-	model := s.cfg.Model
+	model := ai.cfg.Model
 
 	// Personality per identity:
 	//  - voice guest → the switchboard persona (never the owner's assistant, which
@@ -634,6 +640,25 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "chat":
 			client.cancelActive()
+			nextAI, err := s.aiConfigFor(context.Background(), requestUserID(r))
+			if err != nil {
+				client.sendJSON(map[string]any{"type": "error", "content": err.Error()})
+				continue
+			}
+			if !sameAIConfig(ai.cfg, nextAI.cfg) {
+				ai = nextAI
+				executor.SetChatBlind(!ai.cfg.ChatVision)
+				model = ai.cfg.Model
+				be := ai.newChatBackend()
+				executor.SetLLM(be, model)
+				client.ag.SetBackend(be, model)
+				client.sendJSON(map[string]any{"type": "model_set", "model": model})
+			}
+			if !s.userCanUseModel(context.Background(), client.user, model) {
+				client.sendJSON(map[string]any{"type": "error", "content": "model not allowed"})
+				continue
+			}
+
 			ctx, cancel := context.WithCancel(context.Background())
 			client.mu.Lock()
 			// Cancel previous if running
@@ -831,6 +856,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.sendJSON(map[string]interface{}{"type": "notification_deleted", "id": msg.ID})
 
 		case "set_model":
+			client.cancelActive()
 			// RBAC: refuse a model this user isn't allowed to use.
 			if !s.userCanUseModel(context.Background(), client.user, msg.Model) {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": "You are not allowed to use model " + msg.Model})
@@ -847,7 +873,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			// Route the picked model to the backend that serves it (vLLM or Ollama).
-			chatBE := s.chatBackendFor(model)
+			chatBE := ai.chatBackendFor(model)
 			executor.SetLLM(chatBE, model)
 			client.ag = agent.New(chatBE, executor, model, curMS, curPersonality)
 			client.wireApproval(client.ag)

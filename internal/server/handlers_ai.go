@@ -68,15 +68,24 @@ func (s *Server) handleAIAssist(w http.ResponseWriter, r *http.Request) {
 		user = "Instruction: " + b.Instruction + "\n\n---\n" + b.Text
 	}
 
+	ai, err := s.aiConfigFor(r.Context(), requestUserID(r))
+	if err != nil {
+		writeErr(w, 503, err.Error())
+		return
+	}
+	if !s.userCanUseModel(r.Context(), currentUser(r), ai.cfg.Model) {
+		writeErr(w, 403, "model not allowed")
+		return
+	}
 	start := time.Now()
-	log.Printf("[ai/assist] task=%q model=%q textlen=%d", b.Task, s.cfg.Model, len(b.Text))
+	log.Printf("[ai/assist] task=%q model=%q textlen=%d", b.Task, ai.cfg.Model, len(b.Text))
 
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
 	ch := make(chan ollama.StreamEvent, 200)
 	req := ollama.ChatRequest{
-		Model: s.cfg.Model,
+		Model: ai.cfg.Model,
 		Messages: []ollama.Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
@@ -87,7 +96,7 @@ func (s *Server) handleAIAssist(w http.ResponseWriter, r *http.Request) {
 		// email_triage: "done in 2m0s, 0 chars", a silent no-op in the UI.
 		NoThinking: true,
 	}
-	backend := s.newChatBackend()
+	backend := ai.newChatBackend()
 	go func() {
 		backend.Chat(ctx, req, ch)
 		close(ch)

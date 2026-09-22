@@ -4,7 +4,7 @@
 
 *Also known as: Probably Runs Interesting Stuff Magically*
 
-Yes, another AI dashboard. Except this one runs entirely on your own hardware — no cloud, no API keys, no data leaving your machine — and has the slightly unsettling property of being able to modify its own environment.
+Yes, another AI dashboard. Except this one runs on your own hardware, with local models or the AI providers you choose, and has the slightly unsettling property of being able to modify its own environment.
 
 <img src="gui.png" width="700" alt="PRISM dashboard">
 
@@ -32,18 +32,9 @@ Is this a great idea? Probably. Does it make you slightly nervous? It should. Th
 
 ## Quick start
 
-Three things and you're in: a model server, a `.env`, and `docker compose up`.
+Docker + Docker Compose are the only host requirements. Use a local model server or an API provider; the AI connection is configured in the interface.
 
-**1. Have a model server.** The default is [Ollama](https://ollama.com), local or on another box, with a chat model and an embedding model pulled:
-
-```bash
-ollama pull qwen3.6:27b          # chat — anything with tool calling works
-ollama pull qwen3-embedding:8b   # embeddings, for the knowledge base
-```
-
-Not on Ollama? vLLM, LM Studio, llama.cpp or Claude all work too — see [Choosing your backend](#choosing-your-backend) below and come back.
-
-**2. Configure.**
+**1. Install.**
 
 ```bash
 git clone https://github.com/blazux/prism
@@ -51,96 +42,53 @@ cd prism
 cp .env.example .env
 ```
 
-Open `.env` and set the three lines that matter — everything else works out of the box:
+Set `PRISM_TOKEN` in `.env` to protect access to your dashboard, and adjust `TZ` if needed. The remaining values in `.env.example` can stay as they are for the standard Docker Compose installation. You do not need to configure models or AI keys in this file.
 
-```dotenv
-OLLAMA_URL=http://host-gateway:11434   # host-gateway = the machine running Docker
-OLLAMA_MODEL=qwen3.6:27b
-EMBED_MODEL=qwen3-embedding:8b
-```
-
-Set `TZ` to your timezone while you're there, and `PRISM_TOKEN` if anyone but you can reach the port.
-
-**3. Run.**
+**2. Start Prism.**
 
 ```bash
 docker compose up -d
 ```
 
-Open [http://localhost:48080](http://localhost:48080), type your `PRISM_TOKEN` if you set one, and say hi. The first message takes a moment — the model is loading. Something off? [First run & troubleshooting](#first-run--troubleshooting) has the usual suspects.
+PostgreSQL (pgvector), SearXNG and Traefik are included. Open [http://localhost:48080](http://localhost:48080) and sign in with your token.
 
-> Docker + Docker Compose are the only host requirements. PostgreSQL (pgvector), SearXNG and Traefik are bundled in the compose file — nothing else to install.
+**3. Connect your first model.**
 
----
+Open **Settings → AI provider**:
+
+1. Select a source or click **+ Add a source**. Choose **OpenAI**, **Anthropic**, **Ollama** or **Other compatible** (vLLM, SGLang, llama.cpp…). OpenAI and Anthropic have preset URLs; for a local or compatible server, enter its URL and a key if required.
+2. Click **Load models**, select or enter a model that supports tool calling, then **Test model**. Local models must already be installed on your model server.
+3. Click **Use as default** for the source you want, check **Default model supports vision** if applicable, then **Save changes**. You can now talk to the agent.
+
+For Ollama running on the Docker host, use `http://host-gateway:11434`; for an OpenAI-compatible server, include `/v1` in its URL. `localhost` inside the Prism container refers to that container, not your host.
+
+In multi-user mode, AI configuration belongs in **Admin → AI provider**, managed by the global administrator.
+
+### The documentation is the agent
+
+Once your first model is connected, **just ask the agent**. It has Prism's built-in documentation and tools to help configure the app, add other AI sources, choose models and set up embeddings. For example:
+
+- “Help me add another model provider.”
+- “Configure embeddings so I can search my documents.”
+- “How do I connect my mailbox?”
+
+Enter credentials through the secure settings form or the secret prompt the agent opens, rather than pasting keys into chat.
 
 ## Choosing your backend
 
-Prism speaks three dialects. Pick one as the default with `LLM_BACKEND`, or configure several — every model from every configured backend shows up in the same picker, and each message goes to the server that holds the model you chose.
+You can keep several AI sources configured at once, including several servers of the same type. Choose a default source/model for conversations and app actions; the chat model picker also offers models from the other sources. Each source has its own connection and credential.
 
-| | **Ollama** (default) | **OpenAI-compatible** | **Anthropic / Claude** |
-|---|---|---|---|
-| Talks to | Ollama | vLLM, SGLang, TGI, LM Studio, llama.cpp, LiteLLM, OpenRouter… | api.anthropic.com |
-| Chat + tools | ✅ | ✅ | ✅ |
-| Embeddings (RAG) | ✅ | ✅ if the server exposes `/v1/embeddings` — else `EMBED_BACKEND=ollama` | ❌ — RAG stays on Ollama automatically |
-| Vision (looks at widgets) | ✅ with a vision model | ✅ with a vision model | ✅ |
-| Reasoning on/off toggle | ✅ | ✅ (`enable_thinking`) | — never requested |
-| Runs on your hardware | ✅ | ✅ (or not, your call) | ❌ |
-| Costs | electricity | electricity | **tokens** — see below |
+For document search, the **Embeddings** section lets you reuse the default source with **Use same provider**, select another existing source, or enter a dedicated connection. Choose an embedding model and click **Test embeddings**. Anthropic does not provide an embedding endpoint, so choose another source for that part.
 
-### Ollama — the everyday setup
+After saving embedding changes, restart the server to apply them:
 
-```dotenv
-OLLAMA_URL=http://host-gateway:11434
-OLLAMA_MODEL=qwen3.6:27b
-EMBED_MODEL=qwen3-embedding:8b
+```bash
+docker compose restart prism-server
 ```
 
-That's the whole thing. `host-gateway` resolves to the Docker host; use a plain URL for a remote box.
+Changing the embedding model or endpoint requires confirming the index rebuild in the form. Prism rebuilds from stored text; there is no need to upload your documents again. The agent can guide you through this too.
 
-### OpenAI-compatible — your own inference server
-
-```dotenv
-LLM_BACKEND=openai
-OPENAI_BASE_URL=http://host-gateway:8000/v1   # the /v1 root
-OPENAI_MODEL=qwen                             # the server's --served-model-name
-# OPENAI_API_KEY=                             # only if the server asks for one
-EMBED_MODEL=qwen3-embedding:8b
-# EMBED_BACKEND=ollama                        # if the server has no /v1/embeddings
-```
-
-Chat-only servers are common (a 120B on vLLM rarely bothers with embeddings) — keep `OLLAMA_URL` set and `EMBED_BACKEND=ollama` and RAG carries on quietly over there. Heavy reasoners (gpt-oss and friends) get `reasoning_effort=medium` by default so they don't spend the whole token budget thinking and forget to answer; `OPENAI_REASONING_EFFORT=low|high|xhigh|none` overrides it, and each user can pick their own in **Settings → Agent → Turn budget** (a group admin sets it for the shared agent in the admin console). The set a model accepts varies — Qwen3.8-Flash-Next takes `low|medium|xhigh`. Behind LiteLLM, note that `drop_params: true` silently strips `reasoning_effort`: add `allowed_openai_params: ["reasoning_effort"]` to that route's `litellm_params`.
-
-### Anthropic — Claude, for when local isn't enough
-
-```dotenv
-ANTHROPIC_API_KEY=sk-ant-api03-…
-# ANTHROPIC_MODEL=claude-sonnet-5     # the default if you make it LLM_BACKEND=anthropic
-```
-
-You don't have to make Claude the default. Set the key alongside your local backend and its models simply join the picker: local model for daily driving, Claude for the hard stuff, switched per message. Only the messages where you pick Claude are billed. Embeddings stay on Ollama (Anthropic serves none), so keep `OLLAMA_URL` and `EMBED_MODEL` set.
-
-> **On the subject of billing.** Prism is an *agent*, not a chatbot. A single "check my server and fix the disk alert" is fifteen model calls, each one carrying the system prompt, the tool schemas, the conversation so far and whatever `ls -la` returned. Now multiply by a widget-building session and a cron job that runs every hour. Claude is excellent at this, and it will bill you for every token of that excellence — with the same cheerful thoroughness it applies to everything else. Set a spending limit on console.anthropic.com *before* the first "make me a dashboard", not after the invoice. A local model is slower and dumber and costs you nothing per iteration; that trade-off is the whole reason the picker exists.
-
-<details>
-<summary><b>Why a Claude Pro/Max subscription won't work (and this is deliberate)</b></summary>
-
-The OAuth token the `claude` CLI stores does authenticate, and plain chat runs on it — but Anthropic classifies a tool-bearing request from anything that isn't Claude Code as a third-party app and bills it against *extra usage* rather than plan limits, so the agent loop is refused. The refusal is intermittent and no model or setting avoids it ([hermes-agent#31668](https://github.com/NousResearch/hermes-agent/issues/31668) is the same wall from the other side, closed with no fix). Prism is an agent, so a brain that drops tool calls at random is worse than no brain: it was implemented, measured, and taken out rather than shipped as a trap. Paste that token into `ANTHROPIC_API_KEY` and Prism tells you why it won't work instead of letting Anthropic answer `401`.
-
-</details>
-
-### All of them at once
-
-```dotenv
-LLM_BACKEND=ollama                          # the default brain
-OLLAMA_URL=http://host-gateway:11434
-OLLAMA_MODEL=qwen3.6:27b
-EMBED_MODEL=qwen3-embedding:8b
-OPENAI_BASE_URL=http://gpu-box:8000/v1      # the heavyweight
-OPENAI_MODEL=qwen3-235b
-ANTHROPIC_API_KEY=sk-ant-api03-…            # the expensive one
-```
-
-One picker, three servers, per-message choice. Webhooks and rooms can each pin their own model too.
+The `.env` AI settings remain available as server defaults for existing installations. The interface takes precedence once saved; **Use server settings** restores those defaults.
 
 ---
 
@@ -271,9 +219,14 @@ Prism keeps a memory of who you are and how you work, records lessons from probl
 
 ## Configuration
 
-Everything is an environment variable, set in `.env` (the annotated [`.env.example`](.env.example) follows the same sections). Docker Compose reads it on `up`.
+Use **Settings** for everyday configuration, or ask the agent. In multi-user mode, deployment-wide AI settings are in **Admin → AI provider**.
 
-### Required
+The `.env` file supplies installation settings and optional AI defaults. Docker Compose reads it on `up`; the standard values are provided in [`.env.example`](.env.example).
+
+<details>
+<summary>Environment reference for existing or custom installations</summary>
+
+### Optional model defaults
 
 | Variable | What | Example |
 |---|---|---|
@@ -310,7 +263,7 @@ Everything is an environment variable, set in `.env` (the annotated [`.env.examp
 | `SERVICE_PORT_START` / `_END` | Host port range for agent-launched containers | `20000–20999` |
 | `AGENT_CONTAINER`, `WORKSPACE_DIR`, `PLUGIN_DIR` | Internal Docker plumbing — leave alone | set |
 
-Things that aren't env vars — the agent's name and personality, its **turn budget** (max iterations per message, reasoning on/off), integrations, webhooks — live in **Settings** and change without a restart.
+</details>
 
 ---
 
@@ -321,12 +274,12 @@ Things that aren't env vars — the agent's name and personality, its **turn bud
 - **Replies come back empty or cut off on a reasoning model.** It spent the whole budget thinking. Lower the reasoning effort in **Settings → Agent** (or `OPENAI_REASONING_EFFORT`), or switch reasoning off there.
 - **Reasoning effort has no effect behind LiteLLM.** `drop_params: true` strips `reasoning_effort` before it reaches the model — add `allowed_openai_params: ["reasoning_effort"]` to the route's `litellm_params`.
 - **"Iteration limit reached".** The agent hit its per-message cap on a long task — not a bug, a budget. Raise it in **Settings → Agent → Turn budget** (default 75, up to 500), or just say "continue".
-- **Widget previews look wrong / the agent says it can't see.** Text-only chat model: set `CHAT_VISION=false` and optionally `VISION_MODEL` to a small vision model for captions.
-- **You changed `EMBED_MODEL`.** The vector dimension is fixed per table. Prism refuses initialization if the configured model has a different dimension. Restore the previous `EMBED_MODEL`, or back up your database and rebuild only the RAG index before re-indexing your documents. Do not remove the workspace volume or the whole database.
+- **Widget previews look wrong / the agent says it can't see.** Choose a vision-capable model and check **Default model supports vision** in **AI provider**. Ask the agent for help with your model's capabilities.
+- **You changed the embedding model.** Test and save it in **AI provider**, confirm the index rebuild, then restart `prism-server`. Document search is unavailable during rebuilding; a failed rebuild retains the original index. Do not delete your volumes.
 - **Upgrading.** `docker compose pull && docker compose up -d` (or `--build` if you build locally). Schema migrations run at start, nothing to do — [docs/UPGRADING.md](docs/UPGRADING.md) is the contract.
 - **Timezone.** `TZ` accepts IANA names; for a fixed offset use `Etc/GMT+4` — POSIX inverts the sign, so that's UTC-4.
 
-More on daily use in [docs/help/](docs/help/) — it's also the built-in help inside the app.
+For daily use, just ask the agent — its built-in documentation also lives in [docs/help/](docs/help/).
 
 ---
 

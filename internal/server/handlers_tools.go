@@ -20,7 +20,12 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	models, err := s.chatModels(ctx)
+	ai, err := s.aiConfigFor(ctx, requestUserID(r))
+	if err != nil {
+		writeErr(w, 503, err.Error())
+		return
+	}
+	models, err := ai.chatModels(ctx)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{"models": []string{}, "error": err.Error()})
 		return
@@ -32,14 +37,25 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if set, unrestricted := s.platformAllowedModels(ctx); !unrestricted {
 		kept := models[:0]
 		for _, m := range models {
-			if set[m] {
+			if modelInSet(set, m) {
 				kept = append(kept, m)
 			}
 		}
 		models = kept
 	}
 	models = s.filterModelsForUser(ctx, u, models)
-	json.NewEncoder(w).Encode(map[string]interface{}{"models": models})
+	labels := map[string]string{}
+	for _, m := range models {
+		if id, raw, ok := strings.Cut(m, "::"); ok {
+			for _, src := range ai.cfg.AISources {
+				if src.ID == id {
+					labels[m] = src.Name + " · " + raw
+					break
+				}
+			}
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"models": models, "labels": labels})
 }
 
 func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
@@ -217,8 +233,17 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
 	executor.SetRawResults(true) // the result is data for a widget/script, not context for the model
-	executor.SetLLM(s.newChatBackend(), s.cfg.Model)
-	executor.SetChatBlind(!s.cfg.ChatVision)
+	ai, err := s.aiConfigFor(r.Context(), requestUserID(r))
+	if err != nil {
+		writeErr(w, 503, err.Error())
+		return
+	}
+	if !s.userCanUseModel(r.Context(), currentUser(r), ai.cfg.Model) {
+		writeErr(w, 403, "model not allowed")
+		return
+	}
+	executor.SetLLM(ai.newChatBackend(), ai.cfg.Model)
+	executor.SetChatBlind(!ai.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 	if s.ragStore != nil {
 		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)

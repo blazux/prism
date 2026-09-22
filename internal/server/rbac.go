@@ -146,7 +146,7 @@ func (s *Server) userCanUseModel(ctx context.Context, u *memory.User, model stri
 	if u == nil || u.IsGlobalAdmin() || model == "" {
 		return true
 	}
-	if set, unrestricted := s.platformAllowedModels(ctx); !unrestricted && !set[model] {
+	if set, unrestricted := s.platformAllowedModels(ctx); !unrestricted && !modelInSet(set, model) {
 		return false
 	}
 	ms := s.store()
@@ -157,7 +157,7 @@ func (s *Server) userCanUseModel(ctx context.Context, u *memory.User, model stri
 	if err != nil || unrestricted {
 		return true
 	}
-	return set[model]
+	return modelInSet(set, model)
 }
 
 // ragScopeFor returns the RAG tenant scope for a user: their primary group
@@ -243,7 +243,7 @@ func (s *Server) filterModelsForUser(ctx context.Context, u *memory.User, models
 	}
 	out := make([]string, 0, len(models))
 	for _, m := range models {
-		if set[m] {
+		if modelInSet(set, m) {
 			out = append(out, m)
 		}
 	}

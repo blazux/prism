@@ -17,7 +17,7 @@ func TestHelpDocsCoverSettingsTabsAndAdminPanes(t *testing.T) {
 	docs := strings.ToLower(readAllHelpDocs(t))
 
 	settingsLabels := map[string]string{
-		"agent": "Agent", "appearance": "Appearance", "calendar": "Calendar", "channels": "Channels",
+		"ai": "AI provider", "agent": "Agent", "appearance": "Appearance", "calendar": "Calendar", "channels": "Channels",
 		"email": "Email", "knowledge": "Knowledge", "mcp": "MCP", "notes": "Notes", "profile": "Profile",
 		"secrets": "Secrets", "tools": "Tools", "webhooks": "Webhooks",
 	}
@@ -37,7 +37,7 @@ func TestHelpDocsCoverSettingsTabsAndAdminPanes(t *testing.T) {
 	}
 
 	adminLabels := map[string]string{
-		"users": "Users", "groups": "Groups", "tools": "Global tool policy", "usage": "Usage", "logs": "Logs",
+		"ai": "AI provider", "users": "Users", "groups": "Groups", "tools": "Global tool policy", "usage": "Usage", "logs": "Logs",
 		"platform": "Apps", "telephony": "Telephony", "agent": "Shared agent", "rag": "knowledge base",
 		"mcp": "MCP servers", "secrets": "Group secrets", "access": "Group tool access",
 	}

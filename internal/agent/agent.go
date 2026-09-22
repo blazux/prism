@@ -1571,3 +1571,10 @@ func (a *Agent) emitToolSideEffects(toolName string, rawArgs json.RawMessage, ev
 		}
 	}
 }
+
+// SetBackend changes chat routing between turns. The caller must first cancel
+// and await any active turn; conversation history and context hooks survive.
+func (a *Agent) SetBackend(backend ollama.Backend, model string) {
+	a.ollama = backend
+	a.model = model
+}

@@ -1651,10 +1651,15 @@ window.toggleTerm = toggleTerm
 
 
 // ─── Unread mail badge on the rail Email icon ────────────────────────────────────
+let mailBadgeGeneration = 0
 async function refreshMailBadge() {
+  const generation = ++mailBadgeGeneration
   if (DISABLED_APPS.has('email')) return
   try {
-    const { count } = await (await fetch('/api/email/unread')).json()
+    const response = await fetch('/api/email/unread', { cache: 'no-store' })
+    if (!response.ok) return
+    const { count } = await response.json()
+    if (generation !== mailBadgeGeneration || DISABLED_APPS.has('email')) return
     const iconEl = document.querySelector('.rail-item[data-app="email"] .rail-icon')
     if (!iconEl) return
     let b = iconEl.querySelector('.rail-badge')
@@ -1967,7 +1972,7 @@ async function loadModels() {
     sel.innerHTML = ''
     for (const m of (data.models || [])) {
       const opt = document.createElement('option')
-      opt.value = m; opt.textContent = m
+      opt.value = m; opt.textContent = data.labels?.[m] || m
       sel.appendChild(opt)
     }
     if (current) sel.value = current

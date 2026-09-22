@@ -1,0 +1,31 @@
+/* Shared by Settings and Admin; use the same surfaces and rhythm as Agent. */
+.ai-settings { max-width: 620px; color: var(--text); font-size: 13px; }
+.ai-settings [hidden] { display: none !important; }
+.ai-settings .ai-section { margin-bottom: 24px; }
+.ai-settings .config-cat-header { margin-bottom: 14px; }
+.ai-settings .ai-hint { color: var(--text3); font-size: 11.5px; line-height: 1.5; margin: 6px 0 14px; }
+.ai-settings .ai-field { display: flex; flex-direction: column; gap: 5px; margin: 0 0 14px; color: var(--text2); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.ai-settings .ai-field input, .ai-settings .ai-field select { box-sizing: border-box; width: 100%; min-width: 0; background: var(--bg2); color: var(--text); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; font-weight: 400; letter-spacing: normal; text-transform: none; outline: none; }
+.ai-settings .ai-field input:focus, .ai-settings .ai-field select:focus { border-color: var(--accent); }
+.ai-settings .ai-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; background: var(--bg1); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; }
+.ai-settings .ai-row-title { font-size: 13px; font-weight: 600; }
+.ai-settings .ai-row .ai-hint { margin: 3px 0 0; }
+.ai-settings .toggle-switch { margin: 0; flex-shrink: 0; }
+.ai-settings .ai-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 12px; }
+.ai-settings .ai-button { padding: 7px 12px; border: 1px solid var(--border2); border-radius: 7px; background: var(--bg2); color: var(--text2); font: inherit; font-size: 12px; cursor: pointer; }
+.ai-settings .ai-button:hover { color: var(--text); border-color: var(--accent); }
+.ai-settings .ai-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.ai-settings button:disabled { opacity: .5; cursor: wait; }
+.ai-settings .ai-status { min-height: 18px; font-size: 12px; line-height: 1.5; color: var(--text2); overflow-wrap: anywhere; }
+.ai-settings .ai-status.error { color: var(--red); }
+.ai-settings .ai-footer { border-top: 1px solid var(--border); padding-top: 16px; }
+.ai-settings .ai-check { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text2); margin: 10px 0; }
+.ai-settings .ai-check input { width: auto; margin: 2px 0 0; accent-color: var(--accent); }
+@media (max-width: 600px) { .ai-settings-page { padding: 16px !important; } }
+
+.ai-settings .ai-sources { display: grid; gap: 6px; margin-bottom: 10px; }
+.ai-settings .ai-source { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 9px 11px; text-align: left; font: inherit; background: var(--bg1); border: 1px solid var(--border); border-radius: 8px; color: var(--text); cursor: pointer; }
+.ai-settings .ai-source.selected { border-color: var(--accent); background: var(--bg2); }
+.ai-settings .ai-source span { font-size: 11px; color: var(--text3); overflow-wrap: anywhere; }
+.ai-settings .ai-source-editor { padding: 12px; margin: 12px 0; border: 1px solid var(--border); border-radius: 10px; }
+.ai-settings .ai-source-editor .ai-field:last-child { margin-bottom: 0; }
