@@ -55,7 +55,7 @@ func (e *ToolExecutor) listUIPlugins() (string, error) {
 			continue
 		}
 		id := strings.TrimSuffix(fname, ".meta.json")
-		b, err := os.ReadFile(filepath.Join(e.pluginDir, fname))
+		b, err := e.readManagedFile(filepath.Join(e.pluginDir, fname))
 		if err != nil {
 			continue
 		}
@@ -90,7 +90,7 @@ func (e *ToolExecutor) existingWidgetsHint() string {
 		}
 		id := strings.TrimSuffix(fname, ".meta.json")
 		var m pluginMeta
-		if b, err := os.ReadFile(filepath.Join(e.pluginDir, fname)); err == nil {
+		if b, err := e.readManagedFile(filepath.Join(e.pluginDir, fname)); err == nil {
 			json.Unmarshal(b, &m)
 		}
 		parts = append(parts, fmt.Sprintf("%s (%q)", id, m.Title))
@@ -238,7 +238,7 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 	}
 
 	metaPath := filepath.Join(e.pluginDir, id+".meta.json")
-	if data, err := os.ReadFile(metaPath); err == nil {
+	if data, err := e.readManagedFile(metaPath); err == nil {
 		var existing pluginMeta
 		if err := json.Unmarshal(data, &existing); err != nil {
 			return "", nil, fmt.Errorf("corrupt widget meta: %w", err)
@@ -253,12 +253,12 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 	pluginPath := filepath.Join(e.pluginDir, id+".html")
 	_, statErr := os.Stat(pluginPath)
 	replaced := statErr == nil // same title → same id → silent clobber unless we say so
-	if err := os.WriteFile(pluginPath, []byte(content), 0644); err != nil {
+	if err := e.writeManagedFile(pluginPath, []byte(content)); err != nil {
 		return "", nil, fmt.Errorf("write plugin: %w", err)
 	}
 
 	meta, _ := json.Marshal(pluginMeta{Title: title, Cols: cols, Height: height})
-	if err := os.WriteFile(metaPath, meta, 0644); err != nil {
+	if err := e.writeManagedFile(metaPath, meta); err != nil {
 		return "", nil, fmt.Errorf("write widget meta: %w", err)
 	}
 
@@ -283,7 +283,7 @@ func (e *ToolExecutor) updateUIPlugin(ctx context.Context, id, title, content st
 	metaPath := filepath.Join(e.pluginDir, id+".meta.json")
 	htmlPath := filepath.Join(e.pluginDir, id+".html")
 
-	b, err := os.ReadFile(metaPath)
+	b, err := e.readManagedFile(metaPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("widget '%s' not found. %s", id, e.existingWidgetsHint())
 	}
@@ -306,16 +306,16 @@ func (e *ToolExecutor) updateUIPlugin(ctx context.Context, id, title, content st
 	}
 
 	meta, _ := json.Marshal(m)
-	if err := os.WriteFile(metaPath, meta, 0644); err != nil {
+	if err := e.writeManagedFile(metaPath, meta); err != nil {
 		return "", nil, fmt.Errorf("write meta: %w", err)
 	}
 
 	if content != "" {
-		if err := os.WriteFile(htmlPath, []byte(content), 0644); err != nil {
+		if err := e.writeManagedFile(htmlPath, []byte(content)); err != nil {
 			return "", nil, fmt.Errorf("write content: %w", err)
 		}
 	} else {
-		existing, _ := os.ReadFile(htmlPath)
+		existing, _ := e.readManagedFile(htmlPath)
 		content = string(existing)
 	}
 
@@ -337,7 +337,7 @@ func (e *ToolExecutor) removeUIPlugin(id string) (string, error) {
 		return "", fmt.Errorf("widget '%s' does not exist. %s", id, e.existingWidgetsHint())
 	}
 
-	if b, err := os.ReadFile(metaPath); err == nil {
+	if b, err := e.readManagedFile(metaPath); err == nil {
 		var m pluginMeta
 		if json.Unmarshal(b, &m) == nil && m.Locked {
 			return "", fmt.Errorf("widget '%s' is locked by the user and cannot be removed", id)
@@ -386,7 +386,7 @@ func widgetDataRefs(html string) map[string]bool {
 // path to work); detecting whether some tool/cron job still WRITES to it is
 // not attempted here — the note just tells the user to check.
 func (e *ToolExecutor) orphanedDataNote(removedID, removedHTMLPath string) string {
-	html, err := os.ReadFile(removedHTMLPath)
+	html, err := e.readManagedFile(removedHTMLPath)
 	if err != nil {
 		return ""
 	}
@@ -404,7 +404,7 @@ func (e *ToolExecutor) orphanedDataNote(removedID, removedHTMLPath string) strin
 		if name == removedID+".html" || !strings.HasSuffix(name, ".html") {
 			continue
 		}
-		other, err := os.ReadFile(filepath.Join(e.pluginDir, name))
+		other, err := e.readManagedFile(filepath.Join(e.pluginDir, name))
 		if err != nil {
 			continue
 		}

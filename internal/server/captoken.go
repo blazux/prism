@@ -130,6 +130,9 @@ func hmacSum(key []byte, msg string) []byte {
 // unapproved account yields nil (denied).
 func (s *Server) userForCapToken(ctx context.Context, uid int64) *memory.User {
 	if uid == 0 {
+		if s.cfg.MultiUser {
+			return nil
+		} // group principals require the signed session
 		return serviceUser
 	}
 	ms := s.store()

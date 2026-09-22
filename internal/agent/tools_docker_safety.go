@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -39,16 +40,18 @@ type composeService struct {
 
 // validateComposeSafety parses the compose file at hostPath and returns a
 // model-readable error if any service asks for host-level privilege. A parse
-// failure is not fatal here — docker will report a malformed file far more
-// precisely than we can, so we only block on privilege we positively recognise.
+// failure blocks execution: an unchecked document must never reach the daemon.
 func validateComposeSafety(hostPath string) error {
 	data, err := os.ReadFile(hostPath)
 	if err != nil {
-		return nil // let docker compose surface the read/parse error itself
+		return fmt.Errorf("cannot read compose file: %w", err)
+	}
+	if err := validateComposeDocument(data, filepath.Dir(hostPath)); err != nil {
+		return fmt.Errorf("%w — remove it and run docker_compose up again", err)
 	}
 	var cf composeFile
 	if yaml.Unmarshal(data, &cf) != nil {
-		return nil
+		return fmt.Errorf("invalid compose service settings")
 	}
 	for name, svc := range cf.Services {
 		if err := svc.unsafeReason(); err != nil {
@@ -131,5 +134,5 @@ func bindHostSource(v interface{}) string {
 // an absolute path or ~ reaches the host filesystem.
 func isHostPath(src string) bool {
 	src = strings.TrimSpace(src)
-	return strings.HasPrefix(src, "/") || strings.HasPrefix(src, "~")
+	return strings.HasPrefix(src, "/") || strings.HasPrefix(src, "~") || filepath.Clean(src) == ".." || strings.HasPrefix(filepath.Clean(src), "../")
 }

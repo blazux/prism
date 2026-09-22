@@ -9,14 +9,14 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "docker_run",
-			Description: "Start a Docker service container. A host port is auto-allocated and http://<name>.localhost/ is configured via Traefik — use that URL for iframes and API calls in widgets (see Docker service networking in the system prompt). Prefer this over apt/pip installs for anything that has a Docker image.",
+			Description: "Start a Docker service container. A port is auto-allocated on the configured Docker backend. Use the widget and script URLs returned by this tool (they depend on the deployment). Prefer this over apt/pip installs for anything that has a Docker image.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
 					"image":       {Type: "string", Description: "Docker image to run (e.g. 'jgraph/drawio')"},
 					"name":        {Type: "string", Description: "Short service name, letters/digits/hyphens only (e.g. 'drawio'). Container will be named prism-svc-<name>."},
 					"port":        {Type: "integer", Description: "Primary port the service listens on inside the container (e.g. 3000 for the UI)"},
-					"extra_ports": {Type: "array", Description: "Additional internal ports to expose (e.g. [9090, 8080] for metrics or API). Each gets its own auto-allocated host port."},
+					"extra_ports": {Type: "array", Description: "Additional internal ports to expose (e.g. [9090, 8080] for metrics or API). Each gets its own auto-allocated published port."},
 					"env":         {Type: "object", Description: "Optional environment variables as key/value pairs"},
 					"command":     {Type: "string", Description: "Optional command to override the image's default entrypoint (e.g. 'tail -f /dev/null' to keep a CLI image alive, or 'nginx -g daemon off;'). Leave empty to use the image default."},
 					"volumes":     {Type: "array", Description: "Ignored — the workspace (/workspace) is automatically available inside every service container via --volumes-from."},

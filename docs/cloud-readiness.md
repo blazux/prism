@@ -4,7 +4,7 @@ Ordre demandé : compléter les fonctionnalités de Prism, puis écrire la recet
 
 ## Configuration IA du produit Prism
 
-Implémenté dans le code et couvert par des tests ; validation visuelle et en usage à effectuer :
+Implémenté dans le code et couvert par des tests ; utilisé et déployé sur l’instance locale. Cela ne valide pas le BYOK Cloud personnel :
 
 - Settings → AI provider en mono-user ; Admin → AI provider pour l’administrateur global en multi-user. OpenAI/Anthropic avec URL préconfigurée, Ollama et Other compatible avec URL explicite.
 - Profil de déploiement enregistré atomiquement dans un secret chiffré.
@@ -33,3 +33,7 @@ Ce réglage global du mode multi-user existant ne représente pas le BYOK par co
 Écrire la recette dans Prism Cloud avec versions épinglées, réseaux, volumes, limites, migrations, sauvegardes/restauration et tests d'acceptation. La tester dans un environnement isolé avant toute installation sur le VPS.
 
 Abonnements et facturation exclus de la bêta. Ce premier lot ne constitue ni une architecture distribuée achevée ni une validation d'isolation pour une ouverture publique.
+
+## État des lieux du 22 septembre 2026
+
+La [checklist alpha](../../Prism%20Cloud/docs/09-alpha-readiness.md) relie le code actuel aux critères d’ouverture et fixe la première tranche : deux propriétaires dans un même serveur mutualisé. Les correctifs de sécurité locaux sont testés et déployés ; la résolution Cloud, le provisionnement et la coordination distribuée restent à implémenter. Aucun déploiement Cloud n’a été réalisé.

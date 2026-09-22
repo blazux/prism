@@ -17,6 +17,7 @@ EXPOSE 8080
 
 ENV PORT=8080
 ENV WORKSPACE_DIR=/workspace
+ENV SECRET_KEY_PATH=/var/lib/prism/secret.key
 ENV OLLAMA_URL=http://ollama:11434
 ENV OLLAMA_MODEL=qwen3.6:27b
 ENV AGENT_CONTAINER=prism-workspace

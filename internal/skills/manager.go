@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"prism/internal/workspace"
 	"sort"
 	"strings"
 )
@@ -57,19 +58,16 @@ func (m *Manager) Save(s Skill) error {
 	if strings.TrimSpace(s.Body) == "" {
 		return fmt.Errorf("skill body is required")
 	}
-	if err := os.MkdirAll(m.dir, 0755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.path(s.Name), b, 0644)
+	return workspace.WriteFile(filepath.Dir(m.dir), filepath.Join(filepath.Base(m.dir), sanitize(s.Name)+".json"), b)
 }
 
 // Get returns a single skill by name.
 func (m *Manager) Get(name string) (Skill, bool, error) {
-	b, err := os.ReadFile(m.path(name))
+	b, err := workspace.ReadFile(filepath.Dir(m.dir), filepath.Join(filepath.Base(m.dir), sanitize(name)+".json"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Skill{}, false, nil
@@ -97,7 +95,7 @@ func (m *Manager) List() ([]Skill, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(m.dir, e.Name()))
+		b, err := workspace.ReadFile(filepath.Dir(m.dir), filepath.Join(filepath.Base(m.dir), e.Name()))
 		if err != nil {
 			continue
 		}

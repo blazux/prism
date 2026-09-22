@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"prism/internal/workspace"
 	"strings"
 	"time"
 
@@ -115,10 +116,9 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			return "", fmt.Errorf("source_path escapes workspace")
 		}
 
-		if st, serr := os.Stat(fullPath); serr == nil && st.IsDir() {
+		if entries, dirErr := workspace.ReadDir(e.workspaceDir, sourcePath); dirErr == nil {
 			// A folder is the natural first guess; teach the one-file-per-call rule
 			// with the actual file names instead of a bare "is a directory".
-			entries, _ := os.ReadDir(fullPath)
 			var names []string
 			for _, en := range entries {
 				if !en.IsDir() {
@@ -130,7 +130,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			}
 			return fmt.Sprintf("%s is a directory — rag_ingest takes ONE file per call. Files in it: %s. Ingest them one at a time into the same collection.", sourcePath, strings.Join(names, ", ")), nil
 		}
-		data, err := os.ReadFile(fullPath)
+		data, err := workspace.ReadFile(e.workspaceDir, sourcePath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return e.notFoundHint(sourcePath, fullPath).Error(), nil // teach: siblings + closest name
@@ -147,6 +147,17 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 
 		fileExt := strings.ToLower(filepath.Ext(fullPath))
 
+		// Parsers reopen their input, so give them a private snapshot rather
+		// than a path the executing agent can replace with a symlink.
+		snapshotDir, err := os.MkdirTemp("", "prism-ingest-")
+		if err != nil {
+			return "", err
+		}
+		defer os.RemoveAll(snapshotDir)
+		fullPath = filepath.Join(snapshotDir, filepath.Base(fullPath))
+		if err := os.WriteFile(fullPath, data, 0600); err != nil {
+			return "", err
+		}
 		parsePath := fullPath
 		var convertedDir string
 

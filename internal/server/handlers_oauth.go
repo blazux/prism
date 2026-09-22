@@ -9,7 +9,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"html"
 	"net/http"
+	"prism/internal/memory"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 )
 
 type oauthState struct {
+	ownerID  int64
 	provider string
 	redirect string
 	exp      time.Time
@@ -72,7 +75,7 @@ func (s *Server) handleOAuth(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 400)
 			return
 		}
-		s.oauthStates.Store(state, oauthState{provider: provider, redirect: redirect, exp: time.Now().Add(10 * time.Minute)})
+		s.oauthStates.Store(state, oauthState{ownerID: requestUserID(r), provider: provider, redirect: redirect, exp: time.Now().Add(10 * time.Minute)})
 		http.Redirect(w, r, url, http.StatusFound)
 	case "callback":
 		s.oauthCallback(w, r, provider)
@@ -120,10 +123,6 @@ func (s *Server) oauthConfig(w http.ResponseWriter, r *http.Request, provider, r
 
 func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request, provider string) {
 	q := r.URL.Query()
-	if e := q.Get("error"); e != "" {
-		oauthDonePage(w, provider, "Authorization was denied: "+e)
-		return
-	}
 	state := q.Get("state")
 	v, ok := s.oauthStates.LoadAndDelete(state)
 	if !ok {
@@ -133,6 +132,28 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request, provider 
 	st := v.(oauthState)
 	if st.provider != provider || time.Now().After(st.exp) {
 		oauthDonePage(w, provider, "Authorization expired. Please try again.")
+		return
+	}
+	// The callback has no authenticated cookie context. Recover only the owner
+	// recorded by the authenticated start request, never a request-supplied id.
+	if st.ownerID > 0 {
+		ms := s.store()
+		if ms == nil {
+			oauthDonePage(w, provider, "Account unavailable. Please sign in again.")
+			return
+		}
+		user, err := ms.GetUserByID(r.Context(), st.ownerID)
+		if err != nil || user == nil || user.Status != memory.StatusApproved {
+			oauthDonePage(w, provider, "Account unavailable. Please sign in again.")
+			return
+		}
+		r = withUser(r, user)
+	} else if s.cfg.MultiUser {
+		oauthDonePage(w, provider, "Start authorization from your own account.")
+		return
+	}
+	if q.Get("error") != "" {
+		oauthDonePage(w, provider, "Authorization was denied. Please try again.")
 		return
 	}
 	if err := oauthx.Exchange(r.Context(), s.userStore(r), provider, st.redirect, q.Get("code")); err != nil {
@@ -154,8 +175,8 @@ func oauthDonePage(w http.ResponseWriter, provider, msg string) {
 	}
 	w.Write([]byte(`<!doctype html><html><head><meta charset="utf-8"><title>Prism</title>
 <style>body{font:14px -apple-system,system-ui,sans-serif;background:#0b0d12;color:#dce0e8;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:24px}</style>
-</head><body><div><p>` + status + `</p></div>
-<script>try{window.opener&&window.opener.postMessage({type:'oauth-done',provider:'` + provider + `',ok:` + ok + `},'*')}catch(e){};setTimeout(function(){window.close()}, ` + boolPick(ok, "800", "4000") + `)</script>
+</head><body><div><p>` + html.EscapeString(status) + `</p></div>
+<script>try{window.opener&&window.opener.postMessage({type:'oauth-done',provider:` + string(mustOAuthJSON(provider)) + `,ok:` + ok + `},'*')}catch(e){};setTimeout(function(){window.close()}, ` + boolPick(ok, "800", "4000") + `)</script>
 </body></html>`))
 }
 
@@ -165,3 +186,5 @@ func boolPick(ok, a, b string) string {
 	}
 	return b
 }
+
+func mustOAuthJSON(value string) []byte { b, _ := json.Marshal(value); return b }

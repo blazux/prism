@@ -170,9 +170,17 @@ func injectWidgetTheme(html, session string) string {
 // injected; everything else (meta.json, assets) falls through to next.
 func (s *Server) servePluginHTML(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rel := strings.TrimPrefix(r.URL.Path, "/")
+		parts := strings.SplitN(rel, "/", 2)
+		if s.cfg.MultiUser {
+			if len(parts) != 2 || !s.canReadPluginSession(r, parts[0]) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
 		if strings.HasSuffix(r.URL.Path, ".html") {
-			full := filepath.Join(s.cfg.PluginDir, filepath.Clean("/"+r.URL.Path))
-			if b, err := os.ReadFile(full); err == nil {
+			rel := strings.TrimPrefix(r.URL.Path, "/")
+			if b, err := s.readGeneratedFile(s.cfg.PluginDir, rel); err == nil {
 				// The path is <session>/<id>.html; the leading segment is the
 				// session, so the injected helper can call tools/chat as this widget.
 				session := ""
@@ -189,3 +197,24 @@ func (s *Server) servePluginHTML(next http.Handler) http.Handler {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+func (s *Server) canReadPluginSession(r *http.Request, session string) bool {
+	if bound := boundSession(r); bound != "" {
+		return session == bound
+	}
+	u := currentUser(r)
+	if u == nil {
+		return false
+	}
+	if u.IsGlobalAdmin() {
+		return true
+	}
+	if u.ID > 0 && strings.HasPrefix(session, fmt.Sprintf("u%d-", u.ID)) {
+		return true
+	}
+	if scope := groupScopeFromSessionID(session); scope != "" {
+		gid, _ := strconv.ParseInt(strings.TrimPrefix(scope, "g"), 10, 64)
+		return s.userInGroup(r.Context(), u.ID, gid)
+	}
+	return false
+}

@@ -301,3 +301,33 @@ func (s *Store) AddGroupMember(ctx context.Context, groupID, userID int64, group
 	`, groupID, userID, groupRole)
 	return err
 }
+
+// RegisterUser elects the initial administrator in the same transaction as the
+// insert. Concurrent first signups must not both become global administrators.
+func (s *Store) RegisterUser(ctx context.Context, email, passwordHash, displayName string) (*User, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_schema() || ':prism-signup',0))`); err != nil {
+		return nil, err
+	}
+	var count int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&count); err != nil {
+		return nil, err
+	}
+	role, status := RoleMember, StatusPending
+	if count == 0 {
+		role, status = RoleGlobalAdmin, StatusApproved
+	}
+	u := &User{}
+	err = tx.QueryRow(ctx, `INSERT INTO users(email,password_hash,display_name,role,status) VALUES($1,$2,$3,$4,$5) RETURNING id,email,display_name,role,status,created_at`, email, passwordHash, displayName, role, status).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return u, nil
+}

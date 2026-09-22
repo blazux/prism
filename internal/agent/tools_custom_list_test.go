@@ -28,7 +28,7 @@ func TestListToolsShowsSourcePath(t *testing.T) {
 	write("my_thing.py", `# TOOL: {"name": "my_thing", "description": "does a thing"}`)
 	write("pcap.py", `# TOOL: {"name": "pcap", "description": "reads a pcap", "protected": true}`)
 
-	e := &ToolExecutor{}
+	e := &ToolExecutor{workspaceDir: filepath.Dir(dir)}
 	e.SetCustomTools(customtools.NewManager(dir), nil)
 
 	out, err := e.listTools()
@@ -56,7 +56,7 @@ func TestRegisterToolReturnsSourcePath(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	e := &ToolExecutor{}
+	e := &ToolExecutor{workspaceDir: filepath.Dir(dir)}
 	e.SetCustomTools(customtools.NewManager(dir), nil)
 
 	msg, err := e.registerTool("# TOOL: {\"name\": \"my_tool\", \"description\": \"d\"}\nprint('ok')\n")

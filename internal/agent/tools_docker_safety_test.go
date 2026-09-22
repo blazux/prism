@@ -100,11 +100,28 @@ volumes:
 		}
 	}
 
-	// Unreadable / malformed files are left for docker to report.
-	if err := validateComposeSafety(filepath.Join(t.TempDir(), "nope.yml")); err != nil {
-		t.Errorf("missing file should not error here: %v", err)
+	// Unreadable and malformed files must never reach the privileged daemon.
+	if err := validateComposeSafety(filepath.Join(t.TempDir(), "nope.yml")); err == nil {
+		t.Errorf("missing file was accepted: %v", err)
 	}
-	if err := validateComposeSafety(writeCompose(t, "::: not yaml :::")); err != nil {
-		t.Errorf("malformed yaml should not error here: %v", err)
+	if err := validateComposeSafety(writeCompose(t, "::: not yaml :::")); err == nil {
+		t.Errorf("malformed YAML was accepted: %v", err)
+	}
+}
+
+func TestComposeRejectsIndirectHostAuthority(t *testing.T) {
+	for _, body := range []string{
+		"include: [other.yaml]",
+		"services:\n  app: {image: alpine, volumes: ['../../host:/data']}",
+		"services:\n  app: {image: alpine, volumes: ['data:/data']}\nvolumes:\n  data: {driver_opts: {type: none, o: bind, device: /}}",
+		"services:\n  app: {image: alpine, volumes_from: [prism-server]}",
+		"services:\n  app: {image: alpine, privileged: '${MODE}'}",
+		"services:\n  app: {image: alpine, extends: other}",
+		"services:\n  app: {image: alpine, env_file: ../../server.env}",
+		"services:\n  app: {image: alpine, container_name: prism-server}",
+	} {
+		if err := validateComposeSafety(writeCompose(t, body)); err == nil {
+			t.Fatalf("unsafe compose accepted: %s", body)
+		}
 	}
 }

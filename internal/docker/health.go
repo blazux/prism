@@ -21,7 +21,7 @@ type ServiceHealthInfo struct {
 
 // ServiceHealth inspects a running service container and reports its state.
 func (m *Manager) ServiceHealth(ctx context.Context, name string) (ServiceHealthInfo, error) {
-	out, err := m.run(ctx, "docker", "inspect", "--format",
+	out, err := m.serviceRun(ctx, "inspect", "--format",
 		"{{.State.Running}}|{{.State.Restarting}}|{{.State.ExitCode}}|{{.RestartCount}}|{{.State.Status}}",
 		servicePrefix+name)
 	if err != nil {

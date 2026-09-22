@@ -23,10 +23,12 @@ import (
 )
 
 type Config struct {
+	DockerBackend   docker.Backend
 	AISources       []aiSource
 	AIDefaultSource string
 	Port            string
 	WorkspaceDir    string
+	SecretKeyPath   string
 	PluginDir       string
 	OllamaURL       string
 	Model           string
@@ -71,6 +73,8 @@ type Config struct {
 }
 
 type Server struct {
+	authMu          sync.Mutex
+	authWindows     map[string]authWindow
 	cfg             Config
 	docker          *docker.Manager
 	upgrader        websocket.Upgrader
@@ -101,7 +105,7 @@ func New(cfg Config) *Server {
 	customToolsDir := filepath.Join(cfg.WorkspaceDir, "agent_tools")
 	s := &Server{
 		cfg:         cfg,
-		docker:      docker.NewManager(cfg.AgentContainer, cfg.WorkspaceDir, cfg.ServicePortStart, cfg.ServicePortEnd),
+		docker:      docker.NewManager(cfg.AgentContainer, cfg.WorkspaceDir, cfg.ServicePortStart, cfg.ServicePortEnd, cfg.DockerBackend),
 		clients:     make(map[*Client]struct{}),
 		customMgr:   customtools.NewManager(customToolsDir),
 		mcpMgr:      mcp.NewManager(nil),
@@ -111,7 +115,7 @@ func New(cfg Config) *Server {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
-			CheckOrigin:     func(r *http.Request) bool { return true },
+			// Default websocket origin check permits only the request host.
 		},
 	}
 	s.initChannels()
@@ -119,6 +123,12 @@ func New(cfg Config) *Server {
 }
 
 func (s *Server) Start() error {
+	if err := s.cfg.DockerBackend.Validate(); err != nil {
+		return err
+	}
+	if s.docker.WorkspaceDocker() && !s.docker.IsDockerAvailable() {
+		return fmt.Errorf("workspace Docker unavailable: provision the internal daemon and check WORKSPACE_DOCKER_SOCKET and WORKSPACE_DOCKER_USER; no host fallback")
+	}
 	// Route the standard logger through the in-memory ring (Admin → Logs) while
 	// keeping stderr for docker logs. Error lines are persisted once the store
 	// is up (installLogRing).
@@ -126,7 +136,16 @@ func (s *Server) Start() error {
 	s.installLogRing()
 
 	// Load or generate the AES-256 encryption key for secrets.
-	encKey, err := memory.LoadOrGenerateKey(filepath.Join(s.cfg.WorkspaceDir, ".secret_key"))
+	keyPath := s.cfg.SecretKeyPath
+	if keyPath == "" {
+		keyPath = filepath.Join(filepath.Dir(s.cfg.WorkspaceDir), ".prism-private", filepath.Base(s.cfg.WorkspaceDir)+".key")
+	}
+	// Resolve an existing ancestor too, so an operator cannot accidentally place
+	// the private store back inside the shared execution volume through a link.
+	if withinResolved(s.cfg.WorkspaceDir, keyPath) {
+		return fmt.Errorf("SECRET_KEY_PATH must be outside WORKSPACE_DIR")
+	}
+	encKey, err := memory.LoadPrivateKey(keyPath, filepath.Join(s.cfg.WorkspaceDir, ".secret_key"))
 	if err != nil {
 		return fmt.Errorf("secret key: %w", err)
 	}
@@ -191,18 +210,18 @@ func (s *Server) Start() error {
 
 	// Dynamic plugin files
 	os.MkdirAll(s.cfg.PluginDir, 0755)
-	mux.Handle("/plugins/", http.StripPrefix("/plugins/", s.servePluginHTML(http.FileServer(http.Dir(s.cfg.PluginDir)))))
+	mux.Handle("/plugins/", http.StripPrefix("/plugins/", s.servePluginHTML(http.FileServer(s.generatedFS(s.cfg.PluginDir)))))
 
 	// The classic "public/static folder" pattern: workspace/data/ is served verbatim
 	// at /data/ — same name for the write path and the URL, nothing to translate.
 	dataDir := filepath.Join(s.cfg.WorkspaceDir, "data")
 	os.MkdirAll(dataDir, 0755)
-	mux.Handle("/data/", http.StripPrefix("/data/", http.FileServer(http.Dir(dataDir))))
+	mux.Handle("/data/", http.StripPrefix("/data/", http.FileServer(s.generatedFS(dataDir))))
 
 	// Browser automation screenshots — served at /screenshots/<file>
 	screenshotsDir := filepath.Join(s.cfg.WorkspaceDir, ".screenshots")
 	os.MkdirAll(screenshotsDir, 0755)
-	mux.Handle("/screenshots/", http.StripPrefix("/screenshots/", http.FileServer(http.Dir(screenshotsDir))))
+	mux.Handle("/screenshots/", http.StripPrefix("/screenshots/", http.FileServer(s.generatedFS(screenshotsDir))))
 
 	// WebSocket
 	mux.HandleFunc("/ws", s.handleWS)
@@ -320,5 +339,6 @@ func (s *Server) Start() error {
 	if s.cfg.AuthToken != "" {
 		log.Printf("Auth enabled (PRISM_TOKEN is set)")
 	}
-	return http.ListenAndServe(addr, s.withAuth(mux))
+	srv := &http.Server{Addr: addr, Handler: s.withAuth(mux), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
+	return srv.ListenAndServe()
 }

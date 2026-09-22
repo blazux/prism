@@ -9,8 +9,8 @@ package server
 //   - Service token: a request bearing `Authorization: Bearer <PRISM_TOKEN>` is
 //     treated as a synthetic global admin. The agent uses this for its own
 //     internal API self-calls (http_request tool, widget data, …).
-//   - Legacy single-token mode: if there is no database (no POSTGRES_URL), auth
-//     falls back to the old shared-token behaviour so local/dev still works.
+//   - Single-user mode retains shared-token authentication. Multi-user mode
+//     requires its database and fails closed while it is unavailable.
 
 import (
 	"context"
@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -60,6 +61,9 @@ func (s *Server) store() *memory.Store {
 // identity / legacy no-DB mode.
 func (s *Server) userStore(r *http.Request) *memory.Store {
 	ms := s.store()
+	if u := currentUser(r); u != nil && u.ID < 0 && ms != nil {
+		return ms.ConfigScope(fmt.Sprintf("g%d", -u.ID))
+	}
 	if u := currentUser(r); u != nil && u.ID > 0 {
 		return ms.ConfigScope(fmt.Sprintf("u%d", u.ID))
 	}
@@ -117,6 +121,32 @@ func (s *Server) userFromCookie(r *http.Request, ms *memory.Store) *memory.User 
 
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.allowAuthentication(r) {
+			w.Header().Set("Retry-After", "60")
+			writeErr(w, http.StatusTooManyRequests, "Too many sign-in attempts; retry in a minute.")
+			return
+		}
+		if r.Body != nil {
+			limit := int64(10 << 20)
+			if r.URL.Path == "/api/rag/upload" {
+				limit = 50 << 20
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+			if origin := r.Header.Get("Origin"); origin != "" {
+				parsed, err := url.Parse(origin)
+				if err != nil || parsed.Host != r.Host || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+					writeErr(w, http.StatusForbidden, "Cross-origin request refused")
+					return
+				}
+			} else if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+				writeErr(w, http.StatusForbidden, "Cross-site request refused")
+				return
+			}
+		}
+
 		// The one place the two modes part company. Single-user is the default and
 		// never reaches the account machinery below — see auth_singleuser.go.
 		if !s.cfg.MultiUser {
@@ -131,13 +161,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 
 		ms := s.store()
 
-		// Legacy single-token mode when there is no database.
+		// A shared deployment must never fall back to anonymous access while its
+		// database is unavailable or still starting.
 		if ms == nil {
-			if s.cfg.AuthToken == "" || bearerToken(r) == s.cfg.AuthToken || s.legacyCookieAuthed(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			s.deny(w, r)
+			writeErr(w, http.StatusServiceUnavailable, "Account database unavailable; retry shortly.")
 			return
 		}
 
@@ -154,9 +181,9 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		// one user + session, so it grants only what that member already has —
 		// never the global admin the deployment token would. See captoken.go.
 		if tok := capTokenFromRequest(r); tok != "" {
-			if uid, _, ok := s.verifyCapToken(tok); ok {
-				if u := s.userForCapToken(r.Context(), uid); u != nil {
-					next.ServeHTTP(w, withUser(r, u))
+			if uid, session, ok := s.verifyCapToken(tok); ok {
+				if scoped, allowed := s.capabilityRequest(r, uid, session); allowed {
+					next.ServeHTTP(w, scoped)
 					return
 				}
 				s.deny(w, r)
@@ -201,13 +228,15 @@ func newSessionToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
+func setSessionCookie(w http.ResponseWriter, token string, maxAge int, requests ...*http.Request) {
+	secure := len(requests) > 0 && (requests[0].TLS != nil || requests[0].Header.Get("X-Forwarded-Proto") == "https")
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    token,
 		Path:     "/",
 		MaxAge:   maxAge,
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -220,7 +249,7 @@ func (s *Server) startLoginSession(w http.ResponseWriter, r *http.Request, ms *m
 	if err := ms.CreateLoginSession(r.Context(), token, userID, time.Now().Add(sessionTTL)); err != nil {
 		return err
 	}
-	setSessionCookie(w, token, int(sessionTTL/time.Second))
+	setSessionCookie(w, token, int(sessionTTL/time.Second), r)
 	return nil
 }
 
@@ -291,25 +320,14 @@ func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		name = email
 	}
 
-	// First account bootstraps the global admin (auto-approved).
-	n, err := ms.CountUsers(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	role, status := memory.RoleMember, memory.StatusPending
-	if n == 0 {
-		role, status = memory.RoleGlobalAdmin, memory.StatusApproved
-	}
-
-	u, err := ms.CreateUser(r.Context(), email, string(hash), name, role, status)
+	u, err := ms.RegisterUser(r.Context(), email, string(hash), name)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if status == memory.StatusApproved {
+	if u.Status == memory.StatusApproved {
 		if err := s.startLoginSession(w, r, ms, u.ID); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -395,7 +413,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 			ms.DeleteLoginSession(r.Context(), c.Value)
 		}
 	}
-	setSessionCookie(w, "", -1)
+	setSessionCookie(w, "", -1, r)
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, `{"ok":true}`)
 }

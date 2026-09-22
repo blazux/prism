@@ -5,11 +5,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"prism/internal/workspace"
 	"sort"
 	"strings"
 	"time"
@@ -31,9 +31,6 @@ func (e *ToolExecutor) downloadFile(ctx context.Context, rawURL, path string) (s
 	if e.isProtectedToolPath(fullPath) {
 		return "", fmt.Errorf("%q is a tool shipped with Prism and cannot be overwritten", filepath.Base(fullPath))
 	}
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return "", fmt.Errorf("mkdir: %w", err)
-	}
 	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return "", err
@@ -49,12 +46,7 @@ func (e *ToolExecutor) downloadFile(ctx context.Context, rawURL, path string) (s
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d from %s", resp.StatusCode, rawURL)
 	}
-	f, err := os.Create(fullPath)
-	if err != nil {
-		return "", fmt.Errorf("create file: %w", err)
-	}
-	defer f.Close()
-	written, err := io.Copy(f, resp.Body)
+	written, err := workspace.Write(e.workspaceDir, NormalizeWorkspacePath(path), resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("write failed: %w", err)
 	}
@@ -114,10 +106,7 @@ func (e *ToolExecutor) writeFile(path, content string) (string, error) {
 	if e.isProtectedToolPath(fullPath) {
 		return "", fmt.Errorf("%q is a tool shipped with Prism and cannot be overwritten", filepath.Base(fullPath))
 	}
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+	if err := workspace.WriteFile(e.workspaceDir, path, []byte(content)); err != nil {
 		return "", err
 	}
 
@@ -134,7 +123,7 @@ func (e *ToolExecutor) readFile(path string) (string, error) {
 	}
 
 	fullPath := filepath.Join(e.workspaceDir, path)
-	data, err := os.ReadFile(fullPath)
+	data, err := workspace.ReadFile(e.workspaceDir, path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", e.notFoundHint(path, fullPath)
@@ -154,9 +143,8 @@ func (e *ToolExecutor) readFile(path string) (string, error) {
 // probing round-trips (the "errors that teach" pattern). path is the
 // workspace-relative path the agent passed; fullPath is the resolved host path.
 func (e *ToolExecutor) notFoundHint(path, fullPath string) error {
-	dir := filepath.Dir(fullPath)
 	relDir := filepath.Dir(path)
-	entries, derr := os.ReadDir(dir)
+	entries, derr := workspace.ReadDir(e.workspaceDir, relDir)
 	if derr != nil {
 		return fmt.Errorf("file not found: %s — its directory %q does not exist either; check the path", path, relDir)
 	}
@@ -270,7 +258,7 @@ func (e *ToolExecutor) deleteFile(path string) (string, error) {
 	if e.isProtectedToolPath(fullPath) {
 		return "", fmt.Errorf("%q is a tool shipped with Prism and cannot be deleted", filepath.Base(fullPath))
 	}
-	if err := os.Remove(fullPath); err != nil {
+	if err := workspace.Remove(e.workspaceDir, path); err != nil {
 		return "", err
 	}
 	if e.onFileChange != nil {
@@ -285,8 +273,7 @@ func (e *ToolExecutor) listFiles(path string) (string, error) {
 		return "", fmt.Errorf("invalid path")
 	}
 
-	fullPath := filepath.Join(e.workspaceDir, path)
-	entries, err := os.ReadDir(fullPath)
+	entries, err := workspace.ReadDir(e.workspaceDir, path)
 	if err != nil {
 		return "", err
 	}
@@ -315,7 +302,7 @@ func (e *ToolExecutor) aptInstall(ctx context.Context, packages string) (string,
 	// Persist package names so they are reinstalled on container restart.
 	manifestPath := filepath.Join(e.workspaceDir, ".apt-packages")
 	for _, pkg := range strings.Fields(packages) {
-		appendToManifest(manifestPath, pkg)
+		e.appendToManifest(manifestPath, pkg)
 	}
 	return fmt.Sprintf("Installed: %s\n%s", packages, out), nil
 }
@@ -329,36 +316,36 @@ func (e *ToolExecutor) pipInstall(ctx context.Context, packages string) (string,
 	// Persist package names so they are reinstalled on container restart.
 	manifestPath := filepath.Join(e.workspaceDir, ".pip-packages")
 	for _, pkg := range strings.Fields(packages) {
-		appendToManifest(manifestPath, pkg)
+		e.appendToManifest(manifestPath, pkg)
 	}
 	return fmt.Sprintf("pip installed: %s\n%s", packages, out), nil
 }
 
 // appendToManifest adds an entry to a manifest file if not already present.
-func appendToManifest(path, entry string) {
-	existing, _ := os.ReadFile(path)
+func (e *ToolExecutor) appendToManifest(path, entry string) {
+	existing, err := e.readManagedFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return
+	}
 	for _, line := range strings.Split(string(existing), "\n") {
 		if strings.TrimSpace(line) == entry {
 			return
 		}
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintln(f, entry)
+	_ = e.writeManagedFile(path, append(existing, []byte(entry+"\n")...))
 }
 
 func (e *ToolExecutor) openFile(path string) (string, error) {
 	path = NormalizeWorkspacePath(path)
 	fullPath := filepath.Join(e.workspaceDir, path)
-	if _, err := os.Stat(fullPath); err != nil {
+	f, err := workspace.Open(e.workspaceDir, path)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return e.notFoundHint(path, fullPath).Error(), nil // teach: siblings + closest name
 		}
 		return fmt.Sprintf("cannot open %s: %v", path, err), nil
 	}
+	f.Close()
 	if e.onOpenFile != nil {
 		e.onOpenFile(path)
 	}
@@ -380,7 +367,7 @@ func (e *ToolExecutor) addAttachment(path string) (string, []string, error) {
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", nil, fmt.Errorf("path escapes workspace")
 	}
-	data, err := os.ReadFile(fullPath)
+	data, err := workspace.ReadFile(e.workspaceDir, path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return e.notFoundHint(path, fullPath).Error(), nil, nil // teach: siblings + closest name

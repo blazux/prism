@@ -108,6 +108,12 @@ The `.env` AI settings remain available as server defaults for existing installa
 
 ## Embedded services
 
+Docker services use the host daemon by default (DOCKER_MODE=host).
+For a workspace with its own preconfigured Docker daemon, select
+DOCKER_MODE=workspace; see [Docker backends](docs/help/docker-backends.md)
+for prerequisites and internal URLs. This does not install a daemon or enable
+privileged containers automatically. The Traefik setup below describes host mode.
+
 The agent can spin up full Docker containers on demand — Uptime Kuma, Jupyter, Grafana, ComfyUI, whatever has an image. Each service gets its own subdomain and is embedded directly in the dashboard as a widget iframe.
 
 When the agent calls `docker_run`, Prism:

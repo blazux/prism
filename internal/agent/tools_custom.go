@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
+	"prism/internal/workspace"
 	"strings"
 	"time"
 
@@ -79,7 +79,11 @@ func (e *ToolExecutor) registerTool(code string) (string, error) {
 	}
 
 	path := filepath.Join(e.customMgr.Dir(), base)
-	if err := os.WriteFile(path, []byte(code), 0644); err != nil {
+	rel, err := filepath.Rel(e.workspaceDir, path)
+	if err != nil {
+		return "", err
+	}
+	if err := workspace.WriteFile(e.workspaceDir, rel, []byte(code)); err != nil {
 		return "", fmt.Errorf("write script: %w", err)
 	}
 

@@ -14,6 +14,7 @@ services:
       - "48080:8080"
     volumes:
       - workspace:/workspace
+      - server-private:/var/lib/prism
       - /var/run/docker.sock:/var/run/docker.sock
       # To connect a Markdown vault (Obsidian/Logseq) to the Notes app, mount it
       # here and set its path in Settings → Notes (e.g. /vault):
@@ -49,6 +50,9 @@ services:
       - LIVE_CONTEXT_CHAR_BUDGET=${LIVE_CONTEXT_CHAR_BUDGET:-}
       - SEARXNG_URL=${SEARXNG_URL}
       - PRISM_TOKEN=${PRISM_TOKEN:-}
+      - DOCKER_MODE=${DOCKER_MODE:-host}
+      - WORKSPACE_DOCKER_SOCKET=${WORKSPACE_DOCKER_SOCKET:-unix:///run/user/1000/docker.sock}
+      - WORKSPACE_DOCKER_USER=${WORKSPACE_DOCKER_USER:-1000}
       - AGENT_CONTAINER=${AGENT_CONTAINER}
       - WORKSPACE_DIR=${WORKSPACE_DIR}
       - PLUGIN_DIR=${PLUGIN_DIR}
@@ -171,6 +175,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  server-private:
   workspace:
   pgdata:
   protonmail:

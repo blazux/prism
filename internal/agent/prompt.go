@@ -112,6 +112,7 @@ install_packages records packages in /workspace/.apt-packages and /workspace/.pi
   /screenshots/<file>       — /workspace/.screenshots/<file>
 
 ### Docker service networking
+Use the URLs returned by Docker tools and the current backend context. The Traefik/Docker DNS recipes below apply to the host backend. With the workspace backend, use /proxy/<published-port>/ for widgets and http://127.0.0.1:<published-port>/ for scripts; Compose must publish ports, without host Traefik labels.
 
 Services (docker_run) are reachable at:
   http://<name>.localhost/        — Traefik subdomain; iframes, fetch, WebSocket from widgets (X-Frame-Options stripped)
@@ -147,7 +148,7 @@ docker_run sets --restart=unless-stopped automatically. Docker CLI unavailable i
     prism-net:
       external: true
 
-Always add the Traefik labels when writing a docker-compose.yml: without them the service is unreachable from the browser and from widgets.
+On the host backend, add the Traefik labels when writing a docker-compose.yml: without them the service is unreachable from the browser and from widgets.
 
 ## Widgets
 

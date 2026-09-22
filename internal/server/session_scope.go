@@ -22,7 +22,7 @@ import (
 
 var userPrefixRe = regexp.MustCompile(`^u\d+-`)
 var userIDPrefixRe = regexp.MustCompile(`^u\d+`)
-var groupScopeInSessionRe = regexp.MustCompile(`(?:^|-)(g\d+)(?:-|$)`)
+var groupScopeInSessionRe = regexp.MustCompile(`^(?:room-|webex-)(g\d+)(?:-|$)`)
 
 // groupScopeFromSessionID extracts the group scope ("g<id>") embedded in a
 // shared-agent session id — "room-g<id>" (rooms.go) or "webex-g<id>-<roomID>"
@@ -86,6 +86,13 @@ func ownerPtr(u *memory.User) *int64 {
 // sessionFor maps a client-facing session id to its per-user storage id.
 // Returns ok=false when the client tries to reach a different user's namespace.
 func (s *Server) sessionFor(r *http.Request, clientID string) (string, bool) {
+	if bound := boundSession(r); bound != "" {
+		if clientID == "" || clientID == bound {
+			return bound, true
+		}
+		return "", false
+	}
+
 	id := sanitizeSessionID(clientID)
 	if id == "" {
 		id = "default"

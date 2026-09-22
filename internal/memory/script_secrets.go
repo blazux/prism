@@ -30,7 +30,7 @@ func IsIntegrationSecret(name string) bool {
 	case "PRISM_AI_PROFILE", "EMAIL_PASSWORD", "CALDAV_PASSWORD", "TODOIST_TOKEN", "TELEGRAM_BOT_TOKEN", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN":
 		return true
 	}
-	return strings.HasPrefix(n, "WEBEX_BOT_TOKEN_") || strings.HasPrefix(n, "MCP_OAUTH_") || strings.HasPrefix(strings.ToLower(name), "webex_bot_token:") || strings.HasPrefix(strings.ToLower(name), "mcp_oauth_")
+	return strings.HasPrefix(n, "OAUTH_") || strings.HasPrefix(n, "WEBEX_BOT_TOKEN_") || strings.HasPrefix(n, "MCP_OAUTH_") || strings.HasPrefix(strings.ToLower(name), "webex_bot_token:") || strings.HasPrefix(strings.ToLower(name), "mcp_oauth_")
 }
 
 func ValidateScriptSecretName(name string) error {

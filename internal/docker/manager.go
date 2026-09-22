@@ -23,6 +23,7 @@ type ServiceInfo struct {
 }
 
 type Manager struct {
+	backend        Backend
 	containerName  string
 	workspaceDir   string
 	portRangeStart int
@@ -33,14 +34,19 @@ type Manager struct {
 	portMu sync.Mutex
 }
 
-func NewManager(containerName, workspaceDir string, portRangeStart, portRangeEnd int) *Manager {
+func NewManager(containerName, workspaceDir string, portRangeStart, portRangeEnd int, backend ...Backend) *Manager {
 	if portRangeStart <= 0 {
 		portRangeStart = 20000
 	}
 	if portRangeEnd <= portRangeStart {
 		portRangeEnd = portRangeStart + 999
 	}
+	var selected Backend
+	if len(backend) > 0 {
+		selected = backend[0]
+	}
 	return &Manager{
+		backend:        selected,
 		containerName:  containerName,
 		workspaceDir:   workspaceDir,
 		portRangeStart: portRangeStart,
@@ -50,9 +56,12 @@ func NewManager(containerName, workspaceDir string, portRangeStart, portRangeEnd
 
 // allocateHostPorts returns n unused host ports from the configured range.
 func (m *Manager) allocateHostPorts(ctx context.Context, n int) ([]int, error) {
-	out, _ := m.run(ctx, "docker", "ps", "-a",
+	out, err := m.serviceRun(ctx, "ps", "-a",
 		"--filter", "name="+servicePrefix,
 		"--format", "{{.Ports}}")
+	if err != nil {
+		return nil, err
+	}
 	used := make(map[int]bool)
 	for _, line := range strings.Split(out, "\n") {
 		for _, word := range strings.Fields(line) {
@@ -78,6 +87,9 @@ func (m *Manager) EnsureRunning(ctx context.Context) error {
 	out, err := m.run(ctx, "docker", "inspect", "--format", "{{.State.Status}}", m.containerName)
 	if err != nil {
 		// Container doesn't exist, create it
+		if m.WorkspaceDocker() {
+			return fmt.Errorf("workspace Docker requires a provisioned workspace with its own daemon: %w", err)
+		}
 		return m.create(ctx)
 	}
 
@@ -138,7 +150,7 @@ func (m *Manager) Exec(ctx context.Context, command string, timeout time.Duratio
 		defer cancel()
 	}
 
-	out, err := m.run(ctx, "docker", "exec", m.containerName, "bash", "-c", command)
+	out, err := m.run(ctx, "docker", append(m.execPrefix(false), m.containerName, "bash", "-c", command)...)
 	return out, err
 }
 
@@ -151,7 +163,7 @@ func (m *Manager) ExecWithEnv(ctx context.Context, command string, timeout time.
 		defer cancel()
 	}
 
-	args := []string{"exec"}
+	args := m.execPrefix(false)
 	for k, v := range env {
 		args = append(args, "-e", k+"="+v)
 	}
@@ -168,7 +180,7 @@ func (m *Manager) ExecWithStdin(ctx context.Context, command string, stdin []byt
 		defer cancel()
 	}
 
-	args := []string{"exec", "-i"}
+	args := m.execPrefix(true)
 	for k, v := range env {
 		args = append(args, "-e", k+"="+v)
 	}
@@ -194,7 +206,7 @@ func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string
 		defer close(outCh)
 		defer close(errCh)
 
-		cmd := exec.CommandContext(ctx, "docker", "exec", m.containerName, "bash", "-c", command)
+		cmd := exec.CommandContext(ctx, "docker", append(m.execPrefix(false), m.containerName, "bash", "-c", command)...)
 		cmd.Stdout = &chanWriter{ch: outCh}
 		cmd.Stderr = &chanWriter{ch: outCh}
 
@@ -223,18 +235,21 @@ func (m *Manager) RunService(ctx context.Context, name, image string, ports []in
 		return nil, err
 	}
 
-	// Detect network from the workspace container so services land on the same network.
-	netOut, _ := m.run(ctx, "docker", "inspect",
-		"--format", "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}",
-		m.containerName)
-	network := strings.Fields(strings.TrimSpace(netOut))
-	net := "prism_default"
-	if len(network) > 0 {
-		net = network[0]
-	}
+	net := "bridge"
+	if !m.WorkspaceDocker() {
+		// Detect network from the workspace container so services land on the same network.
+		netOut, _ := m.run(ctx, "docker", "inspect",
+			"--format", "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}",
+			m.containerName)
+		network := strings.Fields(strings.TrimSpace(netOut))
+		net = "prism_default"
+		if len(network) > 0 {
+			net = network[0]
+		}
 
+	}
 	// Remove existing container with the same name (idempotent).
-	_, _ = m.run(ctx, "docker", "rm", "-f", servicePrefix+name)
+	_, _ = m.serviceRun(ctx, "rm", "-f", servicePrefix+name)
 
 	args := []string{
 		"run", "-d",
@@ -250,6 +265,11 @@ func (m *Manager) RunService(ctx context.Context, name, image string, ports []in
 		// Self-description: what the agent deployed this for, surfaced back to it
 		// in the running-services index.
 		"--label", "prism.purpose=" + purpose,
+	}
+	if m.WorkspaceDocker() {
+		args = []string{"run", "-d", "--name", servicePrefix + name, "--network", "bridge",
+			"--restart", "unless-stopped", "--mount", "type=bind,src=/workspace,dst=/workspace",
+			"--label", "prism.purpose=" + purpose}
 	}
 	for i, hp := range hostPorts {
 		args = append(args, "-p", fmt.Sprintf("%d:%d", hp, ports[i]))
@@ -272,7 +292,7 @@ func (m *Manager) RunService(ctx context.Context, name, image string, ports []in
 		args = append(args, "sh", "-c", command)
 	}
 
-	if _, err := m.run(ctx, "docker", args...); err != nil {
+	if _, err := m.serviceRun(ctx, args...); err != nil {
 		return nil, fmt.Errorf("docker run: %w", err)
 	}
 	return hostPorts, nil
@@ -280,7 +300,7 @@ func (m *Manager) RunService(ctx context.Context, name, image string, ports []in
 
 // StopService stops and removes a service container.
 func (m *Manager) StopService(ctx context.Context, name string) error {
-	_, err := m.run(ctx, "docker", "rm", "-f", servicePrefix+name)
+	_, err := m.serviceRun(ctx, "rm", "-f", servicePrefix+name)
 	return err
 }
 
@@ -291,12 +311,12 @@ func (m *Manager) ExecService(ctx context.Context, name, command string, timeout
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	return m.run(ctx, "docker", "exec", servicePrefix+name, "sh", "-c", command)
+	return m.serviceRun(ctx, "exec", servicePrefix+name, "sh", "-c", command)
 }
 
 // ListServices returns all prism-svc-* containers.
 func (m *Manager) ListServices(ctx context.Context) ([]ServiceInfo, error) {
-	out, err := m.run(ctx, "docker", "ps", "-a",
+	out, err := m.serviceRun(ctx, "ps", "-a",
 		"--filter", "name="+servicePrefix,
 		"--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Label \"prism.purpose\"}}")
 	if err != nil {
@@ -333,13 +353,23 @@ func (m *Manager) ListServices(ctx context.Context) ([]ServiceInfo, error) {
 func (m *Manager) ServicesContext(ctx context.Context) string {
 	svcs, err := m.ListServices(ctx)
 	if err != nil || len(svcs) == 0 {
+		if m.WorkspaceDocker() {
+			return "## Docker backend: workspace\nDocker services run inside this workspace. Use /proxy/<published-port>/ for widgets and http://127.0.0.1:<published-port>/ for scripts. Compose must publish ports into the workspace. Host Traefik labels and host container DNS do not apply.\n"
+		}
 		return ""
 	}
 	var sb strings.Builder
 	sb.WriteString("## Services you have running\n")
-	sb.WriteString("Containers you started with docker_run. Reach them from a widget at `http://<name>.localhost/`, and from scripts/cron at `http://prism-svc-<name>:<port>/`. Manage them with docker_manage (inspect/logs/stop/restart) — don't redeploy one that already exists here.\n")
+	if m.WorkspaceDocker() {
+		sb.WriteString("Services run inside your workspace. Use http://127.0.0.1:<published-port>/ from workspace scripts and /proxy/<published-port>/ from widgets. Ports are workspace ports, not public host ports.\n")
+	} else {
+		sb.WriteString("Containers you started with docker_run. Reach them from a widget at `http://<name>.localhost/`, and from scripts/cron at `http://prism-svc-<name>:<port>/`. Manage them with docker_manage (inspect/logs/stop/restart) — don't redeploy one that already exists here.\n")
+	}
 	for _, s := range svcs {
 		line := "- **" + s.Name + "** (" + s.Image + ") — " + s.Status
+		if m.WorkspaceDocker() && s.Port > 0 {
+			line += fmt.Sprintf(" — workspace port %d; widget URL /proxy/%d/", s.Port, s.Port)
+		}
 		if s.Purpose != "" {
 			line += " — " + s.Purpose
 		}
@@ -350,7 +380,7 @@ func (m *Manager) ServicesContext(ctx context.Context) string {
 
 // ListAllContainers returns all prism-* containers (docker ps -a filtered by name).
 func (m *Manager) ListAllContainers(ctx context.Context) ([]ServiceInfo, error) {
-	out, err := m.run(ctx, "docker", "ps", "-a",
+	out, err := m.serviceRun(ctx, "ps", "-a",
 		"--filter", "name=prism",
 		"--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}")
 	if err != nil {
@@ -380,42 +410,54 @@ func (m *Manager) ListAllContainers(ctx context.Context) ([]ServiceInfo, error) 
 
 // ServiceLogs returns the last n log lines from a service container.
 func (m *Manager) ServiceLogs(ctx context.Context, name string, tail int) (string, error) {
-	return m.run(ctx, "docker", "logs", "--tail", strconv.Itoa(tail), servicePrefix+name)
+	return m.serviceRun(ctx, "logs", "--tail", strconv.Itoa(tail), servicePrefix+name)
 }
 
 // ComposeUp runs `docker compose up -d` for the given compose file (absolute host path).
-func (m *Manager) ComposeUp(ctx context.Context, file, project string) (string, error) {
+func (m *Manager) ComposeUp(ctx context.Context, file, project string, projectDirs ...string) (string, error) {
 	args := []string{"compose", "-f", file}
+	if len(projectDirs) > 0 {
+		args = append(args, "--project-directory", projectDirs[0])
+	}
 	if project != "" {
 		args = append(args, "--project-name", project)
 	}
 	args = append(args, "up", "-d", "--remove-orphans")
-	return m.run(ctx, "docker", args...)
+	return m.composeRun(ctx, args...)
 }
 
 // ComposeDown runs `docker compose down` for the given compose file.
-func (m *Manager) ComposeDown(ctx context.Context, file, project string) (string, error) {
+func (m *Manager) ComposeDown(ctx context.Context, file, project string, projectDirs ...string) (string, error) {
 	args := []string{"compose", "-f", file}
+	if len(projectDirs) > 0 {
+		args = append(args, "--project-directory", projectDirs[0])
+	}
 	if project != "" {
 		args = append(args, "--project-name", project)
 	}
 	args = append(args, "down")
-	return m.run(ctx, "docker", args...)
+	return m.composeRun(ctx, args...)
 }
 
 // ComposePS lists services for the given compose file.
-func (m *Manager) ComposePS(ctx context.Context, file, project string) (string, error) {
+func (m *Manager) ComposePS(ctx context.Context, file, project string, projectDirs ...string) (string, error) {
 	args := []string{"compose", "-f", file}
+	if len(projectDirs) > 0 {
+		args = append(args, "--project-directory", projectDirs[0])
+	}
 	if project != "" {
 		args = append(args, "--project-name", project)
 	}
 	args = append(args, "ps")
-	return m.run(ctx, "docker", args...)
+	return m.composeRun(ctx, args...)
 }
 
 // ComposeLogs returns logs from the given compose project (optionally filtered to one service).
-func (m *Manager) ComposeLogs(ctx context.Context, file, project, service string, tail int) (string, error) {
+func (m *Manager) ComposeLogs(ctx context.Context, file, project, service string, tail int, projectDirs ...string) (string, error) {
 	args := []string{"compose", "-f", file}
+	if len(projectDirs) > 0 {
+		args = append(args, "--project-directory", projectDirs[0])
+	}
 	if project != "" {
 		args = append(args, "--project-name", project)
 	}
@@ -423,22 +465,28 @@ func (m *Manager) ComposeLogs(ctx context.Context, file, project, service string
 	if service != "" {
 		args = append(args, service)
 	}
-	return m.run(ctx, "docker", args...)
+	return m.composeRun(ctx, args...)
 }
 
 // ComposeExec runs a shell command inside a compose service container (non-interactive).
-func (m *Manager) ComposeExec(ctx context.Context, file, project, service, command string) (string, error) {
+func (m *Manager) ComposeExec(ctx context.Context, file, project, service, command string, projectDirs ...string) (string, error) {
 	args := []string{"compose", "-f", file}
+	if len(projectDirs) > 0 {
+		args = append(args, "--project-directory", projectDirs[0])
+	}
 	if project != "" {
 		args = append(args, "--project-name", project)
 	}
 	args = append(args, "exec", "-T", service, "sh", "-c", command)
-	return m.run(ctx, "docker", args...)
+	return m.composeRun(ctx, args...)
 }
 
 // ComposeRestart restarts services in the given compose project.
-func (m *Manager) ComposeRestart(ctx context.Context, file, project, service string) (string, error) {
+func (m *Manager) ComposeRestart(ctx context.Context, file, project, service string, projectDirs ...string) (string, error) {
 	args := []string{"compose", "-f", file}
+	if len(projectDirs) > 0 {
+		args = append(args, "--project-directory", projectDirs[0])
+	}
 	if project != "" {
 		args = append(args, "--project-name", project)
 	}
@@ -446,7 +494,7 @@ func (m *Manager) ComposeRestart(ctx context.Context, file, project, service str
 	if service != "" {
 		args = append(args, service)
 	}
-	return m.run(ctx, "docker", args...)
+	return m.composeRun(ctx, args...)
 }
 
 // parseFirstPort extracts the first host port from a docker ps --format {{.Ports}} string.
@@ -466,8 +514,10 @@ func parseFirstPort(ports string) int {
 }
 
 func (m *Manager) IsDockerAvailable() bool {
-	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
-	return cmd.Run() == nil
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := m.serviceRun(ctx, "version", "--format", "{{.Server.Version}}")
+	return err == nil
 }
 
 func (m *Manager) Status(ctx context.Context) string {

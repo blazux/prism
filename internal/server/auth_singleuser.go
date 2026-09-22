@@ -48,7 +48,7 @@ func (s *Server) singleUserAuth(next http.Handler, w http.ResponseWriter, r *htt
 			return
 		}
 	}
-	if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws" {
+	if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws" || privateContentPath(r.URL.Path) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"error":"unauthorized"}`)
@@ -76,12 +76,23 @@ func (s *Server) singleUserHandleAuth(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, `{"error":"invalid token"}`)
 			return
 		}
-		setSessionCookie(w, s.cfg.AuthToken, 30*24*3600)
+		setSessionCookie(w, s.cfg.AuthToken, 30*24*3600, r)
 		fmt.Fprint(w, `{"ok":true}`)
 	case http.MethodDelete:
-		setSessionCookie(w, "", -1)
+		setSessionCookie(w, "", -1, r)
 		fmt.Fprint(w, `{"ok":true}`)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// Only the dashboard shell and bundled assets are public. User-generated files
+// and running services require the same authentication as the API.
+func privateContentPath(path string) bool {
+	for _, prefix := range []string{"/data", "/screenshots", "/plugins", "/proxy", "/socket.io"} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return path == "/wsroom"
 }

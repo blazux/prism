@@ -15,7 +15,7 @@ the contract that keeps that true. Every change to `main` must respect it.
 
 2. **Existing rows keep their meaning.** Config keys in `agent_config`, secret
    names, session-id formats (`u<id>-<board>`, `room-g<id>`, `webhook-<id>`),
-   widget/plugin ids and the `.secret_key` file are stable identifiers. A new
+   widget/plugin ids and the encryption key contents are stable identifiers. A new
    version reads what the old one wrote. If a format must evolve, the new
    version migrates on read (as `migrateUserScopedConfig` does) and never
    requires the old data to be gone.
@@ -42,7 +42,7 @@ the contract that keeps that true. Every change to `main` must respect it.
    unchanged.
 
 5. **Encrypted data stays readable.** The secrets cipher (AES-256-GCM keyed
-   by `.secret_key`) and its on-disk/in-DB format do not change.
+   by the persisted private key) and its on-disk/in-DB format do not change.
 
 ## What a change may do
 
@@ -62,3 +62,36 @@ the contract that keeps that true. Every change to `main` must respect it.
       migration is idempotent.
 - [ ] Start the new build against a database from the previous version at
       least once.
+
+## Security update: private key storage
+
+Use the updated Compose file as well as the new server image. It adds the
+`server-private` volume at `/var/lib/prism`, mounted only in prism-server.
+At startup, Prism copies the existing workspace `.secret_key` into
+`/var/lib/prism/secret.key`, verifies that the keys match, then removes the
+workspace copy. Encrypted database rows and credentials remain unchanged.
+A conflicting destination key stops startup instead of replacing either key.
+
+Back up the database **and the server-private volume**. The workspace alone
+is no longer sufficient to restore credentials. Never regenerate a key to
+resolve a decryption error. For non-Docker installations, `SECRET_KEY_PATH`
+can select a persistent file outside the workspace; by default it is
+`../.prism-private/<workspace-directory-name>.key` relative to the workspace.
+Custom deployments must persist this private location across replacements.
+An older server expects the old location: rollback requires restoring the
+same key there while the server is stopped.
+
+Generated files, screenshots, plugins and proxied applications now require
+authentication even in single-user mode. Group capability tokens keep their
+format, but are bound to their signed session and group permissions; unsigned
+group identity and uid-zero tokens for unrelated multi-user sessions are
+refused. Ordinary user sessions keep their tools and parameters.
+
+Compose operations now fail closed on unreadable or invalid files and reject
+host paths, indirect privileged volume definitions, includes, builds and
+env_file. Use a published image, explicit environment values and ordinary
+volumes. This local guard is not a sandbox for hostile Cloud tenants.
+
+Login throttling uses the direct peer address (30 login attempts per minute,
+10 signup attempts). Behind a reverse proxy those quotas are shared; distributed
+Cloud throttling and trusted proxy configuration remain deployment work.

@@ -9,6 +9,7 @@ import (
 	_ "time/tzdata" // embed IANA timezone database so TZ env var works without tzdata installed
 
 	"prism/internal/anthropic"
+	"prism/internal/docker"
 	"prism/internal/server"
 )
 
@@ -130,7 +131,9 @@ func main() {
 	multiUser := os.Getenv("MULTI_USER") == "1" || strings.EqualFold(os.Getenv("MULTI_USER"), "true")
 
 	cfg := server.Config{
+		DockerBackend: docker.Backend{Mode: os.Getenv("DOCKER_MODE"), Socket: os.Getenv("WORKSPACE_DOCKER_SOCKET"), User: os.Getenv("WORKSPACE_DOCKER_USER")},
 		Port:          port,
+		SecretKeyPath: os.Getenv("SECRET_KEY_PATH"),
 		WorkspaceDir:  workspaceDir,
 		PluginDir:     pluginDir,
 		OllamaURL:     ollamaURL,

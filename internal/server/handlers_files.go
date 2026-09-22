@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"prism/internal/workspace"
 	"strings"
 	"time"
 
@@ -46,11 +47,14 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path", 400)
 		return
 	}
-	fullPath := filepath.Join(s.cfg.WorkspaceDir, cleanPath)
+	if _, err := workspace.Name(cleanPath); err != nil {
+		http.Error(w, "invalid path", 400)
+		return
+	}
 
 	switch r.Method {
 	case "GET":
-		data, err := os.ReadFile(fullPath)
+		data, err := workspace.ReadFile(s.cfg.WorkspaceDir, cleanPath)
 		if err != nil {
 			http.Error(w, err.Error(), 404)
 			return
@@ -63,8 +67,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad body", 400)
 			return
 		}
-		os.MkdirAll(filepath.Dir(fullPath), 0755)
-		if err := os.WriteFile(fullPath, []byte(body.Content), 0644); err != nil {
+		if err := workspace.WriteFile(s.cfg.WorkspaceDir, cleanPath, []byte(body.Content)); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -115,7 +118,7 @@ func safeWorkspacePath(workspaceDir, untrustedPath string) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
 		return "", fmt.Errorf("invalid path")
 	}
-	if filepath.Base(full) == ".secret_key" {
+	if real, err := filepath.EvalSymlinks(full); filepath.Base(full) == ".secret_key" || (err == nil && filepath.Base(real) == ".secret_key") {
 		return "", fmt.Errorf("invalid path")
 	}
 	if !withinResolved(workspaceDir, full) {

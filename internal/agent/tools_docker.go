@@ -3,7 +3,10 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"prism/internal/workspace"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -19,12 +22,19 @@ func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port i
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Service %q started.\n\nPort mappings:\n", name)
-	for i, hp := range hostPorts {
-		fmt.Fprintf(&sb, "  %d → host port %d\n", allPorts[i], hp)
+	if e.docker.WorkspaceDocker() {
+		for i, hp := range hostPorts {
+			fmt.Fprintf(&sb, "  %d → workspace port %d\n", allPorts[i], hp)
+		}
+		fmt.Fprintf(&sb, "\nIframe URL: /proxy/%d/\nInternal URL (workspace scripts): http://127.0.0.1:%d/\nPorts are not published on the platform host.", hostPorts[0], hostPorts[0])
+	} else {
+		for i, hp := range hostPorts {
+			fmt.Fprintf(&sb, "  %d → host port %d\n", allPorts[i], hp)
+		}
+		fmt.Fprintf(&sb, "\nIframe URL (preferred):  http://%s.localhost/", name)
+		fmt.Fprintf(&sb, "\nDirect host URL:         http://<hostname>:%d/", hostPorts[0])
+		fmt.Fprintf(&sb, "\nInternal URL (scripts):  http://prism-svc-%s:%d/", name, port)
 	}
-	fmt.Fprintf(&sb, "\nIframe URL (preferred):  http://%s.localhost/", name)
-	fmt.Fprintf(&sb, "\nDirect host URL:         http://<hostname>:%d/", hostPorts[0])
-	fmt.Fprintf(&sb, "\nInternal URL (scripts):  http://prism-svc-%s:%d/", name, port)
 	// Give it a moment to crash and tell the agent if it did, instead of
 	// reporting "started" for a container that immediately exits or crash-loops
 	// (the silent-zombie case — a one-shot script run as a service).
@@ -79,6 +89,9 @@ func (e *ToolExecutor) dockerPS(ctx context.Context) (string, error) {
 		portInfo := ""
 		if s.Port > 0 {
 			portInfo = fmt.Sprintf(" — http://%s.localhost/  (host port %d)", s.Name, s.Port)
+			if e.docker.WorkspaceDocker() {
+				portInfo = fmt.Sprintf(" — /proxy/%d/ (workspace port %d)", s.Port, s.Port)
+			}
 		}
 		fmt.Fprintf(&sb, "  • %s (%s) — %s%s\n", s.Name, s.Image, s.Status, portInfo)
 	}
@@ -156,12 +169,37 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 		project = "prism-svc-" + dir
 	}
 
+	if !regexp.MustCompile(`^prism-svc-[a-z0-9][a-z0-9_-]*$`).MatchString(project) {
+		return "", fmt.Errorf("project must start with prism-svc-; omit it to let Prism choose")
+	}
+	data, err := workspace.ReadFile(e.workspaceDir, file)
+	if err != nil {
+		return "", err
+	}
+	projectDir := filepath.Dir(hostPath)
+	if err := validateComposeDocument(data, projectDir); err != nil {
+		return "", err
+	}
+	// Execute exactly the bytes that passed validation, not an agent-writable file.
+	temp, err := os.MkdirTemp("", "prism-compose-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(temp)
+	snapshot := filepath.Join(temp, "compose.yml")
+	if err := os.WriteFile(snapshot, data, 0600); err != nil {
+		return "", err
+	}
+	if err := validateComposeSafety(snapshot); err != nil {
+		return "", err
+	}
+	hostPath = snapshot
 	switch action {
 	case "up":
 		if err := validateComposeSafety(hostPath); err != nil {
 			return fmt.Sprintf("Refused: %v", err), nil
 		}
-		out, err := e.docker.ComposeUp(ctx, hostPath, project)
+		out, err := e.docker.ComposeUp(ctx, hostPath, project, projectDir)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v\n%s", err, out), nil
 		}
@@ -170,7 +208,7 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 		}
 		return out, nil
 	case "down":
-		out, err := e.docker.ComposeDown(ctx, hostPath, project)
+		out, err := e.docker.ComposeDown(ctx, hostPath, project, projectDir)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v\n%s", err, out), nil
 		}
@@ -179,7 +217,7 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 		}
 		return out, nil
 	case "ps":
-		out, err := e.docker.ComposePS(ctx, hostPath, project)
+		out, err := e.docker.ComposePS(ctx, hostPath, project, projectDir)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v", err), nil
 		}
@@ -188,7 +226,7 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 		}
 		return out, nil
 	case "logs":
-		out, err := e.docker.ComposeLogs(ctx, hostPath, project, service, tail)
+		out, err := e.docker.ComposeLogs(ctx, hostPath, project, service, tail, projectDir)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v", err), nil
 		}
@@ -197,7 +235,7 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 		}
 		return out, nil
 	case "restart":
-		out, err := e.docker.ComposeRestart(ctx, hostPath, project, service)
+		out, err := e.docker.ComposeRestart(ctx, hostPath, project, service, projectDir)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v\n%s", err, out), nil
 		}
@@ -212,7 +250,7 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 		if command == "" {
 			return "", fmt.Errorf("command is required for exec action")
 		}
-		out, err := e.docker.ComposeExec(ctx, hostPath, project, service, command)
+		out, err := e.docker.ComposeExec(ctx, hostPath, project, service, command, projectDir)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v", err), nil
 		}

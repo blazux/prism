@@ -64,6 +64,9 @@ func (cc CallerContext) apply(e *agent.ToolExecutor) {
 // self-calls. This does not touch the permission guard, which stays
 // unrestricted for service calls by design.
 func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessionID string) CallerContext {
+	if u != nil && u.ID < 0 {
+		return s.callerContextForGroup(ctx, -u.ID)
+	}
 	scopeUser := u
 	if scopeUser == nil || scopeUser.ID == 0 {
 		if uid := userIDFromSessionID(sessionID); uid > 0 {

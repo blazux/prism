@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"prism/internal/workspace"
 	"strconv"
 	"strings"
 	"sync"
@@ -452,8 +453,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.sendJSON(map[string]interface{}{"type": "plugin_unload", "id": id})
 		},
 		func(path string) {
-			fullPath := filepath.Join(s.cfg.WorkspaceDir, filepath.Clean(path))
-			content, err := os.ReadFile(fullPath)
+			content, err := workspace.ReadFile(s.cfg.WorkspaceDir, path)
 			if err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": "open_file: " + err.Error()})
 			} else {
@@ -686,12 +686,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": "forbidden: administrators only"})
 				continue
 			}
-			fullPath, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
+			_, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
 			if err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": "invalid path"})
 				continue
 			}
-			content, err := os.ReadFile(fullPath)
+			content, err := workspace.ReadFile(s.cfg.WorkspaceDir, msg.Path)
 			if err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": err.Error()})
 			} else {
@@ -705,7 +705,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": "forbidden: administrators only"})
 				continue
 			}
-			fullPath, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
+			_, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
 			if err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": "invalid path"})
 				continue
@@ -714,8 +714,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				Content string `json:"content"`
 			}
 			json.Unmarshal(msg.Data, &payload)
-			os.MkdirAll(filepath.Dir(fullPath), 0755)
-			if err := os.WriteFile(fullPath, []byte(payload.Content), 0644); err != nil {
+			if err := workspace.WriteFile(s.cfg.WorkspaceDir, msg.Path, []byte(payload.Content)); err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": err.Error()})
 			} else {
 				client.sendJSON(map[string]interface{}{"type": "saved", "path": msg.Path})
@@ -728,11 +727,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": "forbidden: administrators only"})
 				continue
 			}
-			fullPath, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
+			_, err := safeWorkspacePath(s.cfg.WorkspaceDir, msg.Path)
 			if err != nil {
 				continue
 			}
-			os.Remove(fullPath)
+			workspace.Remove(s.cfg.WorkspaceDir, msg.Path)
 			tree := s.buildFileTree(s.cfg.WorkspaceDir)
 			client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
 

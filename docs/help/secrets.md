@@ -78,7 +78,8 @@ to check.
 ## Reserved integration credentials
 Some names are reserved for Prism's own integrations: `email_password`,
 `caldav_password`, `todoist_token`, `telegram_bot_token`, `slack_bot_token`,
-`slack_app_token`, the Webex bot tokens and MCP OAuth tokens. They are stored
+`slack_app_token`, the Webex bot tokens, MCP OAuth tokens and all `oauth_*` credentials
+(including Google and Microsoft tokens and client secrets). They are stored
 with the same mechanism but are **never** injected into scripts, never served
 by the HTTP endpoint above, cannot be used as an MCP server's bearer token, and
 cannot be created as or shared to a group secret by a plain member. Manage
@@ -91,10 +92,11 @@ error instead of running with missing credentials. Existing conflicting names
 must be removed or recreated under distinct names in Settings → Secrets.
 No existing secrets are renamed automatically.
 
-Back up the database together with the workspace's `.secret_key`, and protect
-that backup: both are required to restore encrypted credentials. Never delete
-or replace `.secret_key` to resolve a read error; restore access to the original
-file or restore its backup.
+Back up the database together with the server's private encryption key (the
+`server-private` volume with Docker Compose), and protect that backup: both
+are required to restore encrypted credentials. The old workspace `.secret_key`
+is migrated automatically outside the execution workspace. Never delete or
+replace the private key to resolve a read error; restore its original backup.
 
 Scripts receive usable credentials, so do not print environment variables,
 secret values, or authorization headers. The secure input dialog avoids putting

@@ -69,6 +69,9 @@ func (s *Server) isAdminUser(ctx context.Context, u *memory.User) bool {
 // (legacy/no-DB, or the internal service identity handled upstream) yields a nil
 // guard = unrestricted, preserving single-owner behaviour.
 func (s *Server) buildUserGuard(ctx context.Context, u *memory.User) agent.ToolGuard {
+	if u != nil && u.ID < 0 {
+		return s.buildGroupAgentGuard(ctx, -u.ID)
+	}
 	if u == nil {
 		return nil
 	}
@@ -153,6 +156,20 @@ func (s *Server) userCanUseModel(ctx context.Context, u *memory.User, model stri
 	if ms == nil {
 		return true
 	}
+	if u.ID < 0 {
+		models, err := ms.GroupModels(ctx, -u.ID)
+		if err != nil {
+			return false
+		}
+		if len(models) == 0 {
+			return true
+		}
+		set := map[string]bool{}
+		for _, m := range models {
+			set[m] = true
+		}
+		return modelInSet(set, model)
+	}
 	set, unrestricted, err := ms.AllowedModelsForUser(ctx, u.ID)
 	if err != nil || unrestricted {
 		return true
@@ -164,6 +181,9 @@ func (s *Server) userCanUseModel(ctx context.Context, u *memory.User, model stri
 // ("g<id>", shared with fellow members) or a personal scope ("u<id>") when they
 // belong to no group. Empty for the service identity / legacy no-DB mode.
 func (s *Server) ragScopeFor(ctx context.Context, u *memory.User) string {
+	if u != nil && u.ID < 0 {
+		return fmt.Sprintf("g%d", -u.ID)
+	}
 	if u == nil || u.ID == 0 {
 		return ""
 	}
@@ -236,6 +256,26 @@ func (s *Server) filterModelsForUser(ctx context.Context, u *memory.User, models
 	ms := s.store()
 	if ms == nil {
 		return models
+	}
+	if u.ID < 0 {
+		allowed, err := ms.GroupModels(ctx, -u.ID)
+		if err != nil {
+			return nil
+		}
+		if len(allowed) == 0 {
+			return models
+		}
+		set := map[string]bool{}
+		for _, m := range allowed {
+			set[m] = true
+		}
+		out := make([]string, 0, len(models))
+		for _, m := range models {
+			if modelInSet(set, m) {
+				out = append(out, m)
+			}
+		}
+		return out
 	}
 	set, unrestricted, err := ms.AllowedModelsForUser(ctx, u.ID)
 	if err != nil || unrestricted {
