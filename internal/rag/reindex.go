@@ -56,7 +56,7 @@ func PrepareEmbeddingIndex(ctx context.Context, dsn string, embedder *Embedder, 
 		}
 		changed := old != identity || oldDim != dim
 		if changed && count > 0 && !confirmed {
-			return errors.New("embedding model differs from the document index; confirm rebuilding in AI provider settings, then restart")
+			return errors.New("embedding model differs from the document index; confirm rebuilding in AI provider settings, then save again")
 		}
 		if changed {
 			if oldDim != dim {

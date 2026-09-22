@@ -106,6 +106,9 @@ func (e *ToolExecutor) existingWidgetsHint() string {
 // report (console errors) plus the screenshot as base64 images, so the vision
 // model can verify its own rendering before telling the user the widget works.
 func (e *ToolExecutor) previewWidget(ctx context.Context, id string) (string, []string) {
+	_, _, ragCaptioner, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
 	sessionID := e.sessionID
 	if sessionID == "" {
 		sessionID = "default"
@@ -133,9 +136,9 @@ func (e *ToolExecutor) previewWidget(ctx context.Context, id string) (string, []
 	// vision captioner (e.g. AcidBurn) describe it as text instead, and never
 	// attach the image (it would only confuse a blind model into flailing).
 	if e.chatBlind {
-		if e.ragCaptioner != nil {
+		if ragCaptioner != nil {
 			for _, p := range extractScreenshotPaths(res, e.workspaceDir) {
-				if d, err := e.ragCaptioner.DescribeWidget(ctx, p); err == nil && strings.TrimSpace(d) != "" {
+				if d, err := ragCaptioner.DescribeWidget(ctx, p); err == nil && strings.TrimSpace(d) != "" {
 					report := "Auto-preview (you have no vision — a vision model inspected the rendered widget for you):\n" + strings.TrimSpace(d) +
 						"\n\nIf that description shows broken layout, missing images/icons, blank areas or errors, fix the widget before telling the user it is ready."
 					if consoleErrs != "" {

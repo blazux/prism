@@ -377,7 +377,7 @@ func (s *Server) aiSourceTool(ctx context.Context, u *memory.User, args map[stri
 		if err := s.saveAIProfile(ctx, u, p, old); err != nil {
 			return "", err
 		}
-		raw, _ := json.Marshal(map[string]any{"ok": true, "restartRequired": s.embeddingRestartRequired(*p)})
+		raw, _ := json.Marshal(map[string]any{"ok": true, "embeddingPending": s.embeddingPending(*p)})
 		return string(raw), nil
 	}
 	target := p.Sources[index].profile()
@@ -445,5 +445,6 @@ func (s *Server) saveAIProfile(ctx context.Context, u *memory.User, p, old *aiPr
 	if err := s.store().SetSecret(ctx, aiProfileSecret, string(raw)); err != nil {
 		return errors.New("cannot save AI settings")
 	}
+	s.scheduleRAGApply()
 	return nil
 }

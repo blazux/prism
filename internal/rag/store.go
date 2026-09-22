@@ -58,6 +58,15 @@ type SearchResult struct {
 // vector OID, so we use a plain pool to create it first, then open the real
 // pool with the AfterConnect hook.
 func NewStore(ctx context.Context, connStr string, dim int) (*Store, error) {
+	return newStore(ctx, connStr, dim, false)
+}
+
+// NewMigrationStore opens a candidate that must not serve requests until
+// PrepareEmbeddingIndex succeeds. Existing vectors may have a different dimension.
+func NewMigrationStore(ctx context.Context, connStr string, dim int) (*Store, error) {
+	return newStore(ctx, connStr, dim, true)
+}
+func newStore(ctx context.Context, connStr string, dim int, migration bool) (*Store, error) {
 	// Step 1 — plain pool: create the pgvector extension if needed.
 	plain, err := pgxpool.New(ctx, connStr)
 	if err != nil {
@@ -88,7 +97,7 @@ func NewStore(ctx context.Context, connStr string, dim int) (*Store, error) {
 	}
 
 	s := &Store{pool: pool, dim: dim}
-	if err := s.initSchema(ctx); err != nil {
+	if err := s.initSchema(ctx, migration); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
@@ -97,7 +106,7 @@ func NewStore(ctx context.Context, connStr string, dim int) (*Store, error) {
 
 func (s *Store) Close() { s.pool.Close() }
 
-func (s *Store) initSchema(ctx context.Context) error {
+func (s *Store) initSchema(ctx context.Context, migration bool) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS rag_collections (
 			name        TEXT PRIMARY KEY,
@@ -154,7 +163,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 	if err := s.pool.QueryRow(ctx, `SELECT atttypmod FROM pg_attribute WHERE attrelid = 'rag_chunks'::regclass AND attname = 'embedding' AND NOT attisdropped`).Scan(&storedDim); err != nil {
 		return fmt.Errorf("read embedding dimension: %w", err)
 	}
-	if storedDim != s.dim {
+	if !migration && storedDim != s.dim {
 		return fmt.Errorf("embedding dimension mismatch: database uses %d, configured model produces %d. Restore the previous EMBED_MODEL, or back up and rebuild only the RAG index with the new model; do not delete the workspace or the whole database", storedDim, s.dim)
 	}
 

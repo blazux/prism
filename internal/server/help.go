@@ -275,7 +275,9 @@ func (s *Server) materializeHelpDocs(docs []helpDoc) {
 // ingestHelpDocs indexes the docs into the prism-help RAG collection if their
 // content changed since last time. Safe to call once RAG is ready.
 func (s *Server) ingestHelpDocs(ctx context.Context, docs []helpDoc, hash string) {
-	if s.ragStore == nil || s.ragEmbedder == nil || len(docs) == 0 {
+	store, embedder, _, release := s.acquireRAG()
+	defer release()
+	if store == nil || embedder == nil || len(docs) == 0 {
 		return
 	}
 	if s.memStore != nil {
@@ -283,7 +285,7 @@ func (s *Server) ingestHelpDocs(ctx context.Context, docs []helpDoc, hash string
 			return // already up to date
 		}
 	}
-	if err := s.ragStore.EnsureCollection(ctx, helpCollection, helpSession); err != nil {
+	if err := store.EnsureCollection(ctx, helpCollection, helpSession); err != nil {
 		log.Printf("[help] ensure collection: %v", err)
 		return
 	}
@@ -293,13 +295,13 @@ func (s *Server) ingestHelpDocs(ctx context.Context, docs []helpDoc, hash string
 			continue
 		}
 		pageNums := make([]int, len(chunks))
-		embeddings, err := s.ragEmbedder.EmbedBatch(ctx, chunks)
+		embeddings, err := embedder.EmbedBatch(ctx, chunks)
 		if err != nil {
 			log.Printf("[help] embed %s: %v", d.name, err)
 			return // try again next start
 		}
 		sum := sha256.Sum256([]byte(d.body))
-		if err := s.ragStore.UpsertDocument(ctx, helpCollection, d.name, fmt.Sprintf("%x", sum), int64(len(d.body)), chunks, pageNums, embeddings); err != nil {
+		if err := store.UpsertDocument(ctx, helpCollection, d.name, fmt.Sprintf("%x", sum), int64(len(d.body)), chunks, pageNums, embeddings); err != nil {
 			log.Printf("[help] upsert %s: %v", d.name, err)
 			return
 		}

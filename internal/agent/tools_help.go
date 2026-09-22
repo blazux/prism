@@ -40,6 +40,9 @@ func (e *ToolExecutor) SetHelp(help HelpFn, status func(ctx context.Context) str
 }
 
 func (e *ToolExecutor) prismHelp(ctx context.Context, topic string) (string, error) {
+	ragStore, _, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
 	if e.helpFn == nil {
 		return "Prism's documentation isn't wired into this context. Read the bundled pages instead: list_files .prism_help, then read_file .prism_help/<topic>.md.", nil
 	}
@@ -74,12 +77,12 @@ func (e *ToolExecutor) prismHelp(ctx context.Context, topic string) (string, err
 	}
 	// Knowledge base and MCP servers: the executor sees those itself.
 	switch {
-	case e.ragStore == nil:
+	case ragStore == nil:
 		sb.WriteString("- Knowledge base: RAG is not available on this deployment\n")
 	case e.ragBlocked():
 		sb.WriteString("- Knowledge base: " + ragBlockedMsg + "\n")
 	default:
-		if cols, cerr := e.ragStore.ListCollections(ctx, e.ragScope); cerr == nil {
+		if cols, cerr := ragStore.ListCollections(ctx, e.ragScope); cerr == nil {
 			if len(cols) == 0 {
 				sb.WriteString("- Knowledge base: no collections yet (rag_ingest creates one; Settings → Knowledge to upload documents)\n")
 			} else {
@@ -101,10 +104,13 @@ func (e *ToolExecutor) prismHelp(ctx context.Context, topic string) (string, err
 
 // helpCollectionInfo returns the bundled-docs collection if it has been indexed.
 func (e *ToolExecutor) helpCollectionInfo(ctx context.Context) *rag.Collection {
-	if e.ragStore == nil {
+	ragStore, _, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
+	if ragStore == nil {
 		return nil
 	}
-	cols, err := e.ragStore.ListCollections(ctx, HelpCollectionScope)
+	cols, err := ragStore.ListCollections(ctx, HelpCollectionScope)
 	if err != nil {
 		return nil
 	}

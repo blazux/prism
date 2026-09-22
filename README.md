@@ -80,11 +80,7 @@ You can keep several AI sources configured at once, including several servers of
 
 For document search, the **Embeddings** section lets you reuse the default source with **Use same provider**, select another existing source, or enter a dedicated connection. Choose an embedding model and click **Test embeddings**. Anthropic does not provide an embedding endpoint, so choose another source for that part.
 
-After saving embedding changes, restart the server to apply them:
-
-```bash
-docker compose restart prism-server
-```
+Click **Save changes** to apply embedding settings automatically, without restarting Prism. Settings displays progress if the document index needs rebuilding.
 
 Changing the embedding model or endpoint requires confirming the index rebuild in the form. Prism rebuilds from stored text; there is no need to upload your documents again. The agent can guide you through this too.
 
@@ -275,7 +271,7 @@ The `.env` file supplies installation settings and optional AI defaults. Docker 
 - **Reasoning effort has no effect behind LiteLLM.** `drop_params: true` strips `reasoning_effort` before it reaches the model — add `allowed_openai_params: ["reasoning_effort"]` to the route's `litellm_params`.
 - **"Iteration limit reached".** The agent hit its per-message cap on a long task — not a bug, a budget. Raise it in **Settings → Agent → Turn budget** (default 75, up to 500), or just say "continue".
 - **Widget previews look wrong / the agent says it can't see.** Choose a vision-capable model and check **Default model supports vision** in **AI provider**. Ask the agent for help with your model's capabilities.
-- **You changed the embedding model.** Test and save it in **AI provider**, confirm the index rebuild, then restart `prism-server`. Document search is unavailable during rebuilding; a failed rebuild retains the original index. Do not delete your volumes.
+- **You changed the embedding model.** Test it in **AI provider**, confirm the index rebuild, then click **Save changes**. Prism applies it automatically. Document search is temporarily unavailable during rebuilding; a failed rebuild retains the original index. Correct the configuration and save again to retry. Do not delete your volumes.
 - **Upgrading.** `docker compose pull && docker compose up -d` (or `--build` if you build locally). Schema migrations run at start, nothing to do — [docs/UPGRADING.md](docs/UPGRADING.md) is the contract.
 - **Timezone.** `TZ` accepts IANA names; for a fixed offset use `Etc/GMT+4` — POSIX inverts the sign, so that's UTC-4.
 

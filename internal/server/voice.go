@@ -501,6 +501,11 @@ func (s *Server) handleVoiceSearch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "query required")
 		return
 	}
+	release, ok := s.lockRAGRequest(w)
+	if !ok {
+		return
+	}
+	defer release()
 	ms := s.store()
 	if ms == nil || s.ragStore == nil || s.ragEmbedder == nil {
 		writeErr(w, http.StatusServiceUnavailable, "no knowledge base on this deployment")
@@ -560,6 +565,11 @@ func (s *Server) handleVoiceKB(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	release, ok := s.lockRAGRequest(w)
+	if !ok {
+		return
+	}
+	defer release()
 	ms := s.store()
 	if ms == nil || s.ragStore == nil {
 		writeErr(w, http.StatusServiceUnavailable, "no knowledge base on this deployment")

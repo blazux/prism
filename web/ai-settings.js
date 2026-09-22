@@ -30,7 +30,7 @@ async function renderAITab(container, options = {}) {
         <div class="ai-actions"><button class="ai-button" type="button" data-default-source>Use as default</button><button class="ai-button" type="button" data-remove-source>Remove source</button></div></div>
         <p class="ai-hint">Each source keeps its own model and credential. The default model powers new conversations and app actions; all sources remain available in the chat model picker.</p>
         <div class="ai-row"><div><div class="ai-row-title">Default model supports vision</div><div class="ai-hint">Required to understand images and screenshots directly. Model catalogs do not always report this capability.</div></div><label class="toggle-switch"><input name="chatVision" type="checkbox" aria-label="Default model supports vision"><span class="toggle-track"></span></label></div>
-        <p class="ai-hint">Vision is used for image attachments, screenshots and visual checks of widgets. A text-only model can still chat and use tools. Restart Prism to apply vision changes to the widget inspection fallback.</p>
+        <p class="ai-hint">Vision is used for image attachments, screenshots and visual checks of widgets. A text-only model can still chat and use tools. Vision changes apply automatically when saved.</p>
       </section>
       <section class="ai-section">
         <div class="config-cat-header"><span class="config-cat-icon">⌕</span><span class="config-cat-name">Embeddings</span></div>
@@ -41,10 +41,10 @@ async function renderAITab(container, options = {}) {
         <p class="ai-hint" data-unsupported hidden>Anthropic has no embedding endpoint. Uncheck “Use same provider” and select another provider to enable document search.</p>
         ${model('embed-', 'embedding_')}
         <p class="ai-hint">Suggested models come from the provider catalog. If yours is missing, enter its ID; “Test embeddings” verifies the actual endpoint. Leave empty to disable document search.</p>
-        <label class="ai-check" data-reindex hidden><input name="reindex" type="checkbox">Rebuild the document index at the next server restart. All indexed text will be sent to the selected embedding provider; API charges may apply.</label>
+        <label class="ai-check" data-reindex hidden><input name="reindex" type="checkbox">Rebuild the document index when saving. All indexed text will be sent to the selected embedding provider; API charges may apply.</label>
       </section>
       <div class="ai-footer">
-        <p class="ai-hint" data-restart hidden>Embedding changes are saved but require a server restart. Document search will be unavailable during the rebuild; the original index is retained if it fails. Stop other Prism servers using this database before restarting.</p>
+        <p class="ai-hint" data-embedding-status role="status" aria-live="polite"></p>
         <div class="ai-actions"><button class="ai-button primary" type="submit">Save changes</button><button class="ai-button" type="button" data-action="reset">Use server settings</button></div>
         <p class="ai-hint">Chat changes apply from the next message. Tests send a small request and may incur API charges. Keys are stored encrypted and never displayed.</p>
       </div>
@@ -125,6 +125,32 @@ async function renderAITab(container, options = {}) {
     if (!r.ok) throw new Error(data.error || text || 'Request failed')
     return data
   }
+  let monitorGeneration = 0
+  function showEmbeddingStatus(data) {
+    pane.querySelector('[data-embedding-status]').textContent = data.embeddingApplying
+      ? 'Applying embeddings — '+data.embeddingStatus+'. Document search is temporarily unavailable.'
+      : 'Embeddings: '+(data.embeddingStatus || 'not configured')+(data.embeddingPending ? ' Saved configuration is not active yet.' : '')
+    saved.embeddingStatus=data.embeddingStatus
+    saved.embeddingPending=data.embeddingPending
+    refresh()
+  }
+  async function monitorEmbedding(generation) {
+    while (pane.isConnected && generation===monitorGeneration) {
+      await new Promise(resolve=>setTimeout(resolve,1000))
+      if (!pane.isConnected || generation!==monitorGeneration) return
+      try {
+        const r=await fetch('/api/ai/config',{cache:'no-store'})
+        if(!r.ok) throw new Error('Status unavailable')
+        const data=await r.json()
+        if(generation!==monitorGeneration || !pane.isConnected) return
+        showEmbeddingStatus(data)
+        if(!data.embeddingApplying) return
+      } catch {
+        if(generation===monitorGeneration && pane.isConnected) pane.querySelector('[data-embedding-status]').textContent='Cannot refresh embedding status. Reopen settings to check.'
+        return
+      }
+    }
+  }
   async function load() {
     const r=await fetch('/api/ai/config',{cache:'no-store'})
     if (!r.ok) throw new Error('AI configuration is unavailable. In multi-user mode, use Admin → AI provider.')
@@ -139,14 +165,16 @@ async function renderAITab(container, options = {}) {
     f('useSameProvider').checked=saved.embedding.useSameProvider !== false
     f('reindex').checked=false
     pane.querySelector('[data-source]').textContent=(options.admin ? 'Deployment configuration — applies to all users and shared agents. ' : 'Configure the AI used by your agent and apps. ')+(saved.source==='server' ? 'Using server defaults.' : '')
-    pane.querySelector('[data-restart]').hidden=!saved.embeddingRestartRequired
+    showEmbeddingStatus(saved)
+    const generation=++monitorGeneration
+    if(saved.embeddingApplying) void monitorEmbedding(generation)
     refresh()
   }
   async function perform(action, quiet=false) {
     if (busy) return
     if (action==='reset') {
       // Prism's shared confirmation dialog, with native confirm only as a fallback.
-      const message='Restore the server AI settings? If the embedding provider or model changes, the document index will be rebuilt at the next restart.'
+      const message='Restore the server AI settings? If the embedding provider or model changes, the document index will be rebuilt automatically.'
       const ok=typeof PrismModal!=='undefined' ? await PrismModal.confirm(message) : window.confirm(message)
       if (!ok) return
     }
@@ -164,7 +192,7 @@ async function renderAITab(container, options = {}) {
         if (!quiet) status.textContent=`${result.models.length} models available. Select or enter a model ID.`
       } else if (action==='test') status.textContent='The model responded. This text test does not verify vision support.'
       else if(action==='embedding_test') status.textContent=`Embedding endpoint verified · ${result.dimension} dimensions.`
-      else {await load();status.textContent='Saved. Chat applies from the next message.'+(saved.embeddingRestartRequired ? ' Restart the server to apply embeddings.' : '')}
+      else {await load();status.textContent='Saved. Chat applies from the next message.'+' Embeddings apply automatically.'}
     } catch(err) {status.textContent=err.message;status.classList.add('error')}
     finally {busy=false;controls.forEach(el=>el.disabled=false);pane.querySelectorAll('[data-sources] button').forEach(el=>el.disabled=false);refresh()}
   }

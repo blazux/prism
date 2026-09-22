@@ -27,11 +27,12 @@ const maxUploadSize = 50 << 20 // 50 MB
 // to live copy-pasted in each caller and the headless copy silently lost the
 // "don't guess, search first" sentence.
 func (s *Server) ragContextFn(scope string) func() string {
-	if s.ragStore == nil {
-		return nil
-	}
-	ragStore := s.ragStore
 	return func() string {
+		ragStore, _, _, release := s.acquireRAG()
+		defer release()
+		if ragStore == nil {
+			return ""
+		}
 		if s.ragPersonalFallbackBlocked(scope) {
 			return ""
 		}
@@ -73,17 +74,13 @@ func (s *Server) ragContextFn(scope string) func() string {
 
 var ragInitStatus atomic.Value // stores string
 
-// initRAG initialises the embedder and store, retrying until success.
+// initRAG starts the same embedding configuration worker used by settings.
 // Runs in a background goroutine — RAG endpoints return 503 until ready.
 func (s *Server) initRAG(ctx context.Context) {
-	ragInitStatus.Store("initializing")
-
 	if s.cfg.PostgresURL == "" {
 		ragInitStatus.Store("disabled: POSTGRES_URL not set")
-		log.Println("[rag] POSTGRES_URL not set — RAG disabled")
 		return
 	}
-	// The encrypted profile lives in the memory store, which starts separately.
 	for s.store() == nil {
 		select {
 		case <-ctx.Done():
@@ -91,113 +88,7 @@ func (s *Server) initRAG(ctx context.Context) {
 		case <-time.After(time.Second):
 		}
 	}
-	p, err := loadAIProfile(ctx, s.store())
-	if err != nil {
-		ragInitStatus.Store("cannot load AI settings")
-		return
-	}
-	legacy := s.environmentAIProfile()
-	if p == nil {
-		p = legacy
-	} else if p.ServerDefaults {
-		confirm := p.Embedding != nil && p.Embedding.Reindex && p.Embedding.ReindexFor == embeddingIdentity(legacy.effectiveEmbedding())
-		p = legacy
-		p.Embedding.Reindex = confirm
-		if confirm {
-			p.Embedding.ReindexFor = embeddingIdentity(p.effectiveEmbedding())
-		}
-	}
-	if p.Embedding == nil {
-		p.Embedding = legacy.Embedding
-	}
-	s.mu.Lock()
-	s.activeEmbedding = p
-	s.mu.Unlock()
-	ep := p.effectiveEmbedding()
-	if ep == nil || ep.Model == "" {
-		ragInitStatus.Store("disabled: no embedding model configured")
-		return
-	}
-	if ep.Provider == "anthropic" {
-		ragInitStatus.Store("Anthropic has no embedding endpoint; select another provider")
-		return
-	}
-	embedder := ep.embedder()
-
-	// Probe embedding dimension (retry — model may need to load)
-	var dim int
-	for attempt := 1; ; attempt++ {
-		probeCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		ragInitStatus.Store(fmt.Sprintf("probing embed model (attempt %d)…", attempt))
-		log.Printf("[rag] probing embedding dim for %s (attempt %d)…", ep.Model, attempt)
-		var err error
-		dim, err = embedder.Dim(probeCtx)
-		cancel()
-		if err == nil {
-			break
-		}
-		log.Printf("[rag] embed probe failed: %v — retrying in 5s", err)
-		ragInitStatus.Store(fmt.Sprintf("embed probe failed: %v — retrying…", err))
-		select {
-		case <-ctx.Done():
-			ragInitStatus.Store("cancelled")
-			return
-		case <-time.After(5 * time.Second):
-		}
-	}
-	log.Printf("[rag] embedding dim=%d", dim)
-
-	ragInitStatus.Store("checking document index…")
-	if err := rag.PrepareEmbeddingIndex(ctx, s.cfg.PostgresURL, embedder, dim, embeddingIdentity(ep), embeddingIdentity(legacy.effectiveEmbedding()), p.Embedding.Reindex && p.Embedding.ReindexFor == embeddingIdentity(ep), func(done int) { ragInitStatus.Store(fmt.Sprintf("rebuilding document index: %d chunks…", done)) }); err != nil {
-		log.Printf("[rag] index preparation failed: %v", err)
-		ragInitStatus.Store("document index preparation failed; original index retained. Check server logs and AI provider settings, then restart.")
-		return
-	}
-	s.mu.Lock()
-	s.activeEmbedding = p
-	s.mu.Unlock()
-
-	// Connect to Postgres (retry — container may still be starting)
-	var store *rag.Store
-	for attempt := 1; ; attempt++ {
-		ragInitStatus.Store(fmt.Sprintf("connecting to postgres (attempt %d)…", attempt))
-		log.Printf("[rag] connecting to postgres (attempt %d)…", attempt)
-		var err error
-		storeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		store, err = rag.NewStore(storeCtx, s.cfg.PostgresURL, dim)
-		cancel()
-		if err == nil {
-			break
-		}
-		log.Printf("[rag] postgres failed: %v — retrying in 3s", err)
-		ragInitStatus.Store(fmt.Sprintf("postgres: %v — retrying…", err))
-		select {
-		case <-ctx.Done():
-			ragInitStatus.Store("cancelled")
-			return
-		case <-time.After(3 * time.Second):
-		}
-	}
-
-	s.ragEmbedder = embedder
-	s.ragStore = store
-	s.ragCaptioner = s.newCaptioner()
-	// UI profiles use the conversation model for widget inspection, independent of
-	// the embedding server. Legacy .env deployments keep VISION_MODEL routing.
-	if !p.ServerDefaults && p != legacy && p.ChatVision != nil {
-		if *p.ChatVision {
-			s.ragCaptioner = rag.NewBackendCaptioner(p.backendConfig().newChatBackend(), p.Model)
-		} else {
-			s.ragCaptioner = nil
-		}
-	}
-	ragInitStatus.Store("ready")
-	log.Println("[rag] ready")
-
-	// Index Prism's bundled help docs for semantic search (idempotent).
-	if docs, hash := s.loadHelpDocs(); len(docs) > 0 {
-		s.ingestHelpDocs(ctx, docs, hash)
-	}
+	s.scheduleRAGApply()
 }
 
 // registerRAGRoutes adds /api/rag/* handlers to the mux.
@@ -214,20 +105,14 @@ func (s *Server) registerRAGRoutes(mux *http.ServeMux) {
 func (s *Server) handleRAGStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	status, _ := ragInitStatus.Load().(string)
-	ready := s.ragStore != nil
+	store, _, _, release := s.acquireRAG()
+	ready := store != nil
+	release()
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"ready":  ready,
-		"status": status,
+		"ready":    ready,
+		"applying": s.ragUpdating.Load(),
+		"status":   status,
 	})
-}
-
-func (s *Server) ragEnabled(w http.ResponseWriter) bool {
-	if s.ragStore == nil {
-		status, _ := ragInitStatus.Load().(string)
-		jsonError(w, "RAG not ready: "+status, http.StatusServiceUnavailable)
-		return false
-	}
-	return true
 }
 
 // /api/rag/collections  — GET list | DELETE ?name=x | PATCH (body: {name, description})
@@ -267,9 +152,11 @@ func (s *Server) ragScopeForRequest(r *http.Request) (scope string, manage, ok b
 
 func (s *Server) handleRAGCollections(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if !s.ragEnabled(w) {
+	release, ok := s.lockRAGRequest(w)
+	if !ok {
 		return
 	}
+	defer release()
 
 	// RAG is scoped to the user's group (or personal scope); collection names are
 	// stored prefixed so tenants never collide (Phase 3b). ?group=<id> lets a
@@ -339,9 +226,11 @@ func (s *Server) handleRAGCollections(w http.ResponseWriter, r *http.Request) {
 // GET /api/rag/documents?collection=xxx
 func (s *Server) handleRAGDocuments(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if !s.ragEnabled(w) {
+	release, ok := s.lockRAGRequest(w)
+	if !ok {
 		return
 	}
+	defer release()
 	collection := r.URL.Query().Get("collection")
 	if collection == "" {
 		jsonError(w, "missing collection", http.StatusBadRequest)
@@ -376,9 +265,11 @@ func (s *Server) handleRAGDocument(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DELETE only", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.ragEnabled(w) {
+	release, ok := s.lockRAGRequest(w)
+	if !ok {
 		return
 	}
+	defer release()
 	scope, canManage, scopeOK := s.ragScopeForRequest(r)
 	if !scopeOK || !canManage {
 		jsonError(w, "the group knowledge base is managed by your group admin", http.StatusForbidden)
@@ -419,9 +310,11 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.ragEnabled(w) {
+	release, ok := s.lockRAGRequest(w)
+	if !ok {
 		return
 	}
+	defer release()
 	upScope, upManage, upOK2 := s.ragScopeForRequest(r)
 	if !upOK2 || !upManage {
 		jsonError(w, "the group knowledge base is managed by your group admin", http.StatusForbidden)

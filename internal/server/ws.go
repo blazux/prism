@@ -174,9 +174,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	executor.SetLLM(ollamaClient, ai.cfg.Model)
 	executor.SetChatBlind(!ai.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
-	if s.ragStore != nil {
-		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
-	}
+	executor.SetRAGProvider(s.acquireRAG)
 	executor.SetSessionID(sessionID)
 	if ms != nil {
 		executor.SetMemoryStore(ms)

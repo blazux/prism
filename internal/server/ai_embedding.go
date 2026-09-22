@@ -190,10 +190,10 @@ func (s *Server) aiPublicView(p *aiProfile, source string) map[string]any {
 	}
 	status, _ := ragInitStatus.Load().(string)
 	return map[string]any{"sources": publicSources(p), "defaultSource": p.DefaultSource, "embeddingStatus": status, "source": source, "provider": p.Provider, "baseURL": p.BaseURL, "model": p.Model, "keyConfigured": p.APIKey != "", "chatVision": vision, "multiUser": s.cfg.MultiUser,
-		"embedding":                map[string]any{"sourceID": e.SourceID, "useSameProvider": e.UseSameProvider, "provider": ep.Provider, "baseURL": ep.BaseURL, "model": ep.Model, "keyConfigured": ep.APIKey != ""},
-		"embeddingRestartRequired": s.embeddingRestartRequired(cp)}
+		"embedding":         map[string]any{"sourceID": e.SourceID, "useSameProvider": e.UseSameProvider, "provider": ep.Provider, "baseURL": ep.BaseURL, "model": ep.Model, "keyConfigured": ep.APIKey != ""},
+		"embeddingApplying": s.ragUpdating.Load(), "embeddingPending": s.embeddingPending(cp)}
 }
-func (s *Server) embeddingRestartRequired(p aiProfile) bool {
+func (s *Server) embeddingPending(p aiProfile) bool {
 	s.mu.Lock()
 	active := s.activeEmbedding
 	s.mu.Unlock()
@@ -251,12 +251,13 @@ func (s *Server) resetAIProfile(ctx context.Context, confirmed bool) error {
 	if err = s.validateEmbeddingSave(ctx, p, old); err != nil {
 		return err
 	}
-	// Keep the explicit reindex permission until the next successful startup.
+	// Keep the explicit reindex permission for the confirmed embedding identity.
 	p.ServerDefaults = true
 	raw, _ := json.Marshal(p)
 	if err = s.store().SetSecret(ctx, aiProfileSecret, string(raw)); err != nil {
 		return errors.New("cannot reset AI settings")
 	}
+	s.scheduleRAGApply()
 	return nil
 }
 

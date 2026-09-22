@@ -290,7 +290,7 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, 409, err.Error())
 				return
 			}
-			writeJSON(w, map[string]any{"ok": true, "restartRequired": s.embeddingRestartRequired(b.aiProfile)})
+			writeJSON(w, map[string]any{"ok": true, "embeddingPending": s.embeddingPending(b.aiProfile)})
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -375,7 +375,7 @@ func (s *Server) aiSettingsTool(u *memory.User) func(context.Context, map[string
 			if err := s.resetAIProfile(ctx, args["reindex"] == true); err != nil {
 				return "", err
 			}
-			return "Server AI defaults restored. Chat applies next message; restart the server for embedding changes.", nil
+			return "Server AI defaults restored. Chat applies next message; embedding changes apply automatically.", nil
 		}
 		old, err := loadAIProfile(ctx, ms)
 		if err != nil {
@@ -496,7 +496,7 @@ func (s *Server) aiSettingsTool(u *memory.User) func(context.Context, map[string
 			if err := s.saveAIProfile(ctx, u, &p, old); err != nil {
 				return "", err
 			}
-			return "AI configuration saved. Other sources retained. Chat applies next message; embedding changes require a server restart.", nil
+			return "AI configuration saved. Other sources retained. Chat applies next message; embedding changes apply automatically.", nil
 		}
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()

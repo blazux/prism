@@ -253,9 +253,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	executor.SetChatBlind(!ai.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 
-	if s.ragStore != nil {
-		executor.SetRAG(s.ragStore, s.ragEmbedder, s.ragCaptioner)
-	}
+	executor.SetRAGProvider(s.acquireRAG)
 	executor.SetSessionID(sessionID)
 	executor.SetHeadless(true) // no dashboard: widget tools refuse cleanly
 	cc.apply(executor)

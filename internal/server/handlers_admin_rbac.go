@@ -34,6 +34,7 @@ func (s *Server) purgeGroupResidue(groupID int64) {
 	scope := fmt.Sprintf("g%d", groupID)
 
 	// RAG collections (stored as "g<id>--<name>").
+	s.ragMu.RLock()
 	if s.ragStore != nil {
 		if cols, err := s.ragStore.ListCollections(ctx, scope); err == nil {
 			for _, c := range cols {
@@ -41,6 +42,7 @@ func (s *Server) purgeGroupResidue(groupID int64) {
 			}
 		}
 	}
+	s.ragMu.RUnlock()
 	// Group MCP servers (session "g<id>") — via the manager so live clients close.
 	if s.mcpMgr != nil {
 		if servers, err := s.mcpMgr.List(ctx, scope); err == nil {

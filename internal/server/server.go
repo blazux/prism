@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"prism/internal/customtools"
@@ -75,7 +76,12 @@ type Server struct {
 	upgrader        websocket.Upgrader
 	clients         map[*Client]struct{}
 	mu              sync.RWMutex
-	activeEmbedding *aiProfile // embedding configuration in use until restart; protected by mu
+	ragMu           sync.RWMutex
+	ragApplyMu      sync.Mutex
+	ragUpdating     atomic.Bool
+	ragGeneration   uint64             // protected by mu
+	ragCancel       context.CancelFunc // protected by mu
+	activeEmbedding *aiProfile         // currently active embedding configuration; protected by mu
 	ragStore        *rag.Store
 	ragEmbedder     *rag.Embedder
 	ragCaptioner    *rag.Captioner

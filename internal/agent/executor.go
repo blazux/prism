@@ -39,6 +39,7 @@ type ToolExecutor struct {
 	globalAdmin           bool                  // caller is a global admin (MCP group management)
 	ragReadOnly           bool                  // group knowledge base is admin-curated: this caller may only search it
 	rawResults            bool                  // programmatic caller (/api/builtin → prismTool, cron): never truncate a result
+	ragProvider           func() (*rag.Store, *rag.Embedder, *rag.Captioner, func())
 	ragStore              *rag.Store
 	ragEmbedder           *rag.Embedder
 	ragCaptioner          *rag.Captioner
@@ -1224,4 +1225,16 @@ func normalizeContactName(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = strings.NewReplacer("-", " ", "'", " ", "  ", " ").Replace(s)
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// A fresh lease per operation lets an already connected agent follow live RAG
+// changes without retaining an old embedder or writing old-model vectors.
+func (e *ToolExecutor) SetRAGProvider(fn func() (*rag.Store, *rag.Embedder, *rag.Captioner, func())) {
+	e.ragProvider = fn
+}
+func (e *ToolExecutor) acquireRAG() (*rag.Store, *rag.Embedder, *rag.Captioner, func()) {
+	if e.ragProvider != nil {
+		return e.ragProvider()
+	}
+	return e.ragStore, e.ragEmbedder, e.ragCaptioner, func() {}
 }

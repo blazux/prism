@@ -18,22 +18,25 @@ import (
 const ragBlockedMsg = "No knowledge base available — you're not in a group; ask your admin to add you to one."
 
 func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, limit int) (string, []string, error) {
+	ragStore, ragEmbedder, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
 	if e.ragBlocked() {
 		return ragBlockedMsg, nil, nil
 	}
-	if e.ragStore == nil || e.ragEmbedder == nil {
+	if ragStore == nil || ragEmbedder == nil {
 		return "RAG not available (Postgres not configured)", nil, nil
 	}
 	if query == "" || collection == "" {
 		return "", nil, fmt.Errorf("query and collection are required")
 	}
 
-	embedding, err := e.ragEmbedder.Embed(ctx, query)
+	embedding, err := ragEmbedder.Embed(ctx, query)
 	if err != nil {
 		return fmt.Sprintf("ERROR embedding query: %v", err), nil, nil
 	}
 
-	results, err := e.ragStore.Search(ctx, e.resolveCollection(collection), embedding, limit)
+	results, err := ragStore.Search(ctx, e.resolveCollection(collection), embedding, limit)
 	if err != nil {
 		return fmt.Sprintf("ERROR searching: %v", err), nil, nil
 	}
@@ -41,7 +44,7 @@ func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, 
 		// Distinguish "collection exists but matched nothing" from "no such
 		// collection" (a guessed/misspelled name) — the latter otherwise reads
 		// as an empty knowledge base and dead-ends the agent on a mandated search.
-		if cols, cerr := e.ragStore.ListCollections(ctx, e.ragScope); cerr == nil {
+		if cols, cerr := ragStore.ListCollections(ctx, e.ragScope); cerr == nil {
 			want := e.resolveCollection(collection)
 			found := false
 			var names []string
@@ -75,6 +78,9 @@ func (e *ToolExecutor) ragSearch(ctx context.Context, query, collection string, 
 }
 
 func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, content, sourcePath string) (string, error) {
+	ragStore, ragEmbedder, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
 	if e.ragBlocked() {
 		return ragBlockedMsg, nil
 	}
@@ -84,7 +90,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 	if e.groupWriteRefused(collection) {
 		return ragReadOnlyMsg, nil
 	}
-	if e.ragStore == nil || e.ragEmbedder == nil {
+	if ragStore == nil || ragEmbedder == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
 	if collection == "" {
@@ -193,7 +199,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 		return "Content produced no chunks after splitting.", nil
 	}
 
-	if err := e.ragStore.EnsureCollection(ctx, collection, scope); err != nil {
+	if err := ragStore.EnsureCollection(ctx, collection, scope); err != nil {
 		return fmt.Sprintf("ERROR registering collection: %v", err), nil
 	}
 
@@ -201,7 +207,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 	// one opaque request, and nothing would say where the ingestion stands.
 	embedStart := time.Now()
 	logged := embedStart
-	embeddings, err := e.ragEmbedder.EmbedBatchProgress(ctx, chunks, func(done, total int) {
+	embeddings, err := ragEmbedder.EmbedBatchProgress(ctx, chunks, func(done, total int) {
 		if time.Since(logged) < 5*time.Second && done < total {
 			return
 		}
@@ -217,7 +223,7 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 	}
 	log.Printf("[rag] ingest %q: %d chunks embedded in %s", source, len(chunks), time.Since(embedStart).Round(time.Second))
 
-	if err := e.ragStore.UpsertDocument(ctx, collection, source, fileHash, sizeBytes, chunks, pageNums, embeddings); err != nil {
+	if err := ragStore.UpsertDocument(ctx, collection, source, fileHash, sizeBytes, chunks, pageNums, embeddings); err != nil {
 		return fmt.Sprintf("ERROR storing document: %v", err), nil
 	}
 
@@ -225,14 +231,17 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 }
 
 func (e *ToolExecutor) ragListCollections(ctx context.Context) (string, error) {
+	ragStore, _, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
 	if e.ragBlocked() {
 		return ragBlockedMsg, nil
 	}
-	if e.ragStore == nil {
+	if ragStore == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
 
-	cols, err := e.ragStore.ListCollections(ctx, e.ragScope)
+	cols, err := ragStore.ListCollections(ctx, e.ragScope)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
@@ -257,10 +266,13 @@ func (e *ToolExecutor) ragListCollections(ctx context.Context) (string, error) {
 }
 
 func (e *ToolExecutor) ragListDocuments(ctx context.Context, collection string) (string, error) {
+	ragStore, _, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
 	if e.ragBlocked() {
 		return ragBlockedMsg, nil
 	}
-	if e.ragStore == nil {
+	if ragStore == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
 	if collection == "" {
@@ -269,7 +281,7 @@ func (e *ToolExecutor) ragListDocuments(ctx context.Context, collection string) 
 	displayCol := collection
 	collection = e.resolveCollection(collection)
 
-	docs, err := e.ragStore.ListDocuments(ctx, collection)
+	docs, err := ragStore.ListDocuments(ctx, collection)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
@@ -287,6 +299,9 @@ func (e *ToolExecutor) ragListDocuments(ctx context.Context, collection string) 
 }
 
 func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document string) (string, error) {
+	ragStore, _, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
 	if e.ragBlocked() {
 		return ragBlockedMsg, nil
 	}
@@ -296,7 +311,7 @@ func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document strin
 	if e.groupWriteRefused(collection) {
 		return ragReadOnlyMsg, nil
 	}
-	if e.ragStore == nil {
+	if ragStore == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
 	if collection == "" {
@@ -308,7 +323,7 @@ func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document strin
 	if document == "" {
 		// Verify the collection exists so a typo'd name reports honestly instead
 		// of a fake "deleted" — else the agent's model of the KB silently diverges.
-		if cols, cerr := e.ragStore.ListCollections(ctx, e.ragScope); cerr == nil {
+		if cols, cerr := ragStore.ListCollections(ctx, e.ragScope); cerr == nil {
 			found := false
 			var names []string
 			for _, c := range cols {
@@ -324,19 +339,19 @@ func (e *ToolExecutor) ragDelete(ctx context.Context, collection, document strin
 				return fmt.Sprintf("Collection %q does not exist — nothing deleted. Available: %s.", displayCol, strings.Join(names, ", ")), nil
 			}
 		}
-		if err := e.ragStore.DeleteCollection(ctx, collection); err != nil {
+		if err := ragStore.DeleteCollection(ctx, collection); err != nil {
 			return fmt.Sprintf("ERROR: %v", err), nil
 		}
 		return fmt.Sprintf("Collection %q deleted", displayCol), nil
 	}
 
-	docs, err := e.ragStore.ListDocuments(ctx, collection)
+	docs, err := ragStore.ListDocuments(ctx, collection)
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
 	for _, d := range docs {
 		if d.Filename == document {
-			if err := e.ragStore.DeleteDocument(ctx, d.ID); err != nil {
+			if err := ragStore.DeleteDocument(ctx, d.ID); err != nil {
 				return fmt.Sprintf("ERROR: %v", err), nil
 			}
 			return fmt.Sprintf("Document %q deleted from collection %q", document, displayCol), nil
@@ -366,6 +381,9 @@ func (e *ToolExecutor) groupWriteRefused(collection string) bool {
 // ragDescribe sets the one-line description shown in Settings › Knowledge and
 // in the agent's own Knowledge Base prompt block.
 func (e *ToolExecutor) ragDescribe(ctx context.Context, collection, description string) (string, error) {
+	ragStore, _, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
 	if e.ragBlocked() {
 		return ragBlockedMsg, nil
 	}
@@ -375,14 +393,14 @@ func (e *ToolExecutor) ragDescribe(ctx context.Context, collection, description 
 	if e.groupWriteRefused(collection) {
 		return ragReadOnlyMsg, nil
 	}
-	if e.ragStore == nil {
+	if ragStore == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
 	if collection == "" {
 		return "", fmt.Errorf("collection is required")
 	}
 	description = strings.TrimSpace(description)
-	cols, err := e.ragStore.ListCollections(ctx, e.resolveScope(collection))
+	cols, err := ragStore.ListCollections(ctx, e.resolveScope(collection))
 	if err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
@@ -398,7 +416,7 @@ func (e *ToolExecutor) ragDescribe(ctx context.Context, collection, description 
 	if !found {
 		return fmt.Sprintf("Collection %q does not exist. Available collections: %s", collection, strings.Join(names, ", ")), nil
 	}
-	if err := e.ragStore.SetCollectionDescription(ctx, stored, e.resolveScope(collection), description); err != nil {
+	if err := ragStore.SetCollectionDescription(ctx, stored, e.resolveScope(collection), description); err != nil {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
 	if description == "" {
@@ -440,14 +458,17 @@ func (e *ToolExecutor) resolveScope(name string) string {
 const learningsCollection = "agent-learnings"
 
 func (e *ToolExecutor) saveLearning(ctx context.Context, title, content string) (string, error) {
-	if e.ragStore == nil || e.ragEmbedder == nil {
+	ragStore, ragEmbedder, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
+	if ragStore == nil || ragEmbedder == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
 	if title == "" || content == "" {
 		return "", fmt.Errorf("title and content are required")
 	}
 
-	if err := e.ragStore.EnsureCollection(ctx, e.pcol(learningsCollection), e.personalScope()); err != nil {
+	if err := ragStore.EnsureCollection(ctx, e.pcol(learningsCollection), e.personalScope()); err != nil {
 		return fmt.Sprintf("ERROR registering collection: %v", err), nil
 	}
 
@@ -457,13 +478,13 @@ func (e *ToolExecutor) saveLearning(ctx context.Context, title, content string) 
 		return "Content produced no chunks after splitting.", nil
 	}
 
-	embeddings, err := e.ragEmbedder.EmbedBatch(ctx, chunks)
+	embeddings, err := ragEmbedder.EmbedBatch(ctx, chunks)
 	if err != nil {
 		return fmt.Sprintf("ERROR embedding content: %v", err), nil
 	}
 
 	pageNums := make([]int, len(chunks))
-	if err := e.ragStore.UpsertDocument(ctx, e.pcol(learningsCollection), title, "", int64(len(full)), chunks, pageNums, embeddings); err != nil {
+	if err := ragStore.UpsertDocument(ctx, e.pcol(learningsCollection), title, "", int64(len(full)), chunks, pageNums, embeddings); err != nil {
 		return fmt.Sprintf("ERROR storing learning: %v", err), nil
 	}
 
@@ -473,16 +494,19 @@ func (e *ToolExecutor) saveLearning(ctx context.Context, title, content string) 
 // SearchLearnings queries the agent-learnings collection and returns a formatted
 // string suitable for injection into the system prompt. Returns "" if nothing relevant.
 func (e *ToolExecutor) SearchLearnings(ctx context.Context, query string) string {
-	if e.ragStore == nil || e.ragEmbedder == nil || query == "" {
+	ragStore, ragEmbedder, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
+	if ragStore == nil || ragEmbedder == nil || query == "" {
 		return ""
 	}
 
-	embedding, err := e.ragEmbedder.Embed(ctx, query)
+	embedding, err := ragEmbedder.Embed(ctx, query)
 	if err != nil {
 		return ""
 	}
 
-	results, err := e.ragStore.Search(ctx, e.pcol(learningsCollection), embedding, 3)
+	results, err := ragStore.Search(ctx, e.pcol(learningsCollection), embedding, 3)
 	if err != nil || len(results) == 0 {
 		return ""
 	}
@@ -502,14 +526,17 @@ func (e *ToolExecutor) SearchLearnings(ctx context.Context, query string) string
 const userProfileCollection = "user-profile"
 
 func (e *ToolExecutor) saveUserInfo(ctx context.Context, topic, content string) (string, error) {
-	if e.ragStore == nil || e.ragEmbedder == nil {
+	ragStore, ragEmbedder, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
+	if ragStore == nil || ragEmbedder == nil {
 		return "RAG not available (Postgres not configured)", nil
 	}
 	if topic == "" || content == "" {
 		return "", fmt.Errorf("topic and content are required")
 	}
 
-	if err := e.ragStore.EnsureCollection(ctx, e.pcol(userProfileCollection), e.personalScope()); err != nil {
+	if err := ragStore.EnsureCollection(ctx, e.pcol(userProfileCollection), e.personalScope()); err != nil {
 		return fmt.Sprintf("ERROR registering collection: %v", err), nil
 	}
 
@@ -519,13 +546,13 @@ func (e *ToolExecutor) saveUserInfo(ctx context.Context, topic, content string) 
 		return "Content produced no chunks after splitting.", nil
 	}
 
-	embeddings, err := e.ragEmbedder.EmbedBatch(ctx, chunks)
+	embeddings, err := ragEmbedder.EmbedBatch(ctx, chunks)
 	if err != nil {
 		return fmt.Sprintf("ERROR embedding content: %v", err), nil
 	}
 
 	pageNums := make([]int, len(chunks))
-	if err := e.ragStore.UpsertDocument(ctx, e.pcol(userProfileCollection), topic, "", int64(len(full)), chunks, pageNums, embeddings); err != nil {
+	if err := ragStore.UpsertDocument(ctx, e.pcol(userProfileCollection), topic, "", int64(len(full)), chunks, pageNums, embeddings); err != nil {
 		return fmt.Sprintf("ERROR storing user info: %v", err), nil
 	}
 
@@ -536,11 +563,14 @@ func (e *ToolExecutor) saveUserInfo(ctx context.Context, topic, content string) 
 // The profile is always injected in full (no semantic search) since it's small
 // and potentially relevant to any conversation.
 func (e *ToolExecutor) GetUserProfile(ctx context.Context) string {
-	if e.ragStore == nil {
+	ragStore, _, _, releaseRAG := e.acquireRAG()
+	defer releaseRAG()
+
+	if ragStore == nil {
 		return ""
 	}
 
-	chunks, err := e.ragStore.AllContent(ctx, e.pcol(userProfileCollection))
+	chunks, err := ragStore.AllContent(ctx, e.pcol(userProfileCollection))
 	if err != nil || len(chunks) == 0 {
 		return ""
 	}
