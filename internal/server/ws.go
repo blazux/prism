@@ -139,6 +139,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ws upgrade: %v", err)
 		return
 	}
+	// Bound a complete message, including fragmented frames and base64 images.
+	conn.SetReadLimit(16 << 20)
+	stopOnCancel := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	defer stopOnCancel()
 
 	// Determine session from query param, scoped to the connected user so each
 	// user gets their own isolated sessions (Phase 3).
@@ -161,7 +165,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
-	os.MkdirAll(sessionPluginDir, 0755)
+	s.mkdirManaged(sessionPluginDir)
 
 	ai, err := s.aiConfigFor(r.Context(), requestUserID(r))
 	if err != nil {
@@ -480,10 +484,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Send initial state
-	status := "unavailable"
-	if s.docker.IsDockerAvailable() {
-		status = s.docker.Status(r.Context())
-	}
+	status := s.docker.WorkspaceStatus(r.Context())
 	client.sendJSON(map[string]interface{}{
 		"type":      "container_status",
 		"status":    status,
@@ -598,7 +599,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					client.mu.Lock()
 					lastID := client.lastNotifID
 					client.mu.Unlock()
-					notifs, err := ms.GetNotificationsAfter(context.Background(), sessionID, lastID)
+					notifs, err := ms.GetNotificationsAfter(r.Context(), sessionID, lastID)
 					if err != nil || len(notifs) == 0 {
 						continue
 					}
@@ -657,7 +658,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(r.Context())
 			client.mu.Lock()
 			// Cancel previous if running
 			if client.cancelFn != nil {
@@ -741,10 +742,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		case "remove_plugin":
 			if msg.ID != "" {
-				if err := os.Remove(filepath.Join(sessionPluginDir, msg.ID+".html")); err != nil && !os.IsNotExist(err) {
+				if err := s.removeManaged(filepath.Join(sessionPluginDir, msg.ID+".html")); err != nil && !os.IsNotExist(err) {
 					log.Printf("[remove_plugin] delete html %s: %v", msg.ID, err)
 				}
-				if err := os.Remove(filepath.Join(sessionPluginDir, msg.ID+".meta.json")); err != nil && !os.IsNotExist(err) {
+				if err := s.removeManaged(filepath.Join(sessionPluginDir, msg.ID+".meta.json")); err != nil && !os.IsNotExist(err) {
 					log.Printf("[remove_plugin] delete meta %s: %v", msg.ID, err)
 				}
 				client.sendJSON(map[string]interface{}{"type": "plugin_unload", "id": msg.ID})
@@ -754,7 +755,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "lock_plugin":
 			if msg.ID != "" {
 				metaPath := filepath.Join(sessionPluginDir, msg.ID+".meta.json")
-				updatePluginMeta(metaPath, func(m map[string]any) {
+				s.updatePluginMeta(metaPath, func(m map[string]any) {
 					m["locked"] = msg.Locked
 				})
 			}
@@ -775,7 +776,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if msg.ID != "" {
 				metaPath := filepath.Join(sessionPluginDir, msg.ID+".meta.json")
 				if _, err := os.Stat(metaPath); err == nil {
-					updatePluginMeta(metaPath, func(m map[string]any) {
+					s.updatePluginMeta(metaPath, func(m map[string]any) {
 						if msg.Open != nil {
 							m["open"] = *msg.Open
 						}
@@ -943,8 +944,8 @@ func (s *Server) handleChat(ctx context.Context, client *Client, content string,
 	// dock reads this to know Prism's reply is complete). The browser ignores it.
 	client.sendJSONReliable(map[string]interface{}{"type": "turn_complete"})
 
-	// Usage: one chat turn, tokens estimated (chars/4 in+out) until backend
-	// counters are wired.
+	// Legacy chat-turn estimate for existing dashboards. Real main-chat provider
+	// usage is stored separately as model_request; never add the two quantities.
 	if ms := s.store(); ms != nil {
 		model := modelOverride
 		if model == "" && client.ag != nil {

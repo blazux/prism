@@ -24,9 +24,9 @@ func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port i
 	fmt.Fprintf(&sb, "Service %q started.\n\nPort mappings:\n", name)
 	if e.docker.WorkspaceDocker() {
 		for i, hp := range hostPorts {
-			fmt.Fprintf(&sb, "  %d → workspace port %d\n", allPorts[i], hp)
+			fmt.Fprintf(&sb, "  %d → workspace port %d — %s\n", allPorts[i], hp, e.docker.ServiceURL(hp))
 		}
-		fmt.Fprintf(&sb, "\nIframe URL: /proxy/%d/\nInternal URL (workspace scripts): http://127.0.0.1:%d/\nPorts are not published on the platform host.", hostPorts[0], hostPorts[0])
+		fmt.Fprintf(&sb, "\nService URL (browser / iframe): %s\nInternal URL (workspace scripts): http://127.0.0.1:%d/\nPorts are not published on the platform host.", e.docker.ServiceURL(hostPorts[0]), hostPorts[0])
 	} else {
 		for i, hp := range hostPorts {
 			fmt.Fprintf(&sb, "  %d → host port %d\n", allPorts[i], hp)
@@ -90,7 +90,7 @@ func (e *ToolExecutor) dockerPS(ctx context.Context) (string, error) {
 		if s.Port > 0 {
 			portInfo = fmt.Sprintf(" — http://%s.localhost/  (host port %d)", s.Name, s.Port)
 			if e.docker.WorkspaceDocker() {
-				portInfo = fmt.Sprintf(" — /proxy/%d/ (workspace port %d)", s.Port, s.Port)
+				portInfo = fmt.Sprintf(" — %s (workspace port %d)", e.docker.ServiceURL(s.Port), s.Port)
 			}
 		}
 		fmt.Fprintf(&sb, "  • %s (%s) — %s%s\n", s.Name, s.Image, s.Status, portInfo)
@@ -202,6 +202,11 @@ func (e *ToolExecutor) dockerCompose(ctx context.Context, action, file, project,
 		out, err := e.docker.ComposeUp(ctx, hostPath, project, projectDir)
 		if err != nil {
 			return fmt.Sprintf("ERROR: %v\n%s", err, out), nil
+		}
+		if e.docker.WorkspaceDocker() {
+			if listing, listErr := e.docker.ComposePS(ctx, hostPath, project, projectDir); listErr == nil && strings.TrimSpace(listing) != "" {
+				out += "\n" + listing
+			}
 		}
 		if strings.TrimSpace(out) == "" {
 			return fmt.Sprintf("All services started (project: %s).", project), nil

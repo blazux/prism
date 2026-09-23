@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/mail"
 	"strconv"
 	"strings"
 
 	"prism/internal/memory"
+	"prism/internal/timeprefs"
 )
 
 // profileResponse is the profile plus what the page needs to render the
@@ -61,15 +63,18 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		// The groups come with the profile so the page can offer the default-group
 		// picker without a second round trip, and hide it entirely for the many
 		// users who are in one group or none.
+		s.profileTimezone(r, &p)
 		groups, _ := ms.UserGroups(r.Context(), u.ID)
 		defaultGroup, _ := ms.DefaultGroupID(r.Context(), u.ID)
 		writeJSON(w, profileResponse{Profile: p, Groups: groups, DefaultGroupID: defaultGroup})
 	case "POST":
 		var b struct {
-			DisplayName string `json:"displayName"`
-			FirstName   string `json:"firstName"`
-			LastName    string `json:"lastName"`
-			Phone       string `json:"phone"`
+			DisplayName string  `json:"displayName"`
+			FirstName   string  `json:"firstName"`
+			LastName    string  `json:"lastName"`
+			Phone       string  `json:"phone"`
+			Email       *string `json:"email"`
+			Timezone    *string `json:"timezone"`
 			// Empty = leave the transfer preference alone. A client that does not
 			// know about the field must not silently reset it to blind.
 			Transfer string `json:"transfer"`
@@ -79,6 +84,17 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
+			return
+		}
+		if b.Timezone != nil {
+			*b.Timezone = strings.TrimSpace(*b.Timezone)
+			if err := timeprefs.Validate(*b.Timezone); err != nil {
+				writeErr(w, 400, err.Error())
+				return
+			}
+		}
+		if !validProfileEmail(b.Email) {
+			writeErr(w, http.StatusBadRequest, "Enter a valid email address.")
 			return
 		}
 		dn := strings.TrimSpace(b.DisplayName)
@@ -100,11 +116,18 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := ms.UpdateProfile(r.Context(), u.ID, dn, strings.TrimSpace(b.FirstName), strings.TrimSpace(b.LastName), strings.TrimSpace(b.Phone)); err != nil {
+		if err := ms.UpdateProfile(r.Context(), u.ID, dn, strings.TrimSpace(b.FirstName), strings.TrimSpace(b.LastName), strings.TrimSpace(b.Phone), b.Email); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		if b.Timezone != nil {
+			if err := s.userStore(r).SetConfig(r.Context(), timeprefs.Key, *b.Timezone); err != nil {
+				writeErr(w, 500, "cannot save timezone")
+				return
+			}
+		}
 		p, _ := ms.GetProfile(r.Context(), u.ID)
+		s.profileTimezone(r, &p)
 		groups, _ := ms.UserGroups(r.Context(), u.ID)
 		defaultGroup, _ := ms.DefaultGroupID(r.Context(), u.ID)
 		writeJSON(w, profileResponse{Profile: p, Groups: groups, DefaultGroupID: defaultGroup})
@@ -119,14 +142,16 @@ const (
 	cfgProfileFirst   = "profile_first_name"
 	cfgProfileLast    = "profile_last_name"
 	cfgProfilePhone   = "profile_phone"
+	cfgProfileEmail   = "profile_email"
 )
 
 func (s *Server) handleServiceProfile(w http.ResponseWriter, r *http.Request, ms *memory.Store) {
 	get := func(key string) string { v, _, _ := ms.GetConfig(r.Context(), key); return v }
 	profile := func() memory.Profile {
-		return memory.Profile{
+		zone, loc := timeprefs.Read(r.Context(), ms)
+		return memory.Profile{Timezone: zone, EffectiveTimezone: loc.String(),
 			DisplayName: get(cfgProfileDisplay), FirstName: get(cfgProfileFirst),
-			LastName: get(cfgProfileLast), Phone: get(cfgProfilePhone),
+			LastName: get(cfgProfileLast), Phone: get(cfgProfilePhone), Email: get(cfgProfileEmail),
 			AvatarVer: ms.AvatarVer(r.Context(), "u0"),
 		}
 	}
@@ -135,23 +160,43 @@ func (s *Server) handleServiceProfile(w http.ResponseWriter, r *http.Request, ms
 		writeJSON(w, profile())
 	case "POST":
 		var b struct {
-			DisplayName string `json:"displayName"`
-			FirstName   string `json:"firstName"`
-			LastName    string `json:"lastName"`
-			Phone       string `json:"phone"`
+			DisplayName string  `json:"displayName"`
+			FirstName   string  `json:"firstName"`
+			LastName    string  `json:"lastName"`
+			Phone       string  `json:"phone"`
+			Email       *string `json:"email"`
+			Timezone    *string `json:"timezone"`
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
+			return
+		}
+		if b.Timezone != nil {
+			*b.Timezone = strings.TrimSpace(*b.Timezone)
+			if err := timeprefs.Validate(*b.Timezone); err != nil {
+				writeErr(w, 400, err.Error())
+				return
+			}
+		}
+		if !validProfileEmail(b.Email) {
+			writeErr(w, http.StatusBadRequest, "Enter a valid email address.")
 			return
 		}
 		dn := strings.TrimSpace(b.DisplayName)
 		if dn == "" {
 			dn = strings.TrimSpace(b.FirstName + " " + b.LastName)
 		}
-		for key, val := range map[string]string{
+		values := map[string]string{
 			cfgProfileDisplay: dn, cfgProfileFirst: strings.TrimSpace(b.FirstName),
 			cfgProfileLast: strings.TrimSpace(b.LastName), cfgProfilePhone: strings.TrimSpace(b.Phone),
-		} {
+		}
+		if b.Timezone != nil {
+			values[timeprefs.Key] = *b.Timezone
+		}
+		if b.Email != nil {
+			values[cfgProfileEmail] = *b.Email
+		}
+		for key, val := range values {
 			if err := ms.SetConfig(r.Context(), key, val); err != nil {
 				http.Error(w, err.Error(), 500)
 				return
@@ -266,5 +311,29 @@ func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]interface{}{"ok": true})
 	default:
 		http.Error(w, "method not allowed", 405)
+	}
+}
+
+// An omitted email preserves the stored value; an empty email clears it.
+func validProfileEmail(email *string) bool {
+	if email == nil {
+		return true
+	}
+	*email = strings.TrimSpace(*email)
+	if *email == "" {
+		return true
+	}
+	if len(*email) > 254 {
+		return false
+	}
+	addr, err := mail.ParseAddress(*email)
+	return err == nil && addr.Address == *email && strings.Contains(addr.Address, "@")
+}
+
+func (s *Server) profileTimezone(r *http.Request, p *memory.Profile) {
+	if store := s.userStore(r); store != nil {
+		zone, loc := timeprefs.Read(r.Context(), store)
+		p.Timezone = zone
+		p.EffectiveTimezone = loc.String()
 	}
 }

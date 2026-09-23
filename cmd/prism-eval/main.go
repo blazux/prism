@@ -72,17 +72,18 @@ type Check struct {
 
 // Result is what one task run produced.
 type Result struct {
-	Name       string         `json:"name"`
-	Tags       []string       `json:"tags,omitempty"`
-	Success    bool           `json:"success"`
-	Failures   []string       `json:"failures,omitempty"`
-	ToolCalls  int            `json:"tool_calls"`
-	ToolErrors int            `json:"tool_errors"`
-	Tools      map[string]int `json:"tools,omitempty"`
-	OverBudget bool           `json:"over_budget,omitempty"`
-	AgentError string         `json:"agent_error,omitempty"`
-	DurationMS int64          `json:"duration_ms"`
-	Response   string         `json:"response,omitempty"`
+	Name          string            `json:"name"`
+	Tags          []string          `json:"tags,omitempty"`
+	Success       bool              `json:"success"`
+	Failures      []string          `json:"failures,omitempty"`
+	ModelRequests []json.RawMessage `json:"model_requests,omitempty"`
+	ToolCalls     int               `json:"tool_calls"`
+	ToolErrors    int               `json:"tool_errors"`
+	Tools         map[string]int    `json:"tools,omitempty"`
+	OverBudget    bool              `json:"over_budget,omitempty"`
+	AgentError    string            `json:"agent_error,omitempty"`
+	DurationMS    int64             `json:"duration_ms"`
+	Response      string            `json:"response,omitempty"`
 }
 
 // Report is the file written by -out and compared by -baseline.
@@ -324,16 +325,21 @@ func (c *client) chatWS(session, prompt string, timeout time.Duration, res *Resu
 	for {
 		conn.SetReadDeadline(deadline)
 		var ev struct {
-			Type    string `json:"type"`
-			Content string `json:"content"`
-			Tool    string `json:"tool"`
-			Output  string `json:"output"`
-			IsError bool   `json:"is_error"`
+			Usage   json.RawMessage `json:"usage"`
+			Type    string          `json:"type"`
+			Content string          `json:"content"`
+			Tool    string          `json:"tool"`
+			Output  string          `json:"output"`
+			IsError bool            `json:"is_error"`
 		}
 		if err := conn.ReadJSON(&ev); err != nil {
 			return answer.String(), fmt.Errorf("turn did not complete: %w", err)
 		}
 		switch ev.Type {
+		case "model_usage":
+			if len(ev.Usage) > 0 {
+				res.ModelRequests = append(res.ModelRequests, ev.Usage)
+			}
 		case "tool_use":
 			res.ToolCalls++
 			res.Tools[ev.Tool]++

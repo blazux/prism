@@ -1,29 +1,19 @@
 package main
 
 import (
-	"embed"
+	"context"
 	"log"
+	"net"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	_ "time/tzdata" // embed IANA timezone database so TZ env var works without tzdata installed
 
+	"prism/hosting"
 	"prism/internal/anthropic"
-	"prism/internal/docker"
-	"prism/internal/server"
 )
-
-//go:embed web
-var webFS embed.FS
-
-//go:embed docs/help
-var helpFS embed.FS
-
-// all: so the sibling .apt-packages (a dotfile) rides along — go:embed skips
-// dotfiles otherwise.
-//
-//go:embed all:agent_tools
-var toolsFS embed.FS
 
 func main() {
 	port := os.Getenv("PORT")
@@ -130,8 +120,8 @@ func main() {
 	// which every scope helper reads as "global".
 	multiUser := os.Getenv("MULTI_USER") == "1" || strings.EqualFold(os.Getenv("MULTI_USER"), "true")
 
-	cfg := server.Config{
-		DockerBackend: docker.Backend{Mode: os.Getenv("DOCKER_MODE"), Socket: os.Getenv("WORKSPACE_DOCKER_SOCKET"), User: os.Getenv("WORKSPACE_DOCKER_USER")},
+	cfg := hosting.Config{
+		DockerBackend: hosting.DockerBackend{Mode: os.Getenv("DOCKER_MODE"), Socket: os.Getenv("WORKSPACE_DOCKER_SOCKET"), User: os.Getenv("WORKSPACE_DOCKER_USER")},
 		Port:          port,
 		SecretKeyPath: os.Getenv("SECRET_KEY_PATH"),
 		WorkspaceDir:  workspaceDir,
@@ -158,15 +148,23 @@ func main() {
 		VoxURL:           os.Getenv("VOX_URL"), // set → docked with Prism Vox (Téléphonie app appears)
 		VoxUser:          os.Getenv("VOX_USER"),
 		VoxPassword:      os.Getenv("VOX_PASSWORD"),
-		WebFS:            webFS,
-		HelpFS:           helpFS,
-		ToolsFS:          toolsFS,
 		ServicePortStart: servicePortStart,
 		ServicePortEnd:   servicePortEnd,
 	}
 
-	srv := server.New(cfg)
+	srv, err := hosting.New(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("Prism → http://localhost:%s", port)
 	log.Printf("Workspace: %s | Backend: %s | Ollama: %s | Model: %s", workspaceDir, llmBackend, ollamaURL, model)
-	log.Fatal(srv.Start())
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	listener, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := srv.Serve(ctx, listener); err != nil {
+		log.Fatal(err)
+	}
 }

@@ -294,8 +294,11 @@ func (e *ToolExecutor) listFiles(path string) (string, error) {
 }
 
 func (e *ToolExecutor) aptInstall(ctx context.Context, packages string) (string, error) {
-	cmd := fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y -qq %s 2>&1 | tail -10", packages)
-	out, err := e.docker.Exec(ctx, cmd, 5*time.Minute)
+	if e.docker.ConfinedExecution() {
+		return "System packages cannot be installed into this read-only workspace. For Python libraries use install_packages with pip. For system dependencies, build an image and run it with the workspace Docker tools; mount /workspace for persistent files.", nil
+	}
+	cmd := fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y -qq %s", packages)
+	out, err := e.docker.Exec(ctx, packageInstallCommand(cmd), 5*time.Minute)
 	if err != nil {
 		return fmt.Sprintf("Install failed: %v\n%s", err, out), nil
 	}
@@ -308,8 +311,8 @@ func (e *ToolExecutor) aptInstall(ctx context.Context, packages string) (string,
 }
 
 func (e *ToolExecutor) pipInstall(ctx context.Context, packages string) (string, error) {
-	cmd := fmt.Sprintf("pip3 install --quiet %s 2>&1 | tail -10", packages)
-	out, err := e.docker.Exec(ctx, cmd, 5*time.Minute)
+	cmd := fmt.Sprintf("pip3 install --quiet %s", packages)
+	out, err := e.docker.Exec(ctx, packageInstallCommand(cmd), 5*time.Minute)
 	if err != nil {
 		return fmt.Sprintf("pip install failed: %v\n%s", err, out), nil
 	}
@@ -379,4 +382,10 @@ func (e *ToolExecutor) addAttachment(path string) (string, []string, error) {
 		return fmt.Sprintf("Attached %q to your response (non-image file — download will be available).", filepath.Base(path)), nil, nil
 	}
 	return fmt.Sprintf("Attached %q to your response.", filepath.Base(path)), []string{base64.StdEncoding.EncodeToString(data)}, nil
+}
+
+// Preserve the install status while bounding returned logs, without a pipeline
+// whose last successful command hides the package manager's failure.
+func packageInstallCommand(command string) string {
+	return "prism_install_log=$(mktemp) || exit 1; trap 'rm -f \"$prism_install_log\"' EXIT HUP INT TERM; (" + command + ") >\"$prism_install_log\" 2>&1; prism_install_status=$?; tail -c 8000 \"$prism_install_log\"; exit \"$prism_install_status\""
 }

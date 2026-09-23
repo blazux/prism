@@ -11,6 +11,7 @@ import (
 	"prism/internal/calendar"
 	"prism/internal/notes"
 	"prism/internal/tasks"
+	"prism/internal/timeprefs"
 )
 
 // PIMScope is the fallback scope for personal data (notes, tasks, calendar) when
@@ -31,7 +32,7 @@ func (e *ToolExecutor) pimSessionScope() string {
 }
 
 // parseTime accepts a few human-friendly layouts (local time) and RFC3339.
-func parseTime(s string) (time.Time, error) {
+func parseTime(s string, locations ...*time.Location) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}, fmt.Errorf("empty time")
@@ -40,15 +41,15 @@ func parseTime(s string) (time.Time, error) {
 		time.RFC3339, "2006-01-02 15:04", "2006-01-02T15:04", "2006-01-02 15:04:05", "2006-01-02",
 	}
 	for _, l := range layouts {
-		if t, err := time.ParseInLocation(l, s, time.Local); err == nil {
+		if t, err := timeprefs.Parse(l, s, timeprefs.First(locations)); err == nil {
 			return t, nil
 		}
 	}
 	return time.Time{}, fmt.Errorf("could not parse time %q (use e.g. 2006-01-02 15:04)", s)
 }
 
-func parseTimePtr(s string) *time.Time {
-	if t, err := parseTime(s); err == nil {
+func parseTimePtr(s string, locations ...*time.Location) *time.Time {
+	if t, err := parseTime(s, locations...); err == nil {
 		return &t
 	}
 	return nil
@@ -314,10 +315,10 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 			priority = "normal"
 		}
 		patch := tasks.Patch{Title: &title, Priority: &priority, Due: &due}
-		if err := patch.Validate(); err != nil {
+		if err := patch.Validate(timeprefs.Location(ctx)); err != nil {
 			return "", err
 		}
-		deadline, _ := patch.Deadline()
+		deadline, _ := patch.Deadline(timeprefs.Location(ctx))
 		id, err := prov.Add(ctx, title, priority, deadline)
 		if err != nil {
 			return "", err
@@ -329,7 +330,7 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 			return "", err
 		}
 		if len(filters) == 2 {
-			items, err = tasks.Filter(items, filters[0], filters[1], time.Now())
+			items, err = tasks.Filter(items, filters[0], filters[1], time.Now().In(timeprefs.Location(ctx)))
 			if err != nil {
 				return "", err
 			}
@@ -390,11 +391,11 @@ func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, d
 	prov := calendar.ProviderFor(ctx, e.userStore(), e.pimSessionScope())
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "create":
-		st, err := parseTime(start)
+		st, err := parseTime(start, timeprefs.Location(ctx))
 		if err != nil {
 			return "", fmt.Errorf("add requires a valid start time: %w", err)
 		}
-		et, err := calendar.ParseTime(end)
+		et, err := calendar.ParseTime(end, timeprefs.Location(ctx))
 		if err != nil {
 			return "", err
 		}
@@ -408,7 +409,7 @@ func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, d
 		}
 		return fmt.Sprintf("Event %q added.", id), nil
 	case "list", "":
-		items, err := prov.List(ctx, parseTimePtr(from), parseTimePtr(to))
+		items, err := prov.List(ctx, parseTimePtr(from, timeprefs.Location(ctx)), parseTimePtr(to, timeprefs.Location(ctx)))
 		if err != nil {
 			return "", err
 		}

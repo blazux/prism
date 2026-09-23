@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -98,12 +99,13 @@ func (c *Client) auth(req *http.Request) {
 // ---- request translation -------------------------------------------------
 
 type chatRequest struct {
-	Model       string     `json:"model"`
-	Messages    []chatMsg  `json:"messages"`
-	Tools       []chatTool `json:"tools,omitempty"`
-	Stream      bool       `json:"stream"`
-	Temperature float64    `json:"temperature,omitempty"`
-	MaxTokens   int        `json:"max_tokens,omitempty"`
+	StreamOptions map[string]bool `json:"stream_options,omitempty"`
+	Model         string          `json:"model"`
+	Messages      []chatMsg       `json:"messages"`
+	Tools         []chatTool      `json:"tools,omitempty"`
+	Stream        bool            `json:"stream"`
+	Temperature   float64         `json:"temperature,omitempty"`
+	MaxTokens     int             `json:"max_tokens,omitempty"`
 	// Pointer so an explicit 0 (penalty off) still reaches the backend instead of
 	// being dropped by omitempty and silently replaced by the default.
 	PresencePenalty *float64 `json:"presence_penalty,omitempty"`
@@ -245,7 +247,26 @@ type respToolCallFn struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
+type streamUsage struct {
+	Prompt        *int64 `json:"prompt_tokens"`
+	Completion    *int64 `json:"completion_tokens"`
+	PromptDetails struct {
+		Cached *int64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	CompletionDetails struct {
+		Reasoning *int64 `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+}
+
+func (u *streamUsage) usage() *ollama.Usage {
+	if u == nil {
+		return nil
+	}
+	return &ollama.Usage{InputTokens: u.Prompt, OutputTokens: u.Completion, CacheReadTokens: u.PromptDetails.Cached, ReasoningTokens: u.CompletionDetails.Reasoning}
+}
+
 type streamChunk struct {
+	Usage   *streamUsage `json:"usage"`
 	Choices []struct {
 		Delta struct {
 			Content          string         `json:"content"`
@@ -373,11 +394,12 @@ func (c *Client) postChatWithRetry(ctx context.Context, body []byte) (*http.Resp
 
 func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
 	payload := chatRequest{
-		Model:       req.Model,
-		Messages:    buildMessages(req.Messages),
-		Stream:      true,
-		Temperature: req.Options.Temperature,
-		MaxTokens:   req.Options.NumPredict,
+		StreamOptions: map[string]bool{"include_usage": true},
+		Model:         req.Model,
+		Messages:      buildMessages(req.Messages),
+		Stream:        true,
+		Temperature:   req.Options.Temperature,
+		MaxTokens:     req.Options.NumPredict,
 	}
 	if payload.MaxTokens <= 0 {
 		payload.MaxTokens = defaultMaxTokens
@@ -411,6 +433,24 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		out <- ollama.StreamEvent{Err: fmt.Errorf("http: %w", err)}
 		return
 	}
+	// Some compatible servers reject stream_options. Retry only an explicit
+	// unsupported-parameter response, before generation has started.
+	if resp.StatusCode == 400 || resp.StatusCode == 422 {
+		rejected, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		resp.Body.Close()
+		message := strings.ToLower(string(rejected))
+		if readErr == nil && strings.Contains(message, "stream_options") && (strings.Contains(message, "unsupported") || strings.Contains(message, "unknown") || strings.Contains(message, "extra") || strings.Contains(message, "unrecognized")) {
+			payload.StreamOptions = nil
+			body, _ = json.Marshal(payload)
+			resp, err = c.postChatWithRetry(ctx, body)
+			if err != nil {
+				out <- ollama.StreamEvent{Err: err}
+				return
+			}
+		} else {
+			resp.Body = io.NopCloser(bytes.NewReader(rejected))
+		}
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -423,6 +463,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	tools := newToolAccumulator()
 	finish := ""
+	var usage *ollama.Usage
 	streamed := false // set once any chunk arrives, so a later read error is a mid-stream cut, not a failure to start
 
 	for scanner.Scan() {
@@ -445,6 +486,9 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		var chunk streamChunk
 		if err := json.Unmarshal(data, &chunk); err != nil {
 			continue
+		}
+		if chunk.Usage != nil {
+			usage = chunk.Usage.usage()
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -480,7 +524,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 			return
 		}
 		log.Printf("[openai] stream cut mid-response (%v) — finalizing partial turn, model %q", err, req.Model)
-		out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: "interrupted"}
+		out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: "interrupted", Usage: usage}
 		return
 	}
 	// "length" means the model was still going when it hit the cap: either a
@@ -490,7 +534,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		log.Printf("openai: generation hit the %d-token cap (truncated turn) — model %q", payload.MaxTokens, req.Model)
 	}
 
-	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: finish}
+	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: finish, Usage: usage}
 }
 
 // ContextBudgetChars returns 0: an OpenAI-compatible server (vLLM/SGLang/LiteLLM)

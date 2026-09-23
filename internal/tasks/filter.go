@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Filter is shared by list API and agent; dates use the deployment timezone.
+// Filter is shared by list API and agent; dates use the timezone of now supplied by the caller.
 func Filter(items []Item, query, filter string, now time.Time) ([]Item, error) {
 	switch filter {
 	case "", "all", "today", "overdue", "upcoming", "high":

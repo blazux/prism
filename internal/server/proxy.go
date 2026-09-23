@@ -2,6 +2,7 @@ package server
 
 import (
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -58,6 +59,7 @@ func (s *Server) handleSocketIOProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	targetURL := &url.URL{Scheme: "http", Host: targetHost}
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.Transport = s.workspaceProxyTransport()
 	host := targetHost
 	proxy.Director = func(req *http.Request) {
 		req.URL.Scheme = "http"
@@ -67,7 +69,7 @@ func (s *Server) handleSocketIOProxy(w http.ResponseWriter, r *http.Request) {
 		stripPrismCredentials(req.Header)
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
-		body, err := io.ReadAll(resp.Body)
+		body, err := readProxyBody(resp.Body)
 		resp.Body.Close()
 		if err != nil {
 			return err
@@ -216,6 +218,7 @@ func (s *Server) reverseProxy(w http.ResponseWriter, r *http.Request, targetHost
 	}
 	targetURL := &url.URL{Scheme: "http", Host: targetHost}
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.Transport = s.workspaceProxyTransport()
 	proxy.Director = func(req *http.Request) {
 		req.URL.Scheme = "http"
 		req.URL.Host = targetHost
@@ -264,7 +267,7 @@ func (s *Server) reverseProxy(w http.ResponseWriter, r *http.Request, targetHost
 			defer gr.Close()
 			reader = gr
 		}
-		body, err := io.ReadAll(reader)
+		body, err := readProxyBody(reader)
 		resp.Body.Close()
 		if err != nil {
 			resp.Body = io.NopCloser(strings.NewReader(""))
@@ -356,7 +359,7 @@ func rewriteAttr(body, attr, prefix string) string {
 }
 
 func (s *Server) tunnelWebSocket(w http.ResponseWriter, r *http.Request, targetHost, subPath string) {
-	dst, err := net.DialTimeout("tcp", targetHost, 10*time.Second)
+	dst, err := s.dialWorkspaceProxy(r.Context(), "tcp", targetHost)
 	if err != nil {
 		http.Error(w, "workspace service unreachable", http.StatusBadGateway)
 		return
@@ -391,3 +394,27 @@ func (s *Server) tunnelWebSocket(w http.ResponseWriter, r *http.Request, targetH
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
+
+func (s *Server) dialWorkspaceProxy(ctx context.Context, network, address string) (net.Conn, error) {
+	if s.cfg.WorkspaceDial == nil {
+		return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, address)
+	}
+	host, rawPort, err := net.SplitHostPort(address)
+	port, parseErr := strconv.Atoi(rawPort)
+	if err != nil || parseErr != nil || host != s.cfg.AgentContainer || port < 1 || port > 65535 {
+		return nil, fmt.Errorf("use /proxy/<published-workspace-port>/ for workspace services")
+	}
+	return s.cfg.WorkspaceDial(ctx, port)
+}
+func (s *Server) workspaceProxyTransport() *http.Transport {
+	return &http.Transport{DialContext: s.dialWorkspaceProxy, DisableKeepAlives: true,
+		ResponseHeaderTimeout: 30 * time.Second, MaxResponseHeaderBytes: 1 << 20}
+}
+
+func readProxyBody(r io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, (8<<20)+1))
+	if len(b) > 8<<20 {
+		return nil, fmt.Errorf("workspace response too large to rewrite")
+	}
+	return b, err
+}

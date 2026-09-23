@@ -237,13 +237,16 @@ type Options struct {
 }
 
 type ChatChunk struct {
-	Model      string  `json:"model"`
-	Message    Message `json:"message"`
-	Done       bool    `json:"done"`
-	DoneReason string  `json:"done_reason"` // "stop" | "length" | …; "length" = truncated
+	PromptEvalCount *int64  `json:"prompt_eval_count"`
+	EvalCount       *int64  `json:"eval_count"`
+	Model           string  `json:"model"`
+	Message         Message `json:"message"`
+	Done            bool    `json:"done"`
+	DoneReason      string  `json:"done_reason"` // "stop" | "length" | …; "length" = truncated
 }
 
 type StreamEvent struct {
+	Usage     *Usage
 	Content   string
 	Thinking  string
 	ToolCalls []ToolCall
@@ -374,6 +377,9 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 			ToolCalls:  chunk.Message.ToolCalls,
 			Done:       chunk.Done,
 			DoneReason: chunk.DoneReason,
+		}
+		if chunk.Done && (chunk.PromptEvalCount != nil || chunk.EvalCount != nil) {
+			ev.Usage = &Usage{InputTokens: chunk.PromptEvalCount, OutputTokens: chunk.EvalCount}
 		}
 		out <- ev
 

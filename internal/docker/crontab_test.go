@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,5 +30,12 @@ func TestReadCrontabDistinguishesEmptyFromFailure(t *testing.T) {
 				t.Fatalf("%q %v", out, err)
 			}
 		})
+	}
+}
+
+func TestCronReadErrorDoesNotExposeContents(t *testing.T) {
+	err := CronReadError(fmt.Errorf("workspace operation failed"), "crontabs/workspace/: Permission denied\nPRISM_TOKEN=private-fixture")
+	if !strings.Contains(err.Error(), "cannot access crontab") || strings.Contains(err.Error(), "private-fixture") {
+		t.Fatal(err)
 	}
 }

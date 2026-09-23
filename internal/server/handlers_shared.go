@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -224,7 +223,7 @@ func (s *Server) handleSharedItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dir := filepath.Join(s.cfg.PluginDir, target)
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := s.mkdirManaged(dir); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -239,11 +238,11 @@ func (s *Server) handleSharedItem(w http.ResponseWriter, r *http.Request) {
 			if height <= 0 {
 				height = 280
 			}
-			if err := os.WriteFile(filepath.Join(dir, wid+".html"), []byte(wdg.Content), 0644); err != nil {
+			if err := s.writeManagedFile(filepath.Join(dir, wid+".html"), []byte(wdg.Content)); err != nil {
 				continue
 			}
 			meta, _ := json.Marshal(map[string]interface{}{"title": wdg.Title, "cols": cols, "height": height})
-			os.WriteFile(filepath.Join(dir, wid+".meta.json"), meta, 0644)
+			s.writeManagedFile(filepath.Join(dir, wid+".meta.json"), meta)
 			s.pushPluginToSession(target, wid, wdg.Title, wdg.Content, cols, height)
 			added++
 		}

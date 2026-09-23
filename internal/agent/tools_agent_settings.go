@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"prism/internal/memory"
+	"prism/internal/timeprefs"
 )
 
 // agentSettings reads/writes the caller's Settings › Agent values (name, turn
@@ -44,11 +45,23 @@ func (e *ToolExecutor) agentSettings(ctx context.Context, action string, args ma
 		if p := get(memory.KeyPersonalityBase); p != "" {
 			persona = fmt.Sprintf("set (%d chars): %s", len(p), truncate(p, 200))
 		}
-		return fmt.Sprintf("Agent settings (Settings → Agent):\n- name: %s\n- personality (default, every workspace): %s\n- max_iterations: %s\n- thinking (extended reasoning): %v\n- lean_prompt: %v\n- reasoning_effort: %s\nChanges take effect from the next message.",
-			name, persona, iter, get(memory.KeyAgentThinking) != "off", get(memory.KeyAgentLeanPrompt) == "on", effort)
+		_, loc := timeprefs.Read(ctx, us)
+		return "Timezone (Settings → Profile): " + loc.String() + "\n" + fmt.Sprintf("Agent settings (Settings → Agent):\n- name: %s\n- personality (default, every workspace): %s\n- max_iterations: %s\n- thinking (extended reasoning): %v\n- prompt_profile: %s\n- reasoning_effort: %s\nChanges take effect from the next message.",
+			name, persona, iter, get(memory.KeyAgentThinking) != "off", memory.ResolvePromptProfile(get(memory.KeyAgentPromptProfile), get(memory.KeyAgentLeanPrompt) == "on"), effort)
 	}
 	if action != "set" {
 		return render(), nil
+	}
+	profile, hasProfile := args["prompt_profile"].(string)
+	if hasProfile && !memory.ValidPromptProfile(profile) {
+		return "", fmt.Errorf("prompt_profile must be guided, standard or minimal")
+	}
+	zone, hasZone := args["timezone"].(string)
+	zone = strings.TrimSpace(zone)
+	if hasZone {
+		if err := timeprefs.Validate(zone); err != nil {
+			return "", err
+		}
 	}
 	var changed []string
 	set := func(label, key, value string) error {
@@ -57,6 +70,11 @@ func (e *ToolExecutor) agentSettings(ctx context.Context, action string, args ma
 		}
 		changed = append(changed, label)
 		return nil
+	}
+	if hasZone {
+		if err := set("timezone", timeprefs.Key, zone); err != nil {
+			return "", err
+		}
 	}
 	if v, ok := args["name"].(string); ok {
 		if err := set("name", memory.KeyAgentName, strings.TrimSpace(v)); err != nil {
@@ -86,12 +104,25 @@ func (e *ToolExecutor) agentSettings(ctx context.Context, action string, args ma
 			return "", err
 		}
 	}
-	if v, ok := args["lean_prompt"].(bool); ok {
+	if v, ok := args["lean_prompt"].(bool); ok && !hasProfile {
+		profile, hasProfile = memory.ResolvePromptProfile("", v), true
 		lv := "off"
 		if v {
 			lv = "on"
 		}
 		if err := set("lean_prompt", memory.KeyAgentLeanPrompt, lv); err != nil {
+			return "", err
+		}
+	}
+	if hasProfile {
+		lv := "off"
+		if profile != "guided" {
+			lv = "on"
+		}
+		if err := us.SetConfig(ctx, memory.KeyAgentLeanPrompt, lv); err != nil {
+			return "", err
+		}
+		if err := set("prompt_profile", memory.KeyAgentPromptProfile, profile); err != nil {
 			return "", err
 		}
 	}
@@ -105,7 +136,7 @@ func (e *ToolExecutor) agentSettings(ctx context.Context, action string, args ma
 		}
 	}
 	if len(changed) == 0 {
-		return "Nothing to change: pass at least one of name, personality, max_iterations, thinking, lean_prompt, reasoning_effort.", nil
+		return "Nothing to change: pass at least one of name, personality, max_iterations, thinking, prompt_profile, reasoning_effort.", nil
 	}
 	return "Updated " + strings.Join(changed, ", ") + ".\n" + render(), nil
 }

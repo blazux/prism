@@ -20,6 +20,7 @@ import (
 	"prism/internal/ollama"
 	"prism/internal/rag"
 	"prism/internal/tasks"
+	"prism/internal/timeprefs"
 )
 
 type ToolExecutor struct {
@@ -631,6 +632,10 @@ func canonicalToolName(name string) string {
 // work is prioritised on. The model sees exactly the same result and error as
 // before; this is observation, not behaviour.
 func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, []string, error) {
+	if store := e.userStore(); store != nil {
+		_, loc := timeprefs.Read(ctx, store)
+		ctx = timeprefs.WithLocation(ctx, loc)
+	}
 	started := time.Now()
 	res, images, err := e.execute(ctx, name, rawArgs)
 	if err != nil && e.memStore != nil {

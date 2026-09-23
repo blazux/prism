@@ -3,8 +3,8 @@ package server
 import (
 	"io/fs"
 	"log"
-	"os"
 	"path/filepath"
+	"prism/internal/workspace"
 	"sort"
 	"strings"
 )
@@ -20,8 +20,7 @@ import (
 const toolsEmbedDir = "agent_tools"
 
 func (s *Server) materializeAgentTools() {
-	dir := filepath.Join(s.cfg.WorkspaceDir, "agent_tools")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := workspace.MkdirAll(s.cfg.WorkspaceDir, "agent_tools", 0755); err != nil {
 		log.Printf("[tools] mkdir: %v", err)
 		return
 	}
@@ -45,7 +44,7 @@ func (s *Server) materializeAgentTools() {
 			aptPkgs = splitLines(string(b))
 			continue
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0644); err != nil {
+		if err := workspace.WriteFile(s.cfg.WorkspaceDir, filepath.Join("agent_tools", name), b); err != nil {
 			log.Printf("[tools] write %s: %v", name, err)
 		}
 	}
@@ -60,10 +59,10 @@ func (s *Server) materializeAgentTools() {
 // workspace container installs the list at its next start; on this box tshark is
 // already present, so the merge is a no-op there.
 func (s *Server) ensureAptPackages(pkgs []string) {
-	path := filepath.Join(s.cfg.WorkspaceDir, ".apt-packages")
+	path := ".apt-packages"
 	existing := map[string]bool{}
 	var lines []string
-	if b, err := os.ReadFile(path); err == nil {
+	if b, err := workspace.ReadFile(s.cfg.WorkspaceDir, path); err == nil {
 		for _, l := range splitLines(string(b)) {
 			existing[l] = true
 			lines = append(lines, l)
@@ -81,7 +80,7 @@ func (s *Server) ensureAptPackages(pkgs []string) {
 		return
 	}
 	sort.Strings(lines)
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+	if err := workspace.WriteFile(s.cfg.WorkspaceDir, path, []byte(strings.Join(lines, "\n")+"\n")); err != nil {
 		log.Printf("[tools] write .apt-packages: %v", err)
 		return
 	}

@@ -456,7 +456,8 @@ document.querySelectorAll('.nav-item').forEach(el => {
 })
 
 // Hide settings tabs for apps the global admin disabled (Admin → Platform).
-fetch('/api/platform').then(r => r.json()).then(d => {
+const PLATFORM = fetch('/api/platform').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+PLATFORM.then(d => {
   const disabled = new Set(d.disabledApps || [])
   const tabFor = { email: 'email', notes: 'notes', calendar: 'calendar' }
   for (const [app, tab] of Object.entries(tabFor)) {
@@ -888,10 +889,12 @@ async function renderAgentTab(container) {
       <div><div class="ag-toggle-title">Extended reasoning</div><div class="ag-toggle-hint">Lets thinking models (Qwen3, DeepSeek-R1, gpt-oss…) reason before answering. Off = faster, cheaper replies. Applies to Ollama and OpenAI-compatible backends; Claude models never use it here. Always off on phone calls.</div></div>
       <label class="toggle-switch" title="Extended reasoning"><input id="ag-thinking" type="checkbox" ${limits.thinking ? 'checked' : ''}><span class="toggle-track"></span></label>
     </div>
-    <div class="ag-toggle-row">
-      <div><div class="ag-toggle-title">Lean prompt (frontier models)</div><div class="ag-toggle-hint">Drops the step-by-step guardrails that small local models need from the system prompt — a capable model (Claude, GPT-5, large hosted models) wastes turns on them. Leave off for small Ollama models. Safety rules stay on either way.</div></div>
-      <label class="toggle-switch" title="Lean prompt"><input id="ag-lean" type="checkbox" ${limits.leanPrompt ? 'checked' : ''}><span class="toggle-track"></span></label>
-    </div>
+    <label class="ag-label">Prompt profile
+      <select id="ag-profile" style="max-width:240px">
+        ${[['guided','Guided'],['standard','Standard'],['minimal','Minimal']].map(([value,label])=>`<option value="${value}" ${(limits.promptProfile || (limits.leanPrompt ? 'standard' : 'guided')) === value ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>
+      <span class="ag-toggle-hint">Guided: detailed guidance for small models. Standard: compact instructions (formerly Lean). Minimal: essential contracts, documentation on demand. Permissions stay the same.</span>
+    </label>
     <label class="ag-label">Reasoning effort
       <select id="ag-effort" style="max-width:240px">
         <option value="">Server default</option>
@@ -935,7 +938,7 @@ async function renderAgentTab(container) {
     try {
       const raw = page.querySelector('#ag-maxiter').value.trim()
       const r = await fetch('/api/agent/limits', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxIterations: raw === '' ? 0 : parseInt(raw, 10) || 0, thinking: page.querySelector('#ag-thinking').checked, leanPrompt: page.querySelector('#ag-lean').checked, reasoningEffort: page.querySelector('#ag-effort').value }) }).then(r => r.json())
+        body: JSON.stringify({ maxIterations: raw === '' ? 0 : parseInt(raw, 10) || 0, thinking: page.querySelector('#ag-thinking').checked, promptProfile: page.querySelector('#ag-profile').value, reasoningEffort: page.querySelector('#ag-effort').value }) }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Cannot save agent settings'); return result })
       // Echo the clamped value back so the field shows what was actually stored.
       page.querySelector('#ag-maxiter').value = r.maxIterations || ''
       st.textContent = '✓ Saved — takes effect on the next message'
@@ -1334,17 +1337,26 @@ async function renderWebhooksTab(container) {
       <select id="wh-deliver" class="mcp-input">
         <option value="">— Don't push the answer anywhere —</option>
         <option value="telegram">Also send the answer to Telegram</option>
-        <option value="slack">Also send the answer to Slack</option>
-        <option value="webex">Also send the answer to Webex</option>
       </select>
     </div>
     <textarea id="wh-prompt" class="mcp-input" rows="5" placeholder="Prompt wrapped around the payload. Put {{content}} where the payload goes." style="width:100%;margin-top:8px;font-family:inherit"></textarea>
-    <label style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:12px;color:var(--text2)">
-      <input id="wh-respond" type="checkbox"> Wait for the agent and return its answer in the HTTP response
-    </label>
-    <label style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px;color:var(--text2)">
-      <input id="wh-enabled" type="checkbox" checked> Enabled
-    </label>
+    <div class="ag-toggle-row" style="margin-top:8px">
+      <div>
+        <label for="wh-respond" class="ag-toggle-title">Return the agent's answer</label>
+        <div class="ag-toggle-hint">Wait for the agent and return its answer in the HTTP response.</div>
+      </div>
+      <label class="toggle-switch" title="Return the agent's answer">
+        <input id="wh-respond" type="checkbox" aria-label="Return the agent's answer">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+    <div class="ag-toggle-row">
+      <label for="wh-enabled" class="ag-toggle-title">Enabled</label>
+      <label class="toggle-switch" title="Enable webhook">
+        <input id="wh-enabled" type="checkbox" checked aria-label="Enable webhook">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
     <input id="wh-id" type="hidden">
     <div style="margin-top:10px;display:flex;gap:6px">
       <button id="wh-save" class="mcp-add-submit">Create</button>
@@ -1353,7 +1365,7 @@ async function renderWebhooksTab(container) {
     <div id="wh-status" class="mcp-add-status"></div>
     <div style="margin-top:8px;font-size:11.5px;color:var(--text3);line-height:1.5">
       The URL carries its own secret token — anyone holding it can make the agent run, so treat it like a password.
-      Calls return <code>202</code> immediately and the agent works in the background, unless you tick the box above.
+      Calls return <code>202</code> immediately and the agent works in the background, unless you enable “Return the agent's answer”.
       JSON payloads are pretty-printed before reaching the agent.
     </div>`
   page.appendChild(form)
@@ -1364,7 +1376,7 @@ async function renderWebhooksTab(container) {
     document.getElementById('wh-name').value = h.name || ''
     document.getElementById('wh-session').value = h.session_id || ''
     document.getElementById('wh-model').value = h.model || ''
-    document.getElementById('wh-deliver').value = h.deliver || ''
+    document.getElementById('wh-deliver').value = h.deliver === 'telegram' ? 'telegram' : ''
     document.getElementById('wh-prompt').value = h.prompt || ''
     document.getElementById('wh-respond').checked = !!h.respond
     document.getElementById('wh-enabled').checked = !!h.enabled
@@ -2417,6 +2429,7 @@ async function renderProfileTab(container) {
   container.appendChild(page)
   let p = {}
   try { p = await fetch('/api/profile').then(r => r.json()) } catch (_) {}
+  const voxDocked = (await PLATFORM).voxDocked === true
   const nameFor = () => ($('pf-display') ? $('pf-display').value : '') || p.displayName || p.email || '?'
   page.innerHTML = `
     <h2 style="margin:0 0 4px;font-size:17px">Profile</h2>
@@ -2439,16 +2452,22 @@ async function renderProfileTab(container) {
         <input id="pf-first" class="pf-field" type="text" autocomplete="off" value="${escHtml(p.firstName || '')}" style="width:100%;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--text2)">Last name
         <input id="pf-last" class="pf-field" type="text" autocomplete="off" value="${escHtml(p.lastName || '')}" style="width:100%;margin-top:4px"></label>
-      <label style="font-size:12px;color:var(--text2)">Email (login)
-        <input class="pf-field" type="email" value="${escHtml(p.email || '')}" readonly style="width:100%;margin-top:4px;opacity:.6"></label>
-      <label style="font-size:12px;color:var(--text2)">Phone
+      <label style="font-size:12px;color:var(--text2)">Email
+        <input id="pf-email" class="pf-field" type="email" autocomplete="email" maxlength="254" value="${escHtml(p.email || '')}" placeholder="Contact email (optional)" style="width:100%;margin-top:4px"></label>
+      <label style="font-size:12px;color:var(--text2)">Timezone
+        <input id="pf-timezone" class="pf-field" list="pf-timezones" value="${escHtml(p.timezone || '')}" placeholder="Server default" style="width:100%;margin-top:4px">
+        <datalist id="pf-timezones">${['UTC',...(Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : ['America/Martinique','Europe/Paris'])].map(z=>`<option value="${escHtml(z)}">`).join('')}</datalist>
+        <button id="pf-timezone-browser" type="button" class="btn" style="margin-top:6px">Use browser timezone</button>
+        <span style="display:block;margin-top:4px">Used by your agent and dates without an offset. New schedules keep the timezone used when created; existing schedules are unchanged. Calendar forms use browser time. Leave empty for the server default.</span>
+      </label>
+      ${voxDocked ? `<label style="font-size:12px;color:var(--text2)">Phone
         <input id="pf-phone" class="pf-field" type="tel" autocomplete="off" value="${escHtml(p.phone || '')}" placeholder="+33…" style="width:100%;margin-top:4px"></label>
       <label style="font-size:12px;color:var(--text2)">Incoming transfers
         <select id="pf-transfer" class="pf-field" style="width:100%;margin-top:4px">
           <option value="blind"${(p.transfer || 'blind') === 'attended' ? '' : ' selected'}>Put callers straight through</option>
           <option value="attended"${(p.transfer || 'blind') === 'attended' ? ' selected' : ''}>Announce them first — I can decline</option>
         </select></label>
-      <div style="grid-column:1/3;font-size:11.5px;color:var(--text3);margin-top:-6px;line-height:1.5">How the switchboard hands you a call. Announce first means it asks who is calling and why, tells you, and only connects you if you accept. Only matters if your number is filled in above — that is also what lets the agent recognise you when you call in.</div>
+      <div style="grid-column:1/3;font-size:11.5px;color:var(--text3);margin-top:-6px;line-height:1.5">How the switchboard hands you a call. Announce first means it asks who is calling and why, tells you, and only connects you if you accept. Only matters if your number is filled in above — that is also what lets the agent recognise you when you call in.</div>` : ''}
       ${(p.groups || []).length > 1 ? `
       <label style="grid-column:1/3;font-size:12px;color:var(--text2)">Main group
         <select id="pf-group" class="pf-field" style="width:100%;margin-top:4px">
@@ -2477,10 +2496,13 @@ async function renderProfileTab(container) {
     $('pf-avatar').innerHTML = avatarMarkup(uScope, 0, nameFor(), 72)
     $('pf-av-rm').style.display = 'none'; p.avatarVer = 0
   }
+  $('pf-timezone-browser').onclick = () => { $('pf-timezone').value = Intl.DateTimeFormat().resolvedOptions().timeZone }
   $('pf-save').onclick = async () => {
+    if (!$('pf-email').reportValidity()) return
     $('pf-status').textContent = 'Saving…'
     try {
-      const body = { displayName: $('pf-display').value, firstName: $('pf-first').value, lastName: $('pf-last').value, phone: $('pf-phone').value, transfer: $('pf-transfer').value }
+      const body = { timezone: $('pf-timezone').value.trim(), email: $('pf-email').value, displayName: $('pf-display').value, firstName: $('pf-first').value, lastName: $('pf-last').value, phone: $('pf-phone') ? $('pf-phone').value : (p.phone || '') }
+      if ($('pf-transfer')) body.transfer = $('pf-transfer').value
       // Only sent when the picker is on screen: omitting it leaves the choice
       // alone, which is what a single-group user wants.
       if ($('pf-group')) body.defaultGroupId = Number($('pf-group').value)

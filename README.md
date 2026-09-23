@@ -42,7 +42,7 @@ cd prism
 cp .env.example .env
 ```
 
-Set `PRISM_TOKEN` in `.env` to protect access to your dashboard, and adjust `TZ` if needed. The remaining values in `.env.example` can stay as they are for the standard Docker Compose installation. You do not need to configure models or AI keys in this file.
+Set `PRISM_TOKEN` in `.env` to protect access to your dashboard, and choose your timezone in **Settings → Profile** after starting Prism. The remaining values in `.env.example` can stay as they are for the standard Docker Compose installation. You do not need to configure models or AI keys in this file.
 
 **2. Start Prism.**
 
@@ -258,7 +258,7 @@ The `.env` file supplies installation settings and optional AI defaults. Docker 
 |---|---|---|
 | `PRISM_TOKEN` | Login token for the dashboard; unset = no login | — |
 | `MULTI_USER` | `1` for accounts, groups, rooms and an admin console ([one-way door](#personal-or-shared)) | off |
-| `TZ` | IANA timezone for cron and timestamps (`Europe/Paris`) | `UTC` |
+| `TZ` | Default timezone; personal override in Settings → Profile | `UTC` |
 | `SEARXNG_URL` | SearXNG for web search; remove to disable | `http://searxng:8080` |
 | `POSTGRES_URL` | PostgreSQL connection string | bundled service |
 | `WORKSPACE` | `gpu` for the CUDA workspace image (~20 GB) | ubuntu base |
@@ -279,7 +279,7 @@ The `.env` file supplies installation settings and optional AI defaults. Docker 
 - **Widget previews look wrong / the agent says it can't see.** Choose a vision-capable model and check **Default model supports vision** in **AI provider**. Ask the agent for help with your model's capabilities.
 - **You changed the embedding model.** Test it in **AI provider**, confirm the index rebuild, then click **Save changes**. Prism applies it automatically. Document search is temporarily unavailable during rebuilding; a failed rebuild retains the original index. Correct the configuration and save again to retry. Do not delete your volumes.
 - **Upgrading.** `docker compose pull && docker compose up -d` (or `--build` if you build locally). Schema migrations run at start, nothing to do — [docs/UPGRADING.md](docs/UPGRADING.md) is the contract.
-- **Timezone.** `TZ` accepts IANA names; for a fixed offset use `Etc/GMT+4` — POSIX inverts the sign, so that's UTC-4.
+- **Timezone.** Choose an IANA name in **Settings → Profile** (for example `America/Martinique` or `Europe/Paris`), or use the browser timezone button. It applies without restarting. `TZ` remains the deployment fallback. New/rescheduled cron jobs capture your preference; existing jobs keep their timezone. Calendar/task forms display browser-local time.
 
 For daily use, just ask the agent — its built-in documentation also lives in [docs/help/](docs/help/).
 

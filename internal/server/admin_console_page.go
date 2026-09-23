@@ -145,7 +145,7 @@ const adminConsoleMid = `
       <label>System prompt</label><textarea id="ag-prompt" placeholder="You are the team's assistant…"></textarea>
       <label>Max iterations per turn</label><input id="ag-maxiter" type="number" min="10" max="500" step="5" placeholder="75 (default)" style="width:160px"><span class="hint">Model calls allowed for one message (each tool use is one). 10–500, blank = default. Raise it if the shared agent stops with "iteration limit reached" on long tasks.</span>
       <div class="row" style="gap:10px;align-items:center"><label class="toggle-switch" title="Extended reasoning"><input id="ag-thinking" type="checkbox" checked><span class="toggle-track"></span></label><span>Extended reasoning</span></div><span class="hint">Thinking mode for models that have one (Qwen3, DeepSeek-R1, gpt-oss…). Off = faster, cheaper replies. No effect on Claude models.</span>
-      <div class="row" style="gap:10px;align-items:center"><label class="toggle-switch" title="Lean prompt"><input id="ag-lean" type="checkbox"><span class="toggle-track"></span></label><span>Lean prompt (frontier models)</span></div><span class="hint">Drops the step-by-step guardrails small local models need from the system prompt — a capable model wastes turns on them. Leave off for small Ollama models; safety rules stay on either way.</span>
+      <label>Prompt profile <select id="ag-profile"><option value="guided">Guided</option><option value="standard">Standard</option><option value="minimal">Minimal</option></select></label><span class="hint">Guided: detailed. Standard: compact (formerly Lean). Minimal: essential contracts and documentation on demand. Permissions stay the same.</span>
       <label>Reasoning effort</label><select id="ag-effort" style="width:200px"><option value="">Server default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select><span class="hint">How much a thinking model reasons (when extended reasoning is on). Accepted values depend on the model — gpt-oss: low/medium/high, Qwen3.8-Flash-Next: low/medium/xhigh; an unsupported one is refused by the server, pick another.</span>
       <h2 style="margin-top:26px;font-size:15px">On the phone — members of this group</h2>
       <div class="hint">When someone in this group phones in and is recognised by their number, this is who answers. It <b>replaces</b> their own agent personality for the call — their memory, profile and knowledge are untouched, and that is where the continuity lives. A phone agent has to call its tools to transfer, take a message or hang up, and a dense personality is measurably bad at that, which is why this is one text for the whole group rather than everyone's own. Blank = the built-in text.</div>
@@ -261,7 +261,7 @@ function fillGroupPickers(){const opts=adminGroups().map(g=>'<option value="'+(g
  ['ag-group','ac-group','rg-group','mc-group','gs-group'].forEach(i=>{if($(i))$(i).innerHTML=opts;});}
 async function loadAgent(){const g=$('ag-group').value;if(!g)return;const c=await jget('/api/room/config?group='+g);if(!c)return;
  $('ag-name').value=c.agentName||'';$('ag-prompt').value=c.agentPrompt||'';$('ag-model').value=c.agentModel||'';
- $('ag-maxiter').value=c.agentMaxIter||'';$('ag-thinking').checked=c.agentThinking!==false;$('ag-lean').checked=c.agentLean===true;$('ag-effort').value=c.agentReasoning||'';
+ $('ag-maxiter').value=c.agentMaxIter||'';$('ag-thinking').checked=c.agentThinking!==false;$('ag-profile').value=c.agentPromptProfile||(c.agentLean?'standard':'guided');$('ag-effort').value=c.agentReasoning||'';
  $('ag-voice').value=c.agentVoicePrompt||'';renderAgentAvatar();}
 // ── Shared-agent avatar ──
 function avInitials(n){return (n||'?').trim().split(/\s+/).map(w=>w[0]||'').slice(0,2).join('').toUpperCase()||'?';}
@@ -272,7 +272,7 @@ async function downscale(file){const img=await createImageBitmap(file);const s=M
 async function uploadAgentAvatar(file){const g=$('ag-group').value;if(!g)return;const blob=await downscale(file);const fd=new FormData();fd.append('file',blob,'a.png');const r=await fetch('/api/avatar?scope=agent-g'+g,{method:'POST',body:fd});if(r.ok){renderAgentAvatar(Date.now());}else{$('status').textContent='avatar error';}}
 async function rmAgentAvatar(){const g=$('ag-group').value;if(!g)return;await fetch('/api/avatar?scope=agent-g'+g,{method:'DELETE'});renderAgentAvatar(Date.now());}
 async function saveAgent(){const g=$('ag-group').value;const r=await jpost('/api/room/config?group='+g,{agentName:$('ag-name').value,agentPrompt:$('ag-prompt').value,agentModel:$('ag-model').value,
- agentMaxIter:parseInt($('ag-maxiter').value,10)||0,agentThinking:$('ag-thinking').checked,agentLean:$('ag-lean').checked,agentReasoning:$('ag-effort').value,
+ agentMaxIter:parseInt($('ag-maxiter').value,10)||0,agentThinking:$('ag-thinking').checked,agentPromptProfile:$('ag-profile').value,agentReasoning:$('ag-effort').value,
  agentVoicePrompt:$('ag-voice').value});
  $('status').textContent=r.ok?'saved ✓':'error';setTimeout(()=>$('status').textContent='',2000);}
 // ── Webex (per-group bot for the shared agent) ──

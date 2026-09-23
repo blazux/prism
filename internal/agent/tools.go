@@ -166,7 +166,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "agent_settings",
-			Description: "Read or change the user's own agent settings (Settings → Agent): name, personality (the default one, every workspace), max_iterations per turn, thinking (extended reasoning on/off), lean_prompt (frontier-model profile) and reasoning_effort. Use it when the user asks to rename you, raise the turn budget after an 'iteration limit reached', turn reasoning off for speed, or pick a reasoning effort. AI configuration: Settings → AI provider in single-user, Admin → AI provider (global admin only) in multi-user. Use ai_get to see all sources. ai_source_set adds/updates a source_id; ai_source_remove deletes it; ai_source_default picks its default model; ai_source_models and ai_source_test inspect one source. Legacy ai_set edits the default without removing other sources. ai_embedding_models/ai_embedding_test inspect embeddings; ai_reset restores server defaults. Embedding changes apply automatically; ai_get reports progress; set reindex=true only after the user agrees to rebuilding their document index and sending indexed text to the selected provider. Pass a stored key_secret NAME, never a raw API key; ask for keys with request_secret or direct the user to the secure settings form. ai_test makes a short potentially billable request. Changes apply from the next message. A group's shared agent is configured by a group admin in the admin console instead.",
+			Description: "Read or change the user's own agent settings (Settings → Agent): name, personality (the default one, every workspace), max_iterations per turn, thinking (extended reasoning on/off), prompt_profile (guided, standard or minimal) and reasoning_effort. Use it when the user asks to rename you, raise the turn budget after an 'iteration limit reached', turn reasoning off for speed, or pick a reasoning effort. AI configuration: Settings → AI provider in single-user, Admin → AI provider (global admin only) in multi-user. Use ai_get to see all sources. ai_source_set adds/updates a source_id; ai_source_remove deletes it; ai_source_default picks its default model; ai_source_models and ai_source_test inspect one source. Legacy ai_set edits the default without removing other sources. ai_embedding_models/ai_embedding_test inspect embeddings; ai_reset restores server defaults. Embedding changes apply automatically; ai_get reports progress; set reindex=true only after the user agrees to rebuilding their document index and sending indexed text to the selected provider. Pass a stored key_secret NAME, never a raw API key; ask for keys with request_secret or direct the user to the secure settings form. ai_test makes a short potentially billable request. Changes apply from the next message. A group's shared agent is configured by a group admin in the admin console instead.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -189,8 +189,10 @@ var ToolDefinitions = []ollama.Tool{
 					"name":                        {Type: "string", Description: "set: the agent's display name (empty = default)"},
 					"max_iterations":              {Type: "integer", Description: "set: model calls allowed per turn (10–500; 0 = default 75)"},
 					"thinking":                    {Type: "boolean", Description: "set: extended reasoning on/off"},
+					"prompt_profile":              {Type: "string", Description: "Prompt detail: guided for small models, standard (former lean), minimal for capable models; applies next message.", Enum: []string{"guided", "standard", "minimal"}},
 					"lean_prompt":                 {Type: "boolean", Description: "set: lean system-prompt profile for frontier models"},
 					"personality":                 {Type: "string", Description: "set: the default personality applied in every workspace (Settings → Agent → Default personality); empty = none. For one workspace only, use update_system_prompt instead"},
+					"timezone":                    {Type: "string", Description: "set: Personal IANA timezone (Settings → Profile), e.g. Europe/Paris or America/Martinique. Empty restores the server default. Used for agent time, dates without offsets and new cron schedules; existing jobs keep their timezone."},
 					"reasoning_effort":            {Type: "string", Description: "set: One of: low, medium, high, xhigh, default (the model decides which it accepts — Qwen3.8-Flash-Next: low/medium/xhigh; gpt-oss: low/medium/high)", Enum: []string{"low", "medium", "high", "xhigh", "default"}},
 				},
 				Required: []string{"action"},
@@ -289,7 +291,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "install_packages",
-			Description: "Install packages in the workspace container with apt-get or pip. Installed packages are recorded and reinstalled automatically on container restart.",
+			Description: "Install workspace libraries with apt or pip. Successful installations are recorded. Read-only workspaces support persistent user-site pip libraries; use Docker images for system dependencies.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{

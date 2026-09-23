@@ -38,11 +38,31 @@ Turn it off for faster, cheaper replies. It applies to the Ollama and
 OpenAI-compatible backends only (Claude models never use it here), and it is
 always off on phone calls.
 
-## Lean prompt (frontier models)
-Prism's default system prompt carries step-by-step guardrails that small local
-models need. A capable model (Claude, GPT-5, large hosted models) wastes turns
-on them — tick **Lean prompt** to drop that scaffolding. Leave it off for small
-Ollama models. Safety rules stay on either way.
+## Prompt profile
+Choose **Guided**, **Standard** or **Minimal** in Settings → Agent, then click
+**Save** below the turn settings. Group admins use Admin → Shared agent instead.
+Changes apply on the next message; use a fresh conversation for a fair comparison.
+
+- **Guided**: detailed guidance for small models (the original default).
+- **Standard**: compact operational instructions and native tool descriptions
+  (the former Lean prompt).
+- **Minimal**: essential contracts and safety policy; detailed runtime guidance is
+  available through `prism_help` with topic `agent-runtime`. Designed for capable
+  models, without inferring capabilities from their names.
+
+Existing Lean off/on settings map to Guided/Standard; nobody is switched to
+Minimal automatically. All tools and parameter schemas remain available, including
+custom/MCP tools. Server permissions, destructive-action rules, automatic widget
+previews and error recovery remain active. Minimal keeps the open editor/app
+context; it omits the automatic deployed-services inventory (use docker_manage ps).
+
+The agent can read its profile with `agent_settings action=get` and set it with
+`agent_settings action=set prompt_profile=minimal` (or guided/standard). The legacy
+`lean_prompt` boolean still maps to Guided/Standard; an explicit prompt_profile
+wins if both are supplied. Shared-agent settings belong in the group admin UI.
+
+Minimal reduces the fixed input size, not necessarily the bill by the same ratio:
+history, tool results, reasoning, images, caching and additional calls also matter.
 
 ## Reasoning effort
 How much a thinking model reasons before answering (only when extended
@@ -64,10 +84,26 @@ In a shared deployment, every group also has a **shared agent** with the same
 knobs, set by a group admin in the **Admin console → Shared agent** pane:
 **Group**, **Name** (the one members @mention in the Room), **Avatar**,
 **Model**, **System prompt**, **Max iterations per turn**, **Extended
-reasoning**, **Lean prompt** and **Reasoning effort**, then **Save agent**.
+reasoning**, **Prompt profile** and **Reasoning effort**, then **Save agent**.
 These override the personal settings whenever that agent answers — in the
 Room or on the group's Webex bot.
 
 ## Asking the agent
 
 The agent can change these settings itself: "call yourself Shodan", "raise your turn budget to 150", "turn reasoning off", "use low reasoning effort", "from now on, everywhere, answer in French and keep it short" (the default personality). "Only in this workspace, …" changes the per-workspace adaptation instead. It confirms the new values; they apply from the next message. A group's shared agent cannot do this for itself — its settings are in the admin console.
+
+## Personal timezone
+In **Settings → Profile**, choose an IANA timezone such as `America/Martinique`
+or `Europe/Paris`, or click **Use browser timezone**, then **Save**. Changes
+apply without a restart. Leave it empty to use the deployment's `TZ` default.
+The agent can read/change it with `agent_settings` (`timezone`).
+
+This controls the agent's clock, dates supplied without an explicit offset,
+and new or rescheduled cron jobs. Each job keeps its saved timezone when your
+profile changes. Existing legacy jobs continue using the workspace's timezone.
+Calendar/task forms and display follow the browser timezone; the active editor
+reports that timezone to the agent. Explicit ISO offsets always take precedence.
+
+Zoned cron jobs require Python 3 with zoneinfo/tzdata in the workspace; Prism
+checks availability before saving. The UI shows the saved zone. At DST changes,
+a nonexistent local minute is skipped and a repeated minute runs twice.

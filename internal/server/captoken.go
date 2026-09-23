@@ -62,7 +62,7 @@ func (s *Server) selfCallToken(sessionID string) string {
 	if key == nil {
 		return ""
 	}
-	return mintCapToken(key, userIDFromSessionID(sessionID), sessionID)
+	return s.cfg.CapabilityPrefix + mintCapToken(key, userIDFromSessionID(sessionID), sessionID)
 }
 
 func mintCapToken(key []byte, uid int64, session string) string {

@@ -2,10 +2,10 @@ package server
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,18 +23,23 @@ import (
 )
 
 type Config struct {
-	DockerBackend   docker.Backend
-	AISources       []aiSource
-	AIDefaultSource string
-	Port            string
-	WorkspaceDir    string
-	SecretKeyPath   string
-	PluginDir       string
-	OllamaURL       string
-	Model           string
-	LLMBackend      string // "ollama" (default), "openai" (SGLang/vLLM/…) or "anthropic" (Claude, API key)
-	OpenAIBaseURL   string // /v1 root, used when LLMBackend == "openai"
-	OpenAIAPIKey    string // optional bearer token for the openai backend
+	ServiceURL                     func(int) string
+	WorkspaceDial                  func(context.Context, int) (net.Conn, error)
+	DisableAIServerDefaults        bool   // hosting mode without usable server AI defaults; local default remains enabled
+	CapabilityPrefix               string // opaque routing envelope supplied by a trusted embedding host
+	WidgetFrameURL, WidgetGrantURL string // optional isolated widget host supplied by embedding application
+	DockerBackend                  docker.Backend
+	AISources                      []aiSource
+	AIDefaultSource                string
+	Port                           string
+	WorkspaceDir                   string
+	SecretKeyPath                  string
+	PluginDir                      string
+	OllamaURL                      string
+	Model                          string
+	LLMBackend                     string // "ollama" (default), "openai" (SGLang/vLLM/…) or "anthropic" (Claude, API key)
+	OpenAIBaseURL                  string // /v1 root, used when LLMBackend == "openai"
+	OpenAIAPIKey                   string // optional bearer token for the openai backend
 	// AnthropicToken is the console API key for the Claude backend. A Pro/Max
 	// subscription token is not an option — see internal/anthropic/credential.go.
 	AnthropicToken   string
@@ -67,12 +72,14 @@ type Config struct {
 	VoxURL      string
 	VoxUser     string
 	VoxPassword string
-	WebFS       embed.FS
-	HelpFS      embed.FS
-	ToolsFS     embed.FS
+	WebFS       fs.FS
+	HelpFS      fs.FS
+	ToolsFS     fs.FS
 }
 
 type Server struct {
+	hostedResolver  func(*http.Request) (*Server, error)
+	life            lifecycle
 	authMu          sync.Mutex
 	authWindows     map[string]authWindow
 	cfg             Config
@@ -82,6 +89,7 @@ type Server struct {
 	mu              sync.RWMutex
 	ragMu           sync.RWMutex
 	ragApplyMu      sync.Mutex
+	ragInitStatus   atomic.Value // resource-local embedding status, never process-global
 	ragUpdating     atomic.Bool
 	ragGeneration   uint64             // protected by mu
 	ragCancel       context.CancelFunc // protected by mu
@@ -107,7 +115,7 @@ func New(cfg Config) *Server {
 		cfg:         cfg,
 		docker:      docker.NewManager(cfg.AgentContainer, cfg.WorkspaceDir, cfg.ServicePortStart, cfg.ServicePortEnd, cfg.DockerBackend),
 		clients:     make(map[*Client]struct{}),
-		customMgr:   customtools.NewManager(customToolsDir),
+		customMgr:   customtools.LoadManager(customToolsDir),
 		mcpMgr:      mcp.NewManager(nil),
 		rooms:       newRoomHub(),
 		ingest:      newIngestTracker(),
@@ -122,7 +130,7 @@ func New(cfg Config) *Server {
 	return s
 }
 
-func (s *Server) Start() error {
+func (s *Server) initialize(runtime context.Context) error {
 	if err := s.cfg.DockerBackend.Validate(); err != nil {
 		return err
 	}
@@ -152,9 +160,9 @@ func (s *Server) Start() error {
 
 	// Initialize memory store (agent config + conversation history)
 	if s.cfg.PostgresURL != "" {
-		go func() {
+		s.background(func() {
 			for attempt := 1; ; attempt++ {
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				ctx, cancel := context.WithTimeout(runtime, 15*time.Second)
 				ms, err := memory.NewStore(ctx, s.cfg.PostgresURL, encKey, s.cfg.MultiUser)
 				cancel()
 				if err == nil {
@@ -168,9 +176,13 @@ func (s *Server) Start() error {
 					return
 				}
 				log.Printf("[memory] init failed (attempt %d): %v", attempt, err)
-				time.Sleep(3 * time.Second)
+				select {
+				case <-runtime.Done():
+					return
+				case <-time.After(3 * time.Second):
+				}
 			}
-		}()
+		})
 	}
 
 	// Bundle Prism's own docs into the workspace so the agent can read them even
@@ -183,12 +195,12 @@ func (s *Server) Start() error {
 	s.materializeAgentTools()
 
 	// Initialize RAG in background (embedding probe can take a moment)
-	go s.initRAG(context.Background())
+	s.background(func() { s.initRAG(runtime) })
 
 	// Initialize Docker workspace in background
-	go func() {
+	s.background(func() {
 		if s.docker.IsDockerAvailable() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			ctx, cancel := context.WithTimeout(runtime, 10*time.Minute)
 			defer cancel()
 			if err := s.docker.EnsureRunning(ctx); err != nil {
 				log.Printf("[docker] workspace container unavailable: %v", err)
@@ -197,148 +209,157 @@ func (s *Server) Start() error {
 		} else {
 			log.Printf("[docker] Docker not available — exec tools will be disabled")
 		}
-	}()
+	})
 
+	for _, dir := range []string{s.cfg.PluginDir, filepath.Join(s.cfg.WorkspaceDir, "data"), filepath.Join(s.cfg.WorkspaceDir, ".screenshots")} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Start preserves the standalone entry point; hosted callers supply a context.
+func (s *Server) Start() error {
+	listener, err := net.Listen("tcp", ":"+s.cfg.Port)
+	if err != nil {
+		return err
+	}
+	return s.Serve(context.Background(), listener)
+}
+
+// Handler assembles routes without initializing resources or background work.
+func (s *Server) Handler() (http.Handler, error) {
 	mux := http.NewServeMux()
 
 	// Embedded web files
 	webSub, err := fs.Sub(s.cfg.WebFS, "web")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	mux.Handle("/", http.FileServer(http.FS(webSub)))
 
-	// Dynamic plugin files
-	os.MkdirAll(s.cfg.PluginDir, 0755)
-	mux.Handle("/plugins/", http.StripPrefix("/plugins/", s.servePluginHTML(http.FileServer(s.generatedFS(s.cfg.PluginDir)))))
-
-	// The classic "public/static folder" pattern: workspace/data/ is served verbatim
-	// at /data/ — same name for the write path and the URL, nothing to translate.
-	dataDir := filepath.Join(s.cfg.WorkspaceDir, "data")
-	os.MkdirAll(dataDir, 0755)
-	mux.Handle("/data/", http.StripPrefix("/data/", http.FileServer(s.generatedFS(dataDir))))
-
-	// Browser automation screenshots — served at /screenshots/<file>
-	screenshotsDir := filepath.Join(s.cfg.WorkspaceDir, ".screenshots")
-	os.MkdirAll(screenshotsDir, 0755)
-	mux.Handle("/screenshots/", http.StripPrefix("/screenshots/", http.FileServer(s.generatedFS(screenshotsDir))))
+	// Generated content must use the same owner resolution as tools and data.
+	mux.HandleFunc("/plugins/", s.resourceRoute(func(s *Server, w http.ResponseWriter, r *http.Request) {
+		http.StripPrefix("/plugins/", s.servePluginHTML(http.FileServer(s.generatedFS(s.cfg.PluginDir)))).ServeHTTP(w, r)
+	}))
+	mux.HandleFunc("/data/", s.resourceRoute(func(s *Server, w http.ResponseWriter, r *http.Request) {
+		http.StripPrefix("/data/", http.FileServer(s.generatedFS(filepath.Join(s.cfg.WorkspaceDir, "data")))).ServeHTTP(w, r)
+	}))
+	mux.HandleFunc("/screenshots/", s.resourceRoute(func(s *Server, w http.ResponseWriter, r *http.Request) {
+		http.StripPrefix("/screenshots/", http.FileServer(s.generatedFS(filepath.Join(s.cfg.WorkspaceDir, ".screenshots")))).ServeHTTP(w, r)
+	}))
 
 	// WebSocket
-	mux.HandleFunc("/ws", s.handleWS)
+	mux.HandleFunc("/ws", s.resourceRoute((*Server).handleWS))
 
 	// REST API
-	mux.HandleFunc("/api/files", s.handleFiles)
-	mux.HandleFunc("/api/file", s.handleFile)
-	mux.HandleFunc("/api/exec", s.handleExec)
-	mux.HandleFunc("/api/terminal", s.handleTerminal)
-	mux.HandleFunc("/api/models", s.handleModels)
-	mux.HandleFunc("/api/ai/config", s.handleAIProfile)
-	mux.HandleFunc("/api/status", s.handleStatus)
-	mux.HandleFunc("/api/tools", s.handleTools)
-	mux.HandleFunc("/api/tool/", s.handleToolCall)
-	mux.HandleFunc("/api/builtin/", s.handleBuiltinTool)
-	mux.HandleFunc("/api/sessions", s.handleSessions)
-	mux.HandleFunc("/api/sessions/", s.handleSessionByID)
-	mux.HandleFunc("/api/chat/upload", s.handleChatFileUpload)
-	mux.HandleFunc("/api/notify", s.handleExternalNotify)
-	mux.HandleFunc("/api/profile", s.handleProfile)
-	mux.HandleFunc("/api/avatar", s.handleAvatar)
-	mux.HandleFunc("/api/voice", s.handleVoiceConfig)
-	mux.HandleFunc("/api/voice/caller", s.handleVoiceCaller)       // Vox: who is calling?
-	mux.HandleFunc("/api/voice/directory", s.handleVoiceDirectory) // Vox: who can I transfer to?
-	mux.HandleFunc("/api/voice/search", s.handleVoiceSearch)       // Vox: what do we know?
-	mux.HandleFunc("/api/voice/kb", s.handleVoiceKB)               // which collection the switchboard reads
-	mux.HandleFunc(voxProxyPrefix, s.handleVoxProxy)               // /api/vox/* → Vox's API
-	mux.HandleFunc("/api/platform", s.handlePlatform)
-	mux.HandleFunc("/api/admin/platform", s.handleAdminPlatform)
-	mux.HandleFunc("/api/admin/usage", s.handleAdminUsage)
-	mux.HandleFunc("/api/activity", s.handleActivity)
-	mux.HandleFunc("/api/shared", s.handleShared)
-	mux.HandleFunc("/api/shared/", s.handleSharedItem)
-	mux.HandleFunc("/api/admin/logs", s.handleAdminLogs)
-	mux.HandleFunc("/api/notes", s.handleNotes)
-	mux.HandleFunc("/api/notes/share", s.handleNoteShare)
-	mux.HandleFunc("/api/notes/source", s.handleNotesSource)
-	mux.HandleFunc("/api/notes/image", s.handleNoteImage)
-	mux.HandleFunc("/api/caldav/config", s.handleCalDAVConfig)
-	mux.HandleFunc("/api/todoist/config", s.handleTodoistConfig)
-	mux.HandleFunc("/api/oauth/", s.handleOAuth)
-	mux.HandleFunc("/api/pim/sources", s.handlePimSources)
-	mux.HandleFunc("/api/tasks", s.handleTasks)
-	mux.HandleFunc("/api/events", s.handleEvents)
-	mux.HandleFunc("/api/cron", s.handleCron)
-	mux.HandleFunc("/api/webhooks", s.handleWebhooks)
-	mux.HandleFunc("/api/webhooks/", s.handleWebhookByID)
+	mux.HandleFunc("/api/files", s.resourceRoute((*Server).handleFiles))
+	mux.HandleFunc("/api/file", s.resourceRoute((*Server).handleFile))
+	mux.HandleFunc("/api/exec", s.resourceRoute((*Server).handleExec))
+	mux.HandleFunc("/api/terminal", s.resourceRoute((*Server).handleTerminal))
+	mux.HandleFunc("/api/models", s.resourceRoute((*Server).handleModels))
+	mux.HandleFunc("/api/ai/config", s.resourceRoute((*Server).handleAIProfile))
+	mux.HandleFunc("/api/status", s.resourceRoute((*Server).handleStatus))
+	mux.HandleFunc("/api/tools", s.resourceRoute((*Server).handleTools))
+	mux.HandleFunc("/api/tool/", s.resourceRoute((*Server).handleToolCall))
+	mux.HandleFunc("/api/builtin/", s.resourceRoute((*Server).handleBuiltinTool))
+	mux.HandleFunc("/api/sessions", s.resourceRoute((*Server).handleSessions))
+	mux.HandleFunc("/api/sessions/", s.resourceRoute((*Server).handleSessionByID))
+	mux.HandleFunc("/api/chat/upload", s.resourceRoute((*Server).handleChatFileUpload))
+	mux.HandleFunc("/api/notify", s.resourceRoute((*Server).handleExternalNotify))
+	mux.HandleFunc("/api/profile", s.resourceRoute((*Server).handleProfile))
+	mux.HandleFunc("/api/avatar", s.resourceRoute((*Server).handleAvatar))
+	mux.HandleFunc("/api/voice", s.resourceRoute((*Server).handleVoiceConfig))
+	mux.HandleFunc("/api/voice/caller", s.resourceRoute((*Server).handleVoiceCaller))       // Vox: who is calling?
+	mux.HandleFunc("/api/voice/directory", s.resourceRoute((*Server).handleVoiceDirectory)) // Vox: who can I transfer to?
+	mux.HandleFunc("/api/voice/search", s.resourceRoute((*Server).handleVoiceSearch))       // Vox: what do we know?
+	mux.HandleFunc("/api/voice/kb", s.resourceRoute((*Server).handleVoiceKB))               // which collection the switchboard reads
+	mux.HandleFunc(voxProxyPrefix, s.resourceRoute((*Server).handleVoxProxy))               // /api/vox/* → Vox's API
+	mux.HandleFunc("/api/platform", s.resourceRoute((*Server).handlePlatform))
+	mux.HandleFunc("/api/admin/platform", s.resourceRoute((*Server).handleAdminPlatform))
+	mux.HandleFunc("/api/admin/usage", s.resourceRoute((*Server).handleAdminUsage))
+	mux.HandleFunc("/api/activity", s.resourceRoute((*Server).handleActivity))
+	mux.HandleFunc("/api/shared", s.resourceRoute((*Server).handleShared))
+	mux.HandleFunc("/api/shared/", s.resourceRoute((*Server).handleSharedItem))
+	mux.HandleFunc("/api/admin/logs", s.resourceRoute((*Server).handleAdminLogs))
+	mux.HandleFunc("/api/notes", s.resourceRoute((*Server).handleNotes))
+	mux.HandleFunc("/api/notes/share", s.resourceRoute((*Server).handleNoteShare))
+	mux.HandleFunc("/api/notes/source", s.resourceRoute((*Server).handleNotesSource))
+	mux.HandleFunc("/api/notes/image", s.resourceRoute((*Server).handleNoteImage))
+	mux.HandleFunc("/api/caldav/config", s.resourceRoute((*Server).handleCalDAVConfig))
+	mux.HandleFunc("/api/todoist/config", s.resourceRoute((*Server).handleTodoistConfig))
+	mux.HandleFunc("/api/oauth/", s.resourceRoute((*Server).handleOAuth))
+	mux.HandleFunc("/api/pim/sources", s.resourceRoute((*Server).handlePimSources))
+	mux.HandleFunc("/api/tasks", s.resourceRoute((*Server).handleTasks))
+	mux.HandleFunc("/api/events", s.resourceRoute((*Server).handleEvents))
+	mux.HandleFunc("/api/cron", s.resourceRoute((*Server).handleCron))
+	mux.HandleFunc("/api/webhooks", s.resourceRoute((*Server).handleWebhooks))
+	mux.HandleFunc("/api/webhooks/", s.resourceRoute((*Server).handleWebhookByID))
 	// Inbound webhook calls come from machines with no Prism login; they are
 	// authenticated by the per-webhook token instead (see webhookPublicPath).
-	mux.HandleFunc("/api/webhook/", s.handleWebhookIncoming)
-	mux.HandleFunc("/api/personality", s.handlePersonality)
-	mux.HandleFunc("/api/agent/name", s.handleAgentName)
-	mux.HandleFunc("/api/agent/limits", s.handleAgentLimits)
-	mux.HandleFunc("/api/agent/personality", s.handleAgentPersonality)
-	mux.HandleFunc("/api/telegram/config", s.handleTelegramConfig)
-	mux.HandleFunc("/api/telegram/send", s.handleTelegramSend)
-	mux.HandleFunc("/api/slack/config", s.handleSlackConfig)
-	mux.HandleFunc("/api/webex/config", s.handleWebexConfig)
-	mux.HandleFunc("/api/webex/rooms", s.handleWebexRooms)
-	mux.HandleFunc("/api/webex/send", s.handleWebexSend)
-	mux.HandleFunc("/api/skills", s.handleSkills)
-	mux.HandleFunc("/api/email/config", s.handleEmailConfig)
-	mux.HandleFunc("/api/email/unread", s.handleEmailUnread)
-	mux.HandleFunc("/api/email/markseen", s.handleEmailMarkSeen)
-	mux.HandleFunc("/api/email/list", s.handleEmailList)
-	mux.HandleFunc("/api/email/read", s.handleEmailRead)
-	mux.HandleFunc("/api/email/search", s.handleEmailSearch)
-	mux.HandleFunc("/api/email/send", s.handleEmailSend)
-	mux.HandleFunc("/api/email/attachment", s.handleEmailAttachment)
-	mux.HandleFunc("/api/email/tags", s.handleEmailTags)
-	mux.HandleFunc("/api/ai/assist", s.handleAIAssist)
-	mux.HandleFunc("/api/chat", s.handleChatHTTP)
-	mux.HandleFunc("/api/secrets", s.handleSecrets)
-	mux.HandleFunc("/api/secrets/", s.handleSecretByName)
-	mux.HandleFunc("/api/user/secrets", s.handleUserSecrets)
-	mux.HandleFunc("/api/user/secrets/", s.handleUserSecretByName)
-	mux.HandleFunc("/api/mcp/servers", s.handleMCPServers)
-	mux.HandleFunc("/api/mcp/servers/", s.handleMCPServerByID)
-	mux.HandleFunc("/api/oauth/mcp/callback", s.handleMCPOAuthCallback)
-	mux.HandleFunc("/api/auth", s.handleAuth)
+	mux.HandleFunc("/api/webhook/", s.resourceRoute((*Server).handleWebhookIncoming))
+	mux.HandleFunc("/api/personality", s.resourceRoute((*Server).handlePersonality))
+	mux.HandleFunc("/api/agent/name", s.resourceRoute((*Server).handleAgentName))
+	mux.HandleFunc("/api/agent/limits", s.resourceRoute((*Server).handleAgentLimits))
+	mux.HandleFunc("/api/agent/personality", s.resourceRoute((*Server).handleAgentPersonality))
+	mux.HandleFunc("/api/telegram/config", s.resourceRoute((*Server).handleTelegramConfig))
+	mux.HandleFunc("/api/telegram/send", s.resourceRoute((*Server).handleTelegramSend))
+	mux.HandleFunc("/api/slack/config", s.resourceRoute((*Server).handleSlackConfig))
+	mux.HandleFunc("/api/webex/config", s.resourceRoute((*Server).handleWebexConfig))
+	mux.HandleFunc("/api/webex/rooms", s.resourceRoute((*Server).handleWebexRooms))
+	mux.HandleFunc("/api/webex/send", s.resourceRoute((*Server).handleWebexSend))
+	mux.HandleFunc("/api/skills", s.resourceRoute((*Server).handleSkills))
+	mux.HandleFunc("/api/email/config", s.resourceRoute((*Server).handleEmailConfig))
+	mux.HandleFunc("/api/email/unread", s.resourceRoute((*Server).handleEmailUnread))
+	mux.HandleFunc("/api/email/markseen", s.resourceRoute((*Server).handleEmailMarkSeen))
+	mux.HandleFunc("/api/email/list", s.resourceRoute((*Server).handleEmailList))
+	mux.HandleFunc("/api/email/read", s.resourceRoute((*Server).handleEmailRead))
+	mux.HandleFunc("/api/email/search", s.resourceRoute((*Server).handleEmailSearch))
+	mux.HandleFunc("/api/email/send", s.resourceRoute((*Server).handleEmailSend))
+	mux.HandleFunc("/api/email/attachment", s.resourceRoute((*Server).handleEmailAttachment))
+	mux.HandleFunc("/api/email/tags", s.resourceRoute((*Server).handleEmailTags))
+	mux.HandleFunc("/api/ai/assist", s.resourceRoute((*Server).handleAIAssist))
+	mux.HandleFunc("/api/chat", s.resourceRoute((*Server).handleChatHTTP))
+	mux.HandleFunc("/api/secrets", s.resourceRoute((*Server).handleSecrets))
+	mux.HandleFunc("/api/secrets/", s.resourceRoute((*Server).handleSecretByName))
+	mux.HandleFunc("/api/user/secrets", s.resourceRoute((*Server).handleUserSecrets))
+	mux.HandleFunc("/api/user/secrets/", s.resourceRoute((*Server).handleUserSecretByName))
+	mux.HandleFunc("/api/mcp/servers", s.resourceRoute((*Server).handleMCPServers))
+	mux.HandleFunc("/api/mcp/servers/", s.resourceRoute((*Server).handleMCPServerByID))
+	mux.HandleFunc("/api/oauth/mcp/callback", s.resourceRoute((*Server).handleMCPOAuthCallback))
+	mux.HandleFunc("/api/auth", s.resourceRoute((*Server).handleAuth))
 	// Multi-user identity (Prism heavy)
-	mux.HandleFunc("/api/signup", s.handleSignup)
-	mux.HandleFunc("/api/login", s.handleLogin)
-	mux.HandleFunc("/api/logout", s.handleLogout)
-	mux.HandleFunc("/api/me", s.handleMe)
-	mux.HandleFunc("/api/admin/users", s.handleAdminUsers)
-	mux.HandleFunc("/api/admin/groups", s.handleAdminGroups)
-	mux.HandleFunc("/api/admin/tool-policy", s.handleAdminToolPolicy)
-	mux.HandleFunc("/api/admin/group-models", s.handleAdminGroupModels)
-	mux.HandleFunc("/login", s.handleLoginPage)
-	mux.HandleFunc("/signup", s.handleSignupPage)
-	mux.HandleFunc("/admin", s.handleAdminConsolePage)
+	mux.HandleFunc("/api/signup", s.resourceRoute((*Server).handleSignup))
+	mux.HandleFunc("/api/login", s.resourceRoute((*Server).handleLogin))
+	mux.HandleFunc("/api/logout", s.resourceRoute((*Server).handleLogout))
+	mux.HandleFunc("/api/me", s.resourceRoute((*Server).handleMe))
+	mux.HandleFunc("/api/admin/users", s.resourceRoute((*Server).handleAdminUsers))
+	mux.HandleFunc("/api/admin/groups", s.resourceRoute((*Server).handleAdminGroups))
+	mux.HandleFunc("/api/admin/tool-policy", s.resourceRoute((*Server).handleAdminToolPolicy))
+	mux.HandleFunc("/api/admin/group-models", s.resourceRoute((*Server).handleAdminGroupModels))
+	mux.HandleFunc("/login", s.resourceRoute((*Server).handleLoginPage))
+	mux.HandleFunc("/signup", s.resourceRoute((*Server).handleSignupPage))
+	mux.HandleFunc("/admin", s.resourceRoute((*Server).handleAdminConsolePage))
 	// Shared group chat rooms (Phase 4)
-	mux.HandleFunc("/wsroom", s.handleRoomWS)
-	mux.HandleFunc("/api/my/groups", s.handleMyGroups)
-	mux.HandleFunc("/api/my/tool-prefs", s.handleMyToolPrefs)
-	mux.HandleFunc("/api/group/members", s.handleGroupMembers)
-	mux.HandleFunc("/api/room/config", s.handleRoomConfig)
-	mux.HandleFunc("/api/group/tool-policy", s.handleGroupToolPolicy)
-	mux.HandleFunc("/api/group/mcp", s.handleGroupMCP)
-	mux.HandleFunc("/api/group/secrets", s.handleGroupSecrets)
-	mux.HandleFunc("/room", s.handleRoomPage)
-	mux.HandleFunc("/group", s.handleAdminConsolePage) // group admins land on the same console (role-filtered)
-	mux.HandleFunc("/home", s.handleHomePage)
+	mux.HandleFunc("/wsroom", s.resourceRoute((*Server).handleRoomWS))
+	mux.HandleFunc("/api/my/groups", s.resourceRoute((*Server).handleMyGroups))
+	mux.HandleFunc("/api/my/tool-prefs", s.resourceRoute((*Server).handleMyToolPrefs))
+	mux.HandleFunc("/api/group/members", s.resourceRoute((*Server).handleGroupMembers))
+	mux.HandleFunc("/api/room/config", s.resourceRoute((*Server).handleRoomConfig))
+	mux.HandleFunc("/api/group/tool-policy", s.resourceRoute((*Server).handleGroupToolPolicy))
+	mux.HandleFunc("/api/group/mcp", s.resourceRoute((*Server).handleGroupMCP))
+	mux.HandleFunc("/api/group/secrets", s.resourceRoute((*Server).handleGroupSecrets))
+	mux.HandleFunc("/room", s.resourceRoute((*Server).handleRoomPage))
+	mux.HandleFunc("/group", s.resourceRoute((*Server).handleAdminConsolePage)) // group admins land on the same console (role-filtered)
+	mux.HandleFunc("/home", s.resourceRoute((*Server).handleHomePage))
 	s.registerRAGRoutes(mux)
 
 	// Reverse proxy to services running inside the workspace container
-	mux.HandleFunc("/proxy/", s.handleWorkspaceProxy)
+	mux.HandleFunc("/proxy/", s.resourceRoute((*Server).handleWorkspaceProxy))
 	// Catch-all for absolute-path subprotocols (socket.io, etc.) emitted by
 	// proxied SPAs. Routes to the correct backend using Referer/Origin.
-	mux.HandleFunc("/socket.io/", s.handleSocketIOProxy)
+	mux.HandleFunc("/socket.io/", s.resourceRoute((*Server).handleSocketIOProxy))
 
-	addr := ":" + s.cfg.Port
-	log.Printf("Listening on %s", addr)
-	if s.cfg.AuthToken != "" {
-		log.Printf("Auth enabled (PRISM_TOKEN is set)")
-	}
-	srv := &http.Server{Addr: addr, Handler: s.withAuth(mux), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
-	return srv.ListenAndServe()
+	return s.lifecycleHandler(s.withAuth(mux)), nil
 }

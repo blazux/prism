@@ -10,7 +10,7 @@ const code = source.slice(source.indexOf('  let monitorGeneration'), source.inde
   const context = vm.createContext({
     pane:{isConnected:true,querySelector:()=>node},saved,
     refresh:()=>refreshes++,setTimeout:fn=>fn(),
-    fetch:async()=>({ok:true,json:async()=>{requests++;return {embeddingApplying:false,embeddingPending:false,embeddingStatus:'ready'}}}),
+    fetchConfig:async()=>({ok:true,json:async()=>{requests++;return {embeddingApplying:false,embeddingPending:false,embeddingStatus:'ready'}}}),
   })
   await vm.runInContext(code+'\nmonitorEmbedding(0)',context)
   assert.equal(requests,1)

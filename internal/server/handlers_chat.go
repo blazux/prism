@@ -53,7 +53,7 @@ func (s *Server) handleChatFileUpload(w http.ResponseWriter, r *http.Request) {
 // its workspace-relative path (empty on failure — extraction-only still works).
 func (s *Server) saveChatUpload(srcPath, origName string) string {
 	uploadsDir := filepath.Join(s.cfg.WorkspaceDir, "uploads")
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+	if err := s.mkdirManaged(uploadsDir); err != nil {
 		return ""
 	}
 	data, err := os.ReadFile(srcPath)
@@ -61,7 +61,7 @@ func (s *Server) saveChatUpload(srcPath, origName string) string {
 		return ""
 	}
 	dest := uniqueUploadPath(uploadsDir, sanitizeUploadName(origName))
-	if err := os.WriteFile(dest, data, 0644); err != nil {
+	if err := s.writeManagedFile(dest, data); err != nil {
 		return ""
 	}
 	rel, err := filepath.Rel(s.cfg.WorkspaceDir, dest)
@@ -81,14 +81,14 @@ func sanitizeUploadName(name string) string {
 
 func uniqueUploadPath(dir, name string) string {
 	p := filepath.Join(dir, name)
-	if _, err := os.Stat(p); os.IsNotExist(err) {
+	if _, err := os.Stat(p); err != nil {
 		return p
 	}
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
 	for i := 2; ; i++ {
 		c := filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
-		if _, err := os.Stat(c); os.IsNotExist(err) {
+		if _, err := os.Stat(c); err != nil {
 			return c
 		}
 	}

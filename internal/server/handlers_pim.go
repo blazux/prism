@@ -8,7 +8,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +19,8 @@ import (
 	"prism/internal/calendar"
 	"prism/internal/notes"
 	"prism/internal/tasks"
+	"prism/internal/timeprefs"
+	"prism/internal/workspace"
 )
 
 // pimScopeFor returns the caller's personal PIM scope ("u<id>"), or
@@ -98,19 +99,13 @@ func (s *Server) handleNoteImage(w http.ResponseWriter, r *http.Request) {
 
 	scope := s.pimScopeFor(r)
 	dir := filepath.Join(s.cfg.WorkspaceDir, "data", "notes", scope)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := s.mkdirManaged(dir); err != nil {
 		writeErr(w, http.StatusInternalServerError, "mkdir: "+err.Error())
 		return
 	}
 
 	name := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
-	dst, err := os.Create(filepath.Join(dir, name))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "create: "+err.Error())
-		return
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
+	if _, err := workspace.Write(s.cfg.WorkspaceDir, filepath.Join("data", "notes", scope, name), file); err != nil {
 		writeErr(w, http.StatusInternalServerError, "write: "+err.Error())
 		return
 	}
@@ -128,12 +123,12 @@ func (s *Server) pimStore(w http.ResponseWriter) bool {
 
 // parsePIMTime accepts ISO-8601 (what widgets send) plus a couple of friendly
 // local layouts. Returns nil for an empty string.
-func parsePIMTime(s string) *time.Time {
+func parsePIMTime(s string, locations ...*time.Location) *time.Time {
 	if s == "" {
 		return nil
 	}
 	for _, l := range []string{time.RFC3339, "2006-01-02 15:04", "2006-01-02T15:04", "2006-01-02"} {
-		if t, err := time.ParseInLocation(l, s, time.Local); err == nil {
+		if t, err := timeprefs.Parse(l, s, timeprefs.First(locations)); err == nil {
 			return &t
 		}
 	}
@@ -372,6 +367,10 @@ func (s *Server) handleNotesSource(w http.ResponseWriter, r *http.Request) {
 // ─── /api/tasks ───────────────────────────────────────────────────────────────
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	if store := s.userStore(r); store != nil {
+		_, loc := timeprefs.Read(r.Context(), store)
+		r = r.WithContext(timeprefs.WithLocation(r.Context(), loc))
+	}
 	if !s.pimStore(w) {
 		return
 	}
@@ -393,7 +392,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		if u := currentUser(r); u != nil && s.isAdminUser(r.Context(), u) {
 			items = append(s.voxPendingCallTasks(r.Context()), items...)
 		}
-		items, err = tasks.Filter(items, r.URL.Query().Get("query"), r.URL.Query().Get("filter"), time.Now())
+		items, err = tasks.Filter(items, r.URL.Query().Get("query"), r.URL.Query().Get("filter"), time.Now().In(timeprefs.Location(r.Context())))
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return
@@ -431,11 +430,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			b.Priority = "normal"
 		}
 		patch := tasks.Patch{Title: &b.Title, Priority: &b.Priority, Due: &b.Due}
-		if err := patch.Validate(); err != nil {
+		if err := patch.Validate(timeprefs.Location(r.Context())); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
-		due, _ := patch.Deadline()
+		due, _ := patch.Deadline(timeprefs.Location(r.Context()))
 		id, err := prov.Add(r.Context(), b.Title, b.Priority, due)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -453,7 +452,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "invalid task")
 			return
 		}
-		if err := patch.Validate(); err != nil {
+		if err := patch.Validate(timeprefs.Location(r.Context())); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
@@ -480,6 +479,10 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 // ─── /api/events ──────────────────────────────────────────────────────────────
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if store := s.userStore(r); store != nil {
+		_, loc := timeprefs.Read(r.Context(), store)
+		r = r.WithContext(timeprefs.WithLocation(r.Context(), loc))
+	}
 	if !s.pimStore(w) {
 		return
 	}
@@ -487,7 +490,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		items, err := prov.List(r.Context(),
-			parsePIMTime(r.URL.Query().Get("from")), parsePIMTime(r.URL.Query().Get("to")))
+			parsePIMTime(r.URL.Query().Get("from"), timeprefs.Location(r.Context())), parsePIMTime(r.URL.Query().Get("to"), timeprefs.Location(r.Context())))
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -506,12 +509,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad body", 400)
 			return
 		}
-		start := parsePIMTime(b.Start)
+		start := parsePIMTime(b.Start, timeprefs.Location(r.Context()))
 		if start == nil {
 			http.Error(w, "valid start time required", 400)
 			return
 		}
-		end, err := calendar.ParseTime(b.End)
+		end, err := calendar.ParseTime(b.End, timeprefs.Location(r.Context()))
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return

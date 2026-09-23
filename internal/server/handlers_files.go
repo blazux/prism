@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"prism/internal/workspace"
 	"strings"
@@ -162,7 +161,7 @@ type FileNode struct {
 }
 
 func (s *Server) buildFileTree(root string) []FileNode {
-	entries, err := os.ReadDir(root)
+	entries, err := s.readManagedDir(root)
 	if err != nil {
 		return nil
 	}
@@ -193,7 +192,7 @@ func (s *Server) buildSubTree(dir, prefix string, depth int) []FileNode {
 	if depth > 4 {
 		return nil
 	}
-	entries, err := os.ReadDir(dir)
+	entries, err := s.readManagedDir(dir)
 	if err != nil {
 		return nil
 	}

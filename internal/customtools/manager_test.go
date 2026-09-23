@@ -128,3 +128,33 @@ func TestOutOfBandDeletionIsPickedUpWithoutExplicitReload(t *testing.T) {
 		t.Error("a removed file must not be reported as protected")
 	}
 }
+
+func TestDiscoveryRejectsOutsideWorkspaceSymlinks(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	tools := filepath.Join(root, "agent_tools")
+	if err := os.MkdirAll(tools, 0700); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(outside, "hidden.py")
+	if err := os.WriteFile(secret, []byte(`# TOOL: {"name":"outside","description":"private"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(tools, "leak.py")); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadManager(tools).All(); len(got) != 0 {
+		t.Fatal("outside metadata exposed", got)
+	}
+	if err := os.Remove(filepath.Join(tools, "leak.py")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(tools); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, tools); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadManager(tools).All(); len(got) != 0 {
+		t.Fatal("outside tools directory exposed", got)
+	}
+}

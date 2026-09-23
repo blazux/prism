@@ -96,3 +96,35 @@ Every failed tool call is also audited server-side as usage kind `audit`,
 item `tool_error` (with the tool name and the first line of the error), next
 to `tool_denied`. The top of that table is the roadmap for agent-comfort
 work: fix what actually trips the model, not what we assume does.
+
+## Offline prompt size audit
+
+See [prompt-footprint.md](prompt-footprint.md) for the reproducible Guided/Standard
+baseline, current usage-counter limitations and the protocol for comparing Minimal.
+The diagnostic makes no model calls and does not require a running instance.
+
+## Comparing prompt profiles and provider usage
+
+Select Guided/Standard/Minimal in the instance's Agent settings before each batch.
+Do not change the setting during a run. Each result's `model_requests` now keeps
+one `main_chat` record per model call: actual profile, model, duration, system/tool
+bytes, message count, completion status and provider-reported `usage` if available.
+This includes intermediate chat/tool-loop calls, not only the final response.
+
+`input_tokens` includes cached input. `cache_read_tokens`/`cache_write_tokens` are
+breakdowns; do not add them again. `reasoning_tokens`, when reported, is part of
+`output_tokens`, not extra output. Missing fields (or `usage: null`) mean unknown,
+not zero. Interrupted streams may have partial or missing usage. Snapshot counts
+are cumulative per request; only the last reported snapshot is recorded.
+
+These records **do not cover auxiliary vision captions, deep-research model calls,
+compaction or embeddings**, and are not a complete bill. The legacy admin chat-turn
+estimate is separate; never add it to provider counts. In PostgreSQL, records use
+`usage_events.kind=model_request`, qty=1 and meta.measurement; no prompts, tool
+results or credentials are added to these telemetry records. No price is inferred.
+
+Adapters follow [OpenAI's streaming usage contract](https://developers.openai.com/api/reference/resources/chat)
+and [Anthropic's cumulative streaming usage](https://platform.claude.com/docs/en/build-with-claude/streaming),
+with its [cache input normalization](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+An OpenAI-compatible endpoint explicitly rejecting stream_options is retried without
+that parameter; consumption remains unknown if it does not report it.

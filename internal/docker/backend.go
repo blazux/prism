@@ -32,6 +32,9 @@ func (b Backend) Validate() error {
 }
 func (m *Manager) WorkspaceDocker() bool { return m.backend.Mode == "workspace" }
 func (m *Manager) serviceCommand(ctx context.Context, args ...string) (*exec.Cmd, error) {
+	if m.executionOnly {
+		return nil, fmt.Errorf("service backend unavailable on execution-only capability")
+	}
 	if err := m.backend.Validate(); err != nil {
 		return nil, err
 	}
@@ -55,6 +58,17 @@ func (m *Manager) serviceRun(ctx context.Context, args ...string) (string, error
 	return m.serviceInput(ctx, nil, args...)
 }
 func (m *Manager) serviceInput(ctx context.Context, input []byte, args ...string) (string, error) {
+	if m.executionOnly {
+		if !m.WorkspaceDocker() {
+			return "", fmt.Errorf("workspace Docker capability unavailable")
+		}
+		words := []string{"env", "-u", "DOCKER_CONTEXT", "-u", "DOCKER_TLS_VERIFY", "-u", "DOCKER_CERT_PATH", "docker"}
+		words = append(words, args...)
+		for i, word := range words {
+			words[i] = "'" + strings.ReplaceAll(word, "'", "'\\''") + "'"
+		}
+		return m.executeBound(ctx, strings.Join(words, " "), input, nil, 0)
+	}
 	cmd, err := m.serviceCommand(ctx, args...)
 	if err != nil {
 		return "", err

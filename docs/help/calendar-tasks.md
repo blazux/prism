@@ -44,7 +44,7 @@ an end before start are refused.
 For `calendar action=add all_day=true`, pass `start` as a date. Omit `end` for
 one day; for multiple days `end` is the **exclusive** date (the day after the
 last included day). Timed events can use ISO dates with a timezone offset;
-otherwise dates are interpreted in Prism's deployment timezone.
+otherwise dates use your personal timezone in **Settings → Profile**, falling back to the server timezone. Calendar and task forms/display use your browser timezone and send explicit offsets for timed entries.
 
 Prism preserves provider recurrence data when editing a series. Editing or
 completing an individual CalDAV occurrence remains unsupported and is refused

@@ -86,6 +86,8 @@ func (rb *logRing) Tail(n int, filter string) []string {
 // installLogRing hooks the ring into the standard logger and wires error
 // persistence once the store exists. Call from Start after the store is up.
 func (s *Server) installLogRing() {
+	ring.mu.Lock()
+	defer ring.mu.Unlock()
 	ring.onError = func(line string) {
 		if ms := s.store(); ms != nil {
 			item := ""

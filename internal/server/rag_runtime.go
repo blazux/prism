@@ -54,12 +54,12 @@ func (s *Server) scheduleRAGApply() {
 	if s.ragCancel != nil {
 		s.ragCancel()
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(s.runtimeContext())
 	s.ragCancel = cancel
 	s.ragUpdating.Store(true)
-	ragInitStatus.Store("applying configuration: waiting for active document operations…")
+	s.ragInitStatus.Store("applying configuration: waiting for active document operations…")
 	s.mu.Unlock()
-	go func() {
+	if !s.background(func() {
 		s.ragApplyMu.Lock()
 		defer s.ragApplyMu.Unlock()
 		defer cancel()
@@ -72,7 +72,7 @@ func (s *Server) scheduleRAGApply() {
 		if current {
 			s.ragUpdating.Store(false)
 			if err != nil {
-				ragInitStatus.Store("configuration failed; previous document index retained. Check the provider and save again.")
+				s.ragInitStatus.Store("configuration failed; previous document index retained. Check the provider and save again.")
 				log.Printf("[rag] apply failed: %v", err)
 			}
 		}
@@ -82,7 +82,9 @@ func (s *Server) scheduleRAGApply() {
 				s.ingestHelpDocs(ctx, docs, hash)
 			}
 		}
-	}()
+	}) {
+		cancel()
+	}
 }
 func (s *Server) applyRAGProfile(ctx context.Context) error {
 	p, err := loadAIProfile(ctx, s.store())
@@ -120,9 +122,9 @@ func (s *Server) applyRAGProfile(ctx context.Context) error {
 		s.activeEmbedding = p
 		s.mu.Unlock()
 		if s.ragStore == nil {
-			ragInitStatus.Store("disabled: no embedding model configured")
+			s.ragInitStatus.Store("disabled: no embedding model configured")
 		} else {
-			ragInitStatus.Store("ready")
+			s.ragInitStatus.Store("ready")
 		}
 		return nil
 	}
@@ -135,7 +137,7 @@ func (s *Server) applyRAGProfile(ctx context.Context) error {
 		embedder = ep.embedder()
 		for {
 			probe, cancel := context.WithTimeout(ctx, 60*time.Second)
-			ragInitStatus.Store("testing embedding connection…")
+			s.ragInitStatus.Store("testing embedding connection…")
 			dim, err = embedder.Dim(probe)
 			cancel()
 			if err == nil {
@@ -146,7 +148,7 @@ func (s *Server) applyRAGProfile(ctx context.Context) error {
 			}
 			// At startup a local model server may still be loading. A new Save
 			// cancels this retry immediately and applies the latest profile.
-			ragInitStatus.Store("embedding connection unavailable; retrying…")
+			s.ragInitStatus.Store("embedding connection unavailable; retrying…")
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -161,14 +163,14 @@ func (s *Server) applyRAGProfile(ctx context.Context) error {
 	}
 	var store *rag.Store
 	if embedder != nil {
-		ragInitStatus.Store("checking document index…")
+		s.ragInitStatus.Store("checking document index…")
 		// Open the replacement pool before committing the index migration, so a
 		// pool/schema failure cannot leave live callers with incompatible vectors.
 		store, err = rag.NewMigrationStore(ctx, s.cfg.PostgresURL, dim)
 		if err != nil {
 			return err
 		}
-		err = rag.PrepareEmbeddingIndex(ctx, s.cfg.PostgresURL, embedder, dim, embeddingIdentity(ep), embeddingIdentity(legacy.effectiveEmbedding()), p.Embedding.Reindex && p.Embedding.ReindexFor == embeddingIdentity(ep), func(done int) { ragInitStatus.Store(fmt.Sprintf("rebuilding document index: %d chunks…", done)) })
+		err = rag.PrepareEmbeddingIndex(ctx, s.cfg.PostgresURL, embedder, dim, embeddingIdentity(ep), embeddingIdentity(legacy.effectiveEmbedding()), p.Embedding.Reindex && p.Embedding.ReindexFor == embeddingIdentity(ep), func(done int) { s.ragInitStatus.Store(fmt.Sprintf("rebuilding document index: %d chunks…", done)) })
 		if err != nil {
 			store.Close()
 			return err
@@ -180,9 +182,9 @@ func (s *Server) applyRAGProfile(ctx context.Context) error {
 	s.activeEmbedding = p
 	s.mu.Unlock()
 	if store == nil {
-		ragInitStatus.Store("disabled: no embedding model configured")
+		s.ragInitStatus.Store("disabled: no embedding model configured")
 	} else {
-		ragInitStatus.Store("ready")
+		s.ragInitStatus.Store("ready")
 	}
 	if old != nil {
 		old.Close()

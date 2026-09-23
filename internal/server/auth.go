@@ -147,6 +147,11 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			}
 		}
 
+		if s.hostedResolver != nil {
+			s.hostedAuth(next, w, r)
+			return
+		}
+
 		// The one place the two modes part company. Single-user is the default and
 		// never reaches the account machinery below — see auth_singleuser.go.
 		if !s.cfg.MultiUser {
@@ -264,7 +269,14 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	// UI offers the workspace terminal here too. No user object: the account/group
 	// UI (admin link, rooms) keys off user.role and must stay hidden in this mode.
 	if !s.cfg.MultiUser {
-		json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "isAdmin": true, "legacy": true, "multiUser": false})
+		identity := map[string]any{"authenticated": true, "isAdmin": true, "legacy": true, "multiUser": false}
+		if s.docker != nil {
+			identity["terminalAvailable"] = s.docker.SupportsTerminal()
+		}
+		if s.cfg.WidgetFrameURL != "" {
+			identity["widgetHosting"] = map[string]string{"frameURL": s.cfg.WidgetFrameURL, "grantURL": s.cfg.WidgetGrantURL}
+		}
+		json.NewEncoder(w).Encode(identity)
 		return
 	}
 	// /api/me is public, so resolve the cookie here directly.

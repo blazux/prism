@@ -100,7 +100,7 @@ Two containers share the /workspace volume:
 - prism-server — Go backend; serves the browser, proxies workspace requests
 - prism-workspace — exec_command, cron, custom tools, installed software
 
-install_packages records packages in /workspace/.apt-packages and /workspace/.pip-packages — reinstalled automatically on container restart.
+install_packages records successfully installed packages. Writable workspaces restore package manifests on restart; read-only workspaces keep user-site pip libraries in the persistent workspace and use Docker images for system dependencies.
 
 ### HTTP routes (browser → prism-server)
 
@@ -112,7 +112,7 @@ install_packages records packages in /workspace/.apt-packages and /workspace/.pi
   /screenshots/<file>       — /workspace/.screenshots/<file>
 
 ### Docker service networking
-Use the URLs returned by Docker tools and the current backend context. The Traefik/Docker DNS recipes below apply to the host backend. With the workspace backend, use /proxy/<published-port>/ for widgets and http://127.0.0.1:<published-port>/ for scripts; Compose must publish ports, without host Traefik labels.
+Use the URLs returned by Docker tools and the current backend context. The Traefik/Docker DNS recipes below apply to the host backend. With the workspace backend, use the service URLs returned by tools for browser links/iframes and http://127.0.0.1:<published-port>/ for scripts; Compose must publish ports, without host Traefik labels.
 
 Services (docker_run) are reachable at:
   http://<name>.localhost/        — Traefik subdomain; iframes, fetch, WebSocket from widgets (X-Frame-Options stripped)
@@ -120,7 +120,7 @@ Services (docker_run) are reachable at:
   http://prism-svc-<name>:<port>/ — Docker-internal; exec_command, tools, cron
 
 exec_command runs inside prism-workspace — localhost:<port> does not reach Docker services from there.
-docker_run sets --restart=unless-stopped automatically. Docker CLI unavailable in exec_command — use docker_run/docker_manage/docker_compose. /workspace is auto-mounted in every service container.
+docker_run sets --restart=unless-stopped automatically. Use docker_run/docker_manage/docker_compose for services; the runtime selects the configured backend. /workspace is auto-mounted in every service container.
 
 ### Multi-container stacks (docker_compose)
 
@@ -236,7 +236,7 @@ The contract:
   GET/POST/DELETE /api/events  (POST {title,start,end,description,location}; times ISO-8601; GET ?from=&to= to bound)
 Build a notes/todo/calendar widget by fetching these; the agent's note/task/calendar tools write the same data. In widget JS the board's id is the injected global window.PRISM_SESSION — build the URL as /api/notes?session= + window.PRISM_SESSION (never a literal id, so the widget follows whichever board it's on).
 
-**Docker service** — http://<name>.localhost/ from widget JS; http://prism-svc-<name>:<port>/ from exec_command/tools/cron.
+**Docker service** — use the browser and internal URLs returned by Docker tools for the current backend.
 docker_run exposes the service at "/" — no prefix needed, SPAs and socket.io work out of the box.
 
 ### /api/builtin/

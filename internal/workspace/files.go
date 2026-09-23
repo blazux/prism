@@ -142,3 +142,17 @@ func (fs SubFS) Open(name string) (http.File, error) {
 	}
 	return FS(fs.Root).Open(filepath.Join(fs.Prefix, clean))
 }
+
+// MkdirAll creates directories without following links outside the volume.
+func MkdirAll(dir, name string, mode os.FileMode) error {
+	name, err := Name(name)
+	if err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.MkdirAll(name, mode)
+}

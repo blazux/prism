@@ -154,6 +154,9 @@ func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	stopOnCancel := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	defer stopOnCancel()
+
 	c := &roomClient{conn: conn, send: make(chan []byte, 64), groupID: groupID, userID: user.ID, userName: user.DisplayName}
 	s.rooms.add(c)
 	defer func() { s.rooms.remove(c); conn.Close(); s.pushPresence(groupID) }()
@@ -253,13 +256,13 @@ func (s *Server) handleRoomMessage(ctx context.Context, c *roomClient, content s
 	ms.AddUsage(ctx, c.userID, fmt.Sprintf("room-g%d", c.groupID), "channel_msg", "room", 1, nil)
 
 	// Notify any @mentioned members (in their personal notification feed).
-	go s.notifyRoomMentions(c.groupID, c.userID, c.userName, content)
+	s.background(func() { s.notifyRoomMentions(c.groupID, c.userID, c.userName, content) })
 
 	cfg, _ := ms.GetRoomConfig(ctx, c.groupID)
 	if !mentionsAgent(content, cfg.AgentName) {
 		return
 	}
-	go s.runRoomAgent(c.groupID, cfg, c.userName, content)
+	s.background(func() { s.runRoomAgent(c.groupID, cfg, c.userName, content) })
 }
 
 // notifyRoomMentions delivers a notification to each group member @mentioned by
@@ -302,7 +305,7 @@ func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, co
 	// Signal "the agent is typing" to the room.
 	s.rooms.broadcast(groupID, map[string]interface{}{"type": "agent_typing"})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(s.runtimeContext(), 10*time.Minute)
 	defer cancel()
 
 	sessionID := fmt.Sprintf("room-g%d", groupID)
@@ -479,8 +482,9 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 		var b struct {
 			AgentName, AgentPrompt, AgentModel string
 			AgentMaxIter                       int
-			AgentThinking                      *bool  // absent = keep reasoning on
-			AgentLean                          bool   // absent = guided profile
+			AgentThinking                      *bool // absent = keep reasoning on
+			AgentPromptProfile                 *string
+			AgentLean                          *bool  // absent = guided profile
 			AgentReasoning                     string // "" = server default
 			AgentVoicePrompt                   string // "" = built-in internal-call text
 		}
@@ -488,10 +492,21 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "bad body")
 			return
 		}
+		old, _ := ms.GetRoomConfig(r.Context(), groupID)
+		profile := memory.ResolvePromptProfile(old.AgentPromptProfile, old.AgentLean)
+		if b.AgentPromptProfile != nil {
+			if !memory.ValidPromptProfile(*b.AgentPromptProfile) {
+				writeErr(w, 400, "invalid prompt profile")
+				return
+			}
+			profile = *b.AgentPromptProfile
+		} else if b.AgentLean != nil {
+			profile = memory.ResolvePromptProfile("", *b.AgentLean)
+		}
 		thinking := b.AgentThinking == nil || *b.AgentThinking
 		if err := ms.SetRoomConfig(r.Context(), memory.RoomConfig{
 			GroupID: groupID, AgentName: b.AgentName, AgentPrompt: b.AgentPrompt, AgentModel: b.AgentModel,
-			AgentMaxIter: agent.ClampIterations(b.AgentMaxIter), AgentThinking: thinking, AgentLean: b.AgentLean,
+			AgentMaxIter: agent.ClampIterations(b.AgentMaxIter), AgentThinking: thinking, AgentLean: profile != "guided", AgentPromptProfile: profile,
 			AgentReasoning:   agent.NormalizeReasoningEffort(b.AgentReasoning),
 			AgentVoicePrompt: strings.TrimSpace(b.AgentVoicePrompt),
 		}); err != nil {
@@ -531,6 +546,7 @@ func roomLimits(cfg memory.RoomConfig) agent.Limits {
 		MaxIterations:      cfg.AgentMaxIter,
 		Thinking:           &th,
 		LeanPrompt:         &ln,
+		PromptProfile:      memory.ResolvePromptProfile(cfg.AgentPromptProfile, cfg.AgentLean),
 		ReasoningEffort:    cfg.AgentReasoning,
 		HistoryBudgetChars: channelContextCharBudget,
 	}

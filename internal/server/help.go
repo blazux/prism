@@ -14,10 +14,10 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"os"
 	"path/filepath"
 	"prism/internal/agent"
 	"prism/internal/memory"
+	"prism/internal/workspace"
 	"sort"
 	"strings"
 
@@ -232,6 +232,9 @@ type helpDoc struct {
 }
 
 func (s *Server) loadHelpDocs() ([]helpDoc, string) {
+	if s.cfg.HelpFS == nil {
+		return nil, ""
+	}
 	var docs []helpDoc
 	h := sha256.New()
 	entries, err := fs.ReadDir(s.cfg.HelpFS, helpEmbedDir)
@@ -254,19 +257,22 @@ func (s *Server) loadHelpDocs() ([]helpDoc, string) {
 		h.Write([]byte(name))
 		h.Write(b)
 	}
+	runtime := agent.RuntimeHelp()
+	docs = append(docs, helpDoc{name: "agent-runtime.md", body: runtime})
+	h.Write([]byte("agent-runtime.md"))
+	h.Write([]byte(runtime))
 	return docs, fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // materializeHelpDocs writes the bundled docs to the workspace so read_file works
 // regardless of RAG. Cheap; called synchronously at startup.
 func (s *Server) materializeHelpDocs(docs []helpDoc) {
-	dir := filepath.Join(s.cfg.WorkspaceDir, helpWorkspaceNS)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := workspace.MkdirAll(s.cfg.WorkspaceDir, helpWorkspaceNS, 0755); err != nil {
 		log.Printf("[help] mkdir: %v", err)
 		return
 	}
 	for _, d := range docs {
-		if err := os.WriteFile(filepath.Join(dir, d.name), []byte(d.body), 0644); err != nil {
+		if err := workspace.WriteFile(s.cfg.WorkspaceDir, filepath.Join(helpWorkspaceNS, d.name), []byte(d.body)); err != nil {
 			log.Printf("[help] write %s: %v", d.name, err)
 		}
 	}

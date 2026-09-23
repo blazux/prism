@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -130,7 +131,15 @@ func (e *ToolExecutor) ragIngest(ctx context.Context, collection, source, conten
 			}
 			return fmt.Sprintf("%s is a directory — rag_ingest takes ONE file per call. Files in it: %s. Ingest them one at a time into the same collection.", sourcePath, strings.Join(names, ", ")), nil
 		}
-		data, err := workspace.ReadFile(e.workspaceDir, sourcePath)
+		f, err := workspace.Open(e.workspaceDir, sourcePath)
+		var data []byte
+		if err == nil {
+			data, err = io.ReadAll(io.LimitReader(f, (50<<20)+1))
+			f.Close()
+			if len(data) > 50<<20 {
+				return "Document exceeds 50 MiB; split it before indexing.", nil
+			}
+		}
 		if err != nil {
 			if os.IsNotExist(err) {
 				return e.notFoundHint(sourcePath, fullPath).Error(), nil // teach: siblings + closest name

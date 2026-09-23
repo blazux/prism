@@ -18,9 +18,12 @@ import (
 
 	"prism/internal/memory"
 	"prism/internal/ollama"
+	"prism/internal/timeprefs"
+	"prism/internal/workspace"
 )
 
 type Event struct {
+	Usage   *ModelUsage     `json:"usage,omitempty"`
 	Type    string          `json:"type"`
 	Content string          `json:"content,omitempty"`
 	Tool    string          `json:"tool,omitempty"`
@@ -94,6 +97,7 @@ const historyTruncatedNote = "[Older messages in this conversation were not repl
 // see effectiveHistoryBudget below.
 
 type Agent struct {
+	location        *time.Location
 	ollama          ollama.Backend
 	executor        *ToolExecutor
 	model           string
@@ -161,7 +165,8 @@ type Limits struct {
 	// LeanPrompt picks the lean system-prompt profile (for frontier models:
 	// drops the small-model scaffolding — see the prompt-profiles comment in
 	// prompt.go). nil = config / guided.
-	LeanPrompt *bool
+	LeanPrompt    *bool
+	PromptProfile string
 	// ReasoningEffort bounds the reasoning budget of thinking models
 	// ("low"/"medium"/"high"/"xhigh"). "" = config / server default
 	// (OPENAI_REASONING_EFFORT).
@@ -238,15 +243,19 @@ func (a *Agent) effectiveLimits() (maxIter int, thinking bool) {
 // the budget: override → config → guided (false). Guided is the deliberate
 // default: a Prism deployment normally runs a small local model (Ollama/vLLM),
 // and lean is the marginal case a user opts into by hand.
-func (a *Agent) leanPrompt() bool {
-	switch {
-	case a.limitsOverride.LeanPrompt != nil:
-		return *a.limitsOverride.LeanPrompt
-	case a.limits.LeanPrompt != nil:
-		return *a.limits.LeanPrompt
+func (a *Agent) promptProfile() string {
+	if memory.ValidPromptProfile(a.limitsOverride.PromptProfile) {
+		return a.limitsOverride.PromptProfile
 	}
-	return false
+	if a.limitsOverride.LeanPrompt != nil {
+		return memory.ResolvePromptProfile("", *a.limitsOverride.LeanPrompt)
+	}
+	if memory.ValidPromptProfile(a.limits.PromptProfile) {
+		return a.limits.PromptProfile
+	}
+	return memory.ResolvePromptProfile("", a.limits.LeanPrompt != nil && *a.limits.LeanPrompt)
 }
+func (a *Agent) leanPrompt() bool { return a.promptProfile() != "guided" }
 
 // reasoningEffort resolves the reasoning budget the same way: override →
 // config → "" (the backend's default applies).
@@ -330,7 +339,7 @@ func (a *Agent) SetActiveTools(disabledNames []string) {
 // disabled tools. Called on every Ollama request so dynamic tools (custom Python
 // scripts, MCP tools) are always up-to-date without requiring a session restart.
 func (a *Agent) buildToolList() []ollama.Tool {
-	all := append(append([]ollama.Tool{}, ToolDefinitions...), a.executor.AllDynamicTools()...)
+	all := append(nativeToolsFor(a.leanPrompt()), a.executor.AllDynamicTools()...)
 	if len(a.disabledTools) == 0 {
 		return all
 	}
@@ -371,6 +380,7 @@ func (a *Agent) loadProfile() {
 	a.basePersonality = ""
 	a.agentName = ""
 	a.limits = Limits{}
+	a.location = time.Local
 	if a.memStore == nil {
 		return
 	}
@@ -379,6 +389,7 @@ func (a *Agent) loadProfile() {
 		store = store.ConfigScope(m)
 	}
 	ctx := context.Background()
+	_, a.location = timeprefs.Read(ctx, store)
 	if name, ok, err := store.GetConfig(ctx, memory.KeyAgentName); err == nil && ok {
 		a.agentName = name
 	}
@@ -398,6 +409,7 @@ func (a *Agent) loadProfile() {
 			a.limits.Thinking = &on
 		}
 	}
+	a.limits.PromptProfile, _, _ = store.GetConfig(ctx, memory.KeyAgentPromptProfile)
 	if v, ok, err := store.GetConfig(ctx, memory.KeyAgentLeanPrompt); err == nil && ok {
 		if t := strings.TrimSpace(v); t != "" {
 			on := t == "on" || t == "true" || t == "1"
@@ -512,7 +524,7 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 		// Inject timestamp prefix on user messages only so the model can reason about time
 		// (not on assistant messages, to avoid the model mimicking the pattern in its responses)
 		if e.Role == "user" {
-			content = fmt.Sprintf("[%s] %s", e.CreatedAt.In(agentLocation).Format("2006-01-02 15:04"), e.Content)
+			content = fmt.Sprintf("[%s] %s", e.CreatedAt.In(a.timeLocation()).Format("2006-01-02 15:04"), e.Content)
 		}
 		msg := ollama.Message{Role: e.Role, Content: content, DBID: e.ID}
 		if len(e.ToolCalls) > 0 && string(e.ToolCalls) != "null" {
@@ -944,9 +956,13 @@ func (a *Agent) saveMessageToDB(ctx context.Context, msg ollama.Message) int64 {
 	return id
 }
 
-// agentLocation is the timezone used for all timestamps shown to the model.
-// Relies on the TZ environment variable being set at the container/process level.
-var agentLocation = time.Local
+// Personal timezone is reloaded each turn; TZ remains the deployment fallback.
+func (a *Agent) timeLocation() *time.Location {
+	if a.location != nil {
+		return a.location
+	}
+	return time.Local
+}
 
 // buildSystemPrompt assembles the full system prompt for the current request.
 // learningsCtx is a pre-fetched snippet from the agent-learnings RAG (may be empty).
@@ -982,13 +998,19 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		sb.WriteString(persona)
 	}
 	lean := a.leanPrompt()
-	sb.WriteString(systemPromptCoreFor(lean))
-	if lean {
-		sb.WriteString(systemPromptRetryLean)
+	minimal := a.promptProfile() == "minimal"
+	if minimal {
+		sb.WriteString(systemPromptMinimal)
+		sb.WriteString(minimalSafetyPrompt())
 	} else {
-		sb.WriteString(systemPromptRetryGuided)
+		sb.WriteString(systemPromptCoreFor(lean))
+		if lean {
+			sb.WriteString(systemPromptRetryLean)
+		} else {
+			sb.WriteString(systemPromptRetryGuided)
+		}
+		sb.WriteString(systemPromptCoreTailFor(lean))
 	}
-	sb.WriteString(systemPromptCoreTailFor(lean))
 
 	// Channel guidance: the "telegram" session is the user texting from their phone.
 	if a.sessionID == telegramSessionID {
@@ -1042,7 +1064,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	}
 
 	// Inject the live index of services the agent has deployed.
-	if a.servicesCtxFn != nil {
+	if !minimal && a.servicesCtxFn != nil {
 		if extra := a.servicesCtxFn(); extra != "" {
 			sb.WriteString("\n\n")
 			sb.WriteString(extra)
@@ -1070,20 +1092,23 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 
 	// Inject current date/time so the model can reason about time.
 	// Explicit instruction: never output the date/time in responses.
-	fmt.Fprintf(&sb, "\n\nCurrent date and time: %s. Current session ID: `%s`. Use these only as internal context — never write them in your responses. When generating widget code that calls /api/tool/ or /api/notify, always append ?session=%s to the URL.", time.Now().In(agentLocation).Format("2006-01-02 15:04"), a.sessionID, a.sessionID)
+	fmt.Fprintf(&sb, "\n\nCurrent date and time: %s. Current session ID: `%s`. Use these only as internal context — never write them in your responses. When generating widget code that calls /api/tool/ or /api/notify, always append ?session=%s to the URL.", time.Now().In(a.timeLocation()).Format("2006-01-02 15:04 MST -07:00")+" ("+a.timeLocation().String()+")", a.sessionID, a.sessionID)
 
 	// Grounding rule, near the end on purpose: late-prompt instructions are the
 	// ones this size of model actually follows (see systemPromptRole's measurements).
-	sb.WriteString(systemPromptGrounding)
-	sb.WriteString(systemPromptDeliverable)
-	if lean {
-		// A capable model over-delivers; the small-model act-turn crutch is
-		// replaced by the harness fact it cannot guess (a reply without a tool
-		// call ends the turn) and by the opposite discipline.
-		sb.WriteString(systemPromptTurnContract)
-		sb.WriteString(systemPromptKeepItSimple)
-	} else {
-		sb.WriteString(systemPromptActTurn)
+	if !minimal {
+		sb.WriteString(systemPromptGrounding)
+		sb.WriteString(systemPromptDeliverable)
+		if lean {
+			// A capable model over-delivers; the small-model act-turn crutch is
+			// replaced by the harness fact it cannot guess (a reply without a tool
+			// call ends the turn) and by the opposite discipline.
+			sb.WriteString(systemPromptTurnContract)
+			sb.WriteString(systemPromptKeepItSimple)
+		} else {
+			sb.WriteString(systemPromptActTurn)
+		}
+
 	}
 
 	// Channel layer: the phone constrains the *form* of the answer, not
@@ -1138,7 +1163,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	// Prefix user message with timestamp so the model can reason about time.
 	// Only user messages get the prefix — assistant messages don't, to avoid the model
 	// mimicking the pattern and outputting timestamps in its own responses.
-	timestampedContent := fmt.Sprintf("[%s] %s", time.Now().In(agentLocation).Format("2006-01-02 15:04"), userMsg)
+	timestampedContent := fmt.Sprintf("[%s] %s", time.Now().In(a.timeLocation()).Format("2006-01-02 15:04"), userMsg)
 	userMessage := ollama.Message{Role: "user", Content: timestampedContent, Images: images}
 
 	// For DB: store clean content (created_at column is the canonical timestamp).
@@ -1417,7 +1442,7 @@ func extractScreenshotImages(result, workspaceDir string) []string {
 			continue
 		}
 		fname := strings.TrimPrefix(a.URL, "/screenshots/")
-		data, err := os.ReadFile(filepath.Join(workspaceDir, ".screenshots", fname))
+		data, err := workspace.ReadFile(workspaceDir, filepath.Join(".screenshots", fname))
 		if err != nil {
 			continue
 		}
@@ -1492,6 +1517,20 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 
 	log.Printf("[agent] → ollama: %d messages, %d tools, prompt_len=%d", len(messages), len(tools), len(prompt))
 
+	started := time.Now()
+	var measured *ollama.Usage
+	complete := false
+	defer func() {
+		raw, _ := json.Marshal(tools)
+		record := &ModelUsage{Scope: "main_chat", Model: a.model, Profile: a.promptProfile(), DurationMS: time.Since(started).Milliseconds(), SystemBytes: len(prompt), ToolBytes: len(raw), MessageCount: len(messages), Complete: complete, Usage: measured}
+		select {
+		case events <- Event{Type: "model_usage", Usage: record}:
+		case <-ctx.Done():
+		}
+		if a.memStore != nil {
+			a.memStore.AddUsage(ctx, 0, a.sessionID, "model_request", a.model, 1, map[string]interface{}{"measurement": record})
+		}
+	}()
 	ch := make(chan ollama.StreamEvent, 100)
 	go func() {
 		a.ollama.Chat(ctx, req, ch)
@@ -1504,6 +1543,13 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 	var doneReason string
 
 	for ev := range ch {
+		if ev.Usage != nil {
+			measured = ev.Usage
+		}
+		if ev.Done {
+			complete = ev.DoneReason != "interrupted"
+		}
+
 		if ev.Err != nil {
 			return contentBuilder.String(), nil, "", ev.Err
 		}

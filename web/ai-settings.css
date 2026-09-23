@@ -29,3 +29,10 @@
 .ai-settings .ai-source span { font-size: 11px; color: var(--text3); overflow-wrap: anywhere; }
 .ai-settings .ai-source-editor { padding: 12px; margin: 12px 0; border: 1px solid var(--border); border-radius: 10px; }
 .ai-settings .ai-source-editor .ai-field:last-child { margin-bottom: 0; }
+
+.ai-settings .ai-save-state { position: sticky; top: 0; z-index: 2; padding: 10px 12px; margin-bottom: 18px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text2); }
+.ai-settings .ai-save-state.pending { border-color: var(--yellow); color: var(--yellow); }
+.ai-settings .ai-connect-status { flex: 1; min-width: 140px; font-size: 12px; color: var(--text2); overflow-wrap: anywhere; }
+.ai-settings .ai-advanced { margin: 12px 0; }
+.ai-settings .ai-advanced summary { cursor: pointer; color: var(--text3); font-size: 12px; margin-bottom: 12px; }
+.ai-settings [data-remove-source] { color: var(--red); margin-left: auto; }

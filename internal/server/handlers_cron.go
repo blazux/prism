@@ -20,7 +20,9 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/cronclock"
 	"prism/internal/docker"
+	"prism/internal/timeprefs"
 )
 
 const cronJobMarker = "# agent-job: "
@@ -29,6 +31,7 @@ const cronDescMarker = "# agent-desc: "
 const cronDisabledPrefix = "#DISABLED# "
 
 type CronJob struct {
+	Timezone    string `json:"timezone,omitempty"`
 	Name        string `json:"name"`
 	Owner       string `json:"owner,omitempty"` // "u<id>" — who scheduled it
 	Description string `json:"description"`
@@ -62,7 +65,8 @@ func scanJobBlock(lines []string, start int) (owner, desc string, jobIdx int) {
 }
 
 func (s *Server) readCrontab() (string, error) {
-	return s.docker.Exec(context.Background(), docker.ReadCrontabCommand, 10*time.Second)
+	out, err := s.docker.Exec(context.Background(), docker.ReadCrontabCommand, 10*time.Second)
+	return out, docker.CronReadError(err, out)
 }
 
 func (s *Server) applyCrontab(content string) error {
@@ -91,6 +95,9 @@ func (s *Server) applyCrontab(content string) error {
 // splitSchedule separates a cron schedule (5 fields, or a single @keyword) from
 // the command that follows it.
 func splitSchedule(line string) (schedule, command string) {
+	if sc, cmd, _, ok := cronclock.Unwrap(line); ok {
+		return sc, cmd
+	}
 	line = strings.TrimSpace(line)
 	if strings.HasPrefix(line, "@") {
 		parts := strings.SplitN(line, " ", 2)
@@ -126,7 +133,8 @@ func parseCronJobs(raw string) []CronJob {
 			jobLine = strings.TrimPrefix(jobLine, cronDisabledPrefix)
 		}
 		schedule, command := splitSchedule(jobLine)
-		jobs = append(jobs, CronJob{Name: name, Owner: owner, Description: desc, Schedule: schedule, Command: command, Enabled: enabled})
+		_, _, zone, _ := cronclock.Unwrap(jobLine)
+		jobs = append(jobs, CronJob{Timezone: zone, Name: name, Owner: owner, Description: desc, Schedule: schedule, Command: command, Enabled: enabled})
 		i = j
 	}
 	return jobs
@@ -189,7 +197,7 @@ func (s *Server) mutateJob(name string, fn func(line string) string) error {
 		// on every container restart. Leaving stale content here after
 		// removing the last job would resurrect it on the next restart.
 		path := filepath.Join(s.cfg.WorkspaceDir, ".crontab")
-		return os.WriteFile(path, nil, 0600)
+		return s.writeManagedFile(path, nil)
 	}
 	return s.applyCrontab(content)
 }
@@ -325,6 +333,23 @@ func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
 		}
 		// schedule present → create/edit a job; otherwise → enable/disable toggle.
 		if b.Schedule != "" {
+			zone, _ := timeprefs.Read(r.Context(), s.userStore(r))
+			if zone != "" && b.Schedule != "@reboot" {
+				if strings.ContainsAny(b.Schedule, "'\"\n\r\\%") {
+					http.Error(w, "invalid schedule", 400)
+					return
+				}
+				if err := s.writeManagedFile(filepath.Join(s.cfg.WorkspaceDir, cronclock.Path), cronclock.Script); err != nil {
+					http.Error(w, "cannot prepare schedule", 500)
+					return
+				}
+				if _, err := s.docker.Exec(r.Context(), "python3 /workspace/"+cronclock.Path+" '"+b.Schedule+"' '"+zone+"' --check", 10*time.Second); err != nil {
+					http.Error(w, "invalid schedule or workspace timezone unavailable", 400)
+					return
+				}
+				line := cronclock.Wrap(b.Schedule, b.Command, zone)
+				b.Schedule, b.Command = "* * * * *", strings.TrimPrefix(line, "* * * * * ")
+			}
 			if err := s.upsertCronJob(b.Name, b.Schedule, b.Command, b.Description, mine); err != nil {
 				http.Error(w, err.Error(), 400)
 				return

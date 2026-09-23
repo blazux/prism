@@ -188,8 +188,8 @@ func (s *Server) aiPublicView(p *aiProfile, source string) map[string]any {
 	if p.ChatVision != nil {
 		vision = *p.ChatVision
 	}
-	status, _ := ragInitStatus.Load().(string)
-	return map[string]any{"sources": publicSources(p), "defaultSource": p.DefaultSource, "embeddingStatus": status, "source": source, "provider": p.Provider, "baseURL": p.BaseURL, "model": p.Model, "keyConfigured": p.APIKey != "", "chatVision": vision, "multiUser": s.cfg.MultiUser,
+	status, _ := s.ragInitStatus.Load().(string)
+	return map[string]any{"serverDefaultsAvailable": !s.cfg.DisableAIServerDefaults, "sources": publicSources(p), "defaultSource": p.DefaultSource, "embeddingStatus": status, "source": source, "provider": p.Provider, "baseURL": p.BaseURL, "model": p.Model, "keyConfigured": p.APIKey != "", "chatVision": vision, "multiUser": s.cfg.MultiUser,
 		"embedding":         map[string]any{"sourceID": e.SourceID, "useSameProvider": e.UseSameProvider, "provider": ep.Provider, "baseURL": ep.BaseURL, "model": ep.Model, "keyConfigured": ep.APIKey != ""},
 		"embeddingApplying": s.ragUpdating.Load(), "embeddingPending": s.embeddingPending(cp)}
 }
@@ -239,6 +239,9 @@ func (s *Server) validateEmbeddingSave(ctx context.Context, p, old *aiProfile) e
 }
 
 func (s *Server) resetAIProfile(ctx context.Context, confirmed bool) error {
+	if s.cfg.DisableAIServerDefaults {
+		return errors.New("Server AI defaults are unavailable. Configure an AI provider in Settings.")
+	}
 	old, err := loadAIProfile(ctx, s.store())
 	if err != nil {
 		return err

@@ -18,7 +18,8 @@ let lastWorkspace = localStorage.getItem('active-workspace') || localStorage.get
 let currentSessionID = lastWorkspace
 
 // Identity for chat avatars: the current user + their personal agent.
-let ME = { uid: '', name: 'You', isAdmin: false }
+let ME = { uid: '', name: 'You', isAdmin: false, terminalAvailable: true }
+let WIDGET_HOSTING = null
 let MY_GROUPS = [] // groups the user can share widgets within (multi-user)
 let AGENT_NAME = 'Agent'
 // Apps disabled platform-wide by the global admin (Admin → Platform).
@@ -27,7 +28,7 @@ async function loadIdentity() {
   try { const p = await fetch('/api/profile').then(r => r.json()); ME.uid = p.userId ?? ''; ME.name = p.displayName || p.email || 'You' } catch (_) {}
   // Global admin, or admin of any group. This only decides what the UI offers:
   // /api/terminal and /api/exec check the role themselves.
-  try { ME.isAdmin = !!(await fetch('/api/me').then(r => r.json())).isAdmin } catch (_) {}
+  try { const identity = await fetch('/api/me').then(r => r.json()); ME.isAdmin = !!identity.isAdmin; ME.terminalAvailable = identity.terminalAvailable !== false; WIDGET_HOSTING = identity.widgetHosting || null } catch (_) {}
   try { AGENT_NAME = (await fetch('/api/agent/name', { cache: 'no-store' }).then(r => r.json())).name || 'Agent' } catch (_) {}
   try { DISABLED_APPS = new Set((await fetch('/api/platform').then(r => r.json())).disabledApps || []) } catch (_) {}
   // /api/my/groups returns two shapes: {groupId,groupName} for a member,
@@ -315,7 +316,8 @@ function mountWindow(rec) {
   body.className = 'widget-body'
 
   const iframe = document.createElement('iframe')
-  iframe.srcdoc = window.PrismTheme.composeWidgetDoc(rec.content, currentSessionID)
+  if (WIDGET_HOSTING) iframe.src = WIDGET_HOSTING.frameURL
+  else iframe.srcdoc = window.PrismTheme.composeWidgetDoc(rec.content, currentSessionID)
   iframe.setAttribute('sandbox', WIDGET_SANDBOX)
   body.appendChild(iframe)
 
@@ -1551,7 +1553,7 @@ function openCmdK() {
   const input = box.querySelector('#cmdk-input'), list = box.querySelector('#cmdk-list')
   const all = [
     { kind: 'action', label: 'Chat (Ctrl+J)', icon: '❞', run: () => toggleChat() },
-    ...(ME.isAdmin ? [{ kind: 'action', label: 'Terminal (Ctrl+Enter)', icon: '▸', run: () => toggleTerm(true) }] : []),
+    ...(ME.isAdmin && ME.terminalAvailable ? [{ kind: 'action', label: 'Terminal (Ctrl+Enter)', icon: '▸', run: () => toggleTerm(true) }] : []),
     ...(currentView.type === 'board' ? [{ kind: 'action', label: 'Tidy up windows', icon: '▦', run: tidyWindows }] : []),
     ...Object.keys(APP_TITLES).filter(n => !DISABLED_APPS.has(n)).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
     ...allSessions.filter(s => s.id !== ASSISTANT).map(s => {
@@ -1641,7 +1643,7 @@ function termConnect() {
 function toggleTerm(force) {
   // A shell in the tools container is reserved for admins. The server enforces it;
   // this stops the shortcut from opening a panel that would only show a 403.
-  if (!ME.isAdmin) return
+  if (!ME.isAdmin || !ME.terminalAvailable) return
   const show = force == null ? !termVisible : force
   const p = termPanel(); termVisible = show; p.classList.toggle('open', show)
   if (show) { termConnect(); setTimeout(() => { try { termFit.fit() } catch (_) {} ; term.focus(); termSendResize() }, 60) }
@@ -1986,6 +1988,7 @@ function setContainerBadge(status) {
   badge.className = 'badge'
   const map = {
     running:     ['badge-running', 'running'],
+    available:   ['badge-running', 'available'],
     exited:      ['badge-stopped', 'stopped'],
     'not found': ['badge-unknown', 'not found'],
     unavailable: ['badge-unknown', 'unavailable'],
@@ -2235,9 +2238,21 @@ window.addEventListener('message', e => {
   // Only our own frames (widgets, apps, settings) may drive the dashboard. A
   // third-party page embedded inside a widget can postMessage(…, '*') to
   // window.top just as easily, and 'sendChat' would hand it the agent.
-  if (e.origin !== location.origin) return
+  const remoteWidget = WIDGET_HOSTING && e.origin === new URL(WIDGET_HOSTING.frameURL).origin
+    ? [...widgets.values()].find(rec => rec.el?.querySelector('.widget-body iframe')?.contentWindow === e.source) : null
+  if (e.origin !== location.origin && !remoteWidget) return
   const d = e.data
   if (!d || !d.type) return
+  if (d.type === 'prism-widget-ready' && remoteWidget) {
+    fetch(WIDGET_HOSTING.grantURL, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })
+      .then(async response => { if (!response.ok) throw new Error('Widget access unavailable'); return response.json() })
+      .then(grant => {
+        if (widgets.get(remoteWidget.id) !== remoteWidget || remoteWidget.el?.querySelector('.widget-body iframe')?.contentWindow !== e.source) return
+        e.source.postMessage({ type:'prism-widget-render', grant:grant.token,
+          html:window.PrismTheme.composeWidgetDoc(remoteWidget.content, currentSessionID) }, e.origin)
+      }).catch(() => showToast({title:'Widget',message:'Unable to open the widget. Reload the page to retry.',level:'error'}))
+    return
+  }
   if (d.type === 'editor-response') {
     const pending = pendingEditorRequests.get(d.id)
     if (!pending || pending.source !== e.source || pending.socket !== ws) return

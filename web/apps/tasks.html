@@ -539,7 +539,7 @@ function renderJobs() {
   for (const j of jobs) {
     const card = document.createElement('div');
     card.className = 'job' + (j.enabled ? '' : ' off');
-    const next = j.enabled ? nextRunLabel(j.schedule) : '';
+    const next = j.enabled && !j.timezone ? nextRunLabel(j.schedule) : '';
     card.innerHTML = `
       <div class="job-top">
         <span class="job-name">${esc(j.name)}</span>
@@ -547,7 +547,7 @@ function renderJobs() {
         <label class="switch"><input type="checkbox" ${j.enabled ? 'checked' : ''}><span class="slider"></span></label>
       </div>
       ${j.description ? `<div class="job-desc">${esc(j.description)}</div>` : ''}
-      <span class="job-when">⏱ ${esc(describeCron(j.schedule))}</span>
+      <span class="job-when">⏱ ${esc(describeCron(j.schedule))}${j.timezone ? ' · '+esc(j.timezone) : ''}</span>
       ${next ? `<div class="job-next">Next: ${esc(next)}</div>` : ''}
       <details class="job-cmd-wrap"><summary>Command</summary><div class="job-cmd">${esc(j.command)}</div></details>
       <div class="job-foot">

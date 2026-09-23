@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,9 +64,9 @@ type pluginEntry struct {
 // file), lets the caller mutate it as a generic map, and writes it back. Using
 // a map instead of a typed struct means callers that only touch one field
 // (lock, window state) never wipe fields they don't know about.
-func updatePluginMeta(path string, mutate func(m map[string]any)) error {
+func (s *Server) updatePluginMeta(path string, mutate func(m map[string]any)) error {
 	m := map[string]any{}
-	if b, err := os.ReadFile(path); err == nil {
+	if b, err := s.readManagedFile(path); err == nil {
 		json.Unmarshal(b, &m)
 	}
 	mutate(m)
@@ -75,11 +74,11 @@ func updatePluginMeta(path string, mutate func(m map[string]any)) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0644)
+	return s.writeManagedFile(path, b)
 }
 
 func (s *Server) loadPlugins(dir string) []pluginEntry {
-	entries, err := os.ReadDir(dir)
+	entries, err := s.readManagedDir(dir)
 	if err != nil {
 		return nil
 	}
@@ -89,7 +88,7 @@ func (s *Server) loadPlugins(dir string) []pluginEntry {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".html")
-		content, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		content, err := s.readManagedFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			continue
 		}
@@ -99,7 +98,7 @@ func (s *Server) loadPlugins(dir string) []pluginEntry {
 		locked := false
 		open := true
 		var x, y, w, h float64
-		if metaBytes, err := os.ReadFile(filepath.Join(dir, id+".meta.json")); err == nil {
+		if metaBytes, err := s.readManagedFile(filepath.Join(dir, id+".meta.json")); err == nil {
 			var m struct {
 				Title  string  `json:"title"`
 				Cols   int     `json:"cols"`

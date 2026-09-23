@@ -7,15 +7,16 @@ import (
 
 // ─── Lean profile ─────────────────────────────────────────────────────────────
 //
-// Two profiles share one prompt text. The guided profile (small local models)
+// Guided and lean retain the same operational capabilities. The guided profile (small local models)
 // keeps every teaching passage that was earned by measurement. The lean profile
 // (frontier models) drops the pedagogy, worked examples and tutorials, keeping
 // every product contract (routes, helpers, classes) and every safety rule
 // intact, and adds systemPromptTurnContract + systemPromptKeepItSimple.
 //
-// The difference is written INLINE in systemPromptCore / systemPromptCoreTail
-// with three markers, so an edit to the prompt edits both profiles in place and
-// nothing has to be kept in sync elsewhere:
+// The lean core is a compact operational reference in prompt_lean_core.go.
+// Tail differences are written INLINE in systemPromptCoreTail
+// with three markers. Operational changes to the guided core also need to be
+// reflected in the compact core; contract tests cover its essential interfaces:
 //
 //   {{guided}}passage{{/guided}}                  guided only — the lean profile drops it
 //   {{guided}}essay{{lean}}one-liner{{/guided}}   each profile gets its own branch
@@ -114,7 +115,7 @@ var shoutedRe = regexp.MustCompile(`\b(` + strings.Join(shoutedWords, "|") + `)\
 // systemPromptCoreFor / systemPromptCoreTailFor return the profile's text.
 func systemPromptCoreFor(lean bool) string {
 	if lean {
-		return leanTone(renderProfile(systemPromptCore, true))
+		return systemPromptLeanCore
 	}
 	return renderProfile(systemPromptCore, false)
 }

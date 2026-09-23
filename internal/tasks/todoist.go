@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"prism/internal/timeprefs"
 	"time"
 
 	"prism/internal/memory"
@@ -147,13 +148,13 @@ func (p *TodoistProvider) List(ctx context.Context, includeDone bool) ([]Item, e
 			// no due date at all and stopped looking urgent.
 			if d, err := time.Parse(time.RFC3339, t.Due.Datetime); t.Due.Datetime != "" && err == nil {
 				it.DueAt = &d
-			} else if d, err := time.ParseInLocation("2006-01-02T15:04:05", t.Due.Datetime, time.Local); t.Due.Datetime != "" && err == nil {
+			} else if d, err := time.ParseInLocation("2006-01-02T15:04:05", t.Due.Datetime, timeprefs.Location(ctx)); t.Due.Datetime != "" && err == nil {
 				it.DueAt = &d
 			} else if d, err := time.Parse(time.RFC3339, t.Due.Date); err == nil {
 				it.DueAt = &d
-			} else if d, err := time.ParseInLocation("2006-01-02T15:04:05", t.Due.Date, time.Local); err == nil {
+			} else if d, err := time.ParseInLocation("2006-01-02T15:04:05", t.Due.Date, timeprefs.Location(ctx)); err == nil {
 				it.DueAt = &d
-			} else if d, err := time.ParseInLocation("2006-01-02", t.Due.Date, time.Local); t.Due.Date != "" && err == nil {
+			} else if d, err := time.ParseInLocation("2006-01-02", t.Due.Date, timeprefs.Location(ctx)); t.Due.Date != "" && err == nil {
 				it.DueAt = &d
 			}
 		}

@@ -233,10 +233,23 @@ function renderInbox() {
 function inboxLimit() { return Math.max(1, Math.min(500, (cfg && cfg.list_limit) || 60)); }
 
 function errBox(msg) {
+  const detail = String(msg || 'Unknown error');
+  const authFailed = /AUTHENTICATIONFAILED|AUTHORIZATIONFAILED|invalid credentials|authentication failed|login failed|(?:imap login:.*\bNO\b)/i.test(detail);
+  const connectionFailed = /imap dial:|failed to fetch|networkerror|connection refused|no such host|i\/o timeout|connection timed out/i.test(detail);
+  const gmail = /^(?:imap\.gmail\.com|imap\.googlemail\.com)$/i.test(String(cfg?.imap_host || '').trim());
+  const title = authFailed ? 'Mailbox authentication failed' : connectionFailed ? "Couldn't connect to your mail server" : "Couldn't load your mailbox";
+  const hint = authFailed
+    ? (gmail
+      ? 'Gmail refused the sign-in. Use your full Gmail address and a Google App Password, not your regular Google password. App passwords require 2-Step Verification.'
+      : 'Your mail server refused the sign-in. Check your username and password in Settings → Email. Your provider may require an app password or another supported sign-in method.')
+    : connectionFailed
+      ? 'Check the mail server address, port and connection security in Settings → Email, then try again.'
+      : 'The mailbox request failed. The technical details below may help identify the problem.';
   return `<div class="mail-err">
     <div class="ic">⚠</div>
-    <div class="t">Couldn't reach your mailbox</div>
-    <div class="m">${esc(msg)}</div>
+    <div class="t">${esc(title)}</div>
+    <p>${esc(hint)}</p>
+    <details><summary>Technical details</summary><div class="m">${esc(detail)}</div></details>
     <button class="btn" onclick="openSettings()">Edit connection</button>
   </div>`;
 }

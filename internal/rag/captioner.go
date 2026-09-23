@@ -65,6 +65,11 @@ func (c *Captioner) describe(ctx context.Context, imagePath, prompt string) (str
 	if err != nil {
 		return "", err
 	}
+	return c.describeData(ctx, data, prompt)
+}
+
+func (c *Captioner) describeData(ctx context.Context, data []byte, prompt string) (string, error) {
+	var err error
 	b64 := base64.StdEncoding.EncodeToString(data)
 	if c.chat != nil {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -173,4 +178,10 @@ func (c *Captioner) describe(ctx context.Context, imagePath, prompt string) (str
 // screenshot so a text-only chat model can verify its own widget without sight.
 func (c *Captioner) DescribeWidget(ctx context.Context, imagePath string) (string, error) {
 	return c.describe(ctx, imagePath, widgetPrompt)
+}
+
+// DescribeWidgetData lets callers apply their storage confinement before sending
+// an image, without reopening an untrusted pathname in the captioner.
+func (c *Captioner) DescribeWidgetData(ctx context.Context, data []byte) (string, error) {
+	return c.describeData(ctx, data, widgetPrompt)
 }

@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -37,6 +36,26 @@ func isPrivateHost(host string) bool {
 		ip = ips[0]
 	}
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+}
+
+func dialToolTLS(ctx context.Context, network, address string) (net.Conn, error) {
+	raw, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, address)
+	if err != nil {
+		return nil, err
+	}
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		raw.Close()
+		return nil, err
+	}
+	peer, ok := raw.RemoteAddr().(*net.TCPAddr)
+	private := ok && (peer.IP.IsPrivate() || peer.IP.IsLoopback() || peer.IP.IsLinkLocalUnicast())
+	conn := tls.Client(raw, &tls.Config{ServerName: host, InsecureSkipVerify: private, MinVersion: tls.VersionTLS12})
+	if err := conn.HandshakeContext(ctx); err != nil {
+		raw.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 // httpRequestError turns a raw transport error into one the model can act on.
@@ -81,12 +100,12 @@ func (e *ToolExecutor) httpRequest(ctx context.Context, method, rawURL string, h
 		req.Header.Set(k, v)
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	if u.Scheme == "https" && isPrivateHost(u.Hostname()) {
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		client.Transport = tr
-	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	// Classify the actual connected peer on every TLS connection, including
+	// redirects. A DNS lookup before dialing is vulnerable to rebinding.
+	tr.DialTLSContext = dialToolTLS
+	defer tr.CloseIdleConnections()
+	client := &http.Client{Timeout: 15 * time.Second, Transport: tr}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", httpRequestError(u.Hostname(), err)
@@ -291,10 +310,10 @@ func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (
 	}
 
 	scriptPath := filepath.Join(e.workspaceDir, ".browser_exec.py")
-	if err := os.WriteFile(scriptPath, []byte(browserScript), 0644); err != nil {
+	if err := e.writeManagedFile(scriptPath, []byte(browserScript)); err != nil {
 		return "", fmt.Errorf("write script: %w", err)
 	}
-	defer os.Remove(scriptPath)
+	defer e.removeManaged(scriptPath)
 
 	ignoreHTTPS := "0"
 	if u, err := url.Parse(rawURL); err == nil && u.Scheme == "https" && isPrivateHost(u.Hostname()) {
@@ -491,13 +510,13 @@ func (e *ToolExecutor) browserActAuth(ctx context.Context, rawURL string, rawAct
 	inputFile := filepath.Join(e.workspaceDir, ".browser_act_"+sessionID+".json")
 	sessionFile := "/workspace/.browser_session_" + sessionID + ".json"
 
-	if err := os.WriteFile(inputFile, inputJSON, 0644); err != nil {
+	if err := e.writeManagedFile(inputFile, inputJSON); err != nil {
 		return "", fmt.Errorf("write input: %w", err)
 	}
-	defer os.Remove(inputFile)
+	defer e.removeManaged(inputFile)
 
 	scriptPath := filepath.Join(e.workspaceDir, ".browser_act.py")
-	if err := os.WriteFile(scriptPath, []byte(browserActScript), 0644); err != nil {
+	if err := e.writeManagedFile(scriptPath, []byte(browserActScript)); err != nil {
 		return "", fmt.Errorf("write script: %w", err)
 	}
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"prism/internal/caldav"
+	"prism/internal/timeprefs"
 	"strings"
 	"time"
 )
@@ -21,18 +22,18 @@ type Patch struct {
 	End         *string `json:"end,omitempty"`
 }
 
-func ParseTime(s string) (*time.Time, error) {
+func ParseTime(s string, locations ...*time.Location) (*time.Time, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, nil
 	}
 	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04", "2006-01-02 15:04", "2006-01-02"} {
-		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+		if t, err := timeprefs.Parse(layout, s, timeprefs.First(locations)); err == nil {
 			return &t, nil
 		}
 	}
 	return nil, fmt.Errorf("invalid date %q; use YYYY-MM-DD or an ISO date/time", s)
 }
-func (p Patch) Merge(cur Item) (Item, error) {
+func (p Patch) Merge(cur Item, locations ...*time.Location) (Item, error) {
 	if p.AllDay != nil {
 		cur.AllDay = *p.AllDay
 	}
@@ -46,7 +47,7 @@ func (p Patch) Merge(cur Item) (Item, error) {
 		cur.Location = *p.Location
 	}
 	if p.Start != nil {
-		st, err := ParseTime(*p.Start)
+		st, err := ParseTime(*p.Start, locations...)
 		if err != nil {
 			return cur, err
 		}
@@ -60,7 +61,7 @@ func (p Patch) Merge(cur Item) (Item, error) {
 		cur.StartAt = *st
 	}
 	if p.End != nil {
-		end, err := ParseTime(*p.End)
+		end, err := ParseTime(*p.End, locations...)
 		if err != nil {
 			return cur, err
 		}
@@ -68,10 +69,10 @@ func (p Patch) Merge(cur Item) (Item, error) {
 	}
 	if cur.AllDay {
 		st := cur.StartAt
-		cur.StartAt = time.Date(st.Year(), st.Month(), st.Day(), 0, 0, 0, 0, st.Location())
+		cur.StartAt = time.Date(st.Year(), st.Month(), st.Day(), 0, 0, 0, 0, time.UTC)
 		if cur.EndAt != nil {
 			et := *cur.EndAt
-			et = time.Date(et.Year(), et.Month(), et.Day(), 0, 0, 0, 0, st.Location())
+			et = time.Date(et.Year(), et.Month(), et.Day(), 0, 0, 0, 0, time.UTC)
 			if !et.After(cur.StartAt) && p.End == nil {
 				et = cur.StartAt.AddDate(0, 0, 1)
 			}
@@ -147,7 +148,7 @@ func Update(ctx context.Context, prov Provider, id string, patch Patch) error {
 	if err != nil {
 		return err
 	}
-	next, err := patch.Merge(cur)
+	next, err := patch.Merge(cur, timeprefs.Location(ctx))
 	if err != nil {
 		return err
 	}

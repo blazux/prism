@@ -161,7 +161,7 @@ func TestEmbeddingHotReload(t *testing.T) {
 	if vector() != "[0,0,1]" {
 		t.Fatal("failed rebuild lost original vectors")
 	}
-	status, _ := ragInitStatus.Load().(string)
+	status, _ := s.ragInitStatus.Load().(string)
 	if !strings.Contains(status, "failed") {
 		t.Fatalf("missing failure status: %s", status)
 	}
@@ -209,4 +209,18 @@ func TestEmbeddingHotReload(t *testing.T) {
 		t.Fatal("reset to disabled server defaults did not apply")
 	}
 
+}
+
+// A resource that changes embeddings must not publish its progress through
+// another resource's status endpoint in the same process.
+func TestRAGStatusIsResourceLocal(t *testing.T) {
+	a, b := &Server{}, &Server{}
+	a.initRAG(context.Background())
+	a.ragInitStatus.Store("rebuilding document index: 17 chunks…")
+	wa, wb := httptest.NewRecorder(), httptest.NewRecorder()
+	a.handleRAGStatus(wa, httptest.NewRequest("GET", "/api/rag/status", nil))
+	b.handleRAGStatus(wb, httptest.NewRequest("GET", "/api/rag/status", nil))
+	if !strings.Contains(wa.Body.String(), "17 chunks") || strings.Contains(wb.Body.String(), "17 chunks") {
+		t.Fatalf("resource status leaked: %s / %s", wa.Body.String(), wb.Body.String())
+	}
 }

@@ -363,3 +363,31 @@ func TestAIProfilePersistenceIsolationAndRouting(t *testing.T) {
 		t.Fatal("corrupt profile silently fell back")
 	}
 }
+
+func TestAIServerDefaultsAvailability(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		s := &Server{cfg: Config{DisableAIServerDefaults: disabled}}
+		view := s.aiPublicView(s.environmentAIProfile(), "server")
+		if view["serverDefaultsAvailable"] != !disabled {
+			t.Fatal("incorrect reset capability")
+		}
+	}
+	ms := securityStore(t)
+	s := &Server{memStore: ms, cfg: Config{DisableAIServerDefaults: true}}
+	fixture := `{"provider":"openai","model":"fixture","apiKey":"fixture-key"}`
+	if err := ms.SetSecret(t.Context(), aiProfileSecret, fixture); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	s.handleAIProfile(w, withUser(httptest.NewRequest("DELETE", "/api/ai/config?reindex=true", nil), &memory.User{ID: 0}))
+	if w.Code != 409 {
+		t.Fatalf("reset status: %d", w.Code)
+	}
+	if _, err := s.aiSettingsTool(&memory.User{ID: 0})(t.Context(), map[string]any{"action": "ai_reset", "reindex": true}); err == nil {
+		t.Fatal("agent reset allowed")
+	}
+	got, _, err := ms.GetSecret(t.Context(), aiProfileSecret)
+	if err != nil || got != fixture {
+		t.Fatal("blocked reset changed saved configuration")
+	}
+}

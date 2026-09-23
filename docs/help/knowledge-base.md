@@ -31,6 +31,13 @@ DOCX, TXT, CSV, MD, JSON**, up to **50 MB** each. PPTX decks are converted to
 PDF first, so they work too. Progress is shown while a large file is parsed and
 indexed (*Indexation 120/480 passages…*).
 
+Automatic parsing has resource limits: 16 MiB for text/Office input and expanded
+Office archives, 8 MiB of extracted text, and 100,000 rows / 4,096 columns per
+worksheet. Oversized or malformed documents are rejected with an error.
+For larger files, ask the agent to extract or split the relevant content in its
+workspace and index the smaller parts. PDF uploads retain the 50 MiB upload limit;
+their extraction also has time, memory and output limits.
+
 - **PDF** is parsed page by page: each passage remembers its page, and the
   agent cites page numbers in its answers.
 - Everything else is indexed as text.

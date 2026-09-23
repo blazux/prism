@@ -16,10 +16,7 @@ import (
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	status := "unavailable"
-	if s.docker.IsDockerAvailable() {
-		status = s.docker.Status(r.Context())
-	}
+	status := s.docker.WorkspaceStatus(r.Context())
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"container": status,
 		"model":     s.cfg.Model,
@@ -287,25 +284,39 @@ func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
 		if v, ok, _ := ms.GetConfig(r.Context(), memory.KeyAgentLeanPrompt); ok && strings.TrimSpace(v) == "on" {
 			lean = true
 		}
+		profile, _, _ := ms.GetConfig(r.Context(), memory.KeyAgentPromptProfile)
 		effort := ""
 		if v, ok, _ := ms.GetConfig(r.Context(), memory.KeyAgentReasoningEffort); ok {
 			effort = agent.NormalizeReasoningEffort(v)
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"maxIterations": maxIter, "thinking": thinking, "leanPrompt": lean,
+			"maxIterations": maxIter, "thinking": thinking, "leanPrompt": memory.ResolvePromptProfile(profile, lean) != "guided", "promptProfile": memory.ResolvePromptProfile(profile, lean),
 			"reasoningEffort": effort, "reasoningEfforts": agent.ReasoningEfforts,
 			"default": agent.DefaultMaxIterations, "min": agent.MinMaxIterations, "max": agent.MaxMaxIterations,
 		})
 	case "POST":
 		var b struct {
-			MaxIterations   int    `json:"maxIterations"`
-			Thinking        *bool  `json:"thinking"`
-			LeanPrompt      *bool  `json:"leanPrompt"`
-			ReasoningEffort string `json:"reasoningEffort"`
+			MaxIterations   int     `json:"maxIterations"`
+			Thinking        *bool   `json:"thinking"`
+			PromptProfile   *string `json:"promptProfile"`
+			LeanPrompt      *bool   `json:"leanPrompt"`
+			ReasoningEffort string  `json:"reasoningEffort"`
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
 			return
+		}
+		profile, _, _ := ms.GetConfig(r.Context(), memory.KeyAgentPromptProfile)
+		legacy, _, _ := ms.GetConfig(r.Context(), memory.KeyAgentLeanPrompt)
+		profile = memory.ResolvePromptProfile(profile, legacy == "on")
+		if b.PromptProfile != nil {
+			if !memory.ValidPromptProfile(*b.PromptProfile) {
+				writeErr(w, 400, "promptProfile must be guided, standard or minimal")
+				return
+			}
+			profile = *b.PromptProfile
+		} else if b.LeanPrompt != nil {
+			profile = memory.ResolvePromptProfile("", *b.LeanPrompt)
 		}
 		maxIter := agent.ClampIterations(b.MaxIterations)
 		mv := ""
@@ -325,11 +336,15 @@ func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		lv := "off"
-		if b.LeanPrompt != nil && *b.LeanPrompt {
+		if profile != "guided" {
 			lv = "on"
 		}
 		if err := ms.SetConfig(r.Context(), memory.KeyAgentLeanPrompt, lv); err != nil {
 			http.Error(w, err.Error(), 500)
+			return
+		}
+		if err := ms.SetConfig(r.Context(), memory.KeyAgentPromptProfile, profile); err != nil {
+			writeErr(w, 500, "cannot save prompt profile")
 			return
 		}
 		ev := agent.NormalizeReasoningEffort(b.ReasoningEffort)
@@ -337,7 +352,7 @@ func (s *Server) handleAgentLimits(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "maxIterations": maxIter, "thinking": tv == "on", "leanPrompt": lv == "on", "reasoningEffort": ev})
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "maxIterations": maxIter, "thinking": tv == "on", "leanPrompt": lv == "on", "promptProfile": profile, "reasoningEffort": ev})
 	default:
 		http.Error(w, "method not allowed", 405)
 	}

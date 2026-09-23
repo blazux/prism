@@ -60,3 +60,16 @@ func TestAllDayUsesCalendarDates(t *testing.T) {
 		t.Fatal("all day stored as instant")
 	}
 }
+
+func TestAllDayPersonalTimezoneKeepsDate(t *testing.T) {
+	loc, _ := time.LoadLocation("Europe/Paris")
+	all := true
+	next, err := (Patch{Title: ptr("Holiday"), Start: ptr("2026-07-01"), End: ptr("2026-07-02"), AllDay: &all}).Merge(Item{}, loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// TIMESTAMPTZ roundtrip must not turn July 1 into June 30.
+	if next.StartAt.UTC().Format("2006-01-02") != "2026-07-01" || next.EndAt.UTC().Format("2006-01-02") != "2026-07-02" {
+		t.Fatalf("%+v", next)
+	}
+}

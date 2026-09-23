@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -136,14 +135,11 @@ func (e *ToolExecutor) adminOfSharingGroup(id int64) bool {
 }
 
 func (e *ToolExecutor) writeSharedWidget(id, title, content string, cols, height int) error {
-	if err := os.MkdirAll(e.pluginDir, 0755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(e.pluginDir, id+".html"), []byte(content), 0644); err != nil {
+	if err := e.writeManagedFile(filepath.Join(e.pluginDir, id+".html"), []byte(content)); err != nil {
 		return err
 	}
 	meta, _ := json.Marshal(pluginMeta{Title: title, Cols: cols, Height: height})
-	os.WriteFile(filepath.Join(e.pluginDir, id+".meta.json"), meta, 0644)
+	e.writeManagedFile(filepath.Join(e.pluginDir, id+".meta.json"), meta)
 	if e.onPluginAdd != nil {
 		e.onPluginAdd(id, title, content, cols, height)
 	}
@@ -212,7 +208,7 @@ func (e *ToolExecutor) resolveShareGroup(name string) (memory.Membership, error)
 // readBoardWidgets reads this board's widgets from the plugin dir: just the one
 // with id==only, or all of them when only is empty.
 func (e *ToolExecutor) readBoardWidgets(only string) []memory.SharedWidget {
-	entries, err := os.ReadDir(e.pluginDir)
+	entries, err := e.readManagedDir(e.pluginDir)
 	if err != nil {
 		return nil
 	}
@@ -225,12 +221,12 @@ func (e *ToolExecutor) readBoardWidgets(only string) []memory.SharedWidget {
 		if only != "" && id != only {
 			continue
 		}
-		content, err := os.ReadFile(filepath.Join(e.pluginDir, entry.Name()))
+		content, err := e.readManagedFile(filepath.Join(e.pluginDir, entry.Name()))
 		if err != nil {
 			continue
 		}
 		title, cols, height := id, 1, 280
-		if b, err := os.ReadFile(filepath.Join(e.pluginDir, id+".meta.json")); err == nil {
+		if b, err := e.readManagedFile(filepath.Join(e.pluginDir, id+".meta.json")); err == nil {
 			var m pluginMeta
 			if json.Unmarshal(b, &m) == nil {
 				if m.Title != "" {

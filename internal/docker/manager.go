@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -23,6 +24,9 @@ type ServiceInfo struct {
 }
 
 type Manager struct {
+	serviceURL     func(int) string
+	execute        WorkspaceExecution
+	executionOnly  bool
 	backend        Backend
 	containerName  string
 	workspaceDir   string
@@ -144,6 +148,9 @@ func (m *Manager) create(ctx context.Context) error {
 }
 
 func (m *Manager) Exec(ctx context.Context, command string, timeout time.Duration) (string, error) {
+	if m.executionOnly {
+		return m.executeBound(ctx, command, nil, nil, timeout)
+	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -157,6 +164,9 @@ func (m *Manager) Exec(ctx context.Context, command string, timeout time.Duratio
 // ExecWithEnv runs a command in the container with extra environment variables
 // passed via docker exec -e flags (values never appear in the bash command string).
 func (m *Manager) ExecWithEnv(ctx context.Context, command string, timeout time.Duration, env map[string]string) (string, error) {
+	if m.executionOnly {
+		return m.executeBound(ctx, command, nil, env, timeout)
+	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -174,6 +184,9 @@ func (m *Manager) ExecWithEnv(ctx context.Context, command string, timeout time.
 // ExecWithStdin runs a command in the container with stdin attached, bypassing
 // shell argument-length limits for large payloads (images, documents, etc.).
 func (m *Manager) ExecWithStdin(ctx context.Context, command string, stdin []byte, timeout time.Duration, env map[string]string) (string, error) {
+	if m.executionOnly {
+		return m.executeBound(ctx, command, stdin, env, timeout)
+	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -205,6 +218,17 @@ func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string
 	go func() {
 		defer close(outCh)
 		defer close(errCh)
+		if m.executionOnly {
+			out, err := m.executeBound(ctx, command, nil, nil, 0)
+			select {
+			case outCh <- out:
+			case <-ctx.Done():
+			}
+			if err != nil {
+				errCh <- err
+			}
+			return
+		}
 
 		cmd := exec.CommandContext(ctx, "docker", append(m.execPrefix(false), m.containerName, "bash", "-c", command)...)
 		cmd.Stdout = &chanWriter{ch: outCh}
@@ -354,6 +378,9 @@ func (m *Manager) ServicesContext(ctx context.Context) string {
 	svcs, err := m.ListServices(ctx)
 	if err != nil || len(svcs) == 0 {
 		if m.WorkspaceDocker() {
+			if m.serviceURL != nil {
+				return "## Docker backend: workspace\nServices run inside this workspace. Use the HTTPS service URLs returned by docker_run/docker_manage for browser links and widget iframes; each service is served at /. Compose up/ps also returns these URLs. Scripts use http://127.0.0.1:<published-port>/. No host Traefik labels or public VPS ports.\n"
+			}
 			return "## Docker backend: workspace\nDocker services run inside this workspace. Use /proxy/<published-port>/ for widgets and http://127.0.0.1:<published-port>/ for scripts. Compose must publish ports into the workspace. Host Traefik labels and host container DNS do not apply.\n"
 		}
 		return ""
@@ -361,14 +388,18 @@ func (m *Manager) ServicesContext(ctx context.Context) string {
 	var sb strings.Builder
 	sb.WriteString("## Services you have running\n")
 	if m.WorkspaceDocker() {
-		sb.WriteString("Services run inside your workspace. Use http://127.0.0.1:<published-port>/ from workspace scripts and /proxy/<published-port>/ from widgets. Ports are workspace ports, not public host ports.\n")
+		if m.serviceURL != nil {
+			sb.WriteString("Use the listed HTTPS URLs for browser links and widget iframes (applications live at /). Scripts use http://127.0.0.1:<published-port>/. Publish Compose ports on 0.0.0.0 inside the workspace.\n")
+		} else {
+			sb.WriteString("Services run inside your workspace. Use http://127.0.0.1:<published-port>/ from workspace scripts and /proxy/<published-port>/ from widgets. Ports are workspace ports, not public host ports.\n")
+		}
 	} else {
 		sb.WriteString("Containers you started with docker_run. Reach them from a widget at `http://<name>.localhost/`, and from scripts/cron at `http://prism-svc-<name>:<port>/`. Manage them with docker_manage (inspect/logs/stop/restart) — don't redeploy one that already exists here.\n")
 	}
 	for _, s := range svcs {
 		line := "- **" + s.Name + "** (" + s.Image + ") — " + s.Status
 		if m.WorkspaceDocker() && s.Port > 0 {
-			line += fmt.Sprintf(" — workspace port %d; widget URL /proxy/%d/", s.Port, s.Port)
+			line += fmt.Sprintf(" — workspace port %d; service URL %s", s.Port, m.ServiceURL(s.Port))
 		}
 		if s.Purpose != "" {
 			line += " — " + s.Purpose
@@ -449,7 +480,15 @@ func (m *Manager) ComposePS(ctx context.Context, file, project string, projectDi
 		args = append(args, "--project-name", project)
 	}
 	args = append(args, "ps")
-	return m.composeRun(ctx, args...)
+	if m.serviceURL == nil {
+		return m.composeRun(ctx, args...)
+	}
+	args = append(args, "--format", "json")
+	raw, err := m.composeRun(ctx, args...)
+	if err != nil {
+		return raw, err
+	}
+	return composeURLs(raw, m.ServiceURL), nil
 }
 
 // ComposeLogs returns logs from the given compose project (optionally filtered to one service).
@@ -529,6 +568,9 @@ func (m *Manager) Status(ctx context.Context) string {
 }
 
 func (m *Manager) run(ctx context.Context, name string, args ...string) (string, error) {
+	if m.executionOnly {
+		return "", fmt.Errorf("outer runtime access unavailable")
+	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -560,4 +602,41 @@ func (w *chanWriter) Write(p []byte) (n int, err error) {
 		}
 	}
 	return len(p), nil
+}
+
+func composeURLs(raw string, resolve func(int) string) string {
+	type service struct {
+		Name       string
+		Publishers []struct {
+			PublishedPort int
+			Protocol      string
+		}
+	}
+	var rows []service
+	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
+		if json.Unmarshal([]byte(raw), &rows) != nil {
+			return raw
+		}
+	} else {
+		dec := json.NewDecoder(strings.NewReader(raw))
+		for dec.More() {
+			var row service
+			if dec.Decode(&row) != nil {
+				return raw
+			}
+			rows = append(rows, row)
+		}
+	}
+	var out strings.Builder
+	out.WriteString(raw)
+	for _, row := range rows {
+		seen := map[int]bool{}
+		for _, p := range row.Publishers {
+			if p.PublishedPort > 0 && p.Protocol == "tcp" && !seen[p.PublishedPort] {
+				seen[p.PublishedPort] = true
+				fmt.Fprintf(&out, "\n%s — service URL: %s", row.Name, resolve(p.PublishedPort))
+			}
+		}
+	}
+	return out.String()
 }

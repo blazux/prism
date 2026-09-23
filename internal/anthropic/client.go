@@ -209,7 +209,53 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 
 // streamEvent covers every server-sent event shape we act on. The event: line is
 // ignored — the JSON payload names its own type.
+type streamUsage struct {
+	Input      *int64 `json:"input_tokens"`
+	Output     *int64 `json:"output_tokens"`
+	CacheRead  *int64 `json:"cache_read_input_tokens"`
+	CacheWrite *int64 `json:"cache_creation_input_tokens"`
+}
+
+func (u *streamUsage) merge(v *streamUsage) {
+	if v == nil {
+		return
+	}
+	if v.Input != nil {
+		u.Input = v.Input
+	}
+	if v.Output != nil {
+		u.Output = v.Output
+	}
+	if v.CacheRead != nil {
+		u.CacheRead = v.CacheRead
+	}
+	if v.CacheWrite != nil {
+		u.CacheWrite = v.CacheWrite
+	}
+}
+func (u *streamUsage) usage() *ollama.Usage {
+	if u.Input == nil && u.Output == nil {
+		return nil
+	}
+	var total *int64
+	if u.Input != nil {
+		n := *u.Input
+		if u.CacheRead != nil {
+			n += *u.CacheRead
+		}
+		if u.CacheWrite != nil {
+			n += *u.CacheWrite
+		}
+		total = &n
+	}
+	return &ollama.Usage{InputTokens: total, OutputTokens: u.Output, CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite}
+}
+
 type streamEvent struct {
+	Usage   *streamUsage `json:"usage"`
+	Message struct {
+		Usage *streamUsage `json:"usage"`
+	} `json:"message"`
 	Type  string `json:"type"`
 	Index int    `json:"index"`
 
@@ -300,6 +346,7 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, model string, m
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	tools := newToolBuilder()
 	stopReason := ""
+	var usage streamUsage
 
 	for scanner.Scan() {
 		select {
@@ -320,6 +367,8 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, model string, m
 			continue
 		}
 
+		usage.merge(ev.Message.Usage)
+		usage.merge(ev.Usage)
 		switch ev.Type {
 		case "content_block_start":
 			if ev.ContentBlock.Type == "tool_use" {
@@ -356,7 +405,7 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, model string, m
 		case "message_stop":
 			// Anthropic closes the body right after; stop reading rather than
 			// wait on a scanner that has nothing left to yield.
-			out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: stopReason}
+			out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: stopReason, Usage: usage.usage()}
 			c.logStop(stopReason, model, maxTokens)
 			return
 		}
@@ -368,8 +417,8 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, model string, m
 	}
 
 	// The stream ended without message_stop (upstream closed early). Everything
-	// accumulated so far is still worth delivering.
-	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: stopReason}
+	// accumulated so far is still worth delivering, with incomplete accounting flagged.
+	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: "interrupted", Usage: usage.usage()}
 	c.logStop(stopReason, model, maxTokens)
 }
 

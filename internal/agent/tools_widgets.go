@@ -33,7 +33,7 @@ type pluginMeta struct {
 }
 
 func (e *ToolExecutor) listUIPlugins() (string, error) {
-	entries, err := os.ReadDir(e.pluginDir)
+	entries, err := e.readManagedDir(e.pluginDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "No widgets on the dashboard.", nil
@@ -78,7 +78,7 @@ func (e *ToolExecutor) listUIPlugins() (string, error) {
 // calling list first, and a bare "not found" sends it guessing again — putting
 // the real ids in the error lets it self-correct on the next call.
 func (e *ToolExecutor) existingWidgetsHint() string {
-	entries, err := os.ReadDir(e.pluginDir)
+	entries, err := e.readManagedDir(e.pluginDir)
 	if err != nil {
 		return "No widgets exist on the dashboard."
 	}
@@ -138,7 +138,11 @@ func (e *ToolExecutor) previewWidget(ctx context.Context, id string) (string, []
 	if e.chatBlind {
 		if ragCaptioner != nil {
 			for _, p := range extractScreenshotPaths(res, e.workspaceDir) {
-				if d, err := ragCaptioner.DescribeWidget(ctx, p); err == nil && strings.TrimSpace(d) != "" {
+				data, err := e.readManagedFile(p)
+				if err != nil {
+					continue
+				}
+				if d, err := ragCaptioner.DescribeWidgetData(ctx, data); err == nil && strings.TrimSpace(d) != "" {
 					report := "Auto-preview (you have no vision — a vision model inspected the rendered widget for you):\n" + strings.TrimSpace(d) +
 						"\n\nIf that description shows broken layout, missing images/icons, blank areas or errors, fix the widget before telling the user it is ready."
 					if consoleErrs != "" {
@@ -348,8 +352,8 @@ func (e *ToolExecutor) removeUIPlugin(id string) (string, error) {
 	// signal for what data/ files fed it (see orphanedDataNote's doc comment).
 	orphanNote := e.orphanedDataNote(id, htmlPath)
 
-	os.Remove(htmlPath)
-	os.Remove(metaPath)
+	e.removeManaged(htmlPath)
+	e.removeManaged(metaPath)
 
 	if e.onPluginRem != nil {
 		e.onPluginRem(id)
@@ -395,7 +399,7 @@ func (e *ToolExecutor) orphanedDataNote(removedID, removedHTMLPath string) strin
 		return ""
 	}
 
-	entries, err := os.ReadDir(e.pluginDir)
+	entries, err := e.readManagedDir(e.pluginDir)
 	if err != nil {
 		return ""
 	}

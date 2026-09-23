@@ -29,16 +29,17 @@ func (s *Server) initChannels() {
 // startChannels (re)launches the receive loop of every configured channel.
 func (s *Server) startChannels() {
 	s.stopChannels()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(s.runtimeContext())
 	s.mu.Lock()
 	s.chanCancel = cancel
 	s.mu.Unlock()
 	for _, ch := range s.channels {
 		if ch.Configured() {
-			go func(c Channel) {
+			c := ch
+			s.background(func() {
 				log.Printf("[%s] bridge started", c.Name())
 				c.Run(ctx)
-			}(ch)
+			})
 		}
 	}
 }

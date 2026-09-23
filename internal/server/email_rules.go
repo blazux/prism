@@ -14,20 +14,25 @@ import (
 // Use each account's executor so configuration scope and tool policy agree with
 // the interactive email tool. No shared-agent or group mailbox is invented.
 func (s *Server) startEmailRules() {
-	go func() {
+	s.background(func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			s.runEmailRules()
+		for {
+			select {
+			case <-s.runtimeContext().Done():
+				return
+			case <-ticker.C:
+				s.runEmailRules()
+			}
 		}
-	}()
+	})
 }
 func (s *Server) runEmailRules() {
 	ms := s.store()
 	if ms == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	ctx, cancel := context.WithTimeout(s.runtimeContext(), 50*time.Second)
 	defer cancel()
 	users := []memory.User{*serviceUser}
 	if s.cfg.MultiUser {

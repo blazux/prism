@@ -13,7 +13,6 @@ import (
 	"prism/internal/agent"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"prism/internal/rag"
@@ -72,13 +71,11 @@ func (s *Server) ragContextFn(scope string) func() string {
 	}
 }
 
-var ragInitStatus atomic.Value // stores string
-
 // initRAG starts the same embedding configuration worker used by settings.
 // Runs in a background goroutine — RAG endpoints return 503 until ready.
 func (s *Server) initRAG(ctx context.Context) {
 	if s.cfg.PostgresURL == "" {
-		ragInitStatus.Store("disabled: POSTGRES_URL not set")
+		s.ragInitStatus.Store("disabled: POSTGRES_URL not set")
 		return
 	}
 	for s.store() == nil {
@@ -93,18 +90,18 @@ func (s *Server) initRAG(ctx context.Context) {
 
 // registerRAGRoutes adds /api/rag/* handlers to the mux.
 func (s *Server) registerRAGRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/rag/status", s.handleRAGStatus)
-	mux.HandleFunc("/api/rag/collections", s.handleRAGCollections)
-	mux.HandleFunc("/api/rag/documents", s.handleRAGDocuments)
-	mux.HandleFunc("/api/rag/upload", s.handleRAGUpload)
-	mux.HandleFunc("/api/rag/upload/progress", s.handleRAGUploadProgress)
-	mux.HandleFunc("/api/rag/document", s.handleRAGDocument)
+	mux.HandleFunc("/api/rag/status", s.resourceRoute((*Server).handleRAGStatus))
+	mux.HandleFunc("/api/rag/collections", s.resourceRoute((*Server).handleRAGCollections))
+	mux.HandleFunc("/api/rag/documents", s.resourceRoute((*Server).handleRAGDocuments))
+	mux.HandleFunc("/api/rag/upload", s.resourceRoute((*Server).handleRAGUpload))
+	mux.HandleFunc("/api/rag/upload/progress", s.resourceRoute((*Server).handleRAGUploadProgress))
+	mux.HandleFunc("/api/rag/document", s.resourceRoute((*Server).handleRAGDocument))
 }
 
 // GET /api/rag/status — always returns 200, safe to poll from frontend
 func (s *Server) handleRAGStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	status, _ := ragInitStatus.Load().(string)
+	status, _ := s.ragInitStatus.Load().(string)
 	store, _, _, release := s.acquireRAG()
 	ready := store != nil
 	release()

@@ -3,6 +3,7 @@ package calendar
 import (
 	"context"
 	"fmt"
+	"prism/internal/timeprefs"
 	"strings"
 	"time"
 
@@ -60,7 +61,7 @@ func (p *CalDAVProvider) List(ctx context.Context, from, to *time.Time) ([]Item,
 		if obj.Data == nil {
 			continue
 		}
-		out = append(out, itemsFromEvents(obj.Path, obj.ModTime, obj.Data.Events())...)
+		out = append(out, itemsFromEvents(obj.Path, obj.ModTime, obj.Data.Events(), timeprefs.Location(ctx))...)
 	}
 	return out, nil
 }
@@ -70,7 +71,7 @@ func (p *CalDAVProvider) List(ctx context.Context, from, to *time.Time) ([]Item,
 // server returned, or a series master followed by its overridden occurrences
 // (each carrying a RECURRENCE-ID). Reading only the first one hid every moved
 // occurrence — "Monday 9am, except the 3rd at 2pm" displayed 9am.
-func itemsFromEvents(objectPath string, modTime time.Time, evs []ical.Event) []Item {
+func itemsFromEvents(objectPath string, modTime time.Time, evs []ical.Event, locations ...*time.Location) []Item {
 	// A bundle that carries at least one RECURRENCE-ID has a master: the
 	// component without one IS the series, and stays addressable so the series
 	// can still be edited or deleted. Only when nothing identifies the
@@ -89,9 +90,9 @@ func itemsFromEvents(objectPath string, modTime time.Time, evs []ical.Event) []I
 		title, _ := ev.Props.Text(ical.PropSummary)
 		desc, _ := ev.Props.Text(ical.PropDescription)
 		loc, _ := ev.Props.Text(ical.PropLocation)
-		st, _ := ev.DateTimeStart(time.Local)
+		st, _ := ev.DateTimeStart(timeprefs.First(locations))
 		it := Item{AllDay: ev.Props.Get(ical.PropDateTimeStart) != nil && ev.Props.Get(ical.PropDateTimeStart).ValueType() == ical.ValueDate, ID: objectPath, Title: title, Description: desc, Location: loc, StartAt: st, CreatedAt: modTime}
-		if et, err := ev.DateTimeEnd(time.Local); err == nil && !et.IsZero() {
+		if et, err := ev.DateTimeEnd(timeprefs.First(locations)); err == nil && !et.IsZero() {
 			it.EndAt = &et
 		}
 		transp, _ := ev.Props.Text(ical.PropTransparency)

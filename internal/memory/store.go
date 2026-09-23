@@ -106,7 +106,7 @@ func (s *Store) migrateUserScopedConfig(ctx context.Context) {
 	cfgKeys := []string{
 		"email_config", "email_rules", "email_tags", "notes_provider", "notes_vault_path",
 		"caldav_config", "tasks_provider", "calendar_provider",
-		"agent_name", KeyPersonalityBase, KeyAgentMaxIterations, KeyAgentThinking, KeyAgentLeanPrompt, KeyAgentReasoningEffort,
+		"profile_timezone", "agent_name", KeyPersonalityBase, KeyAgentMaxIterations, KeyAgentThinking, KeyAgentLeanPrompt, KeyAgentPromptProfile, KeyAgentReasoningEffort,
 		"oauth_google_client_id", "oauth_microsoft_client_id",
 		"telegram_allowed_chat",
 	}
@@ -361,10 +361,12 @@ func (s *Store) initSchema(ctx context.Context) error {
 			PRIMARY KEY (group_id, tool)
 		)`,
 		// ─── Profiles, avatars & richer room chat (Spectrum) ───────────────────
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_email TEXT`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT ''`,
 		// Shared-agent turn budget, set by the group admin (Admin › Shared agent).
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_max_iter INT NOT NULL DEFAULT 0`,
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_thinking BOOLEAN NOT NULL DEFAULT TRUE`,
+		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_prompt_profile TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_lean BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE room_config ADD COLUMN IF NOT EXISTS agent_reasoning TEXT NOT NULL DEFAULT ''`,
 		// Who the agent is when it answers the phone to someone this group knows.

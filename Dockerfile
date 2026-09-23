@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26.8-alpine AS builder
 
 WORKDIR /build
 COPY go.mod go.sum ./
@@ -7,8 +7,8 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o prism .
 
-FROM alpine:3.19
-RUN apk add --no-cache docker-cli docker-cli-compose ca-certificates poppler-utils
+FROM alpine:3.23
+RUN apk add --no-cache docker-cli docker-cli-compose ca-certificates poppler-utils util-linux
 
 WORKDIR /app
 COPY --from=builder /build/prism .

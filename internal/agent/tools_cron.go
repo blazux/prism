@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/cronclock"
 	"prism/internal/docker"
+	"prism/internal/timeprefs"
 )
 
 // cronOwner is the tag under which the current session's cron jobs are recorded,
@@ -40,6 +42,7 @@ func shQuote(s string) string {
 
 type CronJob struct {
 	Name, Owner, Desc, Schedule, Command string
+	Timezone                             string
 	Enabled                              bool
 }
 
@@ -63,6 +66,15 @@ const cronDisabledPrefix = "#DISABLED# "
 // that follows it. Mirrors server/handlers_cron.go's splitSchedule for the
 // same reason cronDisabledPrefix is duplicated above.
 func splitCronSchedule(line string) (schedule, command string) {
+	if sc, cmd, _, ok := cronclock.Unwrap(line); ok {
+		return sc, cmd
+	}
+	if strings.HasPrefix(line, "@") {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 2 {
+			return parts[0], parts[1]
+		}
+	}
 	fields := strings.Fields(line)
 	if len(fields) < 6 {
 		return line, ""
@@ -99,12 +111,14 @@ func ParseCronJobs(raw string) []CronJob {
 			// bug this case fixes: it showed up in the Tasks list with a
 			// blank schedule instead of being recognized as paused).
 			cur.Enabled = false
+			_, _, cur.Timezone, _ = cronclock.Unwrap(strings.TrimPrefix(t, cronDisabledPrefix))
 			cur.Schedule, cur.Command = splitCronSchedule(strings.TrimPrefix(t, cronDisabledPrefix))
 			flush()
 		case t == "" || strings.HasPrefix(t, "#"):
 			// blank line or unrelated comment — ignore
 		default:
 			if cur != nil && cur.Schedule == "" {
+				_, _, cur.Timezone, _ = cronclock.Unwrap(t)
 				cur.Schedule, cur.Command = splitCronSchedule(t)
 				flush()
 			}
@@ -126,7 +140,7 @@ func displayCommand(command string) string {
 func (e *ToolExecutor) cronList(ctx context.Context) (string, error) {
 	raw, err := e.docker.Exec(ctx, docker.ReadCrontabCommand, 10*time.Second)
 	if err != nil {
-		return "", fmt.Errorf("cannot read crontab: %w", err)
+		return "", docker.CronReadError(err, raw)
 	}
 	owner := e.cronOwner()
 	var out []string
@@ -135,6 +149,9 @@ func (e *ToolExecutor) cronList(ctx context.Context) (string, error) {
 			continue // another user's job
 		}
 		line := fmt.Sprintf("• %s — %s  %s", j.Name, j.Schedule, displayCommand(j.Command))
+		if j.Timezone != "" {
+			line += " [" + j.Timezone + "]"
+		}
 		if j.Desc != "" {
 			line += "  (" + j.Desc + ")"
 		}
@@ -175,7 +192,7 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 
 	current, err := e.docker.Exec(ctx, docker.ReadCrontabCommand, 10*time.Second)
 	if err != nil {
-		return "", fmt.Errorf("cannot read crontab: %w", err)
+		return "", docker.CronReadError(err, current)
 	}
 	current = strings.TrimSpace(current)
 
@@ -184,6 +201,10 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 		return "", fmt.Errorf("a job named %q already exists; remove it first with cron action=remove", name)
 	}
 
+	zone, err := e.prepareCronTimezone(ctx, schedule)
+	if err != nil {
+		return "", err
+	}
 	command = e.cronCommandLine(command)
 
 	// Tag the job with its owner so each user only manages their own tasks.
@@ -191,7 +212,7 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 	if description != "" {
 		entry += "\n# agent-desc: " + description
 	}
-	entry += fmt.Sprintf("\n%s %s", schedule, command)
+	entry += "\n" + cronclock.Wrap(schedule, command, zone)
 	var newCrontab string
 	if current == "" {
 		newCrontab = entry + "\n"
@@ -247,7 +268,7 @@ func (e *ToolExecutor) cronEditBlock(ctx context.Context, name string, edit func
 	if err != nil {
 		// A failed exec is NOT an empty crontab: reporting "no cron jobs yet"
 		// here made the model conclude the job did not exist.
-		return nil, "", fmt.Errorf("cannot read crontab: %w", err)
+		return nil, "", docker.CronReadError(err, current)
 	}
 	if strings.TrimSpace(current) == "" {
 		return nil, "no cron jobs yet", nil
@@ -388,9 +409,21 @@ func (e *ToolExecutor) cronUpdate(ctx context.Context, name, schedule, command, 
 		}
 	}
 	description = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(description, "\n", " "), "\r", " "))
+	zone := ""
+	if schedule != "" {
+		var err error
+		zone, err = e.prepareCronTimezone(ctx, schedule)
+		if err != nil {
+			return "", err
+		}
+	}
 	var newSchedule, newCommand string
 	job, msg, err := e.cronEditBlock(ctx, name, func(desc, line string, enabled bool) (string, string, bool) {
 		curSchedule, curCommand := splitCronSchedule(line)
+		_, _, oldZone, _ := cronclock.Unwrap(line)
+		if schedule == "" {
+			zone = oldZone
+		}
 		newSchedule, newCommand = curSchedule, curCommand
 		if schedule != "" {
 			newSchedule = strings.TrimSpace(schedule)
@@ -401,7 +434,7 @@ func (e *ToolExecutor) cronUpdate(ctx context.Context, name, schedule, command, 
 		if description != "" {
 			desc = description
 		}
-		return desc, newSchedule + " " + newCommand, enabled
+		return desc, cronclock.Wrap(newSchedule, newCommand, zone), enabled
 	})
 	if err != nil || msg != "" {
 		return msg, err
@@ -416,7 +449,7 @@ func (e *ToolExecutor) cronUpdate(ctx context.Context, name, schedule, command, 
 func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, error) {
 	current, err := e.docker.Exec(ctx, docker.ReadCrontabCommand, 10*time.Second)
 	if err != nil {
-		return "", fmt.Errorf("cannot read crontab: %w", err)
+		return "", docker.CronReadError(err, current)
 	}
 	if strings.TrimSpace(current) == "" {
 		return "no cron jobs to remove", nil
@@ -476,7 +509,7 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 		// on every container restart. Leaving stale content here after
 		// removing the last job would resurrect it on the next restart.
 		persistPath := filepath.Join(e.workspaceDir, ".crontab")
-		if err := os.WriteFile(persistPath, nil, 0600); err != nil {
+		if err := e.writeManagedFile(persistPath, nil); err != nil {
 			return fmt.Sprintf("cron_remove failed: %v", err), nil
 		}
 	} else {
@@ -517,14 +550,32 @@ func validateCronSchedule(s string) error {
 func (e *ToolExecutor) writeCrontab(ctx context.Context, content string) error {
 	persistPath := filepath.Join(e.workspaceDir, ".crontab")
 	tmpPath := persistPath + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(content), 0600); err != nil {
+	if err := e.writeManagedFile(tmpPath, []byte(content)); err != nil {
 		return err
 	}
 	if _, err := e.docker.Exec(ctx, "crontab /workspace/.crontab.tmp", 10*time.Second); err != nil {
-		os.Remove(tmpPath)
+		e.removeManaged(tmpPath)
 		return err
 	}
 	return os.Rename(tmpPath, persistPath)
 }
 
 // ─── Custom tools ─────────────────────────────────────────────────────────────
+
+func (e *ToolExecutor) prepareCronTimezone(ctx context.Context, schedule string) (string, error) {
+	store := e.userStore()
+	if store == nil || schedule == "@reboot" {
+		return "", nil
+	}
+	zone, _ := timeprefs.Read(ctx, store)
+	if zone == "" {
+		return "", nil
+	}
+	if err := e.writeManagedFile(filepath.Join(e.workspaceDir, cronclock.Path), cronclock.Script); err != nil {
+		return "", err
+	}
+	if _, err := e.docker.Exec(ctx, "python3 /workspace/"+cronclock.Path+" "+shQuote(schedule)+" "+shQuote(zone)+" --check", 10*time.Second); err != nil {
+		return "", fmt.Errorf("cannot schedule in %s: workspace needs Python zoneinfo/tzdata and a valid schedule: %w", zone, err)
+	}
+	return zone, nil
+}

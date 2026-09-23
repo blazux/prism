@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"prism/internal/timeprefs"
 	"strings"
 	"time"
 
@@ -54,7 +55,7 @@ func (p *CalDAVProvider) List(ctx context.Context, includeDone bool) ([]Item, er
 		if obj.Data == nil {
 			continue
 		}
-		out = append(out, itemsFromTodos(obj.Path, obj.ModTime, todosOf(obj.Data), includeDone)...)
+		out = append(out, itemsFromTodos(obj.Path, obj.ModTime, todosOf(obj.Data), includeDone, timeprefs.Location(ctx))...)
 	}
 	return out, nil
 }
@@ -62,7 +63,7 @@ func (p *CalDAVProvider) List(ctx context.Context, includeDone bool) ([]Item, er
 // itemsFromTodos turns the VTODO components of ONE object into items. An object
 // holds several when a repeating task carries its overridden occurrences next
 // to the master; reading only the first hid every one of them.
-func itemsFromTodos(objectPath string, modTime time.Time, todos []*ical.Component, includeDone bool) []Item {
+func itemsFromTodos(objectPath string, modTime time.Time, todos []*ical.Component, includeDone bool, locations ...*time.Location) []Item {
 	identified := false
 	for _, todo := range todos {
 		if todo.Props.Get(ical.PropRecurrenceID) != nil {
@@ -84,7 +85,7 @@ func itemsFromTodos(objectPath string, modTime time.Time, todos []*ical.Componen
 			continue
 		}
 		var start time.Time
-		if due, err := todo.Props.DateTime(ical.PropDue, time.Local); err == nil && !due.IsZero() {
+		if due, err := todo.Props.DateTime(ical.PropDue, timeprefs.First(locations)); err == nil && !due.IsZero() {
 			it.DueAt = &due
 			start = due
 		}

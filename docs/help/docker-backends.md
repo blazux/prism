@@ -37,8 +37,12 @@ these operations against the host daemon. Compose receives the validated
 snapshot via stdin; its project directory is mapped into /workspace.
 
 - Scripts in the workspace: http://127.0.0.1:<published-port>/.
-- Widget iframe: /proxy/<published-port>/.
-- Compose: publish the desired ports and use the same routes.
+- Browser links and widget iframes: use the URL returned by the Docker tool.
+  The local default is /proxy/<published-port>/; a hosted installation can provide
+  a private HTTPS origin per service, serving the application at /.
+- Compose: publish the desired ports on 0.0.0.0 inside the workspace. Hosted
+  service URLs are returned by Compose up/ps as well. These URLs are for HTTP
+  services; publishing a database port does not make it an HTTP application.
 - Host Traefik discovery and prism-svc-* host DNS do not apply.
 - Published ports belong to the workspace, not to the VPS's public interfaces.
 - Applications using absolute root paths may need a base-path setting for
@@ -60,6 +64,18 @@ security settings. A sandboxed workspace, network restrictions, aggregate
 CPU/RAM/PID/disk quotas (including image caches), and a separate authenticated
 origin for Cloud applications remain operator responsibilities.
 
-The routing implementation has automated transport tests. Rootless Docker
-inside the planned gVisor Cloud image has not yet been validated end to end.
-Cloud will use this backend only after those integration and isolation tests.
+Hosted environments can provide a scoped execution and connection capability
+instead of giving prism-server an outer Docker socket. The private host validates
+the workspace assignment on each operation.
+
+In a read-only workspace, install Python libraries with pip (the user site lives
+in the persistent workspace). Put system dependencies in Docker images instead
+of attempting apt installation into the read-only root filesystem.
+
+With a private HTTPS service origin, open the URL while signed in to Prism.
+Access belongs to the workspace owner and is revoked on logout. The service's
+own login or API Bearer token is separate from the Prism login. Its browser
+frontend can use root-relative API and WebSocket paths without a proxy prefix.
+Embed the URL in an iframe. A widget fetching an API across origins still needs
+normal CORS/credentials handling, or can use its existing /proxy/<port>/ route.
+Starting a container does not publish an anonymous public website.

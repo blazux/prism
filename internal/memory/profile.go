@@ -10,15 +10,17 @@ import (
 )
 
 // Profile is the editable identity a user manages in Settings → Profile. Email is
-// the login identifier and is read-only here. AvatarVer is the avatar's updated_at
+// the contact address, independent of the login identifier. AvatarVer is the avatar's updated_at
 // as a unix epoch (0 when none), used by clients to cache-bust /api/avatar.
 type Profile struct {
-	UserID      int64  `json:"userId"`
-	Email       string `json:"email"`
-	DisplayName string `json:"displayName"`
-	FirstName   string `json:"firstName"`
-	LastName    string `json:"lastName"`
-	Phone       string `json:"phone"`
+	Timezone          string `json:"timezone"`
+	EffectiveTimezone string `json:"effectiveTimezone"`
+	UserID            int64  `json:"userId"`
+	Email             string `json:"email"`
+	DisplayName       string `json:"displayName"`
+	FirstName         string `json:"firstName"`
+	LastName          string `json:"lastName"`
+	Phone             string `json:"phone"`
 	// Transfer is how the switchboard puts a call through to this person:
 	// "blind" (straight through) or "attended" (announced first, refusable).
 	Transfer  string `json:"transfer"`
@@ -28,7 +30,7 @@ type Profile struct {
 func (s *Store) GetProfile(ctx context.Context, userID int64) (Profile, error) {
 	var p Profile
 	err := s.pool.QueryRow(ctx, `
-		SELECT u.id, u.email, u.display_name, u.first_name, u.last_name, u.phone,
+		SELECT u.id, COALESCE(u.contact_email, u.email), u.display_name, u.first_name, u.last_name, u.phone,
 		       COALESCE(NULLIF(u.transfer_type, ''), 'blind'),
 		       COALESCE(EXTRACT(EPOCH FROM a.updated_at)::bigint, 0)
 		FROM users u
@@ -38,11 +40,11 @@ func (s *Store) GetProfile(ctx context.Context, userID int64) (Profile, error) {
 	return p, err
 }
 
-func (s *Store) UpdateProfile(ctx context.Context, userID int64, displayName, firstName, lastName, phone string) error {
+func (s *Store) UpdateProfile(ctx context.Context, userID int64, displayName, firstName, lastName, phone string, email *string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE users SET display_name = $1, first_name = $2, last_name = $3, phone = $4
+		UPDATE users SET display_name = $1, first_name = $2, last_name = $3, phone = $4, contact_email = COALESCE($6, contact_email)
 		WHERE id = $5
-	`, displayName, firstName, lastName, phone, userID)
+	`, displayName, firstName, lastName, phone, userID, email)
 	return err
 }
 

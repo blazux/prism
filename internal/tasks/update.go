@@ -7,6 +7,7 @@ import (
 	"github.com/emersion/go-ical"
 	"net/url"
 	"prism/internal/caldav"
+	"prism/internal/timeprefs"
 	"strconv"
 	"strings"
 	"time"
@@ -20,22 +21,22 @@ type Patch struct {
 	Due      *string `json:"due,omitempty"`
 }
 
-func (p Patch) Validate() error {
+func (p Patch) Validate(locations ...*time.Location) error {
 	if p.Title != nil && strings.TrimSpace(*p.Title) == "" {
 		return fmt.Errorf("title is required")
 	}
 	if p.Priority != nil && *p.Priority != "low" && *p.Priority != "normal" && *p.Priority != "high" {
 		return fmt.Errorf("priority must be low, normal or high")
 	}
-	_, err := p.Deadline()
+	_, err := p.Deadline(locations...)
 	return err
 }
-func (p Patch) Deadline() (*time.Time, error) {
+func (p Patch) Deadline(locations ...*time.Location) (*time.Time, error) {
 	if p.Due == nil || *p.Due == "" {
 		return nil, nil
 	}
 	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04", "2006-01-02 15:04", "2006-01-02"} {
-		if t, err := time.ParseInLocation(layout, *p.Due, time.Local); err == nil {
+		if t, err := timeprefs.Parse(layout, *p.Due, timeprefs.First(locations)); err == nil {
 			return &t, nil
 		}
 	}
@@ -43,18 +44,18 @@ func (p Patch) Deadline() (*time.Time, error) {
 }
 func (p *unavailableProvider) Update(context.Context, string, Patch) error { return p.fail() }
 func (p *DBProvider) Update(ctx context.Context, id string, patch Patch) error {
-	if err := patch.Validate(); err != nil {
+	if err := patch.Validate(timeprefs.Location(ctx)); err != nil {
 		return err
 	}
 	iid, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		return err
 	}
-	due, _ := patch.Deadline()
+	due, _ := patch.Deadline(timeprefs.Location(ctx))
 	return p.Store.PatchTask(ctx, p.Session, iid, patch.Title, patch.Priority, patch.Due != nil, due)
 }
 func (p *TodoistProvider) Update(ctx context.Context, id string, patch Patch) error {
-	if err := patch.Validate(); err != nil {
+	if err := patch.Validate(timeprefs.Location(ctx)); err != nil {
 		return err
 	}
 	body := map[string]any{}
@@ -65,7 +66,7 @@ func (p *TodoistProvider) Update(ctx context.Context, id string, patch Patch) er
 		body["priority"] = toTodoistPriority(*patch.Priority)
 	}
 	if patch.Due != nil {
-		due, _ := patch.Deadline()
+		due, _ := patch.Deadline(timeprefs.Location(ctx))
 		if due == nil {
 			body["due_string"] = "no date"
 			body["due_lang"] = "en"
@@ -87,7 +88,7 @@ func (p *TodoistProvider) Update(ctx context.Context, id string, patch Patch) er
 	return nil
 }
 func (p *CalDAVProvider) Update(ctx context.Context, id string, patch Patch) error {
-	if err := patch.Validate(); err != nil {
+	if err := patch.Validate(timeprefs.Location(ctx)); err != nil {
 		return err
 	}
 	path, occ := caldav.SplitOccurrenceID(id)
@@ -108,17 +109,17 @@ func (p *CalDAVProvider) Update(ctx context.Context, id string, patch Patch) err
 	if obj == nil || obj.Data == nil {
 		return fmt.Errorf("task not found")
 	}
-	if err = applyTaskPatch(masterTodo(obj.Data), patch); err != nil {
+	if err = applyTaskPatch(masterTodo(obj.Data), patch, timeprefs.Location(ctx)); err != nil {
 		return err
 	}
 	_, err = conn.Client.PutCalendarObject(ctx, path, obj.Data)
 	return err
 }
-func applyTaskPatch(todo *ical.Component, patch Patch) error {
+func applyTaskPatch(todo *ical.Component, patch Patch, locations ...*time.Location) error {
 	if todo == nil {
 		return fmt.Errorf("object has no VTODO")
 	}
-	if err := patch.Validate(); err != nil {
+	if err := patch.Validate(timeprefs.First(locations)); err != nil {
 		return err
 	}
 	if patch.Title != nil {
@@ -128,7 +129,7 @@ func applyTaskPatch(todo *ical.Component, patch Patch) error {
 		todo.Props.SetText(ical.PropPriority, toICalPriority(*patch.Priority))
 	}
 	if patch.Due != nil {
-		due, _ := patch.Deadline()
+		due, _ := patch.Deadline(timeprefs.First(locations))
 		if due == nil {
 			todo.Props.Del(ical.PropDue)
 		} else {

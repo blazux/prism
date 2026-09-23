@@ -6,9 +6,9 @@ In single-user mode, open **Settings → AI provider**. In multi-user mode, only
 
 1. Select a source to edit it, or click **+ Add a source** and give it a name. Choose **OpenAI**, **Anthropic**, **Ollama** or **Other compatible**. OpenAI and Anthropic have preset official URLs. Ollama requires a server URL. Other compatible covers OpenAI-compatible servers such as vLLM, SGLang and llama.cpp; include `/v1` in the URL.
 2. Enter an API key if required. The key is stored encrypted and never returned by the API. Leave it blank to retain an existing key at the same provider and URL. A different URL requires its own credential. Ollama's native connection does not support API keys.
-3. **Load models**, then select or enter a model ID. Catalogs do not always identify capabilities; choose a conversation model supporting tools. **Test model** sends a short text request and may incur an API charge. It verifies access, not vision or every tool capability.
+3. **Connect** checks the connection and displays the model list or an error. Selecting a model automatically saves the form. To enter an unlisted ID, expand **Model not listed? Enter its ID**, then click **Save model**. Catalogs do not always identify capabilities; choose a conversation model supporting tools. **Test model** sends a short text request and may incur an API charge. It verifies access, not vision or every tool capability.
 4. Set **Default model supports vision** according to the model's capabilities. Vision is needed for image attachments, screenshots and visual widget checks. Text-only models can still chat and use tools. With a saved UI profile, the widget inspection fallback uses the conversation model when vision is enabled. That fallback updates automatically when settings are saved. The embedding model does not interpret images.
-5. Choose **Use as default** on the source whose selected model should power new conversations and app actions, then **Save changes**. Other sources remain available in the chat model picker. Conversation changes apply from the next message; a running turn retains its connection.
+5. Choose **Use as default** on the source whose selected model should power new conversations and app actions, which saves immediately. Other sources remain available in the chat model picker. Conversation changes apply from the next message; a running turn retains its connection.
 
 You can configure several sources of the same provider type, including multiple OpenAI-compatible servers. The picker identifies secondary models by source so identical model IDs cannot silently select the wrong server. A failed model catalog on one source does not hide healthy sources. Enter a model ID manually if it is absent from a catalog.
 
@@ -20,15 +20,17 @@ On first opening, the form includes the current connection and the other environ
 
 **Use same provider** follows the default conversation source and reuses its URL and credential, but you must choose a separate embedding model. Existing independent server settings remain independent when opening the form. Anthropic has no embedding endpoint: uncheck the switch and choose another embedding connection. No provider is silently substituted.
 
-When the switch is off, **Embedding source** lets you reuse any configured source, without entering its key again, or choose **Dedicated connection** for a separate provider, URL and key. Reused connections follow changes to that source; a source in use cannot be removed until embeddings are reassigned. **Load models** suggests embedding IDs from the catalog. When capabilities are not published, the list may include other models; you can always enter an ID manually. **Test embeddings** makes a real embedding request and reports its dimension. An empty embedding model disables document search when saved.
+When the switch is off, **Embedding source** lets you reuse any configured source, without entering its key again, or choose **Dedicated connection** for a separate provider, URL and key. Reused connections follow changes to that source; removing a source used by embeddings offers to use the default source instead; a required index rebuild still needs explicit confirmation. **Connect** suggests embedding IDs from the catalog. When capabilities are not published, the list may include other models; you can always enter an ID manually. **Test embeddings** makes a real embedding request and reports its dimension. An empty embedding model disables document search when saved.
 
-Embedding changes apply automatically when you click **Save changes**. The settings page displays progress. Changing model or endpoint requires checking **Rebuild the document index** before saving. Rebuilding sends all stored chunk text to the selected provider and may incur charges. In multi-user mode this includes the entire deployment index. The index is rebuilt even when the vector dimension is unchanged: different models do not share a vector space.
+Selecting an embedding model saves the form automatically; other embedding edits require **Save changes**. Embedding changes apply without restarting the server. The settings page displays progress. Changing model or endpoint requires checking **Rebuild the document index** before saving. Rebuilding sends all stored chunk text to the selected provider and may incur charges. In multi-user mode this includes the entire deployment index. The index is rebuilt even when the vector dimension is unchanged: different models do not share a vector space.
 
 Prism retains document records and chunk text. Rebuilding runs before document search becomes available, in a database transaction; a failure leaves the old index intact. Check the server log, correct the provider and save again to retry. Stop any other Prism process connected to the same database before changing the index. This mechanism does not coordinate a rolling migration across cloud replicas.
 
 ## Server defaults
 
 Without a saved override, `.env` continues to configure Prism, including multiple chat backends, `EMBED_BACKEND`, `EMBED_MODEL` and `VISION_MODEL`. **Use server settings** restores that behavior after confirmation. If the embedding connection changes, it applies automatically, potentially rebuilding the index. Once indexed, the embedding identity is recorded to prevent accidental mixing of vectors from different models.
+
+Hosted personal environments such as Prism Cloud do not provide server AI defaults: the reset button is hidden and `ai_reset` is unavailable. Check `serverDefaultsAvailable` in `ai_get` before suggesting a reset; configure a provider instead when it is false. Local installations retain the reset option.
 
 ## Ask the agent
 
@@ -50,3 +52,9 @@ For embedding changes or resetting to different embedding defaults, obtain the u
 Use the secure Settings/Admin form or `request_secret`, then pass the stored secret **name**. Never put raw keys in chat or tool arguments. A script secret remains accessible to the user's scripts; prefer the AI provider form for a credential intended only for this integration. A headless agent cannot open a secure credential prompt.
 
 Source-qualified model IDs use `source_id::model_id` internally; the UI displays source names. The configured default model retains its plain ID for compatibility. Existing access grants for a plain model ID apply across sources offering that ID; administrators can instead grant a source-qualified ID for a specific connection. User permissions are still checked before model calls.
+
+## Saving and removing sources
+
+Connecting or testing alone does not save settings. The save-state banner distinguishes unsaved edits from the active saved configuration. Choosing a model or **Use as default** saves the current form; other edits use **Save changes**. Wait for the Saved confirmation. Errors remain visible and leaving with unsaved changes prompts a warning.
+
+**Remove source** immediately discards an unsaved source. For a saved source it asks for confirmation and persists the removal; if saving fails, the source remains. Removing the default chooses another source, as stated in the confirmation. The last source cannot be removed; edit it or use **Use server settings** instead.

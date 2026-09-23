@@ -14,12 +14,18 @@ async function renderAITab(container, options = {}) {
     <label class="ai-field" data-key="${prefix}">API key<input name="${prefix}apiKey" type="password" autocomplete="new-password" placeholder="Enter your API key"></label>
     <label class="ai-check" data-clear="${prefix}"><input type="checkbox" name="${prefix}clearKey">Remove the saved key</label>`
   const model = (prefix, action) => `
-    <label class="ai-field">Model<input name="${prefix}model" list="${options.admin ? 'admin-' : ''}ai-${prefix}models" placeholder="Select or enter a model ID" spellcheck="false"><datalist id="${options.admin ? 'admin-' : ''}ai-${prefix}models"></datalist></label>
-    <div class="ai-actions"><button class="ai-button" type="button" data-action="${action}models">Load models</button><button class="ai-button" type="button" data-action="${action}test">Test ${prefix ? 'embeddings' : 'model'}</button></div>`
+    <div class="ai-actions"><button class="ai-button primary" type="button" data-action="${action}models">Connect</button><span class="ai-connect-status" data-connected="${prefix}" role="status"></span></div>
+    <label class="ai-field" data-model-picker="${prefix}" hidden>Choose a model<select name="${prefix}modelChoice"><option value="">Connect to see models</option></select></label>
+    <p class="ai-hint" data-model-help="${prefix}" hidden>Selecting a model saves your changes and applies it automatically.</p>
+    <details class="ai-advanced"><summary>Model not listed? Enter its ID</summary>
+      <label class="ai-field">Model ID<input name="${prefix}model" list="${options.admin ? 'admin-' : ''}ai-${prefix}models" placeholder="Exact model ID" spellcheck="false"><datalist id="${options.admin ? 'admin-' : ''}ai-${prefix}models"></datalist></label>
+      <div class="ai-actions"><button class="ai-button" type="submit">Save model</button><button class="ai-button" type="button" data-action="${action}test">Test ${prefix ? 'embeddings' : 'model'}</button></div>
+    </details>`
   pane.innerHTML = `
     <div class="settings-page-title">AI provider</div>
     <p class="ai-hint" data-source>Loading configuration…</p>
     <form autocomplete="off">
+      <div class="ai-save-state" data-save-state role="status">Saved</div>
       <section class="ai-section">
         <div class="config-cat-header"><span class="config-cat-icon">✦</span><span class="config-cat-name">AI sources</span></div>
         <div class="ai-sources" data-sources></div>
@@ -40,12 +46,12 @@ async function renderAITab(container, options = {}) {
         <div data-embedding-connection hidden>${connection('embed-')}</div>
         <p class="ai-hint" data-unsupported hidden>Anthropic has no embedding endpoint. Uncheck “Use same provider” and select another provider to enable document search.</p>
         ${model('embed-', 'embedding_')}
-        <p class="ai-hint">Suggested models come from the provider catalog. If yours is missing, enter its ID; “Test embeddings” verifies the actual endpoint. Leave empty to disable document search.</p>
-        <label class="ai-check" data-reindex hidden><input name="reindex" type="checkbox">Rebuild the document index when saving. All indexed text will be sent to the selected embedding provider; API charges may apply.</label>
+        <p class="ai-hint">Connect to list embedding models, then select one to enable document search. In advanced settings, an empty model ID disables document search.</p>
+        <div class="ai-row" data-reindex hidden><div><div class="ai-row-title">Rebuild the document index when saving</div><div class="ai-hint">All indexed text will be sent to the selected embedding provider; API charges may apply.</div></div><label class="toggle-switch"><input name="reindex" type="checkbox" aria-label="Rebuild the document index when saving"><span class="toggle-track"></span></label></div>
       </section>
       <div class="ai-footer">
         <p class="ai-hint" data-embedding-status role="status" aria-live="polite"></p>
-        <div class="ai-actions"><button class="ai-button primary" type="submit">Save changes</button><button class="ai-button" type="button" data-action="reset">Use server settings</button></div>
+        <div class="ai-actions"><button class="ai-button primary" type="submit">Save changes</button><button class="ai-button" type="button" data-action="reset" hidden>Use server settings</button></div>
         <p class="ai-hint">Chat changes apply from the next message. Tests send a small request and may incur API charges. Keys are stored encrypted and never displayed.</p>
       </div>
     </form>
@@ -53,7 +59,35 @@ async function renderAITab(container, options = {}) {
   const form = pane.querySelector('form'), status = pane.querySelector('[data-status]')
   form.hidden=true
   const f = name => form.elements.namedItem(name)
-  let saved = null, busy = false, sources = [], selectedID = null, defaultID = null
+  let saved = null, busy = false, sources = [], selectedID = null, defaultID = null, dirty = false
+  const catalogs = new Map()
+  const warnOnLeave=e=>{if(pane.isConnected&&(dirty||busy)){e.preventDefault();e.returnValue=''}}
+  const warnOnNavigate=e=>{if(!pane.isConnected||(!dirty&&!busy)||!e.target.closest('a[href],.nav-item')||pane.contains(e.target))return;if(!window.confirm(busy?'Configuration is still being saved or checked. Leave this page?':'Your changes have not been saved. Leave this page?')){e.preventDefault();e.stopImmediatePropagation()}}
+  window.addEventListener('beforeunload',warnOnLeave)
+  document.addEventListener('click',warnOnNavigate,true)
+  const cleanup=new MutationObserver(()=>{if(!pane.isConnected){window.removeEventListener('beforeunload',warnOnLeave);document.removeEventListener('click',warnOnNavigate,true);cleanup.disconnect()}})
+  cleanup.observe(container,{childList:true})
+  function markDirty() { dirty=true; showSaveState() }
+  function showSaveState() {
+    const el=pane.querySelector("[data-save-state]")
+    el.textContent=busy ? "Working…" : dirty ? "Not saved yet — select a model or click Save changes." : (saved?.model ? "Saved — configuration is active." : "No conversation model saved yet. Connect and select a model to get started.")
+    el.classList.toggle("pending",dirty)
+  }
+  function catalogKey(prefix) { return prefix ? "embedding" : selectedID }
+  function showModels(prefix) {
+    const choice=f(prefix+"modelChoice"),models=catalogs.get(catalogKey(prefix))
+    choice.replaceChildren()
+    const hint=document.createElement("option");hint.value="";hint.textContent="Choose a model…";choice.append(hint)
+    const current=f(prefix+"model").value
+    for(const name of new Set([...(models||[]),...(current?[current]:[])])) {const opt=document.createElement("option");opt.value=name;opt.textContent=name;choice.append(opt)}
+    choice.value=current
+    pane.querySelector(`[data-model-picker="${prefix}"]`).hidden=!models&&!current
+    pane.querySelector(`[data-model-help="${prefix}"]`).hidden=!models&&!current
+  }
+  function invalidate(prefix) {
+    catalogs.delete(catalogKey(prefix));showModels(prefix)
+    pane.querySelector(`[data-connected="${prefix}"]`).textContent="Connection changed — click Connect."
+  }
   const defaults = {openai:'https://api.openai.com/v1',anthropic:'https://api.anthropic.com',ollama:'',other:''}
   const identity = e => JSON.stringify([e.provider === 'other' ? 'openai' : e.provider, e.baseURL.replace(/\/+$/, ''), e.model.trim()])
   function syncSource() {
@@ -67,6 +101,7 @@ async function renderAITab(container, options = {}) {
     for(const k of ['provider','baseURL','apiKey','model']) f(k).value=src[k] || ''
     f('sourceName').value=src.name || '';f('clearKey').checked=!!src.clearKey
     pane.querySelector('datalist').replaceChildren()
+    showModels('');pane.querySelector('[data-connected=""]').textContent=''
     drawSources();refresh()
   }
   function drawSources() {
@@ -118,8 +153,22 @@ async function renderAITab(container, options = {}) {
     pane.querySelectorAll('[data-action^="embedding_"]').forEach(b => b.disabled = busy || unsupported)
     pane.querySelector('[data-reindex]').hidden = !saved || (identity(effective()) === identity(saved.embedding) && !saved.embeddingStatus?.includes("failed"))
   }
+  // Bound both the headers and response body; a proxy/provider stall must
+  // never leave every settings control disabled forever.
+  async function fetchConfig(url='/api/ai/config', options={}) {
+    const controller=new AbortController()
+    const timer=setTimeout(()=>controller.abort(),40000)
+    try {
+      const response=await fetch(url,{...options,signal:controller.signal})
+      const text=await response.text()
+      return {ok:response.ok,status:response.status,text:async()=>text,json:async()=>JSON.parse(text)}
+    } catch(err) {
+      if(controller.signal.aborted){const timeout=new Error('The server did not respond in time. Reopen settings to check whether your changes were saved before trying again.');timeout.name='TimeoutError';throw timeout}
+      throw err
+    } finally {clearTimeout(timer)}
+  }
   async function request(action) {
-    const r = await fetch('/api/ai/config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload(action))})
+    const r = await fetchConfig('/api/ai/config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload(action))})
     const text = await r.text();let data
     try { data=JSON.parse(text) } catch { data={} }
     if (!r.ok) throw new Error(data.error || text || 'Request failed')
@@ -139,7 +188,7 @@ async function renderAITab(container, options = {}) {
       await new Promise(resolve=>setTimeout(resolve,1000))
       if (!pane.isConnected || generation!==monitorGeneration) return
       try {
-        const r=await fetch('/api/ai/config',{cache:'no-store'})
+        const r=await fetchConfig('/api/ai/config',{cache:'no-store'})
         if(!r.ok) throw new Error('Status unavailable')
         const data=await r.json()
         if(generation!==monitorGeneration || !pane.isConnected) return
@@ -152,7 +201,7 @@ async function renderAITab(container, options = {}) {
     }
   }
   async function load() {
-    const r=await fetch('/api/ai/config',{cache:'no-store'})
+    const r=await fetchConfig('/api/ai/config',{cache:'no-store'})
     if (!r.ok) throw new Error('AI configuration is unavailable. In multi-user mode, use Admin → AI provider.')
     saved=await r.json()
     sources=saved.sources.map(s=>({...s,apiKey:'',clearKey:false}));defaultID=saved.defaultSource
@@ -164,11 +213,13 @@ async function renderAITab(container, options = {}) {
     f('chatVision').checked=!!saved.chatVision
     f('useSameProvider').checked=saved.embedding.useSameProvider !== false
     f('reindex').checked=false
-    pane.querySelector('[data-source]').textContent=(options.admin ? 'Deployment configuration — applies to all users and shared agents. ' : 'Configure the AI used by your agent and apps. ')+(saved.source==='server' ? 'Using server defaults.' : '')
+    pane.querySelector('[data-action="reset"]').hidden=saved.serverDefaultsAvailable===false
+    pane.querySelector('[data-source]').textContent=(options.admin ? 'Deployment configuration — applies to all users and shared agents. ' : 'Configure the AI used by your agent and apps. ')+(saved.source==='server' && saved.serverDefaultsAvailable!==false ? 'Using server defaults.' : '')
     showEmbeddingStatus(saved)
     const generation=++monitorGeneration
     if(saved.embeddingApplying) void monitorEmbedding(generation)
-    refresh()
+    showModels('embed-')
+    dirty=false;showSaveState();refresh()
   }
   async function perform(action, quiet=false) {
     if (busy) return
@@ -180,49 +231,72 @@ async function renderAITab(container, options = {}) {
     }
     busy=true;const controls=[...form.querySelectorAll('input,select,button')]
     controls.forEach(el=>el.disabled=true);status.classList.remove('error')
-    if (!quiet) status.textContent=action.includes('test') ? 'Testing…' : 'Working…'
+    const connectionPrefix=action==='embedding_models'?'embed-':''
+    const localStatus=action.endsWith('models')?pane.querySelector(`[data-connected="${connectionPrefix}"]`):null
+    if(localStatus)localStatus.textContent='Connecting…'
+    showSaveState()
+    if (!quiet) status.textContent=action.endsWith('models') ? 'Connecting to the provider…' : action.includes('test') ? 'Testing…' : 'Saving…'
+    let persisted=false
     try {
       let result
       if (action==='reset') {
-        const r=await fetch('/api/ai/config?reindex=true',{method:'DELETE'});result=await r.json();if(!r.ok) throw new Error(result.error || 'Cannot restore server settings')
+        const r=await fetchConfig('/api/ai/config?reindex=true',{method:'DELETE'});result=await r.json();if(!r.ok) throw new Error(result.error || 'Cannot restore server settings')
       } else result=await request(action)
       if (action.endsWith('models')) {
         const list=pane.querySelectorAll('datalist')[action==='models' ? 0 : 1];list.replaceChildren()
         for(const name of result.models || []) {const o=document.createElement('option');o.value=name;list.appendChild(o)}
-        if (!quiet) status.textContent=`${result.models.length} models available. Select or enter a model ID.`
+        catalogs.set(catalogKey(connectionPrefix),result.models||[]);showModels(connectionPrefix)
+        localStatus.textContent=result.models?.length ? `Connected · ${result.models.length} models` : 'Connected, but no models were returned. Enter a model ID below.'
+        if (!quiet) status.textContent='Connection checked. Select a model to save and start using it.'
       } else if (action==='test') status.textContent='The model responded. This text test does not verify vision support.'
       else if(action==='embedding_test') status.textContent=`Embedding endpoint verified · ${result.dimension} dimensions.`
-      else {await load();status.textContent='Saved. Chat applies from the next message.'+' Embeddings apply automatically.'}
-    } catch(err) {status.textContent=err.message;status.classList.add('error')}
-    finally {busy=false;controls.forEach(el=>el.disabled=false);pane.querySelectorAll('[data-sources] button').forEach(el=>el.disabled=false);refresh()}
+      else {persisted=true;status.textContent='Saved. Reloading configuration…';await load();status.textContent='Saved. Chat applies from the next message.'+' Embeddings apply automatically.'}
+      return true
+    } catch(err) {if(persisted){dirty=false;saved.model=payload('save').model}status.textContent=(persisted?'Saved, but unable to refresh the page. ' : action==='save'&&err.name!=='TimeoutError'?'Not saved: ':'')+err.message;status.classList.add('error');if(localStatus)localStatus.textContent='Connection failed: '+err.message;return persisted}
+    finally {busy=false;controls.forEach(el=>el.disabled=false);pane.querySelectorAll('[data-sources] button').forEach(el=>el.disabled=false);showSaveState();refresh()}
   }
   for(const prefix of ['', 'embed-']) {
     f(prefix+'provider').addEventListener('change',()=>{
       f(prefix+'baseURL').value=defaults[f(prefix+'provider').value];f(prefix+'apiKey').value='';f(prefix+'model').value='';f(prefix+'clearKey').checked=false
-      pane.querySelectorAll('datalist')[prefix ? 1 : 0].replaceChildren();f('reindex').checked=false;refresh()
+      pane.querySelectorAll('datalist')[prefix ? 1 : 0].replaceChildren();f('reindex').checked=false;invalidate(prefix);refresh()
     })
+    for(const key of ['baseURL','apiKey','clearKey']) f(prefix+key).addEventListener('input',()=>invalidate(prefix))
+    f(prefix+'modelChoice').addEventListener('change',async e=>{if(!e.target.value)return;f(prefix+'model').value=e.target.value;if(!prefix&&!sources.find(s=>s.id===defaultID)?.model)defaultID=selectedID;markDirty();await perform('save')})
   }
   pane.querySelector('[data-add-source]').addEventListener('click',()=>{
     syncSource();const id='source_'+Array.from(crypto.getRandomValues(new Uint8Array(6)),b=>b.toString(16).padStart(2,'0')).join('')
-    sources.push({id,name:'New source',provider:'openai',baseURL:defaults.openai,apiKey:'',model:''});editSource(id);f('sourceName').focus()
+    sources.push({id,name:'New source',provider:'openai',baseURL:defaults.openai,apiKey:'',model:''});editSource(id);markDirty();f('sourceName').focus()
   })
   pane.querySelector('[data-default-source]').addEventListener('click',()=>{
-    syncSource();defaultID=selectedID;f('reindex').checked=false;drawSources();refresh()
+    syncSource();defaultID=selectedID;f('reindex').checked=false;markDirty();catalogs.delete('embedding');showModels('embed-');drawSources();refresh();perform('save')
   })
-  pane.querySelector('[data-remove-source]').addEventListener('click',()=>{
-    if(selectedID===defaultID) {status.textContent='Choose another default source before removing this one.';return}
-    if(!f('useSameProvider').checked && f('embeddingSource').value===selectedID) {status.textContent='Choose another embedding source before removing this one.';return}
-    sources=sources.filter(s=>s.id!==selectedID);editSource(defaultID)
+  pane.querySelector('[data-remove-source]').addEventListener('click',async()=>{
+    if(sources.length===1)return
+    syncSource()
+    const removing=sources.find(s=>s.id===selectedID), persisted=saved.sources.some(s=>s.id===selectedID)
+    const replacement=sources.find(s=>s.id!==selectedID)
+    const usesEmbedding=!f('useSameProvider').checked && f('embeddingSource').value===selectedID
+    const message=`Remove “${removing.name||removing.id}”?`+(selectedID===defaultID ? ` “${replacement.name||replacement.id}” will become the default.` : '')+(usesEmbedding?' Embeddings will use the default source instead. An index rebuild may need confirmation.':'')
+    if(persisted) {const ok=typeof PrismModal!=='undefined'?await PrismModal.confirm(message):window.confirm(message);if(!ok)return}
+    const before=sources.map(s=>({...s})),oldDefault=defaultID,oldSelected=selectedID,oldEmbedding=f('embeddingSource').value,oldSame=f('useSameProvider').checked
+    sources=sources.filter(s=>s.id!==selectedID)
+    if(selectedID===defaultID)defaultID=replacement.id
+    if(usesEmbedding){f('useSameProvider').checked=true;f('embeddingSource').value=''}
+    catalogs.delete(selectedID);editSource(defaultID);markDirty()
+    if(persisted) {
+      if(await perform('save'))status.textContent='Source removed and saved.'
+      else {sources=before;defaultID=oldDefault;editSource(oldSelected);f('embeddingSource').value=oldEmbedding;f('useSameProvider').checked=oldSame;refresh();status.textContent='Source was not removed. '+status.textContent}
+    }else{status.textContent='Unsaved source discarded. Other changes have not been saved.'}
   })
-  form.addEventListener('change',()=>{syncSource();drawSources();refresh()})
-  form.addEventListener('input',refresh)
+  form.addEventListener('change',e=>{if(busy)return;markDirty();syncSource();drawSources();refresh()})
+  form.addEventListener('input',()=>{markDirty();refresh()})
   form.addEventListener('submit',e=>{e.preventDefault();perform('save')})
   pane.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>perform(b.dataset.action)))
   try {
-    if(!options.admin) {const me=await fetch('/api/me').then(r=>r.json());if(me.multiUser){form.remove();pane.querySelector('[data-source]').textContent='AI providers are configured by the global administrator in Admin → AI provider.';return}}
+    if(!options.admin) {const me=await fetch('/api/me').then(r=>r.json());if(me.multiUser){form.remove();pane.querySelector('[data-action="reset"]').hidden=saved.serverDefaultsAvailable===false
+    pane.querySelector('[data-source]').textContent='AI providers are configured by the global administrator in Admin → AI provider.';return}}
     await load()
     form.hidden=false
-    if(sources.find(s=>s.id===selectedID)?.keyConfigured || f('provider').value==='ollama' || f('provider').value==='other') await perform('models',true)
-    if(effective().provider!=='anthropic' && effective().baseURL) await perform('embedding_models',true)
+    status.textContent='Enter a provider URL or API key, click Connect, then choose a model. Selecting a model saves the form; other edits stay unsaved until Save changes.'
   } catch(err) {status.textContent=err.message;status.classList.add('error');form.querySelectorAll('button').forEach(b=>b.disabled=true)}
 }

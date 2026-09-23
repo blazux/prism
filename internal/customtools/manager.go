@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"prism/internal/ollama"
+	"prism/internal/workspace"
 )
 
 type Tool struct {
@@ -65,6 +66,11 @@ type Manager struct {
 
 func NewManager(dir string) *Manager {
 	os.MkdirAll(dir, 0755)
+	return LoadManager(dir)
+}
+
+// LoadManager discovers existing tools without creating deployment directories.
+func LoadManager(dir string) *Manager {
 	m := &Manager{dir: dir}
 	m.Reload()
 	return m
@@ -163,7 +169,7 @@ func (m *Manager) ToOllamaTools() []ollama.Tool {
 }
 
 func (m *Manager) discover() []Tool {
-	entries, err := os.ReadDir(m.dir)
+	entries, err := workspace.ReadDir(filepath.Dir(m.dir), filepath.Base(m.dir))
 	if err != nil {
 		return nil
 	}
@@ -182,7 +188,7 @@ func (m *Manager) discover() []Tool {
 
 // parseToolMeta scans the first 30 lines for a "# TOOL: {...}" comment.
 func parseToolMeta(path, filename string) (Tool, bool) {
-	f, err := os.Open(path)
+	f, err := workspace.Open(filepath.Dir(filepath.Dir(path)), filepath.Join(filepath.Base(filepath.Dir(path)), filename))
 	if err != nil {
 		return Tool{}, false
 	}
