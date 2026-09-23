@@ -27,6 +27,7 @@ func OpenPersonalData(ctx context.Context, owner, dsn string, key []byte) (*Pers
 	if err != nil {
 		return nil, err
 	}
+	ms.LocalVaultDisabled = true
 	return &PersonalData{owner: owner, store: ms}, nil
 }
 func (d *PersonalData) acquire(owner string) (*memory.Store, func(), bool) {

@@ -16,9 +16,9 @@ services:
       - workspace:/workspace
       - server-private:/var/lib/prism
       - /var/run/docker.sock:/var/run/docker.sock
-      # To connect a Markdown vault (Obsidian/Logseq) to the Notes app, mount it
-      # here and set its path in Settings → Notes (e.g. /vault):
-      # - /path/to/your/ObsidianVault:/vault
+      # Optional host vault: set NOTES_VAULT_PATH in .env, then select /vault
+      # in Settings → Notes. Unset = a managed volume, no host folder exposed.
+      - ${NOTES_VAULT_PATH:-notes-vault}:/vault
       # LLM_BACKEND=anthropic without an API key runs on your Claude subscription:
     environment:
       - OLLAMA_URL=${OLLAMA_URL}
@@ -175,6 +175,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  notes-vault:
   server-private:
   workspace:
   pgdata:

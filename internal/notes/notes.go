@@ -49,6 +49,9 @@ func ProviderFor(ctx context.Context, store *memory.Store, session string) Provi
 			return &unavailableProvider{err}
 		}
 		if kind == "vault" {
+			if store.LocalVaultDisabled {
+				return &unavailableProvider{fmt.Errorf("local Markdown vaults are unavailable in this deployment; select Prism database in Settings → Notes")}
+			}
 			dir, _, perr := store.GetConfig(ctx, KeyVaultPath)
 			if perr != nil {
 				return &unavailableProvider{perr}

@@ -32,6 +32,7 @@ func OpenPersonalEnvironment(ctx context.Context, cfg Config, key []byte, execut
 	if err != nil {
 		return nil, err
 	}
+	ms.LocalVaultDisabled = true
 	s.memStore = ms
 	s.mcpMgr.SetStore(ms)
 	for _, dir := range []string{"plugins", "data", ".screenshots"} {

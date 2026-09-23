@@ -2050,14 +2050,14 @@ async function renderNotesTab(container) {
   wrap.style.cssText = 'max-width:640px'
   wrap.innerHTML = `
     <h2 style="margin:0 0 4px;font-size:16px">Notes storage</h2>
-    <p style="color:var(--text3);font-size:12.5px;margin:0 0 18px;line-height:1.5">Keep notes in Prism's database, or connect a Markdown <b>vault</b> (Obsidian / Logseq). In vault mode your notes are plain <code>.md</code> files in the folder — edit them here or in your own editor, both ways. The note's title is the filename; <code>[[wikilinks]]</code> and frontmatter are preserved.</p>
+    <p id="notes-storage-help" style="color:var(--text3);font-size:12.5px;margin:0 0 18px;line-height:1.5">Keep notes in Prism's database, or connect a Markdown <b>vault</b> (Obsidian / Logseq). In vault mode your notes are plain <code>.md</code> files in the folder — edit them here or in your own editor, both ways. The note's title is the filename; <code>[[wikilinks]]</code> and frontmatter are preserved.</p>
     <div class="appe-card">
       <div class="appe-row"><label>Source</label>
         <select id="notes-prov"><option value="local">Prism database (default)</option><option value="vault">Markdown vault (Obsidian / Logseq)</option></select></div>
       <div class="appe-row" id="notes-path-row" style="display:none"><label>Vault folder</label>
         <input id="notes-path" placeholder="/vault" spellcheck="false" style="flex:1;max-width:360px"></div>
     </div>
-    <p id="notes-path-help" style="display:none;color:var(--text3);font-size:11.5px;margin:8px 2px;line-height:1.5">The folder must be mounted into the server container and readable by it (e.g. a volume mapped to <code>/vault</code>). Subfolders are scanned; dotfolders like <code>.obsidian</code> / <code>.git</code> are skipped.</p>
+    <p id="notes-path-help" style="display:none;color:var(--text3);font-size:11.5px;margin:8px 2px;line-height:1.5">For a local folder, set <code>NOTES_VAULT_PATH</code> in <code>.env</code>, run <code>docker compose up -d --no-deps prism-server</code>, then enter <code>/vault</code> here. Custom mounts can use their own container path. Subfolders are scanned; dotfolders like <code>.obsidian</code> / <code>.git</code> are skipped.</p>
     <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
       <button class="btn btn-primary" id="notes-save">Save</button>
       <span id="notes-status" style="font-size:12px;color:var(--text3)"></span>
@@ -2067,7 +2067,21 @@ async function renderNotesTab(container) {
         pathHelp = wrap.querySelector('#notes-path-help'), pathInput = wrap.querySelector('#notes-path'),
         status = wrap.querySelector('#notes-status')
   const sync = () => { const v = prov.value === 'vault'; pathRow.style.display = v ? '' : 'none'; pathHelp.style.display = v ? '' : 'none' }
-  try { const d = await (await fetch('/api/notes/source')).json(); prov.value = d.provider || 'local'; pathInput.value = d.path || '' } catch {}
+  try {
+    const d = await (await fetch('/api/notes/source')).json()
+    prov.value = d.provider || 'local'; pathInput.value = d.path || ''
+    if (d.vault_available === false) {
+      prov.querySelector('option[value="vault"]').remove()
+      prov.value = 'local'
+      wrap.querySelector('#notes-storage-help').textContent = 'Your notes are stored in your personal Prism database. A local Obsidian or Logseq folder on your computer cannot be connected to this hosted instance.'
+      if (d.provider === 'vault') {
+        status.textContent = 'The previous vault is unavailable here. Save to use Prism database. Existing vault files will not be imported or deleted.'
+      } else {
+        wrap.querySelector('#notes-save').hidden = true
+      }
+      prov.disabled = true
+    }
+  } catch {}
   sync()
   prov.addEventListener('change', sync)
   wrap.querySelector('#notes-save').addEventListener('click', async () => {
@@ -2545,7 +2559,25 @@ async function renderRAGTab(container) {
       msg.style.cssText = 'padding:40px 24px;color:var(--text3);font-size:13px'
       msg.textContent = 'RAG not ready: ' + (data.status || 'initializing…')
       container.appendChild(msg)
-      setTimeout(() => { if (currentTab === 'knowledge') renderTab('knowledge') }, 2000)
+      // Update the existing notice instead of clearing the whole tab on each poll.
+      const poll = async () => {
+        if (currentTab !== 'knowledge' || !msg.isConnected) return
+        try {
+          const response = await fetch('/api/rag/status')
+          if (!response.ok) throw new Error('Status unavailable')
+          const next = await response.json()
+          if (currentTab !== 'knowledge' || !msg.isConnected) return
+          if (next.ready) {
+            container.replaceChildren()
+            await renderRAGTab(container)
+            return
+          }
+          const text = 'RAG not ready: ' + (next.status || 'initializing…')
+          if (msg.textContent !== text) msg.textContent = text
+        } catch { /* Keep the current notice during a transient network failure. */ }
+        if (currentTab === 'knowledge' && msg.isConnected) setTimeout(poll, 2000)
+      }
+      setTimeout(poll, 2000)
       return
     }
   } catch { /* ignore, render anyway */ }

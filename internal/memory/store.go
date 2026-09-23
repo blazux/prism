@@ -37,8 +37,11 @@ type HistoryEntry struct {
 }
 
 type Store struct {
-	pool   *pgxpool.Pool
-	encKey []byte // AES-256 key for encrypting secret values
+	// LocalVaultDisabled is a deployment policy, set before serving requests.
+	// Scoped views retain it; user configuration cannot enable server files.
+	LocalVaultDisabled bool
+	pool               *pgxpool.Pool
+	encKey             []byte // AES-256 key for encrypting secret values
 	// cfgScope, when set ("u<id>:"), prefixes config keys and secret names so
 	// external integrations (email, calendar, vault, OAuth…) are per-user instead
 	// of deployment-global. Obtained via ConfigScope; zero value = legacy global.

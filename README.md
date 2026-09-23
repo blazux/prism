@@ -64,6 +64,15 @@ For Ollama running on the Docker host, use `http://host-gateway:11434`; for an O
 
 In multi-user mode, AI configuration belongs in **Admin → AI provider**, managed by the global administrator.
 
+### Optional local Notes vault
+
+To use an existing Obsidian/Logseq folder, set `NOTES_VAULT_PATH=/absolute/path/to/MyVault`
+in `.env` (the folder must be on the Docker host), then run
+`docker compose up -d --no-deps prism-server`. In **Settings → Notes**, select
+**Markdown vault** and enter `/vault`. Prism reads and writes this folder;
+existing database notes are not automatically moved. Leave the variable unset
+if you use database notes. This option is for self-hosted Prism, not Prism Cloud.
+
 ### The documentation is the agent
 
 Once your first model is connected, **just ask the agent**. It has Prism's built-in documentation and tools to help configure the app, add other AI sources, choose models and set up embeddings. For example:

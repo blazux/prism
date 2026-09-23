@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 )
 
@@ -17,7 +18,14 @@ func PrepareEmbeddingIndex(ctx context.Context, dsn string, embedder *Embedder, 
 	if dim < 1 || dim > 16000 || identity == "" {
 		return errors.New("invalid embedding dimension or identity")
 	}
-	db, err := pgx.Connect(ctx, dsn)
+	// Hosted DSNs include client-side pool options. Parse those with pgxpool
+	// so only actual connection parameters reach PostgreSQL, retaining the
+	// tenant search_path and all TLS/authentication settings.
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return err
+	}
+	db, err := pgx.ConnectConfig(ctx, config.ConnConfig)
 	if err != nil {
 		return err
 	}

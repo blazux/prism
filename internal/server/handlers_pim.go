@@ -332,7 +332,11 @@ func (s *Server) handleNotesSource(w http.ResponseWriter, r *http.Request) {
 		if prov == "" {
 			prov = "local"
 		}
-		writeJSON(w, map[string]interface{}{"provider": prov, "path": path})
+		vaultAllowed := !s.userStore(r).LocalVaultDisabled
+		if !vaultAllowed {
+			path = ""
+		}
+		writeJSON(w, map[string]interface{}{"provider": prov, "path": path, "vault_available": vaultAllowed})
 	case "POST":
 		var b struct {
 			Provider string `json:"provider"`
@@ -343,6 +347,10 @@ func (s *Server) handleNotesSource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if b.Provider == "vault" {
+			if s.userStore(r).LocalVaultDisabled {
+				http.Error(w, "Local Markdown vaults are unavailable in this deployment. Use Prism database for notes.", http.StatusForbidden)
+				return
+			}
 			b.Path = strings.TrimSpace(b.Path)
 			if b.Path == "" {
 				http.Error(w, "vault path required", 400)

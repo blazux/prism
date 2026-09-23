@@ -22,10 +22,15 @@ Prism will help.
 
 ## Notes → Obsidian / Logseq vault
 A vault is just a folder of Markdown files, so Prism reads and writes it directly.
+This source is available for self-hosted Prism only. Hosted personal environments
+use the personal Prism database and reject local vault paths, including through
+the API and agent tools. A path on the user's computer is not a server mount.
+Workspace files and synchronization tools are separate capabilities; they do not
+connect a folder to the Notes app automatically.
 
-1. Make the vault folder reachable by the **server container**. In
-   `docker-compose.yml`, mount it under prism-server, e.g.
-   `- /path/to/MyVault:/vault`, then restart.
+1. In `.env`, set `NOTES_VAULT_PATH=/absolute/path/to/MyVault` to an existing
+   folder on the Docker host. Run `docker compose up -d --no-deps prism-server`
+   to recreate the server with the mount (a restart alone does not update mounts).
 2. In Prism: **Settings → Notes → Source → Markdown vault**, and set the folder
    to `/vault` (the path *inside* the container). Save.
 
