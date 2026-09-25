@@ -300,6 +300,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 		options.executor(executor)
 	}
 	ag := agent.New(ollamaClient, executor, model, agentStore, personality)
+	ag.SetChatBlind(!ai.cfg.ChatVision)
 	ag.SetSession(sessionID, personality)
 	ag.SetLimits(limits)
 	if options != nil {

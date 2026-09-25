@@ -334,6 +334,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client.ag = agent.New(ollamaClient, executor, model, ms, personality)
+	client.ag.SetChatBlind(!ai.cfg.ChatVision)
 	client.wireApproval(client.ag)
 	client.ag.SetSession(sessionID, personality)
 	client.sessionID = sessionID
@@ -649,6 +650,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if !sameAIConfig(ai.cfg, nextAI.cfg) {
 				ai = nextAI
 				executor.SetChatBlind(!ai.cfg.ChatVision)
+				client.ag.SetChatBlind(!ai.cfg.ChatVision)
 				model = ai.cfg.Model
 				be := ai.newChatBackend()
 				executor.SetLLM(be, model)
@@ -916,6 +918,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			chatBE := ai.chatBackendFor(model)
 			executor.SetLLM(chatBE, model)
 			client.ag = agent.New(chatBE, executor, model, curMS, curPersonality)
+			client.ag.SetChatBlind(!ai.cfg.ChatVision)
 			client.wireApproval(client.ag)
 			client.ag.SetSession(client.sessionID, curPersonality)
 			if ragContextFn != nil {

@@ -152,6 +152,10 @@ type Agent struct {
 	// (spoken, short, no markup) and disables extended reasoning — never the
 	// agent's identity, which stays the same across channels.
 	channel string
+	// chatBlind is true when the selected conversation model cannot accept image
+	// parts. Tool previews are captioned by the executor in this mode; user
+	// attachments are kept as a textual notice instead of breaking the request.
+	chatBlind bool
 }
 
 // Limits bounds one turn of the agent loop. Zero values mean "not set": the
@@ -220,6 +224,11 @@ func NormalizeReasoningEffort(s string) string {
 // headless runs of a group's shared agent, whose budget is set by the group
 // admin in room_config rather than in a user's config scope.
 func (a *Agent) SetLimits(l Limits) { a.limitsOverride = l }
+
+// SetChatBlind marks the selected chat model as text-only. This is separate
+// from the executor's preview setting because user attachments are assembled
+// by Agent.Chat itself.
+func (a *Agent) SetChatBlind(blind bool) { a.chatBlind = blind }
 
 // effectiveLimits resolves override → config → default.
 func (a *Agent) effectiveLimits() (maxIter int, thinking bool) {
@@ -1191,6 +1200,14 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	// Load history from DB on first call in this session
 	a.loadHistoryFromDB(ctx)
 
+	// Text-only OpenAI-compatible models reject image parts with a hard 400. Keep
+	// the turn usable: the user message remains in the conversation, but the
+	// model receives a clear notice that it cannot inspect the attachment.
+	if a.chatBlind && len(images) > 0 {
+		userMsg += fmt.Sprintf("\n[The user attached %d image(s), but this chat model cannot inspect images.]", len(images))
+		images = nil
+	}
+
 	// Prefix user message with timestamp so the model can reason about time.
 	// Only user messages get the prefix — assistant messages don't, to avoid the model
 	// mimicking the pattern and outputting timestamps in its own responses.
@@ -1237,6 +1254,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 	var emptyRetried bool
 	intentNudges := 0
+	visionRetry := false
 	// True once the user rejected a tool call this turn. The model then ends its
 	// reply on "what would you like instead?" — which the intent-nudge heuristic
 	// reads as an unfulfilled announcement and would push it to retry the very
@@ -1260,6 +1278,16 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			return
 		}
 		if err != nil {
+			// Some compatible gateways advertise no vision capability only when
+			// they receive the first image. Recover once by replaying the request
+			// without image parts and remember the capability for later turns.
+			if !visionRetry && isVisionUnsupportedError(err) {
+				visionRetry = true
+				a.SetChatBlind(true)
+				a.stripHistoryImages()
+				log.Printf("[agent] chat backend rejected images; retrying without image parts: %v", err)
+				continue
+			}
 			// Intentional cancel (user clicked stop, sent new message, or closed tab):
 			// close the bubble cleanly without showing an error message.
 			if errors.Is(err, context.Canceled) {
@@ -1525,6 +1553,36 @@ func (a *Agent) handleUpdateSystemPrompt(ctx context.Context, rawArgs json.RawMe
 		}
 	}
 	return "System prompt personality updated successfully. Changes take effect on the next message."
+}
+
+// stripHistoryImages removes image payloads after a backend proves it is text-only.
+// Keep a short marker so the model knows an attachment existed and can ask the
+// user for a description instead of hallucinating what it contained.
+func (a *Agent) stripHistoryImages() {
+	a.histMu.Lock()
+	defer a.histMu.Unlock()
+	for i := range a.history {
+		if len(a.history[i].Images) == 0 {
+			continue
+		}
+		count := len(a.history[i].Images)
+		a.history[i].Images = nil
+		marker := fmt.Sprintf("\n[Omitted %d image(s): this chat model cannot inspect images.]", count)
+		if !strings.Contains(a.history[i].Content, "this chat model cannot inspect images") {
+			a.history[i].Content += marker
+		}
+	}
+}
+
+func isVisionUnsupportedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "at most 0 image") ||
+		strings.Contains(msg, "does not support image") ||
+		strings.Contains(msg, "image input is not supported") ||
+		(strings.Contains(msg, "image") && strings.Contains(msg, "not supported"))
 }
 
 func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan<- Event) (string, []ollama.ToolCall, string, error) {
