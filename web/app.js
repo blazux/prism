@@ -4,6 +4,7 @@
 
 let ws = null
 let isStreaming = false
+let activeRunStatus = 'idle'
 let chatOpen = false
 let currentAssistantEl = null
 let currentAssistantContent = ''
@@ -132,12 +133,14 @@ function persistState(id, patch) {
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(currentSessionID)}`)
+  const socket = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(currentSessionID)}`)
+  ws = socket
 
-  ws.onopen  = () => { clearChat(); batchLoading = true; send({ type: 'approval_mode', content: approvalMode }); if (currentContext) send({ type: 'set_context', content: currentContext }) }
-  ws.onclose = () => { setContainerBadge('unknown'); setTimeout(connect, 2000) }
+  ws.onopen  = () => { if (ws !== socket) return; closeSecretDialog(); secretRequestID = null; clearChat(); batchLoading = true; send({ type: 'approval_mode', content: approvalMode }); if (currentContext) send({ type: 'set_context', content: currentContext }) }
+  ws.onclose = () => { if (ws !== socket) return; setContainerBadge('unknown'); setTimeout(() => { if (ws === socket) connect() }, 2000) }
   ws.onerror = () => {}
   ws.onmessage = (e) => {
+    if (ws !== socket) return
     try { handleServerMsg(JSON.parse(e.data)) }
     catch(err) { console.error('[ws] message error:', err) }
   }
@@ -186,6 +189,23 @@ function requestActiveEditor(msg) {
 
 function handleServerMsg(msg) {
   switch (msg.type) {
+    case 'run_replay':
+      clearChat()
+      activeRunStatus = msg.status
+      handleServerMsg(msg.history)
+      for (const event of msg.events || []) handleServerMsg(event)
+      setStreaming(['running','waiting_for_input','waiting_for_approval'].includes(msg.status))
+      break
+    case 'run_user': appendUserMessage(msg.content, msg.images); break
+    case 'run_status':
+      activeRunStatus = msg.status
+      if (!['running','waiting_for_input','waiting_for_approval'].includes(msg.status)) finalizeStream()
+      loadSessions()
+      setStreaming(['running','waiting_for_input','waiting_for_approval'].includes(msg.status))
+      if (msg.status === 'interrupted') appendError('The server restarted during this task. Review the results before asking to continue.')
+      if (msg.status === 'failed') appendError('The task failed. Review the error above before continuing.')
+      if (msg.status === 'timed_out') appendError('The task reached its time limit. Review the results before continuing.')
+      break
     case 'editor_request': requestActiveEditor(msg); break
     case 'stream':          appendStream(msg.content); break
     case 'stream_end':      finalizeStream(); break
@@ -216,7 +236,7 @@ function handleServerMsg(msg) {
     case 'tools_updated':
     case 'mcp_updated':
       break
-    case 'secret_request': showSecretDialog(msg.name, msg.description); break
+    case 'secret_request': showSecretDialog(msg.name, msg.description, msg.id); break
     case 'approval_request': appendApprovalRequest(msg); break
     case 'open_file':    break  // handled via file_content callback
     case 'file_content': openEditor(msg.path, msg.content); break
@@ -576,6 +596,9 @@ function autoResizeTextarea(el) {
 }
 
 function setStreaming(v) {
+  // A text segment can end while tools (or subagents) are still working.
+  // Only the server task status ends a background task.
+  v = v || ['running','waiting_for_input','waiting_for_approval'].includes(activeRunStatus)
   isStreaming = v
   const btn = document.getElementById('send-btn')
   if (v) {
@@ -745,6 +768,8 @@ function appendError(text) {
 }
 
 function clearChat() {
+  activeRunStatus = 'idle'
+  pendingAttachments = []
   document.getElementById('chat-messages').innerHTML = ''
   currentAssistantEl = null
   currentAssistantContent = ''
@@ -1037,7 +1062,9 @@ document.addEventListener('click', e => {
 
 // ─── Secret dialog ────────────────────────────────────────────────────────────
 
-function showSecretDialog(name, description) {
+let secretRequestID = null
+function showSecretDialog(name, description, id) {
+  secretRequestID = id
   const overlay = document.getElementById('secret-overlay')
   const dialog  = document.getElementById('secret-dialog')
   const desc    = document.getElementById('secret-dialog-desc')
@@ -1057,14 +1084,14 @@ function closeSecretDialog() {
 
 window.cancelSecretDialog = function() {
   closeSecretDialog()
-  send({ type: 'secret_response', content: '' })
+  send({ type: 'secret_response', id: secretRequestID, content: '' })
 }
 
 window.submitSecretDialog = function() {
   const val = document.getElementById('secret-dialog-input').value
   if (!val) return
   closeSecretDialog()
-  send({ type: 'secret_response', content: val })
+  send({ type: 'secret_response', id: secretRequestID, content: val })
 }
 
 window.handleSecretKey = function(e) {
@@ -1695,6 +1722,14 @@ function renderBoardList(sessions) {
     label.className = 'rail-label'
     label.textContent = sess.name
     item.append(icon, label)
+    if (sess.runStatus) {
+      const badge = document.createElement('span')
+      badge.className = 'rail-badge'
+      badge.textContent = sess.runStatus.startsWith('waiting') ? '…' : '●'
+      badge.title = sess.runStatus.startsWith('waiting') ? 'Waiting for your input' : 'Agent working'
+      icon.appendChild(badge)
+      item.title += ' — ' + badge.title
+    }
 
     const rename = document.createElement('span')
     rename.className = 'rail-board-act'
@@ -2400,6 +2435,7 @@ async function initApp() {
   connect()
   loadModels()
   setInterval(loadModels, 30000)
+  setInterval(() => { if (!document.hidden) loadSessions() }, 10000)
   refreshMailBadge()
   setInterval(refreshMailBadge, 60000)
 

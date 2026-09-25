@@ -10,7 +10,7 @@ password** instead:
 
 - Gmail: turn on 2-Step Verification, then **Google Account → Security → App
   passwords**.
-- Outlook / Hotmail: **account.microsoft.com → Security** (needed when 2FA is on).
+- Outlook.com / Hotmail requires OAuth2, which the email client does not yet implement. Do not suggest an app password as a workaround. Microsoft Calendar OAuth is separate.
 - iCloud: **appleid.apple.com → Sign-In and Security**.
 - Yahoo: **Account Security**.
 
@@ -73,3 +73,19 @@ either leave it on Auto or pick **Google** explicitly here.
 ## Asking the agent
 
 The agent can connect CalDAV and Todoist for you, and point notes at a Markdown vault. Passwords and tokens never go through the chat: the agent first asks for them with its secret dialog (they are stored as secrets), then uses the secret to connect — and it tests the connection before saving anything. It can also switch the active calendar/tasks source ("use Todoist for my tasks"). Google and Microsoft accounts still need the browser sign-in from Settings → Calendar; the agent will guide you there.
+
+## Hosted personal deployments
+
+Settings adapt to the capabilities returned by `/api/platform`. The agent also
+receives the deployment limitations in its integration status. Local vaults and
+the bundled `protonmail-bridge` preset are unavailable in hosted environments;
+self-hosted Prism retains them. Custom public mail endpoints remain configurable.
+A Docker Bridge inside a workspace is not automatically reachable by the mail
+client: its IMAP/SMTP connections currently originate in the application server,
+not the workspace. Do not present that as a tested setup recipe.
+
+Webhook URLs must be used exactly as returned by Prism (UI or webhook tool).
+Hosted URLs route to their owner without a dashboard session and still require
+the webhook token. Suspension, disabled/deleted hooks and rotated tokens deny
+access. Hosted webhook execution is bounded; callers receiving HTTP 429 should
+retry with backoff. No additional tool arguments are required.

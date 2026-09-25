@@ -14,7 +14,7 @@ test('Knowledge polls a stable notice, stops when detached, and renders once rea
   replaceChildren() { replacements++; notices.forEach(n => n.isConnected = false); }
  };
  const ctx = {currentTab:'knowledge', computeRagManage:async()=>{},
-  fetch:async()=> {requests++; return {ok:true,json:async()=>({ready,status:'configuration failed'})};},
+  settingsFetch:async()=> {requests++; return {ok:true,json:async()=>({ready,status:'configuration failed'})};},
   setTimeout:f=>timers.push(f),
   document:{createElement:()=>({style:{},isConnected:true,set textContent(v){writes++;this.text=v;},get textContent(){return this.text;}})}
  };

@@ -21,6 +21,18 @@ import (
 )
 
 type Client struct {
+	turnDisabled []string
+
+	voice           bool
+	historyStale    bool
+	pendingSecretID string
+	approvals       map[string]chan bool
+
+	runMu        sync.RWMutex
+	run          *chatRun
+	disconnected bool
+	transportMu  sync.RWMutex
+
 	editorPending     map[string]chan json.RawMessage
 	editorSequence    uint64
 	conn              *websocket.Conn
@@ -50,21 +62,25 @@ func (s *Server) wsFileOpsAllowed(c *Client) bool {
 // wireApproval connects an agent to this client's manual-approval toggle: the
 // mode is re-read at every tool call, and the verdict travels back over the
 // same WS as an "approval_response" message (see the read pump).
-func (c *Client) wireApproval(ag *agent.Agent) {
+func (c *Client) wireApproval(ag *agent.Agent) { c.wireApprovalPrefix(ag, "") }
+func (c *Client) wireApprovalPrefix(ag *agent.Agent, prefix string) {
 	ag.SetApprovalFns(
 		func() bool {
+			if run := c.currentRun(); run != nil {
+				return run.approvalManual
+			}
 			c.mu.Lock()
 			defer c.mu.Unlock()
 			return c.approvalManual
 		},
 		func(ctx context.Context, toolID string) bool {
-			ch := make(chan bool, 1)
+			toolID = prefix + toolID
 			c.mu.Lock()
-			c.pendingApproval = ch
-			c.pendingApprovalID = toolID
+			ch := c.approvals[toolID]
 			c.mu.Unlock()
 			defer func() {
 				c.mu.Lock()
+				delete(c.approvals, toolID)
 				if c.pendingApproval == ch {
 					c.pendingApproval = nil
 					c.pendingApprovalID = ""
@@ -77,6 +93,18 @@ func (c *Client) wireApproval(ag *agent.Agent) {
 			case <-ctx.Done():
 				return false
 			}
+		},
+		func(toolID string) {
+			toolID = prefix + toolID
+			ch := make(chan bool, 1)
+			c.mu.Lock()
+			if c.approvals == nil {
+				c.approvals = make(map[string]chan bool)
+			}
+			c.approvals[toolID] = ch
+			c.pendingApproval = ch
+			c.pendingApprovalID = toolID
+			c.mu.Unlock()
 		},
 	)
 }
@@ -263,15 +291,24 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	ragContextFn := s.ragContextFn(ragScope)
 
 	client := &Client{
-		conn: conn,
-		send: make(chan []byte, 256),
-		user: wsUser,
+		voice: voiceCall,
+		conn:  conn,
+		send:  make(chan []byte, 256),
+		user:  wsUser,
 	}
 
 	if !voiceCall {
 		executor.SetEditor(client.editorTool)
 	}
 
+	if !voiceCall {
+		tools := s.serverToolsFor(wsUser)
+		if tools == nil {
+			tools = make(map[string]agent.ServerTool)
+		}
+		tools["subagent"] = s.subagentTool(client, executor)
+		executor.SetServerTools(tools)
+	}
 	model := ai.cfg.Model
 
 	// Personality per identity:
@@ -377,6 +414,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		ch := make(chan string, 1)
 		client.mu.Lock()
 		client.pendingSecretCh = ch
+		client.pendingSecretID = fmt.Sprintf("secret-%d", time.Now().UnixNano())
+		secretID := client.pendingSecretID
 		client.mu.Unlock()
 		defer func() {
 			client.mu.Lock()
@@ -388,6 +427,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		client.sendJSON(map[string]interface{}{
 			"type":        "secret_request",
+			"id":          secretID,
 			"name":        name,
 			"description": description,
 		})
@@ -401,8 +441,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(5 * time.Minute):
-			return fmt.Errorf("timed out waiting for secret input (5 min)")
 		}
 	})
 
@@ -480,7 +518,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		delete(s.clients, client)
 		s.mu.Unlock()
 		conn.Close()
-		client.cancelActive()
+		if voiceCall {
+			client.cancelActive()
+		} else {
+			s.detachRun(client)
+		}
 	}()
 
 	// Send initial state
@@ -500,67 +542,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		"custom": s.customMgr.All(),
 		"mcp":    mcpServers,
 	})
-
-	// Restore persisted conversation history for the UI
-	if ms != nil {
-		if entries, err := ms.LoadHistory(r.Context(), sessionID); err == nil && len(entries) > 0 {
-			type toolCallDef struct {
-				Function struct {
-					Name      string          `json:"name"`
-					Arguments json.RawMessage `json:"arguments"`
-				} `json:"function"`
-			}
-			type histMsg struct {
-				Role      string          `json:"role"`
-				Content   string          `json:"content"`
-				CreatedAt string          `json:"createdAt,omitempty"`
-				ToolName  string          `json:"toolName,omitempty"`
-				ToolInput json.RawMessage `json:"toolInput,omitempty"`
-			}
-			var msgs []histMsg
-			var pendingCalls []toolCallDef
-			var callIdx int
-			for _, e := range entries {
-				switch e.Role {
-				case "user":
-					msgs = append(msgs, histMsg{
-						Role:      "user",
-						Content:   e.Content,
-						CreatedAt: e.CreatedAt.Local().Format(time.RFC3339),
-					})
-					pendingCalls = nil
-					callIdx = 0
-				case "assistant":
-					if strings.TrimSpace(e.Content) != "" {
-						msgs = append(msgs, histMsg{
-							Role:      "assistant",
-							Content:   e.Content,
-							CreatedAt: e.CreatedAt.Local().Format(time.RFC3339),
-						})
-					}
-					pendingCalls = nil
-					callIdx = 0
-					if len(e.ToolCalls) > 0 && string(e.ToolCalls) != "null" {
-						_ = json.Unmarshal(e.ToolCalls, &pendingCalls)
-					}
-				case "tool":
-					m := histMsg{Role: "tool", Content: e.Content}
-					if callIdx < len(pendingCalls) {
-						m.ToolName = pendingCalls[callIdx].Function.Name
-						m.ToolInput = pendingCalls[callIdx].Function.Arguments
-						callIdx++
-					}
-					msgs = append(msgs, m)
-				}
-			}
-			if len(msgs) > 0 {
-				client.sendJSON(map[string]interface{}{
-					"type":     "chat_history",
-					"messages": msgs,
-				})
-			}
-		}
-	}
 
 	// Restore persisted widgets for this session
 	for _, p := range s.loadPlugins(sessionPluginDir) {
@@ -583,6 +564,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go client.writePump()
+	if voiceCall {
+		s.sendHistory(r.Context(), client, sessionID)
+	} else {
+		s.attachRun(client)
+	}
 
 	// Background poller: pushes notifications created by cron scripts (outside of chat turns)
 	done := make(chan struct{})
@@ -626,8 +612,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, msgBytes, err := conn.ReadMessage()
 		if err != nil {
-			// WebSocket closed (refresh, tab close, network drop) — cancel any in-flight agent turn.
-			client.cancelActive()
+			// Voice stops on hang-up; dashboard execution belongs to the server.
+			if voiceCall {
+				client.cancelActive()
+			}
 			break
 		}
 
@@ -636,8 +624,22 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		if !voiceCall && s.routeRunControl(client, msg) {
+			continue
+		}
 		switch msg.Type {
 		case "chat":
+			client.mu.Lock()
+			stale := client.historyStale
+			client.historyStale = false
+			client.mu.Unlock()
+			if stale {
+				client.ag.ReloadStoredHistory()
+			}
+			if !voiceCall && s.runActive(client) {
+				client.sendJSON(map[string]any{"type": "error", "content": "This conversation already has a running task. Stop it before starting another."})
+				continue
+			}
 			client.cancelActive()
 			nextAI, err := s.aiConfigFor(context.Background(), requestUserID(r))
 			if err != nil {
@@ -658,7 +660,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			ctx, cancel := context.WithCancel(r.Context())
+			parent := r.Context()
+			if !voiceCall {
+				parent = s.runtimeContext()
+			}
+			ctx, cancel := context.WithTimeout(parent, 2*time.Hour)
 			client.mu.Lock()
 			// Cancel previous if running
 			if client.cancelFn != nil {
@@ -669,6 +675,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.turnDone = turnDone
 			client.mu.Unlock()
 
+			client.turnDisabled = append([]string(nil), msg.DisabledTools...)
 			client.ag.SetActiveTools(msg.DisabledTools)
 			client.ag.SetChannel(msg.Channel)
 			content := voiceTurnContent(msg.Content, msg.GatewayContext, voiceCall)
@@ -677,10 +684,38 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				// sent back {Text, Path}; here we only build the preamble.
 				content = attachmentPreamble(attachment{Name: f.Name, Text: f.Text, Path: f.Path}) + "\n\n" + content
 			}
-			go func() { defer close(turnDone); s.handleChat(ctx, client, content, msg.Images, msg.Model) }()
+			if voiceCall {
+				go func() {
+					defer close(turnDone)
+					defer cancel()
+					s.handleChat(ctx, client, content, msg.Images, msg.Model)
+				}()
+			} else {
+				run, err := s.beginRun(client, cancel, content, msg.Images)
+				if err != nil {
+					cancel()
+					close(turnDone)
+					client.sendJSON(map[string]any{"type": "error", "content": err.Error()})
+					continue
+				}
+				if !s.background(func() {
+					defer close(turnDone)
+					defer cancel()
+					defer s.finishRun(run, ctx)
+					s.handleChat(ctx, client, content, msg.Images, msg.Model)
+				}) {
+					cancel()
+					close(turnDone)
+					s.finishRun(run, ctx)
+				}
+			}
 
 		case "cancel":
-			client.cancelActive()
+			if voiceCall {
+				client.cancelActive()
+			} else {
+				s.cancelRun(client)
+			}
 
 		case "file_open":
 			if !s.wsFileOpsAllowed(client) {
@@ -797,6 +832,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "reset_chat":
+			if !voiceCall {
+				s.cancelRun(client)
+			}
 			client.cancelActive()
 			if err := client.ag.ResetHistory(); err != nil {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": err.Error()})
@@ -854,6 +892,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.sendJSON(map[string]interface{}{"type": "notification_deleted", "id": msg.ID})
 
 		case "set_model":
+			if !voiceCall && s.runActive(client) {
+				client.sendJSON(map[string]any{"type": "error", "content": "Stop the running task before changing its model."})
+				continue
+			}
 			client.cancelActive()
 			// RBAC: refuse a model this user isn't allowed to use.
 			if !s.userCanUseModel(context.Background(), client.user, msg.Model) {
@@ -957,6 +999,12 @@ func (s *Server) handleChat(ctx context.Context, client *Client, content string,
 }
 
 func (c *Client) sendJSON(v interface{}) {
+	if c.publishRun(v) {
+		return
+	}
+	if c.isDisconnected() {
+		return
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		return
@@ -975,6 +1023,12 @@ func (c *Client) sendJSON(v interface{}) {
 // a genuinely dead/stuck client can't hang the turn forever; the write deadline
 // in writePump tears such a connection down anyway.
 func (c *Client) sendJSONReliable(v interface{}) {
+	if c.publishRun(v) {
+		return
+	}
+	if c.isDisconnected() {
+		return
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		return

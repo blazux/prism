@@ -71,3 +71,34 @@ pages and can walk you through them step by step.
 ## Your profile
 
 **Settings → Profile** holds how you appear to others: a photo (Upload photo / remove), a display name (how you appear in chat and in group rooms), your first and last name and a phone number. Your login email is shown there for reference.
+
+## Background work and subagents
+
+A dashboard task keeps running when you open Settings, switch boards or close
+the browser. Return to the same conversation to see its progress and results.
+The board list marks running tasks and tasks waiting for input. **Stop** cancels
+that conversation's task and its subagents; closing the page does not.
+
+Manual tool approvals and secure credential requests wait for you and reappear
+when you reconnect. The approval mode is fixed for the current task. Unsaved
+forms still belong to the browser tab that opened them: the agent cannot edit a
+closed tab's draft. Save important drafts before leaving.
+
+For substantial independent work, the agent can use `subagent` to start helpers,
+wait for their results or stop them. Helpers use the same model, workspace and
+permissions, with separate conversations. They receive the task and context the
+parent supplies. They cannot delegate again, request credentials or control your
+open editor. Assign distinct files when work happens in parallel. The parent
+must collect results before finishing: unfinished helpers stop with it.
+
+There is one active task per conversation, up to four per user and sixteen per
+server. A task lasts at most two hours, including approval waits. Up to three
+helpers can run at once, six per task, for at most fifteen minutes each. Parent
+and helpers share the main agent-loop model-call budget; this is not a monetary
+spending limit for provider APIs or code the agent runs.
+
+A server restart interrupts active tasks. Prism shows the interruption and keeps
+saved conversation history; it does not automatically replay operations that may
+already have changed files or sent messages. Review the results before asking to
+continue. Without a database, recent results are only retained in memory. Phone
+calls keep their existing behavior: hanging up stops the voice agent.

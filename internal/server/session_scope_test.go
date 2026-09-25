@@ -61,3 +61,21 @@ func TestGroupScopeFromSessionID(t *testing.T) {
 		}
 	}
 }
+
+func TestLongSessionIDRoundTrip(t *testing.T) {
+	s := &Server{}
+	user := &memory.User{ID: 42}
+	id, ok := s.sessionFor(reqAs(user), "a-workspace-name-with-thirty-two-characters")
+	if !ok {
+		t.Fatal("initial session rejected")
+	}
+	for _, stored := range []string{id, id + "-2"} {
+		roundtrip, ok := s.sessionFor(reqAs(user), stored)
+		if !ok || roundtrip != stored {
+			t.Fatalf("workspace return changed %q to %q", stored, roundtrip)
+		}
+		if _, ok := s.sessionFor(reqAs(&memory.User{ID: 43}), stored); ok {
+			t.Fatal("cross-user access allowed")
+		}
+	}
+}

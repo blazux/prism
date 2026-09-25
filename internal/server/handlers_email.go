@@ -93,6 +93,10 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad body", 400)
 			return
 		}
+		if err := email.ValidateBridgePreset(s.userStore(r).LocalMailBridgeDisabled, b.IMAPHost, b.SMTPHost); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		out, _ := json.Marshal(b.emailStoredConfig)
 		if err := s.userStore(r).SetConfig(r.Context(), emailConfigKey, string(out)); err != nil {
 			http.Error(w, err.Error(), 500)

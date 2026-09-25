@@ -52,6 +52,9 @@ func (e *ToolExecutor) loadEmailConfig(ctx context.Context) (email.Config, error
 }
 
 func (e *ToolExecutor) saveEmailConfig(ctx context.Context, sc emailStoredConfig, password string) error {
+	if err := email.ValidateBridgePreset(e.userStore().LocalMailBridgeDisabled, sc.IMAPHost, sc.SMTPHost); err != nil {
+		return err
+	}
 	b, _ := json.Marshal(sc)
 	if err := e.userStore().SetConfig(ctx, emailConfigKey, string(b)); err != nil {
 		return err

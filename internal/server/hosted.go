@@ -33,6 +33,7 @@ func OpenPersonalEnvironment(ctx context.Context, cfg Config, key []byte, execut
 		return nil, err
 	}
 	ms.LocalVaultDisabled = true
+	ms.LocalMailBridgeDisabled = true
 	s.memStore = ms
 	s.mcpMgr.SetStore(ms)
 	for _, dir := range []string{"plugins", "data", ".screenshots"} {
@@ -107,4 +108,12 @@ func (s *Server) hostedAuth(next http.Handler, w http.ResponseWriter, r *http.Re
 func (e *PersonalEnvironment) VerifyCapability(token string) bool {
 	_, _, ok := e.state.verifyCapToken(token)
 	return ok
+}
+
+func (e *PersonalEnvironment) ServeWebhook(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.URL.Path, webhookIncomingPrefix) {
+		http.NotFound(w, r)
+		return
+	}
+	e.state.lifecycleHandler(http.HandlerFunc(e.state.handleWebhookIncoming)).ServeHTTP(w, r)
 }

@@ -128,3 +128,31 @@ and [Anthropic's cumulative streaming usage](https://platform.claude.com/docs/en
 with its [cache input normalization](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
 An OpenAI-compatible endpoint explicitly rejecting stream_options is retried without
 that parameter; consumption remains unknown if it does not report it.
+
+## Tool relevance and clarification regression
+
+`go test ./internal/agent -run 'TestClarificationEndsActualAgentLoop|TestAnnouncementFallbackProfiles|TestPromptDecisionAcrossProfiles'`
+checks stopping behavior through the actual agent loop with a scripted backend.
+A necessary clarification must end the turn, including when preceded by an
+announcement. Standard/minimal never receive an announcement reminder; guided
+allows at most one conservative reminder, supplied as harness/system guidance.
+
+The opt-in first-decision probe uses the real prompt builder, native tool catalog
+and OpenAI-compatible adapter with synthetic context. It never executes the
+returned tools or accesses personal data. Provider calls may incur charges.
+
+```bash
+# Set these explicitly for a test provider; do not commit credentials.
+export PRISM_PROBE_URL=http://localhost:8000/v1
+export PRISM_PROBE_MODEL=my-model
+export PRISM_PROBE_OUTPUT=/tmp/prism-prompt-decisions.json
+# PRISM_PROBE_KEY is optional for providers requiring authentication.
+go test ./internal/agent -run '^TestPromptBehaviorProbe$' -count=1 -v -timeout=12m
+```
+
+Eight scenarios run in each of the three profiles: general explanation, rewriting,
+supplied facts, clarification, thanks, note creation, unread mail and relevant RAG.
+The first five expect no tool; the others expect the appropriate tool. Profiles
+run concurrently (up to three requests). The report includes responses, tool names
+and latency. This checks the first decision only, not complete task execution or
+long-conversation quality. The full-stack evaluator remains necessary for those.

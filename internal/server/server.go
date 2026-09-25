@@ -23,6 +23,9 @@ import (
 )
 
 type Config struct {
+	WebhookURL                     func(string, string) string
+	HostedPersonal                 bool
+	WebhookConcurrency             int
 	ServiceURL                     func(int) string
 	WorkspaceDial                  func(context.Context, int) (net.Conn, error)
 	DisableAIServerDefaults        bool   // hosting mode without usable server AI defaults; local default remains enabled
@@ -78,6 +81,12 @@ type Config struct {
 }
 
 type Server struct {
+	completedRuns map[string]*chatRun
+
+	runsMu sync.Mutex
+	runs   map[string]*chatRun
+
+	webhookActive   atomic.Int32
 	hostedResolver  func(*http.Request) (*Server, error)
 	life            lifecycle
 	authMu          sync.Mutex

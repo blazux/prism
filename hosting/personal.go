@@ -16,6 +16,7 @@ import (
 // PersonalConfig contains resolved resources only. It deliberately cannot carry
 // deployment model credentials, enterprise configuration or a host Docker socket.
 type PersonalConfig struct {
+	WebhookURL                                                                          func(string, string) string
 	ServiceURL                                                                          func(int) string
 	DialWorkspace                                                                       func(context.Context, int) (net.Conn, error)
 	WidgetFrameURL, WidgetGrantURL                                                      string
@@ -31,6 +32,9 @@ func personalAssets() server.Config {
 func OpenPersonalEnvironment(ctx context.Context, cfg PersonalConfig) (*PersonalEnvironment, error) {
 	c := personalAssets()
 	c.DisableAIServerDefaults = true
+	c.HostedPersonal = true
+	c.WebhookConcurrency = 2
+	c.WebhookURL = cfg.WebhookURL
 	c.WorkspaceDial = cfg.DialWorkspace
 	c.ServiceURL = cfg.ServiceURL
 	c.WorkspaceDir, c.PostgresURL, c.AuthToken = cfg.WorkspaceDir, cfg.PostgresURL, cfg.CapabilityKey
@@ -64,4 +68,10 @@ func SharedPersonalHandler(resolve func(*http.Request) (*PersonalEnvironment, er
 		}
 		return e.environment, err
 	})
+}
+
+// ServeWebhook dispatches to this owner's token-authenticated webhook endpoint.
+// Hosts must validate account state and route only /api/webhook/<id> here.
+func (e *PersonalEnvironment) ServeWebhook(w http.ResponseWriter, r *http.Request) {
+	e.environment.ServeWebhook(w, r)
 }

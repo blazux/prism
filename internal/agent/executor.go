@@ -893,7 +893,7 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			return "", nil, fmt.Errorf("no live editor connected; use this tool from the browser chat with a note or email draft open")
 		}
 		return wrap(e.editorToolFn(ctx, args))
-	case "webhook", "pim_source", "channel":
+	case "webhook", "pim_source", "channel", "subagent":
 		return wrap(e.serverTool(ctx, name, args))
 	case "install_packages":
 		switch str("manager") {

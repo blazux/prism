@@ -91,7 +91,11 @@ func (s *Server) webhookTool(ms *memory.Store, scope string) agent.ServerTool {
 		if w.Respond {
 			extra += ", responds synchronously"
 		}
-		return fmt.Sprintf("- %s (id %s, %s, runs in %s%s)\n  POST <your Prism URL>%s%s  with header X-Prism-Token: %s", w.Name, w.ID, state, sess, extra, webhookIncomingPrefix, w.ID, w.Token)
+		endpoint := s.webhookDTO(w).URL
+		if strings.HasPrefix(endpoint, "/") {
+			endpoint = "<your Prism URL>" + endpoint
+		}
+		return fmt.Sprintf("- %s (id %s, %s, runs in %s%s)\n  POST %s", w.Name, w.ID, state, sess, extra, endpoint)
 	}
 	// namespaceSession stores a session id the way /ws and /api/chat resolve it
 	// for this user (u<id>-<board>), so a webhook can only be pointed at one of
@@ -344,6 +348,9 @@ func (s *Server) pimSourceTool(us *memory.Store) agent.ServerTool {
 			us.SetSecret(ctx, tasks.TodoistTokenSecret, "")
 			return "Todoist disconnected.", nil
 		case "set_notes_vault":
+			if us.LocalVaultDisabled {
+				return "", fmt.Errorf("local Markdown vaults are unavailable in this deployment; use built-in Notes")
+			}
 			path := argStr(args, "path")
 			if path == "" {
 				return "", fmt.Errorf("path is required (an absolute directory reachable by the server container)")

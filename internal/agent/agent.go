@@ -130,9 +130,10 @@ type Agent struct {
 	// toggle at every tool call, so flipping it mid-turn applies to the next
 	// call; awaitApprovalFn blocks until the user's verdict (or ctx cancel).
 	// Both nil on headless surfaces (cron, Telegram, Webex…) = auto-approve.
-	approvalNeededFn func() bool
-	awaitApprovalFn  func(ctx context.Context, toolID string) bool
-	historyLoaded    bool // true after first DB load
+	approvalNeededFn  func() bool
+	awaitApprovalFn   func(ctx context.Context, toolID string) bool
+	prepareApprovalFn func(string)
+	historyLoaded     bool // true after first DB load
 	// historyGen counts every external mutation of history (InjectNote,
 	// ResetHistory, SetSession) — bumped under histMu. compactLiveContextIfNeeded
 	// captures it before releasing the lock for its ~20s best-effort LLM
@@ -271,9 +272,12 @@ func (a *Agent) SetChannel(ch string) { a.channel = ch }
 
 // SetApprovalFns wires manual tool approval: needed is consulted before every
 // tool call, await blocks for the user's verdict on one call. See the fields.
-func (a *Agent) SetApprovalFns(needed func() bool, await func(context.Context, string) bool) {
+func (a *Agent) SetApprovalFns(needed func() bool, await func(context.Context, string) bool, prepare ...func(string)) {
 	a.approvalNeededFn = needed
 	a.awaitApprovalFn = await
+	if len(prepare) > 0 {
+		a.prepareApprovalFn = prepare[0]
+	}
 }
 
 // voiceChannel is the phone surface (Prism Vox → Prism).
@@ -340,6 +344,17 @@ func (a *Agent) SetActiveTools(disabledNames []string) {
 // scripts, MCP tools) are always up-to-date without requiring a session restart.
 func (a *Agent) buildToolList() []ollama.Tool {
 	all := append(nativeToolsFor(a.leanPrompt()), a.executor.AllDynamicTools()...)
+	available := all[:0]
+	for _, tool := range all {
+		if a.executor.hiddenTools[tool.Function.Name] {
+			continue
+		}
+		if tool.Function.Name == "subagent" && a.executor.serverTools["subagent"] == nil {
+			continue
+		}
+		available = append(available, tool)
+	}
+	all = available
 	if len(a.disabledTools) == 0 {
 		return all
 	}
@@ -905,15 +920,30 @@ func stripThinkingBlocks(s string) string {
 // promise. systemPromptActTurn forbids it; this nudge is the harness-side
 // fallback, gated on the reply *ending* with first-person intent so turns
 // that close on a genuine report pay nothing.
-const maxIntentNudges = 2
+const maxIntentNudges = 1
 
-const intentNudgeMsg = "Your previous reply announced an action but contained no tool calls, so nothing ran and nothing will: a reply without tool calls ends the turn. Do the work now — make the tool calls. If the task is actually complete, reply with a brief summary of what was done instead."
+const intentNudgeMsg = "Execution reminder: a reply without tool calls ends this turn. If you need clarification, authorization, or have already answered the request, stop and give that answer or question. Only if the user already requested an action and you have what you need, perform it with the relevant tool instead of merely announcing it."
 
 // announceTailRe matches first-person intent phrasings ("je corrige…", "I'll…")
 // in the tail of a reply. French first (the fleet's working language), then
 // English. Deliberately conservative: past-tense reports ("je viens de créer",
 // "widget created") must not match.
 var announceTailRe = regexp.MustCompile(`(?i)\b(je (vais|m'en occupe|m'y mets|m'attaque|continue|commence|reprends|relance|corrige|crée|génère|lance|passe|termine|finis|fais|remets|resserre|répare|modifie|change|déploie|installe|configure|vérifie|teste|récupère|télécharge|écris|prépare|construis|patche?)|on (va|s'y met)|maintenant je|i('ll| will| am going to|'m going to)|let me|now i|next i)\b`)
+
+// A conservative small-model fallback only. Never override a question or an
+// explicit wait, including a clarification phrased without a question mark.
+var waitingForUserRe = regexp.MustCompile(`(?i)(\b(wait|waiting|await|awaiting|until|unless|clarif|confirm|which|whether|please (provide|specify|choose|tell)|let me know|need (you|your))|j.attends|en attente|avant de|besoin de|précis|precis|confirme|dis.moi|dites.moi|indique|quel(le|s|les)?\b|si tu|si vous|une fois)`)
+
+func shouldNudgeAnnouncement(profile, response string) bool {
+	if profile != "guided" {
+		return false
+	}
+	visible := stripThinkingBlocks(response)
+	if strings.ContainsAny(visible, "?？") || waitingForUserRe.MatchString(visible) {
+		return false
+	}
+	return announceTailRe.MatchString(replyTail(visible))
+}
 
 // replyTail returns the last 200 runes of a reply — enough to hold the closing
 // sentence or two where the announcement pattern shows up, without letting an
@@ -993,6 +1023,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 	// The role always comes first, whatever the persona says — see systemPromptRole.
 	// A persona describes how the agent talks; it must not be able to remove what it is.
 	sb.WriteString(systemPromptRole)
+	sb.WriteString(systemPromptDecision)
 	if strings.TrimSpace(persona) != "" {
 		sb.WriteString("\n\n")
 		sb.WriteString(persona)
@@ -1092,7 +1123,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 
 	// Inject current date/time so the model can reason about time.
 	// Explicit instruction: never output the date/time in responses.
-	fmt.Fprintf(&sb, "\n\nCurrent date and time: %s. Current session ID: `%s`. Use these only as internal context — never write them in your responses. When generating widget code that calls /api/tool/ or /api/notify, always append ?session=%s to the URL.", time.Now().In(a.timeLocation()).Format("2006-01-02 15:04 MST -07:00")+" ("+a.timeLocation().String()+")", a.sessionID, a.sessionID)
+	fmt.Fprintf(&sb, "\n\nCurrent date and time: %s. Current session ID: `%s`. Use these only as internal context — never write them in your responses. Widget tool calls use prismTool(name,args), which handles session/auth automatically; do not append a session parameter to that helper.", time.Now().In(a.timeLocation()).Format("2006-01-02 15:04 MST -07:00")+" ("+a.timeLocation().String()+")", a.sessionID)
 
 	// Grounding rule, near the end on purpose: late-prompt instructions are the
 	// ones this size of model actually follows (see systemPromptRole's measurements).
@@ -1200,6 +1231,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	// Resolved once per turn: a Settings change lands on the next message,
 	// never mid-turn.
 	maxIterations, thinking := a.effectiveLimits()
+	ctx = withModelBudget(ctx, maxIterations)
 	a.turnThinking = thinking
 	a.turnReasoningEffort = a.reasoningEffort()
 
@@ -1308,11 +1340,11 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		if len(toolCalls) == 0 {
 			// Reply ends on an announced action with nothing to run it: nudge
 			// the model to act instead of ending the turn (see announceTailRe).
-			if !toolRejected && intentNudges < maxIntentNudges && announceTailRe.MatchString(replyTail(stripThinkingBlocks(fullContent))) {
+			if !toolRejected && intentNudges < maxIntentNudges && shouldNudgeAnnouncement(a.promptProfile(), fullContent) {
 				intentNudges++
 				log.Printf("[agent] reply ends on an announcement with no tool calls — nudging to act (%d/%d)", intentNudges, maxIntentNudges)
 				a.histMu.Lock()
-				a.history = append(a.history, ollama.Message{Role: "user", Content: intentNudgeMsg})
+				a.history = append(a.history, ollama.Message{Role: "system", Content: intentNudgeMsg})
 				a.histMu.Unlock()
 				continue
 			}
@@ -1352,6 +1384,9 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			// Manual approval gate. Voice bypasses it — a caller can't click, and
 			// silence while the dashboard waits would read as a dead line.
 			if a.channel != voiceChannel && a.approvalNeededFn != nil && a.approvalNeededFn() && a.awaitApprovalFn != nil {
+				if a.prepareApprovalFn != nil {
+					a.prepareApprovalFn(toolID)
+				}
 				events <- Event{Type: "approval_request", ID: toolID, Tool: tc.Function.Name, Input: tc.Function.Arguments}
 				rejected = !a.awaitApprovalFn(ctx, toolID)
 			}
@@ -1493,6 +1528,9 @@ func (a *Agent) handleUpdateSystemPrompt(ctx context.Context, rawArgs json.RawMe
 }
 
 func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan<- Event) (string, []ollama.ToolCall, string, error) {
+	if err := consumeModelCall(ctx); err != nil {
+		return "", nil, "", err
+	}
 	prompt := a.buildSystemPrompt(ctx, learningsCtx)
 
 	a.histMu.Lock()
@@ -1623,4 +1661,16 @@ func (a *Agent) emitToolSideEffects(toolName string, rawArgs json.RawMessage, ev
 func (a *Agent) SetBackend(backend ollama.Backend, model string) {
 	a.ollama = backend
 	a.model = model
+}
+
+// ReloadStoredHistory is used by an idle browser agent after another tab completed
+// a turn in the same conversation. It never deletes stored messages.
+func (a *Agent) ReloadStoredHistory() {
+	if a.memStore == nil {
+		return
+	}
+	a.histMu.Lock()
+	defer a.histMu.Unlock()
+	a.history = nil
+	a.historyLoaded = false
 }

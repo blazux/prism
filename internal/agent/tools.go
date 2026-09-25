@@ -5,6 +5,15 @@ import (
 )
 
 var ToolDefinitions = []ollama.Tool{
+	{Type: "function", Function: ollama.ToolFunction{
+		Name: "subagent", Description: "Delegate a bounded independent task within the user's request. spawn takes task and optional context; returns id. status lists your children; wait(id) waits for a result; cancel(id) stops one. Children share your workspace, permissions, model-call budget and lifetime; no recursive delegation. Use distinct files to avoid conflicting edits. Delegate substantial independent work, not simple lookups. Wait for useful results and integrate them before finishing; unfinished children are cancelled when you stop. Children report missing user input to you.",
+		Parameters: ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{
+			"action":  {Type: "string", Enum: []string{"spawn", "status", "wait", "cancel"}},
+			"task":    {Type: "string", Description: "Bounded mission and expected deliverable."},
+			"context": {Type: "string", Description: "Only relevant facts, constraints and file paths. Never secret values."},
+			"id":      {Type: "string", Description: "Child id returned by spawn."},
+		}, Required: []string{"action"}},
+	}},
 	{
 		Type: "function",
 		Function: ollama.ToolFunction{

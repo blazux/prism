@@ -10,6 +10,9 @@ import (
 // Requests stay on the initiating browser connection: a second tab/session
 // must never receive an edit intended for this editor.
 func (c *Client) editorTool(ctx context.Context, args map[string]any) (string, error) {
+	if c.isDisconnected() {
+		return "", fmt.Errorf("the initiating editor is offline; ask the user to reopen it before editing unsaved content")
+	}
 	action, _ := args["action"].(string)
 	if action != "read" && action != "update" {
 		return "", fmt.Errorf("editor action must be read or update")

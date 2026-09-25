@@ -55,7 +55,7 @@ func (s *Server) ragContextFn(scope string) func() string {
 		}
 		var sb strings.Builder
 		sb.WriteString("## Knowledge Base (RAG)\n\n")
-		sb.WriteString("You have access to document collections via `rag_search`. Call it whenever the user's question might be answered by these documents — don't guess, search first.\n\n")
+		sb.WriteString(agent.RAGCollectionGuidance + "\n\n")
 		for _, c := range cols {
 			name := unscopeCollection(scope, c.Name)
 			if c.Description != "" {

@@ -126,6 +126,9 @@ func (s *Server) integrationsStatusFor(u *memory.User) func(ctx context.Context)
 		secret := func(st *memory.Store, name string) bool { v, ok, _ := st.GetSecret(ctx, name); return ok && v != "" }
 		var sb strings.Builder
 		row := func(what, state string) { fmt.Fprintf(&sb, "- %s: %s\n", what, state) }
+		if s.cfg.HostedPersonal {
+			row("Deployment", "hosted personal environment: database Notes; no local vault or bundled Proton Bridge. Docker services run inside the personal workspace. Use the exact webhook URL returned by the webhook tool.")
+		}
 
 		location := "Settings → AI provider"
 		if s.cfg.MultiUser {

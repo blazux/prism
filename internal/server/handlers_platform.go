@@ -80,6 +80,11 @@ func (s *Server) handlePlatform(w http.ResponseWriter, r *http.Request) {
 		// Docked with a Prism Vox telephony stack, so the Téléphonie app is
 		// available. Empty VoxURL = standalone Prism, no telephony.
 		"voxDocked": s.cfg.VoxURL != "",
+		"capabilities": map[string]bool{
+			"personalHosting": s.cfg.HostedPersonal,
+			"localNotesVault": !s.cfg.HostedPersonal,
+			"localMailBridge": !s.cfg.HostedPersonal,
+		},
 	})
 }
 

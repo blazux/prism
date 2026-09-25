@@ -292,10 +292,19 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	})
 
 	personality := loadPersonality(ctx, ms, sessionID)
-
-	ag := agent.New(ollamaClient, executor, model, ms, personality)
+	agentStore := ms
+	options, _ := ctx.Value(childOptionsKey{}).(*childOptions)
+	if options != nil {
+		agentStore = nil
+		personality = options.instruction
+		options.executor(executor)
+	}
+	ag := agent.New(ollamaClient, executor, model, agentStore, personality)
 	ag.SetSession(sessionID, personality)
 	ag.SetLimits(limits)
+	if options != nil {
+		options.agent(ag)
+	}
 
 	if fn := s.ragContextFn(cc.RAGScope); fn != nil {
 		ag.SetRAGContextFn(fn)
@@ -314,10 +323,25 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 		close(events)
 	}()
 
+	response, runErr := collectHeadlessResponse(events, tap, sessionID)
+
+	log.Printf("[chat-headless] session=%q response=%d chars", sessionID, len(response))
+	// Usage: one chat turn, tokens estimated (chars/4 in+out) until backend
+	// counters are wired.
+	if ms != nil {
+		ms.AddUsage(context.Background(), 0, sessionID, "chat_turn", model,
+			int64((len(message)+len(response))/4), map[string]interface{}{"origin": "headless"})
+	}
+	return strings.TrimSpace(response), runErr
+}
+
+// collectHeadlessResponse propagates execution failures to webhook and channel callers.
+func collectHeadlessResponse(events <-chan agent.Event, tap func(agent.Event), sessionID string) (string, error) {
 	// Collect only the FINAL assistant message. Reset on each tool call so the
 	// step-by-step planning narration the agent emits between tools doesn't get
 	// concatenated into one delivered message (e.g. a Telegram reply). Also skip
 	// <think>…</think> blocks.
+	var runErr error
 	var response strings.Builder
 	inThink := false
 	for ev := range events {
@@ -326,6 +350,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 		}
 		switch ev.Type {
 		case "error":
+			runErr = fmt.Errorf("agent execution failed: %s", ev.Content)
 			// Otherwise silent: headless only collects "tool_use"/"stream" events,
 			// so a backend error (bad status, stream parse failure) previously
 			// vanished with no trace — the caller just saw an empty response.
@@ -347,14 +372,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 		}
 	}
 
-	log.Printf("[chat-headless] session=%q response=%d chars", sessionID, response.Len())
-	// Usage: one chat turn, tokens estimated (chars/4 in+out) until backend
-	// counters are wired.
-	if ms != nil {
-		ms.AddUsage(context.Background(), 0, sessionID, "chat_turn", model,
-			int64((len(message)+response.Len())/4), map[string]interface{}{"origin": "headless"})
-	}
-	return strings.TrimSpace(response.String()), nil
+	return response.String(), runErr
 }
 
 // looksBinary reports whether extracted "text" is really raw bytes. rag.ParseFile

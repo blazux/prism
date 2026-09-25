@@ -1,0 +1,53 @@
+{
+  "date": "2026-09-24",
+  "model_alias": "flash-next",
+  "scope": "First model decision only; synthetic context; tools not executed",
+  "runs": {
+    "before": {
+      "guided": {
+        "passed": 8,
+        "cases": 8,
+        "tool_calls": 3,
+        "errors": 0
+      },
+      "standard": {
+        "passed": 8,
+        "cases": 8,
+        "tool_calls": 3,
+        "errors": 0
+      },
+      "minimal": {
+        "passed": 8,
+        "cases": 8,
+        "tool_calls": 3,
+        "errors": 0
+      }
+    },
+    "after": {
+      "guided": {
+        "passed": 8,
+        "cases": 8,
+        "tool_calls": 3,
+        "errors": 0
+      },
+      "standard": {
+        "passed": 8,
+        "cases": 8,
+        "tool_calls": 3,
+        "errors": 0
+      },
+      "minimal": {
+        "passed": 8,
+        "cases": 8,
+        "tool_calls": 3,
+        "errors": 0
+      }
+    }
+  },
+  "clarification_loop_regression": {
+    "cases": 18,
+    "before_passed": 0,
+    "after_passed": 18,
+    "backend": "scripted; actual Agent.Chat loop; old heuristic restored via Go overlay for baseline"
+  }
+}

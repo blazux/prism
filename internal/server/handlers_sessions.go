@@ -56,7 +56,19 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			}
 			visible = append(visible, sess)
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"sessions": visible})
+		rows := make([]map[string]any, 0, len(visible))
+		s.runsMu.Lock()
+		for _, session := range visible {
+			row := map[string]any{"id": session.ID, "name": session.Name, "createdAt": session.CreatedAt}
+			if run := s.runs[runKey(&Client{user: currentUser(r), sessionID: session.ID})]; run != nil {
+				run.mu.Lock()
+				row["runStatus"] = run.status
+				run.mu.Unlock()
+			}
+			rows = append(rows, row)
+		}
+		s.runsMu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{"sessions": rows})
 
 	case "POST":
 		var body struct {
@@ -117,6 +129,7 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "DELETE":
+		s.cancelRun(&Client{user: currentUser(r), sessionID: id})
 		if err := ms.DeleteSession(r.Context(), id); err != nil {
 			http.Error(w, err.Error(), 400)
 			return

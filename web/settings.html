@@ -456,7 +456,7 @@ document.querySelectorAll('.nav-item').forEach(el => {
 })
 
 // Hide settings tabs for apps the global admin disabled (Admin → Platform).
-const PLATFORM = fetch('/api/platform').then(r => r.ok ? r.json() : {}).catch(() => ({}))
+const PLATFORM = settingsFetch('/api/platform').then(r => r.ok ? r.json() : {}).catch(() => ({}))
 PLATFORM.then(d => {
   const disabled = new Set(d.disabledApps || [])
   const tabFor = { email: 'email', notes: 'notes', calendar: 'calendar' }
@@ -472,7 +472,7 @@ PLATFORM.then(d => {
 // Slack is still a deployment-wide single bot, so its card is admin-only —
 // see renderChannelsTab.
 let IS_GLOBAL_ADMIN = false
-fetch('/api/me').then(r => r.json()).then(me => {
+settingsFetch('/api/me').then(r => r.json()).then(me => {
   // Multi-user: the role lives on me.user. Single-user (legacy) has no user
   // object — the sole user IS the deployment admin, so isAdmin decides.
   const aiNav=document.querySelector('.nav-item[data-tab="ai"]')
@@ -567,9 +567,9 @@ function renderAppearanceTab(container) {
       <div class="appe-row"><label>Chat panel side</label>
         <select id="appe-chatside"><option value="right">Right</option><option value="left">Left</option></select></div>
       <div class="appe-row"><label>Open chat on load</label>
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;flex:1"><input type="checkbox" id="appe-chatdefault"><span style="font-size:12px;color:var(--text2)">Start with the chat panel open</span></label></div>
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;flex:1"><span class="toggle-switch"><input type="checkbox" id="appe-chatdefault"><span class="toggle-track"></span></span><span style="font-size:12px;color:var(--text2)">Start with the chat panel open</span></label></div>
       <div class="appe-row"><label>Snap &amp; align windows</label>
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;flex:1"><input type="checkbox" id="appe-snap"><span style="font-size:12px;color:var(--text2)">Magnetic edges &amp; matching sizes (hold Alt to bypass)</span></label></div>
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;flex:1"><span class="toggle-switch"><input type="checkbox" id="appe-snap"><span class="toggle-track"></span></span><span style="font-size:12px;color:var(--text2)">Magnetic edges &amp; matching sizes (hold Alt to bypass)</span></label></div>
     </div>`
   const page = document.createElement('div'); page.className = 'settings-page'
   page.appendChild(pane); container.appendChild(page)
@@ -732,7 +732,7 @@ async function renderSkillsPanel(container) {
   container.appendChild(pane)
   const list = pane.querySelector('#skills-list')
   let skills = []
-  try { skills = (await (await fetch('/api/skills')).json()).skills || [] } catch {}
+  try { skills = (await (await settingsFetch('/api/skills')).json()).skills || [] } catch {}
   if (!skills.length) {
     list.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:20px 0">No skills yet. The agent saves procedures here as it learns them.</div>'
     return
@@ -753,14 +753,14 @@ async function renderSkillsPanel(container) {
       const body = card.querySelector('.sk-body')
       if (body.style.display === 'none') {
         if (!body.textContent) {
-          try { const d = await (await fetch('/api/skills?name=' + encodeURIComponent(sk.name))).json(); body.textContent = d.skill?.body || '(empty)' } catch { body.textContent = '(error)' }
+          try { const d = await (await settingsFetch('/api/skills?name=' + encodeURIComponent(sk.name))).json(); body.textContent = d.skill?.body || '(empty)' } catch { body.textContent = '(error)' }
         }
         body.style.display = ''
       } else body.style.display = 'none'
     })
     card.querySelector('.sk-del').addEventListener('click', async () => {
       if (!await PrismModal.confirm(`Delete skill "${sk.name}"?`, { danger: true })) return
-      await fetch('/api/skills?name=' + encodeURIComponent(sk.name), { method: 'DELETE' })
+      await settingsFetch('/api/skills?name=' + encodeURIComponent(sk.name), { method: 'DELETE' })
       renderTab('knowledge')
     })
     list.appendChild(card)
@@ -768,6 +768,23 @@ async function renderSkillsPanel(container) {
 }
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
+
+async function settingsFetch(url, options = {}) {
+  const mutation = !['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase())
+  try {
+    const response = await fetch(url, options)
+    if (mutation && !response.ok) {
+      const raw = await response.clone().text()
+      let message = raw.trim()
+      try { const data = JSON.parse(raw); message = data.error || data.message || message } catch {}
+      throw new Error(message || `Request failed (${response.status})`)
+    }
+    return response
+  } catch (error) {
+    if (mutation) showToast(error.message || 'The change could not be saved.', true)
+    throw error
+  }
+}
 
 function getConfig() {
   try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}') } catch { return {} }
@@ -854,11 +871,11 @@ async function renderAgentTab(container) {
   let name = '', base = '', sessions = [], uid = ''
   let limits = { maxIterations: 0, thinking: true, default: 75, min: 10, max: 500 }
   const NO_CACHE = { cache: 'no-store' }
-  try { name = (await fetch('/api/agent/name', NO_CACHE).then(r => r.json())).name || '' } catch (_) {}
-  try { limits = Object.assign(limits, await fetch('/api/agent/limits', NO_CACHE).then(r => r.json())) } catch (_) {}
-  try { base = (await fetch('/api/agent/personality', NO_CACHE).then(r => r.json())).personality || '' } catch (_) {}
-  try { sessions = (await fetch('/api/sessions', NO_CACHE).then(r => r.json())).sessions || [] } catch (_) {}
-  try { uid = (await fetch('/api/profile').then(r => r.json())).userId || 0 } catch (_) {}
+  try { name = (await settingsFetch('/api/agent/name', NO_CACHE).then(r => r.json())).name || '' } catch (_) {}
+  try { limits = Object.assign(limits, await settingsFetch('/api/agent/limits', NO_CACHE).then(r => r.json())) } catch (_) {}
+  try { base = (await settingsFetch('/api/agent/personality', NO_CACHE).then(r => r.json())).personality || '' } catch (_) {}
+  try { sessions = (await settingsFetch('/api/sessions', NO_CACHE).then(r => r.json())).sessions || [] } catch (_) {}
+  try { uid = (await settingsFetch('/api/profile').then(r => r.json())).userId || 0 } catch (_) {}
   const agScope = 'agent-u' + uid
 
   agWrap.innerHTML = `
@@ -926,8 +943,8 @@ async function renderAgentTab(container) {
   page.querySelector('#ag-save').addEventListener('click', async () => {
     const st = page.querySelector('#ag-status'); st.textContent = 'Saving…'
     try {
-      await fetch('/api/agent/name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: page.querySelector('#ag-name').value }) })
-      await fetch('/api/agent/personality', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: page.querySelector('#ag-base').value }) })
+      await settingsFetch('/api/agent/name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: page.querySelector('#ag-name').value }) })
+      await settingsFetch('/api/agent/personality', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: page.querySelector('#ag-base').value }) })
       st.textContent = '✓ Saved — takes effect on the next message'
     } catch (e) { st.textContent = 'Failed: ' + e.message }
     setTimeout(() => { st.textContent = '' }, 3000)
@@ -937,7 +954,7 @@ async function renderAgentTab(container) {
     const st = page.querySelector('#ag-limits-status'); st.textContent = 'Saving…'
     try {
       const raw = page.querySelector('#ag-maxiter').value.trim()
-      const r = await fetch('/api/agent/limits', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const r = await settingsFetch('/api/agent/limits', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ maxIterations: raw === '' ? 0 : parseInt(raw, 10) || 0, thinking: page.querySelector('#ag-thinking').checked, promptProfile: page.querySelector('#ag-profile').value, reasoningEffort: page.querySelector('#ag-effort').value }) }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Cannot save agent settings'); return result })
       // Echo the clamped value back so the field shows what was actually stored.
       page.querySelector('#ag-maxiter').value = r.maxIterations || ''
@@ -961,13 +978,13 @@ async function renderAgentTab(container) {
     card.addEventListener('toggle', async () => {
       if (card.open && !ta.dataset.loaded) {
         ta.dataset.loaded = '1'
-        try { ta.value = (await fetch(`/api/personality?session=${encodeURIComponent(s.id)}`).then(r => r.json())).personality || '' } catch (_) {}
+        try { ta.value = (await settingsFetch(`/api/personality?session=${encodeURIComponent(s.id)}`).then(r => r.json())).personality || '' } catch (_) {}
       }
     })
     card.querySelector('.ag-ws-save').addEventListener('click', async () => {
       const st = card.querySelector('.ag-ws-status'); st.textContent = 'Saving…'
       try {
-        await fetch(`/api/personality?session=${encodeURIComponent(s.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: ta.value }) })
+        await settingsFetch(`/api/personality?session=${encodeURIComponent(s.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: ta.value }) })
         st.textContent = '✓ Saved'
       } catch (e) { st.textContent = 'Failed' }
       setTimeout(() => { st.textContent = '' }, 2500)
@@ -982,9 +999,9 @@ async function renderChannelsTab(container) {
   wrap.style.cssText = 'max-width:560px'
 
   let tg = { configured: false, linked: false }
-  try { tg = await fetch('/api/telegram/config', { cache: 'no-store' }).then(r => r.json()) } catch (_) {}
+  try { tg = await settingsFetch('/api/telegram/config', { cache: 'no-store' }).then(r => r.json()) } catch (_) {}
   let sl = { configured: false, linked: false }
-  try { sl = await fetch('/api/slack/config', { cache: 'no-store' }).then(r => r.json()) } catch (_) {}
+  try { sl = await settingsFetch('/api/slack/config', { cache: 'no-store' }).then(r => r.json()) } catch (_) {}
 
   const chSub = (c) => c.linked ? 'Linked' : (c.configured ? 'Not linked' : 'Not set up')
 
@@ -1047,7 +1064,7 @@ async function renderChannelsTab(container) {
     if (!tok) { st.textContent = 'Enter a token.'; return }
     st.textContent = 'Saving…'
     try {
-      await fetch('/api/telegram/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) })
+      await settingsFetch('/api/telegram/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) })
       st.textContent = '✓ Saved — now send /start to your bot'
       page.querySelector('#tg-token').value = ''
     } catch (e) { st.textContent = 'Failed: ' + e.message }
@@ -1055,7 +1072,7 @@ async function renderChannelsTab(container) {
   })
   page.querySelector('#tg-unlink').addEventListener('click', async () => {
     const st = page.querySelector('#tg-status'); st.textContent = 'Unlinking…'
-    try { await fetch('/api/telegram/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unlink: true }) }); st.textContent = '✓ Unlinked — next /start re-links' }
+    try { await settingsFetch('/api/telegram/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unlink: true }) }); st.textContent = '✓ Unlinked — next /start re-links' }
     catch (e) { st.textContent = 'Failed' }
     setTimeout(() => { st.textContent = '' }, 3000)
   })
@@ -1071,7 +1088,7 @@ async function renderChannelsTab(container) {
     if (!bot || !app) { st.textContent = 'Enter both tokens.'; return }
     st.textContent = 'Connecting…'
     try {
-      const r = await fetch('/api/slack/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botToken: bot, appToken: app }) })
+      const r = await settingsFetch('/api/slack/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botToken: bot, appToken: app }) })
       if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
       st.textContent = '✓ Connected — now DM your bot to link'
       page.querySelector('#sl-bot').value = ''; page.querySelector('#sl-app').value = ''
@@ -1081,7 +1098,7 @@ async function renderChannelsTab(container) {
   })
   page.querySelector('#sl-disc').addEventListener('click', async () => {
     const st = page.querySelector('#sl-status'); st.textContent = 'Disconnecting…'
-    try { await fetch('/api/slack/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) }); st.textContent = '✓ Disconnected'; page.querySelector('#sl-disc').style.display = 'none' }
+    try { await settingsFetch('/api/slack/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) }); st.textContent = '✓ Disconnected'; page.querySelector('#sl-disc').style.display = 'none' }
     catch (e) { st.textContent = 'Failed' }
     setTimeout(() => { st.textContent = '' }, 3000)
   })
@@ -1174,7 +1191,7 @@ async function renderToolsTab(container) {
 
   // Custom tools
   try {
-    const res = await fetch('/api/tools')
+    const res = await settingsFetch('/api/tools')
     const data = await res.json()
     customTools = data.custom || []
   } catch { customTools = [] }
@@ -1195,7 +1212,7 @@ async function renderToolsTab(container) {
   // guaranteed 403 today).
   if (!MULTI_USER) {
     try {
-      const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+      const res = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
       const data = await res.json()
       mcpServers = data.servers || []
     } catch { mcpServers = [] }
@@ -1225,7 +1242,7 @@ async function renderToolsTab(container) {
   // card grid as the other tool sections; the toggle is the user's own opt-out
   // (admin-locked tools show a badge instead of a toggle).
   try {
-    const d = await fetch('/api/my/tool-prefs').then(r => r.json())
+    const d = await settingsFetch('/api/my/tool-prefs').then(r => r.json())
     const tools = d.tools || []
     if (tools.length) {
       const section = document.createElement('div')
@@ -1256,7 +1273,7 @@ async function renderToolsTab(container) {
         const cb = card.querySelector('input[data-gt]')
         if (cb) cb.addEventListener('change', async function () {
           card.classList.toggle('disabled', !this.checked)
-          await fetch('/api/my/tool-prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: this.dataset.gt, hidden: !this.checked }) })
+          await settingsFetch('/api/my/tool-prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: this.dataset.gt, hidden: !this.checked }) })
         })
         grid.appendChild(card)
       }
@@ -1277,12 +1294,12 @@ async function renderWebhooksTab(container) {
   container.appendChild(page)
 
   let hooks = []
-  try { hooks = await fetch('/api/webhooks').then(r => r.json()) || [] } catch (e) { hooks = [] }
+  try { hooks = await settingsFetch('/api/webhooks').then(r => r.json()) || [] } catch (e) { hooks = [] }
 
   const list = document.createElement('div')
   page.appendChild(list)
 
-  const fullURL = h => location.origin + h.url
+  const fullURL = h => new URL(h.url, location.origin).href
 
   function renderList() {
     list.innerHTML = ''
@@ -1319,7 +1336,7 @@ async function renderWebhooksTab(container) {
     }))
     list.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
       if (!confirm('Delete this webhook? Callers using its URL will start getting 401.')) return
-      await fetch('/api/webhooks/' + encodeURIComponent(b.dataset.del), { method: 'DELETE' })
+      await settingsFetch('/api/webhooks/' + encodeURIComponent(b.dataset.del), { method: 'DELETE' })
       hooks = hooks.filter(x => x.id !== b.dataset.del)
       renderList()
     }))
@@ -1411,7 +1428,7 @@ async function renderWebhooksTab(container) {
     }
     status.textContent = 'Saving…'
     try {
-      const res = await fetch('/api/webhooks', {
+      const res = await settingsFetch('/api/webhooks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -1421,8 +1438,8 @@ async function renderWebhooksTab(container) {
       const i = hooks.findIndex(x => x.id === saved.id)
       if (i >= 0) hooks[i] = saved
       else hooks.push(saved)
-      status.textContent = 'Saved.'
       reset()
+      status.textContent = 'Saved.'
       renderList()
     } catch (e) {
       status.textContent = 'Error: ' + e
@@ -1441,8 +1458,8 @@ async function renderMCPTab(container) {
   // Personal MCP servers only exist in single-user mode — MULTI_USER retires
   // the personal scope entirely (server-side too), so don't even fetch it there.
   const [serversRes, secretsRes] = await Promise.allSettled([
-    MULTI_USER ? Promise.resolve({ servers: [] }) : fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`).then(r => r.json()),
-    fetch('/api/secrets').then(r => r.json()),
+    MULTI_USER ? Promise.resolve({ servers: [] }) : settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`).then(r => r.json()),
+    settingsFetch('/api/secrets').then(r => r.json()),
   ])
   mcpServers = serversRes.status === 'fulfilled' ? (serversRes.value.servers || []) : []
   const secretNames = secretsRes.status === 'fulfilled' ? (secretsRes.value.secrets || []) : []
@@ -1479,12 +1496,12 @@ async function renderMCPTab(container) {
   let anyGroupSection = false
   let hasGroups = false
   try {
-    const my = await fetch('/api/my/groups').then(r => r.json())
+    const my = await settingsFetch('/api/my/groups').then(r => r.json())
     hasGroups = (my.groups || []).length > 0
     for (const g of (my.groups || [])) {
       const gid = g.id || g.groupId
       const gname = g.name || g.groupName
-      const d = await fetch(`/api/group/mcp?group=${gid}`).then(r => r.ok ? r.json() : { servers: [] })
+      const d = await settingsFetch(`/api/group/mcp?group=${gid}`).then(r => r.ok ? r.json() : { servers: [] })
       const servers = d.servers || []
       if (!servers.length) continue
       anyGroupSection = true
@@ -1585,7 +1602,7 @@ async function addMCPServer() {
   btn.disabled = true
   status.textContent = 'Connecting…'; status.className = 'mcp-add-status'
   try {
-    const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`, {
+    const res = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, url, authSecret: secret || undefined }),
@@ -1612,7 +1629,7 @@ async function addMCPServer() {
     document.getElementById('mcp-add-url').value = ''
     document.getElementById('mcp-add-secret').value = ''
     // Reload list
-    const r2 = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+    const r2 = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
     mcpServers = (await r2.json()).servers || []
     renderMCPServerList(document.querySelector('.settings-page'))
   } catch(e) {
@@ -1621,19 +1638,19 @@ async function addMCPServer() {
 }
 
 async function patchMCPServer(id, enabled) {
-  await fetch(`/api/mcp/servers/${encodeURIComponent(id)}?session=${encodeURIComponent(SESSION)}`, {
+  await settingsFetch(`/api/mcp/servers/${encodeURIComponent(id)}?session=${encodeURIComponent(SESSION)}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
   }).catch(console.error)
-  const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+  const res = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
   mcpServers = (await res.json()).servers || []
   renderMCPServerList(document.querySelector('.settings-page'))
 }
 
 async function deleteMCPServer(id) {
   if (!await PrismModal.confirm('Delete this MCP server?', { danger: true })) return
-  await fetch(`/api/mcp/servers/${encodeURIComponent(id)}?session=${encodeURIComponent(SESSION)}`, { method: 'DELETE' }).catch(console.error)
-  const res = await fetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+  await settingsFetch(`/api/mcp/servers/${encodeURIComponent(id)}?session=${encodeURIComponent(SESSION)}`, { method: 'DELETE' }).catch(console.error)
+  const res = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
   mcpServers = (await res.json()).servers || []
   renderMCPServerList(document.querySelector('.settings-page'))
 }
@@ -1685,7 +1702,7 @@ async function renderSecretsTab(container) {
     btn.disabled = true
     status.textContent = 'Saving…'; status.className = 'mcp-add-status'
     try {
-      const res = await fetch('/api/secrets', {
+      const res = await settingsFetch('/api/secrets', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, value }),
       })
@@ -1701,7 +1718,7 @@ async function renderSecretsTab(container) {
   })
 
   try {
-    const res = await fetch('/api/secrets')
+    const res = await settingsFetch('/api/secrets')
     const data = await res.json()
     const names = data.secrets || []
     const list = document.getElementById('secrets-list')
@@ -1722,7 +1739,7 @@ async function renderSecretsTab(container) {
         row.querySelector('button').addEventListener('click', async function() {
           const n = this.dataset.name
           if (!await PrismModal.confirm(`Delete secret "${n}"?`, { danger: true })) return
-          await fetch(`/api/secrets/${encodeURIComponent(n)}`, { method: 'DELETE' })
+          await settingsFetch(`/api/secrets/${encodeURIComponent(n)}`, { method: 'DELETE' })
           document.getElementById(`secret-row-${CSS.escape(n)}`)?.remove()
         })
         list.appendChild(row)
@@ -1749,7 +1766,7 @@ async function renderMultiUserSecretsTab(container) {
 
   let myGroups = []
   try {
-    const my = await fetch('/api/my/groups').then(r => r.json())
+    const my = await settingsFetch('/api/my/groups').then(r => r.json())
     myGroups = (my.groups || []).map(g => ({ id: g.groupId ?? g.id, name: g.groupName ?? g.name ?? ('group ' + (g.groupId ?? g.id)) }))
   } catch {}
 
@@ -1773,7 +1790,7 @@ async function renderMultiUserSecretsTab(container) {
   addForm.className = 'mcp-add-form'
   const groupChoice = myGroups.length === 0 ? '' : `
     <label style="display:flex;gap:7px;align-items:center;margin-top:8px;font-size:12px;color:var(--text2);cursor:pointer">
-      <input type="checkbox" id="user-secret-add-shared" style="width:auto">
+      <span class="toggle-switch"><input type="checkbox" id="user-secret-add-shared"><span class="toggle-track"></span></span>
       Group secret — shared, usable by every member${myGroups.length === 1 ? ' of ' + escHtml(myGroups[0].name) : ''}
     </label>
     ${myGroups.length > 1 ? `<select id="user-secret-add-group" class="mcp-input" style="margin-top:6px;display:none">${myGroups.map(g => `<option value="${g.id}">${escHtml(g.name)}</option>`).join('')}</select>` : ''}`
@@ -1801,7 +1818,7 @@ async function renderMultiUserSecretsTab(container) {
     btn.disabled = true
     status.textContent = 'Saving…'; status.className = 'mcp-add-status'
     try {
-      const res = await fetch('/api/user/secrets', {
+      const res = await settingsFetch('/api/user/secrets', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
@@ -1837,7 +1854,7 @@ async function renderMultiUserSecretsTab(container) {
   }
 
   try {
-    const res = await fetch('/api/user/secrets')
+    const res = await settingsFetch('/api/user/secrets')
     const data = await res.json()
     const names = data.secrets || []
     const list = document.getElementById('user-secrets-list')
@@ -1859,7 +1876,7 @@ async function renderMultiUserSecretsTab(container) {
         row.querySelector('button[title^="Delete"]').addEventListener('click', async function() {
           const n = this.dataset.name
           if (!await PrismModal.confirm(`Delete secret "${n}"?`, { danger: true })) return
-          await fetch(`/api/user/secrets/${encodeURIComponent(n)}`, { method: 'DELETE' })
+          await settingsFetch(`/api/user/secrets/${encodeURIComponent(n)}`, { method: 'DELETE' })
           document.getElementById(`user-secret-row-${CSS.escape(n)}`)?.remove()
         })
         // Share = server-side MOVE to the group's scope (the value is never
@@ -1869,7 +1886,7 @@ async function renderMultiUserSecretsTab(container) {
           const n = this.dataset.name
           for (const g of myGroups) {
             if (!await PrismModal.confirm(`Share secret "${n}" with the group "${g.name}"? It becomes a group secret — usable by every member's agent — and leaves your personal list.`)) continue
-            const res = await fetch(`/api/user/secrets/${encodeURIComponent(n)}`, {
+            const res = await settingsFetch(`/api/user/secrets/${encodeURIComponent(n)}`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ group: g.id }),
             })
@@ -1900,7 +1917,7 @@ async function renderGroupSecretsList(myGroups) {
   for (const g of myGroups) {
     let names = []
     try {
-      const res = await fetch(`/api/group/secrets?group=${g.id}`)
+      const res = await settingsFetch(`/api/group/secrets?group=${g.id}`)
       if (!res.ok) continue
       names = (await res.json()).secrets || []
     } catch { continue }
@@ -1918,7 +1935,7 @@ async function renderGroupSecretsList(myGroups) {
       row.querySelector('button').addEventListener('click', async function() {
         const n = this.dataset.name
         if (!await PrismModal.confirm(`Delete group secret "${n}"? Every member loses it.`, { danger: true })) return
-        const res = await fetch(`/api/group/secrets?group=${g.id}&name=${encodeURIComponent(n)}`, { method: 'DELETE' })
+        const res = await settingsFetch(`/api/group/secrets?group=${g.id}&name=${encodeURIComponent(n)}`, { method: 'DELETE' })
         if (res.ok) { row.remove(); if (status) { status.textContent = ''; status.className = 'mcp-add-status' } }
         else if (status) { status.textContent = 'Error: ' + await res.text(); status.className = 'mcp-add-status error' }
       })
@@ -1948,7 +1965,7 @@ const BRAND = {
 // ── Email tab — mailbox configuration ──────────────────────────────────────────
 const EMAIL_PROVIDERS = {
   gmail:      { label: 'Gmail',      icon: BRAND.gmail, imap: 'imap.gmail.com',        imapPort: 993, smtp: 'smtp.gmail.com',          smtpPort: 587, hint: 'Gmail needs an <b>App Password</b>, not your normal password. Enable 2-Step Verification, then create one at <b>Google Account → Security → App passwords</b>.' },
-  outlook:    { label: 'Outlook',    icon: BRAND.outlook, imap: 'outlook.office365.com', imapPort: 993, smtp: 'smtp-mail.outlook.com',    smtpPort: 587, hint: 'Outlook / Hotmail. If you use 2FA, create an <b>App Password</b> at <b>account.microsoft.com → Security</b>.' },
+  outlook:    { label: 'Outlook',    icon: BRAND.outlook, imap: 'outlook.office365.com', imapPort: 993, smtp: 'smtp-mail.outlook.com',    smtpPort: 587, hint: 'Outlook.com / Hotmail requires <b>OAuth2</b>, which Prism does not yet support for email. A regular password or App Password cannot enable that connection. Microsoft Calendar is configured separately.' },
   protonmail: { label: 'ProtonMail', icon: BRAND.proton, imap: 'protonmail-bridge',     imapPort: 143, smtp: 'protonmail-bridge',       smtpPort: 25, security: 'starttls', insecure: true, hint: 'ProtonMail needs <b>Proton Mail Bridge</b> (paid plan), run as the bundled <b>protonmail-bridge</b> Docker service. Use the <b>username</b> and <b>Bridge password</b> it shows. Host stays <b>protonmail-bridge</b>, IMAP 143 / SMTP 25.' },
   icloud:     { label: 'iCloud',     icon: BRAND.icloud, imap: 'imap.mail.me.com',      imapPort: 993, smtp: 'smtp.mail.me.com',        smtpPort: 587, hint: 'iCloud Mail needs an <b>app-specific password</b> from <b>appleid.apple.com → Sign-In and Security</b>.' },
   yahoo:      { label: 'Yahoo',      icon: BRAND.yahoo, imap: 'imap.mail.yahoo.com',   imapPort: 993, smtp: 'smtp.mail.yahoo.com',     smtpPort: 587, hint: 'Yahoo Mail needs an <b>App Password</b> from <b>Account Security</b>.' },
@@ -1966,20 +1983,24 @@ async function renderEmailTab(container) {
   container.appendChild(page)
 
   let cfg = {}
-  try { cfg = await fetch('/api/email/config').then(r => r.json()) } catch {}
+  try { cfg = await settingsFetch('/api/email/config').then(r => r.json()) } catch {}
 
   const matchProvider = () => {
     for (const k in EMAIL_PROVIDERS) if (k !== 'other' && EMAIL_PROVIDERS[k].imap === cfg.imap_host) return k
     return cfg.imap_host ? 'other' : 'gmail'
   }
-  const sel = matchProvider()
-  const logos = Object.entries(EMAIL_PROVIDERS).map(([k, p]) =>
+  const platform = await PLATFORM
+  const localBridge = platform.capabilities?.localMailBridge !== false
+  const matched = matchProvider()
+  const sel = !localBridge && matched === 'protonmail' ? 'other' : matched
+  const logos = Object.entries(EMAIL_PROVIDERS).filter(([k]) => localBridge || k !== 'protonmail').map(([k, p]) =>
     `<div class="eplogo${k === sel ? ' sel' : ''}" data-prov="${k}"><span class="epi">${p.icon}</span>${p.label}</div>`).join('')
 
   emWrap.innerHTML = `
     <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('mail')}</span><span class="config-cat-name">Mailbox</span></div>
     <div style="font-size:12px;color:var(--text2);margin:6px 0 16px;line-height:1.5">Pick your provider, then enter your email and password. Credentials are stored <b>encrypted</b> on your server.</div>
     <div class="eplogos">${logos}</div>
+    ${!localBridge ? '<p class="eprov-hint">Proton Mail requires a personal Bridge. The local bundled Bridge is not available in this hosted deployment.</p>' : ''}
     <div class="efield"><label>Email</label><input id="e-user" value="${escHtml(cfg.user || '')}" placeholder="you@example.com"></div>
     <div class="efield"><label>Password</label><input id="e-pass" type="password" placeholder="${cfg.has_password ? '•••••• (unchanged)' : ''}"></div>
     <div class="efield"><label>Emails to load in the inbox</label><input id="e-limit" type="number" min="1" max="500" value="${cfg.list_limit || 60}" style="width:120px"></div>
@@ -1996,7 +2017,7 @@ async function renderEmailTab(container) {
       </div>
       <div class="erow2">
         <div class="efield"><label>Security</label><select id="e-sec"><option value="ssl">SSL/TLS</option><option value="starttls">STARTTLS</option></select></div>
-        <div class="efield" style="display:flex;align-items:flex-end;padding-bottom:7px"><label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;cursor:pointer"><input type="checkbox" id="e-insec" style="width:auto"> self-signed</label></div>
+        <div class="efield" style="display:flex;align-items:flex-end;padding-bottom:7px"><label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;cursor:pointer"><span class="toggle-switch"><input type="checkbox" id="e-insec"><span class="toggle-track"></span></span> self-signed</label></div>
       </div>
       <div class="efield"><label>From (optional)</label><input id="e-from" value="${escHtml(cfg.from || '')}" placeholder="defaults to email"></div>
     </details>
@@ -2032,7 +2053,7 @@ async function renderEmailTab(container) {
     if (pass) body.password = pass
     $('e-save').disabled = true; $('e-err').textContent = ''
     try {
-      const res = await fetch('/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const res = await settingsFetch('/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       if (!res.ok) throw new Error(await res.text())
       showToast('Mailbox saved')
     } catch (e) { $('e-err').textContent = 'Could not save: ' + e.message }
@@ -2068,7 +2089,7 @@ async function renderNotesTab(container) {
         status = wrap.querySelector('#notes-status')
   const sync = () => { const v = prov.value === 'vault'; pathRow.style.display = v ? '' : 'none'; pathHelp.style.display = v ? '' : 'none' }
   try {
-    const d = await (await fetch('/api/notes/source')).json()
+    const d = await (await settingsFetch('/api/notes/source')).json()
     prov.value = d.provider || 'local'; pathInput.value = d.path || ''
     if (d.vault_available === false) {
       prov.querySelector('option[value="vault"]').remove()
@@ -2087,7 +2108,7 @@ async function renderNotesTab(container) {
   wrap.querySelector('#notes-save').addEventListener('click', async () => {
     status.style.color = 'var(--text3)'; status.textContent = 'Saving…'
     try {
-      const r = await fetch('/api/notes/source', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: prov.value, path: pathInput.value.trim() }) })
+      const r = await settingsFetch('/api/notes/source', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: prov.value, path: pathInput.value.trim() }) })
       if (!r.ok) { status.style.color = 'var(--red)'; status.textContent = (await r.text()).trim() || 'Failed'; return }
       status.style.color = 'var(--green)'; status.textContent = 'Saved ✓'
     } catch (e) { status.style.color = 'var(--red)'; status.textContent = e.message }
@@ -2198,7 +2219,7 @@ async function renderCalendarTab(container) {
   }
   async function loadSources() {
     let d
-    try { d = await (await fetch('/api/pim/sources')).json() } catch { return }
+    try { d = await (await settingsFetch('/api/pim/sources')).json() } catch { return }
     lastAvail = d.available
     for (const p of ['caldav', 'google', 'microsoft', 'todoist']) {
       const dot = wrap.querySelector(`.cal-st[data-st="${p}"]`); if (dot) dot.classList.toggle('on', !!d.available[p])
@@ -2211,7 +2232,7 @@ async function renderCalendarTab(container) {
     $('#src-task-hint').textContent = d.tasks === 'auto' ? `→ ${SRC_LABEL[d.resolved.tasks] || d.resolved.tasks}` : ''
   }
   const saveSources = async () => {
-    try { await fetch('/api/pim/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ calendar: $('#src-cal').value, tasks: $('#src-task').value }) }) } catch {}
+    try { await settingsFetch('/api/pim/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ calendar: $('#src-cal').value, tasks: $('#src-task').value }) }) } catch {}
     loadSources()
   }
   $('#src-cal').addEventListener('change', saveSources)
@@ -2231,13 +2252,13 @@ async function renderCalendarTab(container) {
     $('#cd-cals').style.display = (cals && cals.length) ? '' : 'none'
   }
   try {
-    const d = await (await fetch('/api/caldav/config')).json()
+    const d = await (await settingsFetch('/api/caldav/config')).json()
     known.eventPath = d.eventPath || ''; known.taskPath = d.taskPath || ''
     $('#cd-url').value = d.url || ''; $('#cd-user').value = d.user || ''
     if (d.configured) { $('#cd-disconnect').style.display = ''; status.style.color = 'var(--green)'; status.textContent = 'Connected' }
   } catch {}
   const post = async (payload) => {
-    const r = await fetch('/api/caldav/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    const r = await settingsFetch('/api/caldav/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
     return r.json()
   }
@@ -2271,7 +2292,7 @@ async function renderCalendarTab(container) {
   const ggStatus = $('#gg-status')
   async function ggLoad() {
     try {
-      const d = await (await fetch('/api/oauth/google/config')).json()
+      const d = await (await settingsFetch('/api/oauth/google/config')).json()
       $('#gg-redirect').value = d.redirectUri || (location.origin + '/api/oauth/google/callback')
       $('#gg-id').value = d.clientId || ''
       if (d.connected) { $('#gg-disconnect').style.display = ''; ggStatus.style.color = 'var(--green)'; ggStatus.textContent = 'Connected' }
@@ -2279,7 +2300,7 @@ async function renderCalendarTab(container) {
     } catch {}
   }
   const ggSaveCreds = async () => {
-    const r = await fetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#gg-id').value.trim(), clientSecret: $('#gg-secret').value }) })
+    const r = await settingsFetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#gg-id').value.trim(), clientSecret: $('#gg-secret').value }) })
     if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
   }
   await ggLoad()
@@ -2300,7 +2321,7 @@ async function renderCalendarTab(container) {
     const iv = setInterval(async () => {
       tries++
       let connected = false
-      try { connected = (await (await fetch('/api/oauth/google/config')).json()).connected } catch {}
+      try { connected = (await (await settingsFetch('/api/oauth/google/config')).json()).connected } catch {}
       if (connected) {
         clearInterval(iv); ggLoad(); loadSources()
         ggStatus.style.color = 'var(--green)'; ggStatus.textContent = 'Connected ✓'
@@ -2318,7 +2339,7 @@ async function renderCalendarTab(container) {
   })
   $('#gg-disconnect').addEventListener('click', async () => {
     try {
-      await fetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
+      await settingsFetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
       ggLoad(); loadSources(); ggStatus.style.color = 'var(--text3)'; ggStatus.textContent = 'Disconnected'
     } catch (e) { ggStatus.style.color = 'var(--red)'; ggStatus.textContent = e.message }
   })
@@ -2327,7 +2348,7 @@ async function renderCalendarTab(container) {
   const msStatus = $('#ms-status')
   async function msLoad() {
     try {
-      const d = await (await fetch('/api/oauth/microsoft/config')).json()
+      const d = await (await settingsFetch('/api/oauth/microsoft/config')).json()
       $('#ms-redirect').value = d.redirectUri || (location.origin + '/api/oauth/microsoft/callback')
       $('#ms-id').value = d.clientId || ''
       if (d.connected) { $('#ms-disconnect').style.display = ''; msStatus.style.color = 'var(--green)'; msStatus.textContent = 'Connected' }
@@ -2335,7 +2356,7 @@ async function renderCalendarTab(container) {
     } catch {}
   }
   const msSaveCreds = async () => {
-    const r = await fetch('/api/oauth/microsoft/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#ms-id').value.trim(), clientSecret: $('#ms-secret').value }) })
+    const r = await settingsFetch('/api/oauth/microsoft/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#ms-id').value.trim(), clientSecret: $('#ms-secret').value }) })
     if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
   }
   await msLoad()
@@ -2354,7 +2375,7 @@ async function renderCalendarTab(container) {
     const iv = setInterval(async () => {
       tries++
       let connected = false
-      try { connected = (await (await fetch('/api/oauth/microsoft/config')).json()).connected } catch {}
+      try { connected = (await (await settingsFetch('/api/oauth/microsoft/config')).json()).connected } catch {}
       if (connected) {
         clearInterval(iv); msLoad(); loadSources()
         msStatus.style.color = 'var(--green)'; msStatus.textContent = 'Connected ✓'
@@ -2372,20 +2393,20 @@ async function renderCalendarTab(container) {
   })
   $('#ms-disconnect').addEventListener('click', async () => {
     try {
-      await fetch('/api/oauth/microsoft/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
+      await settingsFetch('/api/oauth/microsoft/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
       msLoad(); loadSources(); msStatus.style.color = 'var(--text3)'; msStatus.textContent = 'Disconnected'
     } catch (e) { msStatus.style.color = 'var(--red)'; msStatus.textContent = e.message }
   })
 
   // Todoist task backend
   try {
-    const d = await (await fetch('/api/todoist/config')).json()
+    const d = await (await settingsFetch('/api/todoist/config')).json()
     if (d.configured) { $('#td-disconnect').style.display = ''; const s2 = $('#td-status'); s2.style.color = 'var(--green)'; s2.textContent = 'Connected' }
   } catch {}
   $('#td-connect').addEventListener('click', async () => {
     const st = $('#td-status'); st.style.color = 'var(--text3)'; st.textContent = 'Connecting…'
     try {
-      const r = await fetch('/api/todoist/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: $('#td-token').value.trim() }) })
+      const r = await settingsFetch('/api/todoist/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: $('#td-token').value.trim() }) })
       if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
       st.style.color = 'var(--green)'; st.textContent = 'Connected ✓'; $('#td-disconnect').style.display = ''; loadSources()
     } catch (e) { st.style.color = 'var(--red)'; st.textContent = e.message }
@@ -2393,7 +2414,7 @@ async function renderCalendarTab(container) {
   $('#td-disconnect').addEventListener('click', async () => {
     const st = $('#td-status')
     try {
-      await fetch('/api/todoist/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
+      await settingsFetch('/api/todoist/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disconnect: true }) })
       $('#td-disconnect').style.display = 'none'; $('#td-token').value = ''
       st.style.color = 'var(--text3)'; st.textContent = 'Disconnected'; loadSources()
     } catch (e) { st.style.color = 'var(--red)'; st.textContent = e.message }
@@ -2427,12 +2448,12 @@ async function downscaleImage(file, max) {
 async function uploadAvatar(scope, file) {
   const blob = await downscaleImage(file)
   const fd = new FormData(); fd.append('file', blob, 'avatar.png')
-  const r = await fetch(`/api/avatar?scope=${encodeURIComponent(scope)}`, { method: 'POST', body: fd })
+  const r = await settingsFetch(`/api/avatar?scope=${encodeURIComponent(scope)}`, { method: 'POST', body: fd })
   if (!r.ok) throw new Error(await r.text())
   return (await r.json()).avatarVer
 }
 async function removeAvatar(scope) {
-  await fetch(`/api/avatar?scope=${encodeURIComponent(scope)}`, { method: 'DELETE' })
+  await settingsFetch(`/api/avatar?scope=${encodeURIComponent(scope)}`, { method: 'DELETE' })
 }
 
 // ── Profile tab ────────────────────────────────────────────────────────────────
@@ -2442,12 +2463,13 @@ async function renderProfileTab(container) {
   page.className = 'settings-page'
   container.appendChild(page)
   let p = {}
-  try { p = await fetch('/api/profile').then(r => r.json()) } catch (_) {}
-  const voxDocked = (await PLATFORM).voxDocked === true
+  try { p = await settingsFetch('/api/profile').then(r => r.json()) } catch (_) {}
+  const platform = await PLATFORM
+  const voxDocked = platform.voxDocked === true
   const nameFor = () => ($('pf-display') ? $('pf-display').value : '') || p.displayName || p.email || '?'
   page.innerHTML = `
     <h2 style="margin:0 0 4px;font-size:17px">Profile</h2>
-    <p style="color:var(--text3);font-size:12.5px;margin:0 0 20px">Your identity across Prism — shown in group chat and next to your messages.</p>
+    <p style="color:var(--text3);font-size:12.5px;margin:0 0 20px">${platform.capabilities?.personalHosting ? 'Your personal profile and preferences.' : 'Your identity across Prism — shown in group chat and next to your messages.'}</p>
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:22px">
       <div id="pf-avatar">${avatarMarkup('u' + (p.userId || 0), p.avatarVer, p.displayName || p.email, 72)}</div>
       <div style="display:flex;flex-direction:column;gap:8px">
@@ -2520,7 +2542,7 @@ async function renderProfileTab(container) {
       // Only sent when the picker is on screen: omitting it leaves the choice
       // alone, which is what a single-group user wants.
       if ($('pf-group')) body.defaultGroupId = Number($('pf-group').value)
-      const r = await fetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const r = await settingsFetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       if (!r.ok) throw new Error(await r.text())
       $('pf-status').textContent = '✓ Saved'
     } catch (err) { $('pf-status').textContent = 'Error: ' + err.message }
@@ -2538,10 +2560,10 @@ async function computeRagManage() {
   // neither manage nor read access (RAG_SCOPED=false), instead of the old
   // personal-fallback scope.
   try {
-    const me = await fetch('/api/me').then(r => r.json())
+    const me = await settingsFetch('/api/me').then(r => r.json())
     MULTI_USER = !!me.multiUser
     if (!me.authenticated) { RAG_MANAGE = false; RAG_SCOPED = false; return }
-    const my = await fetch('/api/my/groups').then(r => r.json())
+    const my = await settingsFetch('/api/my/groups').then(r => r.json())
     const inGroup = (my.groups || []).length > 0
     RAG_SCOPED = inGroup || !MULTI_USER
     RAG_MANAGE = !MULTI_USER && !inGroup
@@ -2552,7 +2574,7 @@ async function renderRAGTab(container) {
   await computeRagManage()
   // Check RAG status first
   try {
-    const res = await fetch('/api/rag/status')
+    const res = await settingsFetch('/api/rag/status')
     const data = await res.json()
     if (!data.ready) {
       const msg = document.createElement('div')
@@ -2563,7 +2585,7 @@ async function renderRAGTab(container) {
       const poll = async () => {
         if (currentTab !== 'knowledge' || !msg.isConnected) return
         try {
-          const response = await fetch('/api/rag/status')
+          const response = await settingsFetch('/api/rag/status')
           if (!response.ok) throw new Error('Status unavailable')
           const next = await response.json()
           if (currentTab !== 'knowledge' || !msg.isConnected) return
@@ -2611,7 +2633,7 @@ async function renderRAGTab(container) {
 
 async function loadCollections() {
   try {
-    const res = await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`)
+    const res = await settingsFetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`)
     collections = await res.json()
     if (!Array.isArray(collections)) collections = []
     renderCollections()
@@ -2650,7 +2672,7 @@ function selectCollection(name) {
 
 async function deleteCollection(name) {
   if (!await PrismModal.confirm(`Delete collection "${name}" and all its documents?`, { danger: true })) return
-  await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+  await settingsFetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
   if (currentCollection === name) {
     currentCollection = null
     const content = document.getElementById('rag-content')
@@ -2727,7 +2749,7 @@ async function saveDescription(value) {
   const col = collections.find(c => c.name === currentCollection)
   if (!col) return
   col.description = value
-  await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
+  await settingsFetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: currentCollection, description: value })
   })
@@ -2736,7 +2758,7 @@ async function saveDescription(value) {
 async function loadDocuments() {
   if (!currentCollection) return
   try {
-    const res = await fetch(`/api/rag/documents?collection=${encodeURIComponent(currentCollection)}`)
+    const res = await settingsFetch(`/api/rag/documents?collection=${encodeURIComponent(currentCollection)}`)
     const docs = await res.json()
     renderDocuments(Array.isArray(docs) ? docs : [])
   } catch { showToast('Failed to load documents', true) }
@@ -2768,7 +2790,7 @@ function renderDocuments(docs) {
 }
 
 async function deleteDocument(id) {
-  await fetch(`/api/rag/document?id=${id}`, { method: 'DELETE' })
+  await settingsFetch(`/api/rag/document?id=${id}`, { method: 'DELETE' })
   loadDocuments(); loadCollections()
 }
 
@@ -2784,7 +2806,7 @@ async function pollIngestProgress(collection, filename, progress, stop) {
     if (stop.done) return
     let d
     try {
-      const res = await fetch(`/api/rag/upload/progress?session=${encodeURIComponent(SESSION)}`
+      const res = await settingsFetch(`/api/rag/upload/progress?session=${encodeURIComponent(SESSION)}`
         + `&collection=${encodeURIComponent(collection)}&filename=${encodeURIComponent(filename)}`)
       d = await res.json()
     } catch (_) { continue }
@@ -2819,7 +2841,7 @@ async function uploadFiles(files) {
       const stop = { done: false }
       pollIngestProgress(currentCollection, file.name, progress, stop)
       let res
-      try { res = await fetch('/api/rag/upload', { method: 'POST', body: form }) }
+      try { res = await settingsFetch('/api/rag/upload', { method: 'POST', body: form }) }
       finally { stop.done = true }
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || res.statusText)
@@ -2858,7 +2880,7 @@ async function createCollection() {
   // The description is what the agent reads to decide when to search here — see the
   // "## Knowledge Base (RAG)" block built in internal/server/ws.go.
   try {
-    await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
+    await settingsFetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, description }),
     })
@@ -2894,13 +2916,13 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.getElementById('modal-overlay').classList.remove('visible')
 })
 
-fetch('/api/auth').then(r => r.json()).then(d => {
+settingsFetch('/api/auth').then(r => r.json()).then(d => {
   if (!d.authenticated) { window.top.location.href = '/'; return }
   if (d.auth_enabled) document.getElementById('logout-btn').style.display = 'block'
 })
 
 async function logout() {
-  await fetch('/api/auth', { method: 'DELETE' })
+  await settingsFetch('/api/auth', { method: 'DELETE' })
   window.top.location.href = '/'
 }
 

@@ -20,6 +20,8 @@ import (
 	"prism/internal/memory"
 )
 
+var canonicalSessionRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
 var userPrefixRe = regexp.MustCompile(`^u\d+-`)
 var userIDPrefixRe = regexp.MustCompile(`^u\d+`)
 var groupScopeInSessionRe = regexp.MustCompile(`^(?:room-|webex-)(g\d+)(?:-|$)`)
@@ -93,6 +95,16 @@ func (s *Server) sessionFor(r *http.Request, clientID string) (string, bool) {
 		return "", false
 	}
 
+	// Storage IDs already include the owner prefix (and may include a
+	// uniqueness suffix). Re-sanitizing with the 32-byte name limit would
+	// truncate them when the browser returns via the workspace list.
+	if len(clientID) <= 128 && canonicalSessionRe.MatchString(clientID) && userPrefixRe.MatchString(clientID) {
+		u := currentUser(r)
+		if u == nil || u.ID == 0 || strings.HasPrefix(clientID, fmt.Sprintf("u%d-", u.ID)) {
+			return clientID, true
+		}
+		return "", false
+	}
 	id := sanitizeSessionID(clientID)
 	if id == "" {
 		id = "default"

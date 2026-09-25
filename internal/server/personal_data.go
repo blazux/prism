@@ -28,6 +28,7 @@ func OpenPersonalData(ctx context.Context, owner, dsn string, key []byte) (*Pers
 		return nil, err
 	}
 	ms.LocalVaultDisabled = true
+	ms.LocalMailBridgeDisabled = true
 	return &PersonalData{owner: owner, store: ms}, nil
 }
 func (d *PersonalData) acquire(owner string) (*memory.Store, func(), bool) {

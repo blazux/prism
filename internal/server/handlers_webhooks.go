@@ -104,6 +104,14 @@ func toWebhookDTO(w memory.WebhookRow) webhookDTO {
 	return d
 }
 
+func (s *Server) webhookDTO(row memory.WebhookRow) webhookDTO {
+	d := toWebhookDTO(row)
+	if s.cfg.WebhookURL != nil {
+		d.URL = s.cfg.WebhookURL(row.ID, row.Token)
+	}
+	return d
+}
+
 // handleWebhooks lists (GET) and creates or updates (POST) webhooks.
 func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -123,7 +131,7 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 		}
 		out := make([]webhookDTO, 0, len(rows))
 		for _, row := range rows {
-			out = append(out, toWebhookDTO(row))
+			out = append(out, s.webhookDTO(row))
 		}
 		writeJSON(w, out)
 
@@ -149,9 +157,17 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// Editing: refuse to touch another scope's webhook even though ids are
 			// globally unique.
-			if existing, ok, _ := ms.WebhookByID(r.Context(), row.ID); ok && existing.Scope != scope {
-				writeErr(w, http.StatusForbidden, "not your webhook")
+			if existing, ok, err := ms.WebhookByID(r.Context(), row.ID); err != nil {
+				writeErr(w, http.StatusInternalServerError, "could not read webhook")
 				return
+			} else if ok {
+				if existing.Scope != scope {
+					writeErr(w, http.StatusForbidden, "not your webhook")
+					return
+				}
+				if row.Token == "" {
+					row.Token = existing.Token
+				}
 			}
 		}
 		// The session is stored namespaced, exactly as /ws and /api/chat would
@@ -176,7 +192,7 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		saved, _, _ := ms.WebhookByID(r.Context(), row.ID)
-		writeJSON(w, toWebhookDTO(saved))
+		writeJSON(w, s.webhookDTO(saved))
 
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "GET or POST")
@@ -249,7 +265,21 @@ func (s *Server) handleWebhookIncoming(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.cfg.WebhookConcurrency > 0 {
+		if s.webhookActive.Add(1) > int32(s.cfg.WebhookConcurrency) {
+			s.webhookActive.Add(-1)
+			w.Header().Set("Retry-After", "5")
+			writeErr(w, http.StatusTooManyRequests, "too many webhook executions; retry later")
+			return
+		}
+	}
+	release := func() {
+		if s.cfg.WebhookConcurrency > 0 {
+			s.webhookActive.Add(-1)
+		}
+	}
 	if hook.Respond {
+		defer release()
 		ctx, cancel := context.WithTimeout(r.Context(), syncWebhookTimeout)
 		defer cancel()
 		resp, err := s.runWebhook(ctx, hook, message)
@@ -264,13 +294,18 @@ func (s *Server) handleWebhookIncoming(w http.ResponseWriter, r *http.Request) {
 	// Detached: an agent turn routinely outlives the sender's timeout, and most
 	// senders discard the body anyway. Deliberately NOT r.Context() — that dies
 	// when this response is written, which would cancel the run instantly.
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), asyncWebhookTimeout)
+	if !s.background(func() {
+		defer release()
+		ctx, cancel := context.WithTimeout(s.runtimeContext(), asyncWebhookTimeout)
 		defer cancel()
 		if _, err := s.runWebhook(ctx, hook, message); err != nil {
 			log.Printf("[webhook %s] %v", hook.ID, err)
 		}
-	}()
+	}) {
+		release()
+		writeErr(w, http.StatusServiceUnavailable, "server shutting down")
+		return
+	}
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, map[string]string{"status": "accepted", "session": webhookSession(hook)})
 }
@@ -330,7 +365,9 @@ func composeWebhookMessage(prompt, body string, r *http.Request) string {
 	content := strings.TrimSpace(body)
 	if content == "" {
 		// A GET trigger carries its payload in the query string, if anywhere.
-		if q := r.URL.RawQuery; q != "" {
+		qv := r.URL.Query()
+		qv.Del("token") // Authentication is not agent input.
+		if q := qv.Encode(); q != "" {
 			content = strings.TrimSpace(strings.ReplaceAll(q, "&", "\n"))
 		}
 	}

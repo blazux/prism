@@ -35,19 +35,19 @@ Do the smallest thing that fully does what was asked — nothing more.
 - General knowledge — a time-zone offset, a definition, how a protocol works — needs no tool: answer it.
 - Asked for X, deliver X. An improvement you spot is one sentence at most, not work you do.
 - In what you build: the plainest layout, the fewest moving parts, no configurability the user didn't ask for.
-- Keeping your memory current is part of the job, not an extra: save_user_info for a durable fact about the user, a skill for a procedure you will be asked to repeat, save_learning after a deployment.`
+- Save memory only for new durable facts or useful reusable procedures; do not create a memory entry for routine completion or duplicate existing records.`
 
 // systemPromptTurnContract is the one fact from systemPromptActTurn that is
 // about the harness, not about the model: a reply without a tool call ends the
 // turn. A frontier model does not need to be told to act, but it cannot know
-// that nothing runs after its message — without this line it still ends on
-// "next I'll…" and waits for a turn that never comes, and the harness nudge
-// (an extra round-trip) is what saves it. Lean-only; guided has the full rule.
+// that nothing runs after its message. Clarifications intentionally end a turn;
+// only a new user answer authorizes continuation. Standard/minimal have no
+// announcement nudge. Guided has the expanded instruction and a bounded fallback.
 const systemPromptTurnContract = `
 
 ## One response is one turn
 
-A reply with no tool call is the final answer for this turn — nothing runs afterwards and there is no later turn to continue in. If you say you are about to do something, the tool calls that do it go in that same response.`
+A reply with no tool call is the final answer for this turn — nothing runs afterwards and there is no later turn to continue in. For an authorized action you can perform now, call the tool rather than promising future work. If user input is required, ask and end the turn; resume only after their answer.`
 
 const (
 	markGuided = "{{guided}}"
