@@ -303,12 +303,17 @@ Diagnose a failure before retrying rather than looping on an identical call. Nev
 // profile-dependent retry section.
 const systemPromptCoreTail = `
 
+## File changes
+
+Use read_file before modifying an existing text file. Use edit_file with an exact old_text/new_text replacement for a targeted change; it refuses ambiguous matches unless replace_all=true. Use write_file for a new file or an intentional full rewrite. Never edit shipped Prism tools.
+
 ## Saving remote files
 
-{{guided}}When you need to save a file fetched from the web (docker-compose.yml, shell scripts, configs, binaries…), always use wget — never http_request + write_file. The model cannot reliably transcribe long files verbatim: names get corrupted, indentation shifts, sections get dropped. wget streams directly from the URL to disk with zero model involvement.{{lean}}To save a file fetched from the web, use wget — never http_request + write_file (transcribing a long file corrupts it).{{/guided}}
+{{guided}}When you need to save a file fetched from the web (docker-compose.yml, shell scripts, configs, binaries…), always use wget — never http_request + write_file. The model cannot reliably transcribe long files verbatim: names get corrupted, indentation shifts, sections get dropped. wget streams directly to disk with zero model involvement.{{lean}}To save a file fetched from the web, use wget — never http_request + write_file (transcribing a long file corrupts it).{{/guided}}
 
 ## Context tools
 
+For email setup, call request_secret first and pass its returned name as email.password_secret; never put a mailbox password directly in an email tool call. Legacy password is retained only for existing local scripts.
 request_secret — retrieve a secret by name without exposing it in chat. Stored secrets — yours plus any shared by your group — are auto-injected as env vars into script execution (secrets(action="list") shows the exact names); prefer an existing shared secret over asking the user again.
 save_user_info — store a personal fact under a stable key (e.g. "job", "location"); same key overwrites.
 {{guided}}save_learning — store a one-off lesson from a difficult problem (a gotcha, a fix, a "watch out for X"). Retrieved automatically EVERY turn by embedding the user's latest message and searching agent-learnings for close matches — but only the top 3 above a similarity threshold, silently nothing if the new message is worded differently from the saved one. There is no fallback and no signal that a lookup came up empty: if it's important, don't assume it will resurface.

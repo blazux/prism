@@ -27,6 +27,7 @@ var leanToolDescriptions = map[string]string{
 	"docker_run":     "Start a service with auto-allocated port. Use returned widget/script URLs for the configured backend. Prefer a Docker image over installing a service into the workspace.",
 	"docker_manage":  "ps: Prism services; list: visible containers; logs/exec: service inspection; stop: stop AND remove a docker_run service.",
 	"docker_compose": "Manage multi-service stacks from a workspace Compose file (write_file/wget first). Names use prism-svc-<dir>-<service>-1. down stops and removes the stack.",
+	"edit_file":      "Edit a UTF-8 workspace file by exact old_text/new_text replacement. Read first; one match is required unless replace_all=true. Never use it for shipped Prism tools.",
 	"search_history": "Search previous conversations across workspaces, global assistant and Telegram. Returns dated messages with session IDs; use when a past fact is missing from current context.",
 }
 

@@ -984,7 +984,7 @@ func (a *Agent) saveMessageToDB(ctx context.Context, msg ollama.Message) int64 {
 	}
 	var toolCallsJSON json.RawMessage
 	if len(msg.ToolCalls) > 0 {
-		b, _ := json.Marshal(msg.ToolCalls)
+		b, _ := json.Marshal(redactedToolCalls(msg.ToolCalls))
 		toolCallsJSON = b
 	}
 	id, err := a.memStore.AppendMessage(ctx, a.sessionID, msg.Role, sanitizeForDB(msg.Content), toolCallsJSON)
@@ -1402,7 +1402,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				Type:  "tool_use",
 				ID:    toolID,
 				Tool:  tc.Function.Name,
-				Input: tc.Function.Arguments,
+				Input: redactToolArgs(tc.Function.Arguments),
 			}
 
 			var result string
@@ -1678,7 +1678,7 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 	content := contentBuilder.String()
 	log.Printf("[agent] iter response: content=%q tool_calls=%d done_reason=%q", truncate(content, 120), len(toolCalls), doneReason)
 	for i, tc := range toolCalls {
-		log.Printf("[agent]   tool[%d] %s %s", i, tc.Function.Name, truncate(string(tc.Function.Arguments), 200))
+		log.Printf("[agent]   tool[%d] %s %s", i, tc.Function.Name, truncate(string(redactToolArgs(tc.Function.Arguments)), 200))
 	}
 	return content, toolCalls, doneReason, nil
 }
@@ -1706,7 +1706,7 @@ func (a *Agent) emitToolSideEffects(toolName string, rawArgs json.RawMessage, ev
 
 	// plugin_load / plugin_unload are sent directly by the server.go callbacks — no duplicate here
 	switch toolName {
-	case "write_file":
+	case "write_file", "edit_file":
 		events <- Event{
 			Type: "file_changed",
 			Path: str("path"),

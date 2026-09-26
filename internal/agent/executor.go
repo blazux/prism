@@ -866,6 +866,9 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.execCommand(ctx, str("command")))
 	case "write_file":
 		return wrap(e.writeFile(str("path"), str("content")))
+	case "edit_file":
+		replaceAll, _ := args["replace_all"].(bool)
+		return wrap(e.editFile(str("path"), str("old_text"), str("new_text"), replaceAll))
 	case "read_file":
 		return wrap(e.readFile(str("path")))
 	case "list_files":

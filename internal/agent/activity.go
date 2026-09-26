@@ -25,7 +25,7 @@ func activityDetails(name string, raw json.RawMessage) (map[string]any, bool) {
 		case "add", "create", "update", "edit", "delete", "remove", "done", "complete", "reopen", "send", "reply", "move", "archive", "trash", "mark_read", "mark_unread", "create_folder", "rename_folder", "delete_folder", "rule_save", "rule_delete", "share", "unshare", "enable", "disable":
 			meaningful = true
 		}
-	case "write_file", "edit", "delete_file", "register_tool", "docker_run", "place_call", "cancel_call":
+	case "write_file", "edit_file", "edit", "delete_file", "register_tool", "docker_run", "place_call", "cancel_call":
 		meaningful = true
 	}
 	// Useful context for known resources, without collecting message text or

@@ -257,3 +257,57 @@ func TestHTTPRequestError(t *testing.T) {
 		t.Errorf("generic error should stay generic: %q", got)
 	}
 }
+
+func TestEditFile_ExactReplacement(t *testing.T) {
+	e, dir := newTestExecutor(t)
+	if _, err := e.writeFile("config.txt", "alpha\nbeta\nbeta\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.editFile("config.txt", "alpha", "ALPHA", false); err != nil {
+		t.Fatalf("unexpected edit error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "config.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "ALPHA\nbeta\nbeta\n" {
+		t.Fatalf("unexpected content: %q", data)
+	}
+}
+
+func TestEditFile_RefusesAmbiguousReplacement(t *testing.T) {
+	e, _ := newTestExecutor(t)
+	if _, err := e.writeFile("config.txt", "beta\nbeta\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.editFile("config.txt", "beta", "BETA", false); err == nil || !strings.Contains(err.Error(), "occurs 2 times") {
+		t.Fatalf("expected an ambiguity error, got %v", err)
+	}
+	if _, err := e.editFile("config.txt", "beta", "BETA", true); err != nil {
+		t.Fatalf("replace_all should succeed: %v", err)
+	}
+}
+
+func TestEditFile_RejectsMissingTextAndTraversal(t *testing.T) {
+	e, _ := newTestExecutor(t)
+	if _, err := e.writeFile("config.txt", "alpha\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.editFile("config.txt", "missing", "x", false); err == nil {
+		t.Fatal("expected missing text error")
+	}
+	if _, err := e.editFile("../escape.txt", "x", "y", false); err == nil {
+		t.Fatal("expected path traversal error")
+	}
+}
+
+func TestRedactToolArgsKeepsSecretNames(t *testing.T) {
+	raw := []byte(`{"password":"hidden","password_secret":"email_password","token_secret":"bot_token","nested":{"api_key":"also-hidden"}}`)
+	got := string(redactToolArgs(raw))
+	if strings.Contains(got, "hidden") || strings.Contains(got, "also-hidden") {
+		t.Fatalf("credential value leaked: %s", got)
+	}
+	if !strings.Contains(got, `"password_secret":"email_password"`) || !strings.Contains(got, `"token_secret":"bot_token"`) {
+		t.Fatalf("secret identifiers should remain visible: %s", got)
+	}
+}

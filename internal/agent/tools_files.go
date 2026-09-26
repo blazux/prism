@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 func (e *ToolExecutor) downloadFile(ctx context.Context, rawURL, path string) (string, error) {
@@ -114,6 +115,58 @@ func (e *ToolExecutor) writeFile(path, content string) (string, error) {
 		e.onFileChange()
 	}
 	return fmt.Sprintf("Written %d bytes to %s", len(content), path), nil
+}
+
+// editFile replaces an exact text fragment in a workspace file. By default a
+// replacement must be unambiguous: refusing to guess is safer than changing
+// several similar lines. Callers can opt into replacing every occurrence with
+// replaceAll=true.
+func (e *ToolExecutor) editFile(path, oldText, newText string, replaceAll bool) (string, error) {
+	path = filepath.Clean(NormalizeWorkspacePath(path))
+	if strings.HasPrefix(path, "..") {
+		return "", fmt.Errorf("invalid path")
+	}
+	if oldText == "" {
+		return "", fmt.Errorf("old_text is required; read the file and provide the exact text to replace")
+	}
+
+	fullPath := filepath.Join(e.workspaceDir, path)
+	if e.isProtectedToolPath(fullPath) {
+		return "", fmt.Errorf("%q is a tool shipped with Prism and cannot be edited", filepath.Base(fullPath))
+	}
+	data, err := workspace.ReadFile(e.workspaceDir, path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", e.notFoundHint(path, fullPath)
+		}
+		return "", err
+	}
+	if !utf8.Valid(data) {
+		return "", fmt.Errorf("%s is not a UTF-8 text file; use exec_command for binary files", path)
+	}
+	content := string(data)
+	count := strings.Count(content, oldText)
+	if count == 0 {
+		return "", fmt.Errorf("old_text was not found in %s; read the current file and retry with an exact match", path)
+	}
+	if count > 1 && !replaceAll {
+		return "", fmt.Errorf("old_text occurs %d times in %s; provide a larger unique fragment or set replace_all=true", count, path)
+	}
+	updated := strings.Replace(content, oldText, newText, 1)
+	if replaceAll {
+		updated = strings.ReplaceAll(content, oldText, newText)
+	}
+	if err := workspace.WriteFile(e.workspaceDir, path, []byte(updated)); err != nil {
+		return "", err
+	}
+	if e.onFileChange != nil {
+		e.onFileChange()
+	}
+	suffix := ""
+	if count != 1 {
+		suffix = "s"
+	}
+	return fmt.Sprintf("Edited %s (%d replacement%s)", path, count, suffix), nil
 }
 
 func (e *ToolExecutor) readFile(path string) (string, error) {

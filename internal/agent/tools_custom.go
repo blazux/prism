@@ -92,7 +92,7 @@ func (e *ToolExecutor) registerTool(code string) (string, error) {
 	}
 
 	source := filepath.Join(filepath.Base(e.customMgr.Dir()), base)
-	return fmt.Sprintf("Tool '%s' registered — it now appears in the admin panel and is immediately callable. Source: %s (inspect or edit later with read_file/write_file/edit).", name, source), nil
+	return fmt.Sprintf("Tool '%s' registered — it now appears in the admin panel and is immediately callable. Source: %s (inspect or edit later with read_file/write_file/edit_file).", name, source), nil
 }
 
 func (e *ToolExecutor) listTools() (string, error) {
@@ -105,7 +105,7 @@ func (e *ToolExecutor) listTools() (string, error) {
 		return "No custom tools registered yet. Use register_tool to create one.", nil
 	}
 	// The tools live in customMgr.Dir() (an absolute host path); the file tools
-	// (read_file/write_file/edit) take workspace-relative paths, so surface the
+	// (read_file/write_file/edit_file) take workspace-relative paths, so surface the
 	// dir's basename — e.g. "agent_tools" — which they accept as-is via
 	// NormalizeWorkspacePath. Derived, not hardcoded, so it can't drift from
 	// where server.go actually puts the dir.

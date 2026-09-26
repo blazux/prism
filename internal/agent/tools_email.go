@@ -36,7 +36,7 @@ func (e *ToolExecutor) loadEmailConfig(ctx context.Context) (email.Config, error
 	}
 	raw, ok, _ := e.userStore().GetConfig(ctx, emailConfigKey)
 	if !ok || raw == "" {
-		return email.Config{}, fmt.Errorf("email not configured — run email action=config first (imap_host, smtp_host, user, password)")
+		return email.Config{}, fmt.Errorf("email not configured — run email action=config first (imap_host, smtp_host, user, password_secret)")
 	}
 	var sc emailStoredConfig
 	if err := json.Unmarshal([]byte(raw), &sc); err != nil {
@@ -113,7 +113,20 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 			}
 			sc.ListLimit = v
 		}
-		if err := e.saveEmailConfig(ctx, sc, str("password")); err != nil {
+		password := str("password")
+		passwordSecret := strings.TrimSpace(str("password_secret"))
+		if passwordSecret != "" {
+			var exists bool
+			var err error
+			password, exists, err = e.userStore().GetSecret(ctx, passwordSecret)
+			if err != nil {
+				return "", fmt.Errorf("could not read password_secret %q: %w", passwordSecret, err)
+			}
+			if !exists || password == "" {
+				return "", fmt.Errorf("password_secret %q does not exist or is empty; call request_secret first", passwordSecret)
+			}
+		}
+		if err := e.saveEmailConfig(ctx, sc, password); err != nil {
 			return "", err
 		}
 		sec := sc.Security
@@ -125,7 +138,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		}
 		return fmt.Sprintf("Email configured (imap=%s smtp=%s user=%s security=%s). Password %s.",
 			sc.IMAPHost, sc.SMTPHost, sc.User, sec,
-			map[bool]string{true: "stored", false: "unchanged"}[str("password") != ""]), nil
+			map[bool]string{true: "stored", false: "unchanged"}[password != ""]), nil
 
 	case "list", "inbox", "":
 		cfg, err := e.loadEmailConfig(ctx)
