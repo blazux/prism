@@ -19,9 +19,9 @@ type claudeCatalog struct {
 	loaded map[string]bool
 }
 
-func withClaudeCatalog(ctx context.Context, model string, guarded bool) context.Context {
+func withClaudeCatalog(ctx context.Context, model string) context.Context {
 	if os.Getenv("PRISM_CLAUDE_LAZY_TOOLS") != "1" ||
-		!strings.HasPrefix(model, "anthropic::claude-") || guarded {
+		!strings.HasPrefix(model, "anthropic::claude-") {
 		return ctx
 	}
 	return context.WithValue(ctx, claudeCatalogKey{}, &claudeCatalog{loaded: make(map[string]bool)})
@@ -34,7 +34,7 @@ func catalogFromContext(ctx context.Context) *claudeCatalog {
 
 var claudeCatalogTool = ollama.Tool{Type: "function", Function: ollama.ToolFunction{
 	Name:        "tool_catalog",
-	Description: "Enable Prism tools for this turn. If you know exact names, call load directly with all needed names; list is only for discovering unknown names and short purposes. Loaded tools appear on the NEXT model call. Only tools allowed in this session appear. No user data is changed.",
+	Description: "Enable Prism tools for this turn. If you know exact names, call load directly with all needed names; list is only for discovering unknown names and short purposes. Loaded tools appear on the NEXT model call. Execution still follows the caller\x27s permissions. No user data is changed.",
 	Parameters: ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{
 		"action": {Type: "string", Enum: []string{"list", "load"}},
 		"names":  {Type: "array", Description: "Exact names to enable with action=load.", Items: &ollama.ToolProperty{Type: "string"}},
@@ -96,7 +96,7 @@ func (c *claudeCatalog) execute(raw json.RawMessage, available []ollama.Tool) (s
 			lines = append(lines, tool.Function.Name+": "+description)
 		}
 		sort.Strings(lines)
-		return "Available tools (load exact names before calling):\n" + strings.Join(lines, "\n"), nil
+		return "Discoverable tools (load exact names before calling; execution follows permissions):\n" + strings.Join(lines, "\n"), nil
 	case "load":
 		if len(args.Names) == 0 {
 			return "", fmt.Errorf("names are required for load")

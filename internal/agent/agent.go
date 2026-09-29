@@ -1311,7 +1311,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	// never mid-turn.
 	maxIterations, thinking := a.effectiveLimits()
 	ctx = withModelBudget(ctx, maxIterations)
-	ctx = withClaudeCatalog(ctx, a.model, a.executor.toolGuard != nil)
+	ctx = withClaudeCatalog(ctx, a.model)
 	a.turnThinking = thinking
 	a.turnReasoningEffort = a.reasoningEffort()
 
