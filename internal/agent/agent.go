@@ -570,7 +570,7 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 		// Inject timestamp prefix on user messages only so the model can reason about time
 		// (not on assistant messages, to avoid the model mimicking the pattern in its responses)
 		if e.Role == "user" {
-			content = fmt.Sprintf("[%s] %s", e.CreatedAt.In(a.timeLocation()).Format("2006-01-02 15:04"), e.Content)
+			content = a.timestampedUserContent(e.Content, e.CreatedAt)
 		}
 		msg := ollama.Message{Role: e.Role, Content: content, DBID: e.ID}
 		if len(e.ToolCalls) > 0 && string(e.ToolCalls) != "null" {
@@ -1025,6 +1025,14 @@ func (a *Agent) timeLocation() *time.Location {
 	return time.Local
 }
 
+// Keep the request time in the conversation, not the system prompt: appending a
+// new user turn preserves Anthropic's cached prefix from previous turns.
+func (a *Agent) timestampedUserContent(content string, at time.Time) string {
+	return fmt.Sprintf("[%s (%s)] %s",
+		at.In(a.timeLocation()).Format("2006-01-02 15:04 MST -07:00"),
+		a.timeLocation().String(), content)
+}
+
 // buildSystemPrompt assembles the full system prompt for the current request.
 // learningsCtx is a pre-fetched snippet from the agent-learnings RAG (may be empty).
 func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) string {
@@ -1078,8 +1086,8 @@ func (a *Agent) buildSystemPromptWithCachePrefix(ctx context.Context, learningsC
 		}
 		sb.WriteString(systemPromptCoreTailFor(lean))
 	}
-	// Everything above is stable during the tool loop. Live context, the clock
-	// and late turn guidance below may change between requests.
+	// Everything above is stable during the tool loop. Live context and late
+	// turn guidance below may change between requests.
 	cachePrefixBytes := sb.Len()
 
 	// Channel guidance: the "telegram" session is the user texting from their phone.
@@ -1160,9 +1168,10 @@ func (a *Agent) buildSystemPromptWithCachePrefix(ctx context.Context, learningsC
 		}
 	}
 
-	// Inject current date/time so the model can reason about time.
-	// Explicit instruction: never output the date/time in responses.
-	fmt.Fprintf(&sb, "\n\nCurrent date and time: %s. Current session ID: `%s`. Use these only as internal context — never write them in your responses. Widget tool calls use prismTool(name,args), which handles session/auth automatically; do not append a session parameter to that helper.", time.Now().In(a.timeLocation()).Format("2006-01-02 15:04 MST -07:00")+" ("+a.timeLocation().String()+")", a.sessionID)
+	// The user's local request time lives in the latest user message. Recomputing
+	// it here on every model call would invalidate the cached conversation prefix
+	// whenever the minute changes during a long tool loop.
+	fmt.Fprintf(&sb, "\n\nUser messages begin with their local request timestamp and timezone. The latest timestamp is the time of the request, not a live clock; use an available tool if the exact current time matters later. Never repeat these internal timestamps in your responses. Current session ID: `%s`. Widget tool calls use prismTool(name,args), which handles session/auth automatically; do not append a session parameter to that helper.", a.sessionID)
 
 	// Grounding rule, near the end on purpose: late-prompt instructions are the
 	// ones this size of model actually follows (see systemPromptRole's measurements).
@@ -1238,10 +1247,10 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		images = nil
 	}
 
-	// Prefix user message with timestamp so the model can reason about time.
+	// Prefix user message with its local request time so the model can reason about time.
 	// Only user messages get the prefix — assistant messages don't, to avoid the model
 	// mimicking the pattern and outputting timestamps in its own responses.
-	timestampedContent := fmt.Sprintf("[%s] %s", time.Now().In(a.timeLocation()).Format("2006-01-02 15:04"), userMsg)
+	timestampedContent := a.timestampedUserContent(userMsg, time.Now())
 	userMessage := ollama.Message{Role: "user", Content: timestampedContent, Images: images}
 
 	// For DB: store clean content (created_at column is the canonical timestamp).

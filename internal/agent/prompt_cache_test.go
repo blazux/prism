@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"prism/internal/ollama"
 )
@@ -23,6 +24,28 @@ func TestSystemPromptCachePrefixIgnoresLiveContext(t *testing.T) {
 	}
 	if first == second || !strings.Contains(second[secondPrefix:], service) {
 		t.Fatal("live context was lost from the uncached suffix")
+	}
+}
+
+func TestRequestClockDoesNotChangeSystemPrompt(t *testing.T) {
+	a := &Agent{executor: &ToolExecutor{}, sessionID: "clock-test", location: time.UTC}
+	first := time.Date(2026, time.September, 29, 15, 4, 0, 0, time.UTC)
+	second := first.Add(2 * time.Minute)
+
+	firstPrompt := a.buildSystemPrompt(t.Context(), "")
+	firstMessage := a.timestampedUserContent("Create a widget", first)
+	secondPrompt := a.buildSystemPrompt(t.Context(), "")
+	secondMessage := a.timestampedUserContent("Update the widget", second)
+
+	if firstPrompt != secondPrompt {
+		t.Fatal("request time changed the system prompt and invalidated the cached conversation")
+	}
+	if strings.Contains(firstPrompt, "Current date and time:") || !strings.Contains(firstPrompt, "User messages begin with their local request timestamp") {
+		t.Fatal("system prompt should describe user timestamps without embedding a live clock")
+	}
+	if firstMessage != "[2026-09-29 15:04 UTC +00:00 (UTC)] Create a widget" ||
+		secondMessage != "[2026-09-29 15:06 UTC +00:00 (UTC)] Update the widget" {
+		t.Fatalf("request timestamps lost or incorrectly formatted: %q, %q", firstMessage, secondMessage)
 	}
 }
 
