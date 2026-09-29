@@ -52,6 +52,46 @@ credits; the fixture cleans up its widget, cron and files afterward:
 go run ./cmd/prism-eval -tasks eval/weather-live.json -model anthropic::claude-sonnet-5
 ```
 
+To measure the upper bound of a smaller tool catalog on the same task, run
+`eval/weather-live-targeted-tools.json` with the same model. It exposes only
+`exec_command`, `widget`, `cron`, `read_file`, and `write_file` through the
+existing `allowed_tools` fixture field. Keep model, prompt, instance and cache
+conditions comparable. This is an **oracle** experiment: the useful tools are
+selected in advance, not discovered by Claude. It does not test Anthropic's
+server-side tool search or account for its search-call cost and latency.
+
+```bash
+go run ./cmd/prism-eval -tasks eval/weather-live-targeted-tools.json -model anthropic::claude-sonnet-5-5 -runs 3
+```
+
+Anthropic's native tool search has a separate, opt-in local probe:
+`PRISM_ANTHROPIC_TOOL_SEARCH=1` (Sonnet 5.5 only). It is **off by default and
+not production-ready**. On 2026-09-29, keeping the five tools above visible
+and deferring the rest passed the weather task 4/4; the three warm-cache runs
+averaged about $0.052 versus $0.069 for the full-catalog control. This task
+did not actually search for a deferred tool. A separate `list_files` discovery
+fixture failed 3/3 with Anthropic `refusal` (category `cyber`), while the
+same prompt with native search off passed 1/1. The probe also uses a complete
+non-streaming response and keeps provider search blocks only in live memory.
+Do not enable it broadly from the weather result alone.
+
+```bash
+go run ./cmd/prism-eval -tasks eval/tool-search-discovery.json -model anthropic::claude-sonnet-5-5
+```
+
+Prism's own Claude-only catalog is a separate opt-in probe:
+`PRISM_CLAUDE_LAZY_TOOLS=1` (mutually exclusive with native tool search).
+It starts with `exec_command`, `read_file`, `write_file`, `widget`, `cron`,
+`prism_help`, and `tool_catalog`; `tool_catalog` lists/loads the remaining
+permitted tools for that turn. Other providers keep the full catalog. On
+2026-09-29 the weather fixture passed 3/3 at ~$0.182 total versus ~$0.298
+with the full Minimal catalog (three runs each); first-request input fell
+from ~24.4k to ~5.9k tokens. The `list_files` discovery fixture passed 2/2,
+loading it in one extra model step. Small samples and different cache states
+mean this is evidence for further evaluation, not a production rollout or a
+guaranteed percentage saving. The flag is off by default.
+
+
 ## CalDAV, against a disposable server
 
 The PIM providers have live tests that only run when a throwaway CalDAV server
@@ -94,6 +134,10 @@ self-contained.
   `contains_all`, `contains_any`, `not_contains`, `regex` (case-insensitive,
   dot matches newline), `min_len`, `no_error`.
 - `max_tool_calls` is a comfort budget: exceeding it is reported, not failed.
+- Optional `allowed_tools` lists the native tools the agent may see for a
+  controlled catalog-size experiment. The harness disables other native tools
+  for that turn through the existing dashboard protocol; custom/MCP tools stay
+  available. This is an oracle upper bound, not automatic tool selection.
 - Prompts are written the way a user would type them — the point is to
   measure the agent, not to prompt-engineer the task.
 
@@ -118,9 +162,11 @@ The diagnostic makes no model calls and does not require a running instance.
 
 Select Guided/Standard/Minimal in the instance's Agent settings before each batch.
 Do not change the setting during a run. Each result's `model_requests` now keeps
-one `main_chat` record per model call: actual profile, model, duration, system/tool
-bytes, message count, completion status and provider-reported `usage` if available.
-This includes intermediate chat/tool-loop calls, not only the final response.
+one `main_chat` or `subagent` record per model call: actual profile, model,
+duration, system/tool bytes, history sizes (not content), message count,
+completion status and provider-reported `usage` if available. This includes
+intermediate chat/tool-loop calls and delegated calls, not only the final
+response. Subagent records also appear in the parent task's Admin → Usage trace.
 
 `input_tokens` includes cached input. `cache_read_tokens`/`cache_write_tokens` are
 breakdowns; do not add them again. `reasoning_tokens`, when reported, is part of

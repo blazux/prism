@@ -11,8 +11,10 @@ func TestEstimateCachedOpus(t *testing.T) {
 }
 
 func TestEstimateSourcePrefixedModel(t *testing.T) {
-	if _, ok := Estimate("anthropic::claude-sonnet-5", Tokens{Input: 1000, Output: 100}); !ok {
-		t.Fatal("source-prefixed Claude model should have a price")
+	for _, model := range []string{"anthropic::claude-sonnet-5", "anthropic::claude-sonnet-5-5"} {
+		if _, ok := Estimate(model, Tokens{Input: 1000, Output: 100}); !ok {
+			t.Fatalf("source-prefixed Claude model %s should have a price", model)
+		}
 	}
 }
 
@@ -21,7 +23,6 @@ func TestEstimateUnknownOrInvalid(t *testing.T) {
 		model  string
 		tokens Tokens
 	}{
-		{"claude-sonnet-5-5", Tokens{Input: 100}},
 		{"custom-gateway", Tokens{Input: 100}},
 		{"claude-opus-4-6", Tokens{Input: 2, CacheRead: 3}},
 	} {

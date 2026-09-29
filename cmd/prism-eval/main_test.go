@@ -15,3 +15,14 @@ func TestScoreUsagePreservesUnknownCalls(t *testing.T) {
 		t.Fatalf("wrong score: %+v", r)
 	}
 }
+
+func TestDisabledNativeToolsKeepsOnlyAllowlisted(t *testing.T) {
+	disabled := disabledNativeTools([]string{"widget", "cron"})
+	blocked := make(map[string]bool, len(disabled))
+	for _, name := range disabled {
+		blocked[name] = true
+	}
+	if blocked["widget"] || blocked["cron"] || !blocked["docker_run"] || !blocked["agent_settings"] {
+		t.Fatalf("unexpected native tool filter: %v", disabled)
+	}
+}

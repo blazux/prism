@@ -23,11 +23,14 @@ func TestSummarizeTaskCostsCombinesModelsAndMarksUnknown(t *testing.T) {
 func TestTraceTaskCostCumulative(t *testing.T) {
 	now := time.Now()
 	requests := []memory.ModelUsageRequest{
-		{TS: now, Model: "anthropic::claude-opus-4-6", Measurement: json.RawMessage(`{"usage":{"input_tokens":1000,"output_tokens":100,"cache_read_tokens":500,"cache_write_tokens":0}}`)},
+		{TS: now, Model: "anthropic::claude-opus-4-6", Measurement: json.RawMessage(`{"scope":"subagent","history_content_bytes":100,"history_tool_result_bytes":50,"history_tool_argument_bytes":25,"history_image_bytes":4,"usage":{"input_tokens":1000,"output_tokens":100,"cache_read_tokens":500,"cache_write_tokens":0}}`)},
 		{TS: now, Model: "private-model", Measurement: json.RawMessage(`{"usage":null}`)},
 	}
 	got := traceTaskCost(requests)
 	if len(got) != 2 || !got[0].CostKnown || got[0].CostUSD <= 0 || got[1].CostKnown || got[1].CumulativeCostUSD != got[0].CostUSD {
+		t.Fatalf("wrong trace: %+v", got)
+	}
+	if got[0].Scope != "subagent" || got[0].HistoryContentBytes != 100 || got[0].HistoryToolResultBytes != 50 || got[0].HistoryToolArgumentBytes != 25 || got[0].HistoryImageBytes != 4 {
 		t.Fatalf("wrong trace: %+v", got)
 	}
 }

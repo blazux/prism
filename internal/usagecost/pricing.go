@@ -25,6 +25,7 @@ func RatesFor(model string) (Rates, bool) {
 	}{
 		{"claude-opus-4-6", Rates{5, 25, 6.25, 0.50}},
 		{"claude-sonnet-4-6", Rates{3, 15, 3.75, 0.30}},
+		{"claude-sonnet-5-5", Rates{2, 10, 2.50, 0.20}},
 		{"claude-sonnet-5", Rates{2, 10, 2.50, 0.20}},
 	} {
 		// A dated snapshot is the same model; a different minor version isn't.

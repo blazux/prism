@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -168,6 +169,14 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		MaxTokens:    req.Options.NumPredict,
 		Stream:       true,
 	}
+	// Experimental until the end-to-end cost and quality comparison is done.
+	toolSearch := os.Getenv("PRISM_ANTHROPIC_TOOL_SEARCH") == "1" &&
+		os.Getenv("PRISM_CLAUDE_LAZY_TOOLS") != "1" &&
+		strings.HasPrefix(req.Model, "claude-sonnet-5-5") && len(req.Tools) >= 8
+	if toolSearch {
+		payload.Tools = buildToolSearchTools(req.Tools)
+		payload.Stream = false // preserve every provider block without SSE reconstruction
+	}
 	if payload.MaxTokens <= 0 {
 		payload.MaxTokens = defaultMaxTokens
 	}
@@ -203,7 +212,58 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		return
 	}
 
-	c.readStream(ctx, resp.Body, req.Model, payload.MaxTokens, out)
+	if toolSearch {
+		c.readMessage(resp.Body, out)
+	} else {
+		c.readStream(ctx, resp.Body, req.Model, payload.MaxTokens, out)
+	}
+}
+
+// readMessage is used only for the opt-in tool-search experiment. Non-streaming
+// responses expose complete server-tool and tool-reference blocks for replay.
+func (c *Client) readMessage(body io.Reader, out chan<- ollama.StreamEvent) {
+	var response struct {
+		Content     []json.RawMessage `json:"content"`
+		StopReason  string            `json:"stop_reason"`
+		Usage       streamUsage       `json:"usage"`
+		StopDetails struct {
+			Category    string `json:"category"`
+			Explanation string `json:"explanation"`
+		} `json:"stop_details"`
+	}
+	if err := json.NewDecoder(body).Decode(&response); err != nil {
+		out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic response: %w", err)}
+		return
+	}
+	if response.StopReason == "refusal" {
+		out <- ollama.StreamEvent{Done: true, DoneReason: "refusal", Usage: response.Usage.usage(), Err: fmt.Errorf("anthropic refusal (%s): %s", response.StopDetails.Category, response.StopDetails.Explanation)}
+		return
+	}
+	var content strings.Builder
+	var calls []ollama.ToolCall
+	for _, raw := range response.Content {
+		var block struct {
+			Type  string          `json:"type"`
+			Text  string          `json:"text"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		}
+		if err := json.Unmarshal(raw, &block); err != nil {
+			out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic content block: %w", err)}
+			return
+		}
+		switch block.Type {
+		case "text":
+			content.WriteString(block.Text)
+		case "tool_use":
+			args := block.Input
+			if len(args) == 0 {
+				args = json.RawMessage(`{}`)
+			}
+			calls = append(calls, ollama.ToolCall{Function: ollama.ToolCallFunction{Name: block.Name, Arguments: args}})
+		}
+	}
+	out <- ollama.StreamEvent{Content: content.String(), ToolCalls: calls, ProviderBlocks: response.Content, Done: true, DoneReason: response.StopReason, Usage: response.Usage.usage()}
 }
 
 // ---- streaming response -------------------------------------------------

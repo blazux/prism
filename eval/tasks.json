@@ -172,6 +172,12 @@
           "action": "remove",
           "id": "eval-clock"
         }
+      },
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": ".browser_session_eval-widget-static.json"
+        }
       }
     ]
   },
@@ -214,6 +220,12 @@
         "args": {
           "path": "data/eval-status.json"
         }
+      },
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": ".browser_session_eval-widget-polling-file.json"
+        }
       }
     ]
   },
@@ -251,6 +263,12 @@
         "args": {
           "action": "remove",
           "id": "eval-counter"
+        }
+      },
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": ".browser_session_eval-widget-update-existing.json"
         }
       }
     ]

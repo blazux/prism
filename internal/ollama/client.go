@@ -149,6 +149,9 @@ type Message struct {
 	Thinking  string     `json:"thinking,omitempty"` // extended thinking (Qwen3, QwQ, etc.)
 	Images    []string   `json:"images,omitempty"`   // base64-encoded images for multimodal models
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	// Anthropic tool-search blocks live only for this in-memory turn. They may
+	// contain raw tool arguments, so never serialize or persist them.
+	ProviderBlocks []json.RawMessage `json:"-"`
 	// DBID is the conversation_history row this message was persisted as (0 for
 	// synthetic messages that only live in memory: nudges, compaction notes…).
 	// Never sent to any backend — it lets the agent's live-context compaction
@@ -252,11 +255,12 @@ type ChatChunk struct {
 }
 
 type StreamEvent struct {
-	Usage     *Usage
-	Content   string
-	Thinking  string
-	ToolCalls []ToolCall
-	Done      bool
+	Usage          *Usage
+	Content        string
+	Thinking       string
+	ToolCalls      []ToolCall
+	ProviderBlocks []json.RawMessage
+	Done           bool
 	// DoneReason carries the backend's finish reason on the terminal event
 	// ("length" = the model was cut off at the token cap / context edge, so an
 	// empty result means truncation, not a chosen silence). Empty otherwise.

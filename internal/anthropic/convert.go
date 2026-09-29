@@ -44,7 +44,8 @@ type apiMessage struct {
 // apiBlock is the union of every content block shape we emit: text, image,
 // tool_use (replayed assistant calls) and tool_result.
 type apiBlock struct {
-	Type string `json:"type"`
+	Type string          `json:"type"`
+	Raw  json.RawMessage `json:"-"`
 
 	Text string `json:"text,omitempty"`
 
@@ -58,6 +59,15 @@ type apiBlock struct {
 	Content   string `json:"content,omitempty"`
 }
 
+// Tool-search blocks must be replayed exactly, including provider-only fields.
+func (b apiBlock) MarshalJSON() ([]byte, error) {
+	if len(b.Raw) > 0 {
+		return b.Raw, nil
+	}
+	type plain apiBlock
+	return json.Marshal(plain(b))
+}
+
 type imageSource struct {
 	Type      string `json:"type"`
 	MediaType string `json:"media_type"`
@@ -65,10 +75,25 @@ type imageSource struct {
 }
 
 type apiTool struct {
+	Type         string                `json:"type,omitempty"`
 	Name         string                `json:"name"`
 	Description  string                `json:"description"`
 	InputSchema  ollama.ToolParameters `json:"input_schema"`
+	DeferLoading bool                  `json:"defer_loading,omitempty"`
 	CacheControl *cacheControl         `json:"cache_control,omitempty"`
+}
+
+// Server tools have no client-side input schema or description.
+func (t apiTool) MarshalJSON() ([]byte, error) {
+	if t.Type != "" {
+		return json.Marshal(struct {
+			Type         string        `json:"type"`
+			Name         string        `json:"name"`
+			CacheControl *cacheControl `json:"cache_control,omitempty"`
+		}{t.Type, t.Name, t.CacheControl})
+	}
+	type plain apiTool
+	return json.Marshal(plain(t))
 }
 
 // buildTools converts the pivot tool list.
@@ -102,6 +127,26 @@ func buildToolsWithCachePrefix(in []ollama.Tool, nativeCount int) []apiTool {
 	// cache key. They are large and generally unchanged across an agent loop.
 	out[len(out)-1].CacheControl = &cacheControl{Type: "ephemeral"}
 	return out
+}
+
+// buildToolSearchTools keeps basic file/code tools immediately available and
+// lets Claude discover the rest of the catalog when it needs them.
+func buildToolSearchTools(in []ollama.Tool) []apiTool {
+	base := buildTools(in)
+	visible := []apiTool{{Type: "tool_search_tool_bm25_20251119", Name: "tool_search_tool_bm25"}}
+	var deferred []apiTool
+	for _, t := range base {
+		t.CacheControl = nil // Anthropic rejects cache_control on deferred tools.
+		switch t.Name {
+		case "exec_command", "read_file", "write_file", "widget", "cron":
+			visible = append(visible, t)
+		default:
+			t.DeferLoading = true
+			deferred = append(deferred, t)
+		}
+	}
+	visible[len(visible)-1].CacheControl = &cacheControl{Type: "ephemeral"}
+	return append(visible, deferred...)
 }
 
 // buildSystem extracts the system turns from the pivot history into the
@@ -167,6 +212,25 @@ func buildMessages(in []ollama.Message) []apiMessage {
 			continue
 
 		case "assistant":
+			if len(m.ProviderBlocks) > 0 {
+				var replay []apiBlock
+				for _, raw := range m.ProviderBlocks {
+					var header struct{ Type, ID string }
+					if json.Unmarshal(raw, &header) != nil {
+						continue
+					}
+					replay = append(replay, apiBlock{Type: header.Type, ID: header.ID, Raw: raw})
+					if header.Type == "tool_use" {
+						pending = append(pending, header.ID)
+					}
+				}
+				if len(replay) > 0 {
+					appendBlocks("assistant", replay...)
+					continue
+				}
+			}
+			// Without live provider blocks (e.g. after restart), replay the
+			// ordinary tool calls; Claude can search again if needed.
 			var blocks []apiBlock
 			if text := strings.TrimSpace(m.Content); text != "" {
 				blocks = append(blocks, apiBlock{Type: "text", Text: text})

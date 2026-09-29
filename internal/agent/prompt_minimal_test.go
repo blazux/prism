@@ -59,7 +59,7 @@ func (b *usageBackend) Chat(_ context.Context, req ollama.ChatRequest, ch chan<-
 func TestMainChatUsageSingleSnapshot(t *testing.T) {
 	a := &Agent{ollama: &usageBackend{}, executor: &ToolExecutor{}, limits: Limits{PromptProfile: "minimal"}, model: "fixture"}
 	events := make(chan Event, 20)
-	if _, _, _, err := a.callOllama(t.Context(), "", events); err != nil {
+	if _, _, _, _, err := a.callOllama(t.Context(), "", events); err != nil {
 		t.Fatal(err)
 	}
 	close(events)

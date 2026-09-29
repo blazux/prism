@@ -1,0 +1,20 @@
+[
+  {
+    "name": "tool-search-discover-list-files",
+    "tags": ["tools", "discovery", "live"],
+    "prompt": "Liste les fichiers du dossier eval/tool-search-discovery et donne simplement leurs noms. Utilise list_files pour obtenir la liste.",
+    "setup": [
+      {"tool": "write_file", "args": {"path": "eval/tool-search-discovery/a.txt", "content": "a"}},
+      {"tool": "write_file", "args": {"path": "eval/tool-search-discovery/b.txt", "content": "b"}}
+    ],
+    "checks": [
+      {"response": true, "contains_all": ["a.txt", "b.txt"]}
+    ],
+    "max_tool_calls": 2,
+    "cleanup": [
+      {"tool": "delete_file", "args": {"path": "eval/tool-search-discovery/a.txt"}},
+      {"tool": "delete_file", "args": {"path": "eval/tool-search-discovery/b.txt"}},
+      {"tool": "exec_command", "args": {"command": "rmdir eval/tool-search-discovery"}}
+    ]
+  }
+]

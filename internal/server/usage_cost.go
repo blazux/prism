@@ -6,38 +6,41 @@ import (
 	"strconv"
 	"time"
 
+	"prism/internal/agent"
 	"prism/internal/memory"
-	"prism/internal/ollama"
 	"prism/internal/usagecost"
 )
 
 type TaskCostCall struct {
-	TS                time.Time `json:"ts"`
-	Model             string    `json:"model"`
-	InputTokens       int64     `json:"inputTokens"`
-	OutputTokens      int64     `json:"outputTokens"`
-	CacheReadTokens   int64     `json:"cacheReadTokens"`
-	CacheWriteTokens  int64     `json:"cacheWriteTokens"`
-	SystemBytes       int       `json:"systemBytes"`
-	ToolBytes         int       `json:"toolBytes"`
-	MessageCount      int       `json:"messageCount"`
-	CostUSD           float64   `json:"costUsd"`
-	CumulativeCostUSD float64   `json:"cumulativeCostUsd"`
-	CostKnown         bool      `json:"costKnown"`
+	TS                       time.Time `json:"ts"`
+	Model                    string    `json:"model"`
+	Scope                    string    `json:"scope"`
+	InputTokens              int64     `json:"inputTokens"`
+	OutputTokens             int64     `json:"outputTokens"`
+	CacheReadTokens          int64     `json:"cacheReadTokens"`
+	CacheWriteTokens         int64     `json:"cacheWriteTokens"`
+	SystemBytes              int       `json:"systemBytes"`
+	ToolBytes                int       `json:"toolBytes"`
+	MessageCount             int       `json:"messageCount"`
+	HistoryContentBytes      int       `json:"historyContentBytes"`
+	HistoryToolResultBytes   int       `json:"historyToolResultBytes"`
+	HistoryToolArgumentBytes int       `json:"historyToolArgumentBytes"`
+	HistoryImageBytes        int       `json:"historyImageBytes"`
+	CostUSD                  float64   `json:"costUsd"`
+	CumulativeCostUSD        float64   `json:"cumulativeCostUsd"`
+	CostKnown                bool      `json:"costKnown"`
 }
 
 func traceTaskCost(requests []memory.ModelUsageRequest) []TaskCostCall {
 	out := make([]TaskCostCall, 0, len(requests))
 	cumulative := 0.0
 	for _, request := range requests {
-		var m struct {
-			Usage        *ollama.Usage `json:"usage"`
-			SystemBytes  int           `json:"system_bytes"`
-			ToolBytes    int           `json:"tool_bytes"`
-			MessageCount int           `json:"message_count"`
-		}
+		var m agent.ModelUsage
 		_ = json.Unmarshal(request.Measurement, &m)
-		call := TaskCostCall{TS: request.TS, Model: request.Model, SystemBytes: m.SystemBytes, ToolBytes: m.ToolBytes, MessageCount: m.MessageCount}
+		call := TaskCostCall{TS: request.TS, Model: request.Model, Scope: m.Scope, SystemBytes: m.SystemBytes,
+			ToolBytes: m.ToolBytes, MessageCount: m.MessageCount, HistoryContentBytes: m.HistoryContentBytes,
+			HistoryToolResultBytes: m.HistoryToolResultBytes, HistoryToolArgumentBytes: m.HistoryToolArgumentBytes,
+			HistoryImageBytes: m.HistoryImageBytes}
 		if m.Usage != nil && m.Usage.InputTokens != nil && m.Usage.OutputTokens != nil {
 			call.InputTokens, call.OutputTokens = *m.Usage.InputTokens, *m.Usage.OutputTokens
 			if m.Usage.CacheReadTokens != nil {

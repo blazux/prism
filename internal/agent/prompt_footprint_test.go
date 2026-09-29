@@ -18,7 +18,6 @@ func TestPromptFootprint(t *testing.T) {
 	}
 	measure := func(name, text string) size { return size{name, len(text), utf8.RuneCountInString(text)} }
 	for _, name := range []string{"guided", "standard", "minimal"} {
-		lean := name != "guided"
 		a := &Agent{executor: &ToolExecutor{}, sessionID: "prompt-audit", limits: Limits{PromptProfile: name}}
 		prompt := a.buildSystemPrompt(t.Context(), "")
 		tools := a.buildToolList()
@@ -47,7 +46,7 @@ func TestPromptFootprint(t *testing.T) {
 		for _, s := range sections {
 			t.Logf("%s section: %+v", name, s)
 		}
-		if !lean {
+		if name == "minimal" {
 			var sizes []size
 			for _, tool := range tools {
 				b, err := json.Marshal(tool)

@@ -59,7 +59,7 @@ func TestPromptBehaviorProbe(t *testing.T) {
 						close(done)
 					}()
 					start := time.Now()
-					response, calls, _, err := a.callOllama(ctx, "", events)
+					response, calls, _, _, err := a.callOllama(ctx, "", events)
 					cancel()
 					close(events)
 					<-done

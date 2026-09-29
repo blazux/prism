@@ -114,6 +114,8 @@ type Agent struct {
 	globalCtxFn     func() string                                  // global assistant: overview of all workspaces
 	learningsCtxFn  func(ctx context.Context, query string) string // searches agent-learnings RAG for relevant past lessons
 	memStore        *memory.Store
+	usageRecorder   UsageRecorder // independent of history storage for ephemeral subagents
+	usageScope      string
 	sessionID       string
 	personality     string // this session's own editable section (the adaptation, or the base for the default session)
 	basePersonality string // default personality prepended for non-default sessions (layered model)
@@ -357,7 +359,11 @@ func (a *Agent) buildToolList() []ollama.Tool {
 }
 
 func (a *Agent) buildToolListWithCachePrefix() ([]ollama.Tool, int) {
-	native := nativeToolsFor(a.leanPrompt())
+	profile := a.promptProfile()
+	native := nativeToolsFor(profile != "guided")
+	if profile == "minimal" {
+		native = minimalToolCatalog(native)
+	}
 	all := append(native, a.executor.AllDynamicTools()...)
 	available := all[:0]
 	nativeKept := 0
@@ -414,8 +420,18 @@ func New(ollamaClient ollama.Backend, executor *ToolExecutor, model string, memS
 		sessionID:   defaultSessionID,
 		personality: personality,
 	}
+	if memStore != nil {
+		a.usageRecorder = memStore
+	}
 	a.loadProfile()
 	return a
+}
+
+// SetUsageRecorder records model calls without enabling conversation persistence.
+// A delegated agent uses the parent's recorder and task ID with scope "subagent".
+func (a *Agent) SetUsageRecorder(recorder UsageRecorder, scope string) {
+	a.usageRecorder = recorder
+	a.usageScope = scope
 }
 
 // loadProfile loads the agent name and base personality for this session's
@@ -1295,6 +1311,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	// never mid-turn.
 	maxIterations, thinking := a.effectiveLimits()
 	ctx = withModelBudget(ctx, maxIterations)
+	ctx = withClaudeCatalog(ctx, a.model, a.executor.toolGuard != nil)
 	a.turnThinking = thinking
 	a.turnReasoningEffort = a.reasoningEffort()
 
@@ -1318,7 +1335,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		// bloat accumulating within one long multi-tool-call turn.
 		a.compactLiveContextIfNeeded(ctx, events)
 
-		fullContent, toolCalls, doneReason, err := a.callOllama(ctx, learningsCtx, events)
+		fullContent, toolCalls, providerBlocks, doneReason, err := a.callOllama(ctx, learningsCtx, events)
 		if ctx.Err() != nil {
 			events <- Event{Type: "stream_end"}
 			return
@@ -1399,18 +1416,23 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 		// Store assistant turn with its tool_calls (proper Ollama tool-use format)
 		assistantMsg := ollama.Message{
-			Role:      "assistant",
-			Content:   fullContent,
-			ToolCalls: toolCalls,
+			Role:           "assistant",
+			Content:        fullContent,
+			ToolCalls:      toolCalls,
+			ProviderBlocks: providerBlocks,
 		}
 		// Strip thinking blocks before saving to DB (not user-visible content)
 		dbMsg := assistantMsg
 		dbMsg.Content = stripThinkingBlocks(fullContent)
+		dbMsg.ProviderBlocks = nil
 		assistantMsg.DBID = a.saveMessageToDB(ctx, dbMsg)
 		a.histMu.Lock()
 		a.history = append(a.history, assistantMsg)
 		a.histMu.Unlock()
 
+		if doneReason == "pause_turn" && len(toolCalls) == 0 {
+			continue // Anthropic's server-side tool search needs a resume request.
+		}
 		if len(toolCalls) == 0 {
 			// Reply ends on an announced action with nothing to run it: nudge
 			// the model to act instead of ending the turn (see announceTailRe).
@@ -1468,6 +1490,19 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				toolRejected = true
 				result = "Tool call rejected by the user. Do not retry it as-is — ask what they want done differently."
 				toolFailed = true
+			} else if tc.Function.Name == "tool_catalog" && catalogFromContext(ctx) != nil {
+				if err := a.executor.Authorize(tc.Function.Name, tc.Function.Arguments); err != nil {
+					result = fmt.Sprintf("Error: %v", err)
+					toolFailed = true
+				} else {
+					var execErr error
+					available, _ := a.buildToolListWithCachePrefix()
+					result, execErr = catalogFromContext(ctx).execute(tc.Function.Arguments, available)
+					if execErr != nil {
+						result = fmt.Sprintf("Error: %v", execErr)
+						toolFailed = true
+					}
+				}
 			} else if tc.Function.Name == "update_system_prompt" {
 				// Route the special-cased tool through the same policy checks as
 				// every other tool, or a group with update_system_prompt disabled
@@ -1631,11 +1666,14 @@ func isVisionUnsupportedError(err error) bool {
 		(strings.Contains(msg, "image") && strings.Contains(msg, "not supported"))
 }
 
-func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan<- Event) (string, []ollama.ToolCall, string, error) {
+func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan<- Event) (string, []ollama.ToolCall, []json.RawMessage, string, error) {
 	if err := consumeModelCall(ctx); err != nil {
-		return "", nil, "", err
+		return "", nil, nil, "", err
 	}
 	prompt, cachePrefixBytes := a.buildSystemPromptWithCachePrefix(ctx, learningsCtx)
+	if catalogFromContext(ctx) != nil {
+		prompt += "\n\nClaude tool loading is active: exec_command, read_file, write_file, widget, cron, prism_help and tool_catalog are initially visible. Other permitted tools require tool_catalog load before use. Load exact names directly when known from this prompt or the user; list only if names are unknown. Load related tools together. Loaded tools appear on the next model call."
+	}
 
 	a.histMu.Lock()
 	messages := append([]ollama.Message{
@@ -1644,6 +1682,9 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 	a.histMu.Unlock()
 
 	tools, cacheToolPrefixCount := a.buildToolListWithCachePrefix()
+	if catalog := catalogFromContext(ctx); catalog != nil {
+		tools, cacheToolPrefixCount = catalog.selectTools(tools)
+	}
 	req := ollama.ChatRequest{
 		Model:                  a.model,
 		Messages:               messages,
@@ -1661,21 +1702,32 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 
 	log.Printf("[agent] → ollama: %d messages, %d tools, prompt_len=%d", len(messages), len(tools), len(prompt))
 
+	historyContentBytes, toolResultBytes, toolArgumentBytes, imageBytes := historyFootprint(messages)
+	scope := a.usageScope
+	if scope == "" {
+		scope = "main_chat"
+	}
 	started := time.Now()
 	var measured *ollama.Usage
 	complete := false
 	defer func() {
 		raw, _ := json.Marshal(tools)
-		record := &ModelUsage{TaskID: taskIDFromContext(ctx), Scope: "main_chat", Model: a.model, Profile: a.promptProfile(), DurationMS: time.Since(started).Milliseconds(), SystemBytes: len(prompt), ToolBytes: len(raw), MessageCount: len(messages), Complete: complete, Usage: measured}
+		record := &ModelUsage{
+			TaskID: taskIDFromContext(ctx), Scope: scope, Model: a.model, Profile: a.promptProfile(),
+			DurationMS: time.Since(started).Milliseconds(), SystemBytes: len(prompt), ToolBytes: len(raw),
+			MessageCount: len(messages), HistoryContentBytes: historyContentBytes,
+			HistoryToolResultBytes: toolResultBytes, HistoryToolArgumentBytes: toolArgumentBytes,
+			HistoryImageBytes: imageBytes, Complete: complete, Usage: measured,
+		}
 		select {
 		case events <- Event{Type: "model_usage", Usage: record}:
 		case <-ctx.Done():
 		}
-		if a.memStore != nil {
-			// A stopped browser turn still consumed provider tokens. Persist the
-			// final counter independently of its cancelled request context.
+		if a.usageRecorder != nil {
+			// A stopped turn still consumed provider tokens. Persist its counter
+			// independently of the cancelled request and any ephemeral child history.
 			usageCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			a.memStore.AddUsage(usageCtx, 0, a.sessionID, "model_request", a.model, 1, map[string]interface{}{"measurement": record})
+			a.usageRecorder.AddUsage(usageCtx, 0, a.sessionID, "model_request", a.model, 1, map[string]interface{}{"measurement": record})
 			cancel()
 		}
 	}()
@@ -1687,6 +1739,7 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 
 	var contentBuilder strings.Builder
 	var toolCalls []ollama.ToolCall
+	var providerBlocks []json.RawMessage
 	var inThinking bool
 	var doneReason string
 
@@ -1699,7 +1752,7 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 		}
 
 		if ev.Err != nil {
-			return contentBuilder.String(), nil, "", ev.Err
+			return contentBuilder.String(), nil, nil, "", ev.Err
 		}
 		if ev.DoneReason != "" {
 			doneReason = ev.DoneReason
@@ -1722,6 +1775,9 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 		if len(ev.ToolCalls) > 0 {
 			toolCalls = append(toolCalls, ev.ToolCalls...)
 		}
+		if len(ev.ProviderBlocks) > 0 {
+			providerBlocks = ev.ProviderBlocks
+		}
 	}
 	if inThinking {
 		events <- Event{Type: "stream", Content: "</think>"}
@@ -1732,7 +1788,7 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 	for i, tc := range toolCalls {
 		log.Printf("[agent]   tool[%d] %s %s", i, tc.Function.Name, truncate(string(redactToolArgs(tc.Function.Arguments)), 200))
 	}
-	return content, toolCalls, doneReason, nil
+	return content, toolCalls, providerBlocks, doneReason, nil
 }
 
 // isTruncation reports whether a finish reason means the model was cut off at

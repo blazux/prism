@@ -76,6 +76,27 @@ func TestSubagentsParallelBoundedAndParentScoped(t *testing.T) {
 			t.Fatal(row)
 		}
 	}
+	usageEvents := 0
+	for len(parent.send) > 0 {
+		payload := <-parent.send
+		var event agent.Event
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Type != "model_usage" {
+			continue
+		}
+		usageEvents++
+		if event.Usage == nil || event.Usage.Scope != "subagent" {
+			t.Fatalf("child usage missing scope: %s", payload)
+		}
+		if strings.Contains(string(payload), "Fixture result") {
+			t.Fatalf("child usage leaked conversation content: %s", payload)
+		}
+	}
+	if usageEvents != len(ids) {
+		t.Fatalf("got %d child usage events for %d children", usageEvents, len(ids))
+	}
 	s.finishRun(run, ctx)
 }
 func TestRunFinishCancelsChildren(t *testing.T) {

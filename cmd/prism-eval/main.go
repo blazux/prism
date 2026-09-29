@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"prism/internal/agent"
 	"prism/internal/ollama"
 	"prism/internal/usagecost"
 )
@@ -36,6 +37,8 @@ import (
 type Task struct {
 	Name string   `json:"name"`
 	Tags []string `json:"tags,omitempty"`
+	// AllowedTools narrows native tools for a controlled catalog experiment.
+	AllowedTools []string `json:"allowed_tools,omitempty"`
 	// Prompt is sent to the agent verbatim, as a chat message.
 	Prompt string `json:"prompt"`
 	// Setup and Cleanup are builtin tool calls run before/after the turn,
@@ -214,7 +217,7 @@ func (c *client) runTask(t Task, run int, keep bool) Result {
 		timeout = time.Duration(t.TimeoutSec) * time.Second
 	}
 	started := time.Now()
-	resp, err := c.chatWS(session, t.Prompt, timeout, &res)
+	resp, err := c.chatWS(session, t.Prompt, timeout, t.AllowedTools, &res)
 	res.DurationMS = time.Since(started).Milliseconds()
 	res.Response = resp
 	scoreUsage(&res)
@@ -305,8 +308,22 @@ func assert(ck Check, text string) []string {
 	return fails
 }
 
+func disabledNativeTools(allowed []string) []string {
+	keep := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		keep[name] = true
+	}
+	disabled := make([]string, 0, len(agent.ToolDefinitions))
+	for _, tool := range agent.ToolDefinitions {
+		if !keep[tool.Function.Name] {
+			disabled = append(disabled, tool.Function.Name)
+		}
+	}
+	return disabled
+}
+
 // chatWS runs one turn over /ws and collects the final answer plus counters.
-func (c *client) chatWS(session, prompt string, timeout time.Duration, res *Result) (string, error) {
+func (c *client) chatWS(session, prompt string, timeout time.Duration, allowedTools []string, res *Result) (string, error) {
 	u, _ := url.Parse(c.base)
 	switch u.Scheme {
 	case "https":
@@ -347,6 +364,9 @@ func (c *client) chatWS(session, prompt string, timeout time.Duration, res *Resu
 	}
 
 	msg := map[string]interface{}{"type": "chat", "content": prompt}
+	if len(allowedTools) > 0 {
+		msg["disabledTools"] = disabledNativeTools(allowedTools)
+	}
 	if err := conn.WriteJSON(msg); err != nil {
 		return "", fmt.Errorf("ws send: %w", err)
 	}

@@ -102,10 +102,12 @@ func (s *Server) subagentTool(parent *Client, parentExecutor *agent.ToolExecutor
 				defer r.childrenDone.Done()
 				defer cancel()
 				result, err := s.runHeadlessChatTap(childCtx, parent.sessionID, "Task: "+task+"\nRelevant context:\n"+extra, parent.ag.Model(), cc, func(ev agent.Event) {
-					// Keep child prose out of the parent's chat. Tool cards and approvals use
-					// unique IDs, and retain the same owner's approval policy on reconnect.
-					if ev.Type == "tool_use" || ev.Type == "tool_result" || ev.Type == "approval_request" {
-						ev.ID = id + "/" + ev.ID
+					// Keep child prose out of the parent's chat. Only tool cards,
+					// approvals and content-free usage reach the parent connection.
+					if ev.Type == "tool_use" || ev.Type == "tool_result" || ev.Type == "approval_request" || ev.Type == "model_usage" {
+						if ev.ID != "" {
+							ev.ID = id + "/" + ev.ID
+						}
 						parent.sendJSON(ev)
 					}
 				}, limits)

@@ -1,7 +1,8 @@
 [
   {
-    "name": "weather-live-api-widget-cron",
-    "tags": ["widget", "api", "cron", "live"],
+    "name": "weather-live-api-widget-cron-targeted-tools",
+    "tags": ["widget", "api", "cron", "live", "targeted-tools"],
+    "allowed_tools": ["exec_command", "widget", "cron", "read_file", "write_file"],
     "prompt": "Crée un widget de comparaison météo pour Berlin et Paris avec les conditions actuelles (température, humidité et précipitations). Récupère les vraies données de l'API publique Open-Meteo (https://open-meteo.com/en/docs ; endpoint https://api.open-meteo.com/v1/forecast), sans clé. Le widget doit afficher les dernières données disponibles depuis un fichier JSON local, avec la date de mise à jour et un message clair en cas d'erreur. Mets en place un script Python qui rafraîchit ce JSON depuis l'API et une tâche cron qui relance le script toutes les 30 minutes. Utilise les noms eval-weather-live.py, eval-weather-live.json, eval-weather-live pour le widget et pour le cron, afin que je puisse retrouver cet essai. Vérifie que la première récupération marche. C'est un essai local temporaire ; ne crée pas d'autre service.",
     "checks": [
       {"tool": "exec_command", "args": {"command": "python3 -c 'from pathlib import Path; names=[\"eval-weather-live.py\",\"data/eval-weather-live.py\",\"scripts/eval-weather-live.py\",\"agent_tools/eval-weather-live.py\",\"agent_tools/eval_weather_live.py\"]; assert any(\"api.open-meteo.com/v1/forecast\" in p.read_text() for n in names if (p:=Path(\"/workspace\")/n).exists()); print(\"refresh script valid\")'"}, "contains": "refresh script valid", "no_error": true},

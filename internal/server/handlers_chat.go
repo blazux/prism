@@ -304,6 +304,9 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	ag.SetSession(sessionID, personality)
 	ag.SetLimits(limits)
 	if options != nil {
+		// A subagent's conversation stays ephemeral, but its provider calls
+		// still belong to the parent's task cost.
+		ag.SetUsageRecorder(ms, "subagent")
 		options.agent(ag)
 	}
 
