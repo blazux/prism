@@ -422,6 +422,10 @@ func (p *aiProfile) clearTransientFlags() {
 }
 
 func (s *Server) saveAIProfile(ctx context.Context, u *memory.User, p, old *aiProfile) error {
+	return s.saveAIProfileMode(ctx, u, p, old, true)
+}
+
+func (s *Server) saveAIProfileMode(ctx context.Context, u *memory.User, p, old *aiProfile, checkEmbedding bool) error {
 	if p.Model == "" {
 		return errors.New("default model required")
 	}
@@ -436,8 +440,10 @@ func (s *Server) saveAIProfile(ctx context.Context, u *memory.User, p, old *aiPr
 			return fmt.Errorf("source %s: %w", src.Name, err)
 		}
 	}
-	if err := s.validateEmbeddingSave(ctx, p, old); err != nil {
-		return err
+	if checkEmbedding || old == nil || !sameEmbedding(*p, *old) {
+		if err := s.validateEmbeddingSave(ctx, p, old); err != nil {
+			return err
+		}
 	}
 	p.ServerDefaults = false
 	p.clearTransientFlags()

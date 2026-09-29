@@ -12,7 +12,7 @@ package server
 // — this pane is an editor, not a second copy.
 
 // adminTelephonyPane is the pane markup, inserted after Apps.
-const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Telephony</h2><div class="hint">This deployment is docked with a Prism Vox phone stack. The agent also answers the phone: a known caller (number on their profile) gets their own agent, an unknown one gets the switchboard configured here.</div>
+const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Telephony</h2><span class="pane-scope">Deployment</span><div class="hint">This deployment is docked with a Prism Vox phone stack. The agent also answers the phone: a known caller (number on their profile) gets their own agent, an unknown one gets the switchboard configured here.</div>
 
       <div class="hint" style="margin-top:10px">Everything here is stored by the phone stack itself — this page writes to it directly, so there is no second copy to keep in sync. <b>Placing calls and watching activity are not forms:</b> ask the agent ("appelle le plombier et prends rendez-vous", "quels appels sont en attente ?") or build a widget against <code>/api/vox/…</code>, which any admin session can reach.</div>
 

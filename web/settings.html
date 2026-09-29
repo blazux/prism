@@ -90,6 +90,8 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 }
 .nav-item:hover { color: var(--text); background: var(--bg2); }
 .nav-item.active { color: var(--text); background: var(--bg3); }
+.nav-head { margin: 13px 14px 4px; padding: 0 4px 4px; border-bottom: 1px solid var(--border); color: var(--text3); font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.nav-head:first-child { margin-top: 4px; }
 .nav-icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .nav-icon svg { width: 17px; height: 17px; }
 
@@ -118,6 +120,21 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 }
 
 /* ── RAG tab: internal layout ─────────────────────────────────────────────── */
+.settings-content-header { margin-bottom: 16px; max-width: 640px; }
+.settings-content-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.settings-content-title { margin: 0; font-size: 16px; font-weight: 600; }
+.settings-content-intro { margin: 0; color: var(--text3); font-size: 12.5px; line-height: 1.5; }
+.settings-scope { padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--text3); font-size: 10.5px; line-height: 1.2; }
+@media (max-width: 760px) {
+  #settings-main { flex-direction: column; }
+  #settings-nav { width: auto; flex-direction: row; overflow-x: auto; gap: 0; padding: 0 6px; border-right: 0; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
+  #settings-nav .nav-head { display: none; }
+  #settings-nav .nav-item { flex: 0 0 auto; padding: 9px 11px; white-space: nowrap; }
+  .settings-page { padding: 16px; }
+  .appe-row { flex-wrap: wrap; }
+  .appe-row > label { width: 100%; }
+}
+
 #rag-tab {
   flex: 1;
   display: flex;
@@ -366,16 +383,30 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 
   <div id="settings-main">
 
-    <nav id="settings-nav">
+    <nav id="settings-nav" aria-label="Settings">
+      <div class="nav-head">Essentials</div>
       <div class="nav-item active" data-tab="profile">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Profile
-      </div>
-      <div class="nav-item" data-tab="tools">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span> Tools
       </div>
       <div class="nav-item" data-tab="ai" style="display:none"><span class="nav-icon">✦</span> AI provider</div>
       <div class="nav-item" data-tab="agent">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></span> Agent
+      </div>
+      <div class="nav-item" data-tab="email">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg></span> Email
+      </div>
+      <div class="nav-item" data-tab="notes">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H2z"/><path d="M22 6a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z"/></svg></span> Notes
+      </div>
+      <div class="nav-item" data-tab="calendar">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span> Calendar
+      </div>
+      <div class="nav-head">Capabilities</div>
+      <div class="nav-item" data-tab="tools">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span> Tools
+      </div>
+      <div class="nav-item" data-tab="knowledge">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span> Knowledge
       </div>
       <div class="nav-item" data-tab="channels">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></span> Channels
@@ -389,18 +420,7 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
       <div class="nav-item" data-tab="secrets">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4"/><path d="m18 5 2 2"/><path d="m15 8 2 2"/></svg></span> Secrets
       </div>
-      <div class="nav-item" data-tab="email">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg></span> Email
-      </div>
-      <div class="nav-item" data-tab="notes">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H2z"/><path d="M22 6a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z"/></svg></span> Notes
-      </div>
-      <div class="nav-item" data-tab="calendar">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span> Calendar
-      </div>
-      <div class="nav-item" data-tab="knowledge">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span> Knowledge
-      </div>
+      <div class="nav-head">Interface</div>
       <div class="nav-item" data-tab="appearance">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor" stroke="none"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.555C21.965 6.012 17.461 2 12 2z"/></svg></span> Appearance
       </div>
@@ -513,11 +533,16 @@ function renderTab(tab) {
 }
 
 // ── Appearance: theme studio (accent → palette), UI scale, density, bg ──────────
+function settingsHeading(title, description, scope = 'Personal') {
+  return `<div class="settings-content-header"><div class="settings-content-heading"><h2 class="settings-content-title">${escHtml(title)}</h2><span class="settings-scope">${escHtml(scope)}</span></div><p class="settings-content-intro">${escHtml(description)}</p></div>`
+}
+
 function renderAppearanceTab(container) {
   const T = window.PrismTheme
   const pane = document.createElement('div')
   pane.style.cssText = 'max-width:560px'
   pane.innerHTML = `
+    ${settingsHeading('Appearance', 'Theme and interface preferences apply immediately. Custom themes use Save & apply.', 'This browser')}
     <p class="settings-page-title">Theme</p>
     <div class="appe-card">
       <div class="appe-row"><label>Active theme</label><select id="appe-theme"></select></div>
@@ -879,6 +904,7 @@ async function renderAgentTab(container) {
   const agScope = 'agent-u' + uid
 
   agWrap.innerHTML = `
+    ${settingsHeading('Agent', 'Set its identity and behavior. Each section has its own Save button.')}
     <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('agent')}</span><span class="config-cat-name">Agent identity</span></div>
     <div style="font-size:12px;color:var(--text2);margin:6px 0 14px;line-height:1.5">The name and base personality apply to your agent everywhere. Each workspace can layer its own tweaks on top.</div>
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
@@ -1006,8 +1032,7 @@ async function renderChannelsTab(container) {
   const chSub = (c) => c.linked ? 'Linked' : (c.configured ? 'Not linked' : 'Not set up')
 
   wrap.innerHTML = `
-    <h2 style="margin:0 0 4px;font-size:16px">Channels</h2>
-    <p style="color:var(--text3);font-size:12.5px;margin:0 0 16px;line-height:1.5">Connect a messaging app to chat with your agent from anywhere — and let scheduled cron jobs deliver results to you there.</p>
+    ${settingsHeading('Channels', 'Connect a messaging app to chat with your agent and receive scheduled results.') }
     <div class="eplogos">
       <div class="eplogo sel" data-prov="telegram"><span class="epi">${BRAND.telegram}</span>Telegram <span class="cal-st" data-st="telegram"></span><div class="cal-sub">${chSub(tg)}</div></div>
       ${IS_GLOBAL_ADMIN ? `<div class="eplogo" data-prov="slack"><span class="epi">${BRAND.slack}</span>Slack <span class="cal-st" data-st="slack"></span><div class="cal-sub">${chSub(sl)}</div></div>` : ''}
@@ -1177,6 +1202,8 @@ async function renderToolsTab(container) {
   page.className = 'settings-page'
   container.appendChild(page)
 
+  page.innerHTML = settingsHeading('Tools', MULTI_USER ? 'Built-in tool switches are saved in this browser and sent with each chat. Group MCP preferences are saved to your account.' : 'Tool switches are saved in this browser and sent with each chat.', 'Personal preferences')
+
   // Built-in categories
   for (const cat of TOOL_CATEGORIES) {
     const section = document.createElement('div')
@@ -1296,6 +1323,7 @@ async function renderWebhooksTab(container) {
   let hooks = []
   try { hooks = await settingsFetch('/api/webhooks').then(r => r.json()) || [] } catch (e) { hooks = [] }
 
+  page.innerHTML = settingsHeading('Webhooks', 'Let an HTTP request start an agent task. Creating or editing a webhook saves it immediately.', 'Personal')
   const list = document.createElement('div')
   page.appendChild(list)
 
@@ -1454,6 +1482,9 @@ async function renderMCPTab(container) {
   const page = document.createElement('div')
   page.className = 'settings-page'
   container.appendChild(page)
+  page.innerHTML = MULTI_USER
+    ? settingsHeading('MCP servers', 'Group servers are managed in Admin. You can see the tools available to your agent here.', 'Group · read-only')
+    : settingsHeading('MCP servers', 'Connect external tools for your agent. Changes save when you connect or remove a server.', 'Personal')
 
   // Personal MCP servers only exist in single-user mode — MULTI_USER retires
   // the personal scope entirely (server-side too), so don't even fetch it there.
@@ -1664,6 +1695,7 @@ async function renderSecretsTab(container) {
   const page = document.createElement('div')
   page.className = 'settings-page'
   container.appendChild(page)
+  page.innerHTML = settingsHeading('Secrets', 'Store keys for tools and integrations. Adding or deleting a key saves immediately.', 'Local installation')
 
   const section = document.createElement('div')
   section.className = 'config-section'
@@ -1677,7 +1709,7 @@ async function renderSecretsTab(container) {
     </div>
     <div style="margin-top:10px;font-size:11.5px;color:var(--text3);line-height:1.6">
       Secrets are stored encrypted and never exposed in plain text. The agent can also add them via <code style="background:var(--bg2);padding:1px 6px;border-radius:3px;font-size:11px">request_secret</code>.
-      <b>Secrets here are shared with the whole team</b> — every member's agent can use them (API keys for shared services, MCP auth). Personal credentials (email password, calendar tokens) are stored separately per user.
+      These keys are available to your agent on this installation (API keys for tools and MCP authentication). Email and calendar credentials are stored separately.
     </div>`
   page.appendChild(section)
 
@@ -1763,6 +1795,7 @@ async function renderMultiUserSecretsTab(container) {
   const page = document.createElement('div')
   page.className = 'settings-page'
   container.appendChild(page)
+  page.innerHTML = settingsHeading('Secrets', 'Your private keys and any keys shared with your groups. Changes save immediately.', 'Personal & group')
 
   let myGroups = []
   try {
@@ -1997,8 +2030,9 @@ async function renderEmailTab(container) {
     `<div class="eplogo${k === sel ? ' sel' : ''}" data-prov="${k}"><span class="epi">${p.icon}</span>${p.label}</div>`).join('')
 
   emWrap.innerHTML = `
+    ${settingsHeading('Email', 'Choose a provider, enter your credentials, then select Save & connect.')}
     <div class="config-cat-header"><span class="config-cat-icon" style="color:var(--accent)">${icon('mail')}</span><span class="config-cat-name">Mailbox</span></div>
-    <div style="font-size:12px;color:var(--text2);margin:6px 0 16px;line-height:1.5">Pick your provider, then enter your email and password. Credentials are stored <b>encrypted</b> on your server.</div>
+    <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.5">Credentials are stored <b>encrypted</b> on your server.</div>
     <div class="eplogos">${logos}</div>
     ${!localBridge ? '<p class="eprov-hint">Proton Mail requires a personal Bridge. The local bundled Bridge is not available in this hosted deployment.</p>' : ''}
     <div class="efield"><label>Email</label><input id="e-user" value="${escHtml(cfg.user || '')}" placeholder="you@example.com"></div>
@@ -2070,8 +2104,8 @@ async function renderNotesTab(container) {
   const wrap = document.createElement('div')
   wrap.style.cssText = 'max-width:640px'
   wrap.innerHTML = `
-    <h2 style="margin:0 0 4px;font-size:16px">Notes storage</h2>
-    <p id="notes-storage-help" style="color:var(--text3);font-size:12.5px;margin:0 0 18px;line-height:1.5">Keep notes in Prism's database, or connect a Markdown <b>vault</b> (Obsidian / Logseq). In vault mode your notes are plain <code>.md</code> files in the folder — edit them here or in your own editor, both ways. The note's title is the filename; <code>[[wikilinks]]</code> and frontmatter are preserved.</p>
+    ${settingsHeading('Notes', 'Choose where your notes are stored. Save to apply the change.')}
+    <p id="notes-storage-help" class="settings-content-intro" style="margin-bottom:14px">Prism stores notes in its database by default. A Markdown vault keeps them as <code>.md</code> files for Obsidian or Logseq.</p>
     <div class="appe-card">
       <div class="appe-row"><label>Source</label>
         <select id="notes-prov"><option value="local">Prism database (default)</option><option value="vault">Markdown vault (Obsidian / Logseq)</option></select></div>
@@ -2119,8 +2153,7 @@ async function renderCalendarTab(container) {
   const wrap = document.createElement('div')
   wrap.style.cssText = 'max-width:640px'
   wrap.innerHTML = `
-    <h2 style="margin:0 0 4px;font-size:16px">Calendar &amp; Tasks</h2>
-    <p style="color:var(--text3);font-size:12.5px;margin:0 0 16px;line-height:1.5">Pick a provider to connect. You can connect more than one and choose which the apps use.</p>
+    ${settingsHeading('Calendar & Tasks', 'Connect one or more providers, then choose which source each app uses.') }
     <div class="eplogos">
       <div class="eplogo sel" data-prov="caldav"><span class="epi">${BRAND.calendar}</span>CalDAV <span class="cal-st" data-st="caldav"></span><div class="cal-sub">Calendar + Tasks</div></div>
       <div class="eplogo" data-prov="google"><span class="epi">${BRAND.google}</span>Google <span class="cal-st" data-st="google"></span><div class="cal-sub">Calendar</div></div>
@@ -2468,8 +2501,7 @@ async function renderProfileTab(container) {
   const voxDocked = platform.voxDocked === true
   const nameFor = () => ($('pf-display') ? $('pf-display').value : '') || p.displayName || p.email || '?'
   page.innerHTML = `
-    <h2 style="margin:0 0 4px;font-size:17px">Profile</h2>
-    <p style="color:var(--text3);font-size:12.5px;margin:0 0 20px">${platform.capabilities?.personalHosting ? 'Your personal profile and preferences.' : 'Your identity across Prism — shown in group chat and next to your messages.'}</p>
+    ${settingsHeading('Profile', platform.capabilities?.personalHosting ? 'Your personal profile and preferences. Use Save to apply changes.' : 'Your identity across Prism, shown next to your messages. Use Save to apply changes.')}
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:22px">
       <div id="pf-avatar">${avatarMarkup('u' + (p.userId || 0), p.avatarVer, p.displayName || p.email, 72)}</div>
       <div style="display:flex;flex-direction:column;gap:8px">

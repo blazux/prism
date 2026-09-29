@@ -391,3 +391,12 @@ func TestAIServerDefaultsAvailability(t *testing.T) {
 		t.Fatal("blocked reset changed saved configuration")
 	}
 }
+
+func TestChatSaveValidatesChangedEmbeddingConnection(t *testing.T) {
+	s := &Server{}
+	old := &aiProfile{Provider: "other", BaseURL: "https://chat.example/v1", Model: "chat", Embedding: &embeddingProfile{UseSameProvider: true, Model: "embed"}}
+	newProfile := &aiProfile{Provider: "anthropic", APIKey: "test-key", Model: "chat", Embedding: &embeddingProfile{UseSameProvider: true, Model: "embed"}}
+	if err := s.saveAIProfileMode(context.Background(), nil, newProfile, old, false); err == nil || !strings.Contains(err.Error(), "Anthropic has no embedding endpoint") {
+		t.Fatalf("chat save bypassed changed embedding validation: %v", err)
+	}
+}

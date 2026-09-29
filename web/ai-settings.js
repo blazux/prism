@@ -12,47 +12,53 @@ async function renderAITab(container, options = {}) {
     <p class="ai-hint" data-hint="${prefix}"></p>
     <label class="ai-field" data-url="${prefix}">Server URL<input name="${prefix}baseURL" type="url" spellcheck="false" placeholder="http://localhost:11434"></label>
     <label class="ai-field" data-key="${prefix}">API key<input name="${prefix}apiKey" type="password" autocomplete="new-password" placeholder="Enter your API key"></label>
-    <label class="ai-check" data-clear="${prefix}"><input type="checkbox" name="${prefix}clearKey">Remove the saved key</label>`
+    <div class="ai-row ai-clear-key" data-clear="${prefix}"><div><div class="ai-row-title">Remove saved key</div><div class="ai-hint">The next save will delete this credential.</div></div><label class="toggle-switch"><input type="checkbox" name="${prefix}clearKey" aria-label="Remove saved key"><span class="toggle-track"></span></label></div>`
   const model = (prefix, action) => `
     <div class="ai-actions"><button class="ai-button primary" type="button" data-action="${action}models">Connect</button><span class="ai-connect-status" data-connected="${prefix}" role="status"></span></div>
     <label class="ai-field" data-model-picker="${prefix}" hidden>Choose a model<select name="${prefix}modelChoice"><option value="">Connect to see models</option></select></label>
-    <p class="ai-hint" data-model-help="${prefix}" hidden>Selecting a model saves your changes and applies it automatically.</p>
+    <p class="ai-hint" data-model-help="${prefix}" hidden>Choosing a model saves your changes automatically${prefix ? ' and updates document search' : '. New conversations use the default source'}.</p>
     <details class="ai-advanced"><summary>Model not listed? Enter its ID</summary>
       <label class="ai-field">Model ID<input name="${prefix}model" list="${options.admin ? 'admin-' : ''}ai-${prefix}models" placeholder="Exact model ID" spellcheck="false"><datalist id="${options.admin ? 'admin-' : ''}ai-${prefix}models"></datalist></label>
-      <div class="ai-actions"><button class="ai-button" type="submit">Save model</button><button class="ai-button" type="button" data-action="${action}test">Test ${prefix ? 'embeddings' : 'model'}</button></div>
+      <div class="ai-actions"><button class="ai-button" type="button" data-action="${prefix ? 'save' : 'chat'}">Save model ID</button><button class="ai-button" type="button" data-action="${action}test">Test ${prefix ? 'embeddings' : 'model'}</button></div>
     </details>`
   pane.innerHTML = `
-    <div class="settings-page-title">AI provider</div>
-    <p class="ai-hint" data-source>Loading configuration…</p>
+    <div class="ai-header">
+      <div class="ai-title-line">${options.admin ? '<h2 class="ai-admin-title">AI provider</h2>' : '<h2 class="ai-settings-title">AI provider</h2>'}<span class="ai-scope">${options.admin ? 'Deployment' : 'Personal'}</span></div>
+      <p class="ai-description" data-source>Loading configuration…</p>
+      <div class="ai-current" aria-live="polite"><span>Default model</span><strong data-current-model>Not configured</strong><small data-current-source></small></div>
+    </div>
     <form autocomplete="off">
-      <div class="ai-save-state" data-save-state role="status">Saved</div>
+      <div class="ai-save-state" data-save-state role="status">Loading…</div>
       <section class="ai-section">
-        <div class="config-cat-header"><span class="config-cat-icon">✦</span><span class="config-cat-name">AI sources</span></div>
-        <div class="ai-sources" data-sources></div>
-        <div class="ai-actions"><button class="ai-button" type="button" data-add-source>+ Add a source</button></div>
+        <div class="config-cat-header"><span class="config-cat-name">Conversation models</span></div>
+        <p class="ai-hint ai-section-hint">Connect a provider, then choose a model. Add more sources if needed.</p>
+        <div class="ai-source-toolbar"><div class="ai-sources" data-sources aria-label="AI sources"></div><button class="ai-button" type="button" data-add-source>+ Add source</button></div>
         <div class="ai-source-editor">
-        <label class="ai-field">Source name<input name="sourceName" maxlength="100" placeholder="e.g. Local Ollama"></label>
-        ${connection('')}${model('', '')}
-        <div class="ai-actions"><button class="ai-button" type="button" data-default-source>Use as default</button><button class="ai-button" type="button" data-remove-source>Remove source</button></div></div>
-        <p class="ai-hint">Each source keeps its own model and credential. The default model powers new conversations and app actions; all sources remain available in the chat model picker.</p>
-        <div class="ai-row"><div><div class="ai-row-title">Default model supports vision</div><div class="ai-hint">Required to understand images and screenshots directly. Model catalogs do not always report this capability.</div></div><label class="toggle-switch"><input name="chatVision" type="checkbox" aria-label="Default model supports vision"><span class="toggle-track"></span></label></div>
-        <p class="ai-hint">Vision is used for image attachments, screenshots and visual checks of widgets. A text-only model can still chat and use tools. Vision changes apply automatically when saved.</p>
+          <div class="ai-editor-heading"><strong data-editor-title>Source</strong><button class="ai-button danger" type="button" data-remove-source>Remove source</button></div>
+          <label class="ai-field">Source name<input name="sourceName" maxlength="100" placeholder="e.g. Local Ollama"></label>
+          <div class="ai-subsection">
+            ${connection('')}${model('', '')}
+          </div>
+          <div class="ai-default-action"><span data-default-action-help>Make this model the default for new conversations.</span><button class="ai-button" type="button" data-default-source>Use as default</button></div>
+        </div>
+        <div class="ai-row ai-vision"><div><div class="ai-row-title">Default model supports vision</div><div class="ai-hint">Enable if the default model accepts images. Required for image attachments and visual widget checks.</div></div><label class="toggle-switch"><input name="chatVision" type="checkbox" aria-label="Default model supports vision"><span class="toggle-track"></span></label></div>
       </section>
       <section class="ai-section">
-        <div class="config-cat-header"><span class="config-cat-icon">⌕</span><span class="config-cat-name">Embeddings</span></div>
-        <p class="ai-hint">Used to index and search documents. Choose an embedding model, separate from the conversation model.</p>
+        <div class="config-cat-header"><span class="config-cat-name">Document search</span></div>
+        <p class="ai-hint ai-section-hint">Optional. An embedding model lets the agent search indexed documents.</p>
         <div class="ai-row"><div><div class="ai-row-title">Use same provider</div><div class="ai-hint">Reuse the default conversation source and its credential.</div></div><label class="toggle-switch"><input name="useSameProvider" type="checkbox" checked aria-label="Use same provider"><span class="toggle-track"></span></label></div>
-        <label class="ai-field" data-embedding-source hidden>Embedding source<select name="embeddingSource"></select></label>
-        <div data-embedding-connection hidden>${connection('embed-')}</div>
-        <p class="ai-hint" data-unsupported hidden>Anthropic has no embedding endpoint. Uncheck “Use same provider” and select another provider to enable document search.</p>
-        ${model('embed-', 'embedding_')}
-        <p class="ai-hint">Connect to list embedding models, then select one to enable document search. In advanced settings, an empty model ID disables document search.</p>
-        <div class="ai-row" data-reindex hidden><div><div class="ai-row-title">Rebuild the document index when saving</div><div class="ai-hint">All indexed text will be sent to the selected embedding provider; API charges may apply.</div></div><label class="toggle-switch"><input name="reindex" type="checkbox" aria-label="Rebuild the document index when saving"><span class="toggle-track"></span></label></div>
+        <div class="ai-embedding-config"><label class="ai-field" data-embedding-source hidden>Embedding source<select name="embeddingSource"></select></label>
+          <div data-embedding-connection hidden>${connection('embed-')}</div>
+          <p class="ai-hint" data-unsupported hidden>Anthropic has no embedding endpoint. Select another source or a dedicated provider.</p>
+          ${model('embed-', 'embedding_')}
+          <p class="ai-hint">Leave the embedding model empty to disable document search.</p>
+        </div>
+        <div class="ai-row" data-reindex hidden><div><div class="ai-row-title">Rebuild the document index when saving</div><div class="ai-hint">Indexed text is sent to the selected embedding provider; API charges may apply.</div></div><label class="toggle-switch"><input name="reindex" type="checkbox" aria-label="Rebuild the document index when saving"><span class="toggle-track"></span></label></div>
+        <p class="ai-hint" data-embedding-status role="status" aria-live="polite"></p>
       </section>
       <div class="ai-footer">
-        <p class="ai-hint" data-embedding-status role="status" aria-live="polite"></p>
-        <div class="ai-actions"><button class="ai-button primary" type="submit">Save changes</button><button class="ai-button" type="button" data-action="reset" hidden>Use server settings</button></div>
-        <p class="ai-hint">Chat changes apply from the next message. Tests send a small request and may incur API charges. Keys are stored encrypted and never displayed.</p>
+        <div class="ai-actions"><button class="ai-button primary" type="submit" data-save>Save other changes</button><button class="ai-button" type="button" data-action="reset" hidden>Use server settings</button></div>
+        <p class="ai-hint">Choosing a model saves automatically. Use Save other changes for names, vision and embedding options. Keys are stored encrypted and never displayed.</p>
       </div>
     </form>
     <p class="ai-status" data-status role="status" aria-live="polite"></p>`
@@ -70,8 +76,12 @@ async function renderAITab(container, options = {}) {
   function markDirty() { dirty=true; showSaveState() }
   function showSaveState() {
     const el=pane.querySelector("[data-save-state]")
-    el.textContent=busy ? "Working…" : dirty ? "Not saved yet — select a model or click Save changes." : (saved?.model ? "Saved — configuration is active." : "No conversation model saved yet. Connect and select a model to get started.")
+    el.textContent=busy ? "Working…" : dirty ? "Unsaved changes — click Save other changes." : (saved?.model ? "All changes saved." : "Connect a provider and choose a model to get started.")
     el.classList.toggle("pending",dirty)
+    const primary=sources.find(s=>s.id===defaultID)
+    pane.querySelector('[data-current-model]').textContent=saved?.model || 'Not configured'
+    pane.querySelector('[data-current-source]').textContent=primary?.name || ''
+    pane.querySelector('[data-save]').hidden=!dirty || busy
   }
   function catalogKey(prefix) { return prefix ? "embedding" : selectedID }
   function showModels(prefix) {
@@ -108,9 +118,11 @@ async function renderAITab(container, options = {}) {
     const list=pane.querySelector('[data-sources]');list.replaceChildren()
     for(const src of sources) {
       const row=document.createElement('button');row.type='button';row.className='ai-source'+(src.id===selectedID?' selected':'');row.setAttribute('aria-pressed',String(src.id===selectedID))
-      const name=document.createElement('strong');name.textContent=src.name || src.id
-      const detail=document.createElement('span');detail.textContent=src.provider+(src.model ? ' · '+src.model : '')+(src.id===defaultID ? ' · Default' : '')
-      row.append(name,detail);row.addEventListener('click',()=>{syncSource();editSource(src.id)})
+      const title=document.createElement('span');title.className='ai-source-title'
+      const name=document.createElement('strong');name.textContent=src.name || src.id;title.append(name)
+      if(src.id===defaultID){const badge=document.createElement('em');badge.className='ai-default-badge';badge.textContent='Default';title.append(badge)}
+      const detail=document.createElement('small');detail.textContent=src.provider+(src.model ? ' · '+src.model : ' · No model yet')
+      row.append(title,detail);row.addEventListener('click',()=>{syncSource();editSource(src.id)})
       row.disabled=busy;list.append(row)
     }
     const choice=f('embeddingSource'),previous=choice.value
@@ -146,7 +158,13 @@ async function renderAITab(container, options = {}) {
     }
     pane.querySelector('[data-embedding-source]').hidden=f('useSameProvider').checked
     pane.querySelector('[data-embedding-connection]').hidden = f('useSameProvider').checked || !!f('embeddingSource').value
-    pane.querySelector('[data-default-source]').disabled=busy || selectedID===defaultID
+    const selected=sources.find(s=>s.id===selectedID)
+    pane.querySelector('[data-editor-title]').textContent=selected?.name || 'New source'
+    const defaultAction=pane.querySelector('.ai-default-action')
+    defaultAction.hidden=selectedID===defaultID || !selected?.model
+    pane.querySelector('[data-default-source]').disabled=busy
+    pane.querySelector('[data-default-action-help]').textContent=selected?.model ? 'Make this model the default for new conversations.' : 'Choose and save a model first.'
+    pane.querySelector('[data-remove-source]').hidden=sources.length===1
     pane.querySelector('[data-remove-source]').disabled=busy || sources.length===1
     const unsupported = effective().provider === 'anthropic'
     pane.querySelector('[data-unsupported]').hidden = !unsupported
@@ -229,13 +247,13 @@ async function renderAITab(container, options = {}) {
       const ok=typeof PrismModal!=='undefined' ? await PrismModal.confirm(message) : window.confirm(message)
       if (!ok) return
     }
-    busy=true;const controls=[...form.querySelectorAll('input,select,button')]
+    busy=true;pane.classList.add('is-busy');const controls=[...form.querySelectorAll('input,select,button')]
     controls.forEach(el=>el.disabled=true);status.classList.remove('error')
     const connectionPrefix=action==='embedding_models'?'embed-':''
     const localStatus=action.endsWith('models')?pane.querySelector(`[data-connected="${connectionPrefix}"]`):null
     if(localStatus)localStatus.textContent='Connecting…'
     showSaveState()
-    if (!quiet) status.textContent=action.endsWith('models') ? 'Connecting to the provider…' : action.includes('test') ? 'Testing…' : 'Saving…'
+    if (!quiet) status.textContent=action.endsWith('models') ? 'Connecting to the provider…' : action.includes('test') ? 'Testing…' : 'Saving changes…'
     let persisted=false
     try {
       let result
@@ -247,13 +265,13 @@ async function renderAITab(container, options = {}) {
         for(const name of result.models || []) {const o=document.createElement('option');o.value=name;list.appendChild(o)}
         catalogs.set(catalogKey(connectionPrefix),result.models||[]);showModels(connectionPrefix)
         localStatus.textContent=result.models?.length ? `Connected · ${result.models.length} models` : 'Connected, but no models were returned. Enter a model ID below.'
-        if (!quiet) status.textContent='Connection checked. Select a model to save and start using it.'
+        if (!quiet) status.textContent='Connection ready. Choose a model to save it automatically.'
       } else if (action==='test') status.textContent='The model responded. This text test does not verify vision support.'
       else if(action==='embedding_test') status.textContent=`Embedding endpoint verified · ${result.dimension} dimensions.`
-      else {persisted=true;status.textContent='Saved. Reloading configuration…';await load();status.textContent='Saved. Chat applies from the next message.'+' Embeddings apply automatically.'}
+      else {persisted=true;status.textContent='Saved. Refreshing…';await load();status.textContent='Changes saved. New conversations use the selected default model.'}
       return true
     } catch(err) {if(persisted){dirty=false;saved.model=payload('save').model}status.textContent=(persisted?'Saved, but unable to refresh the page. ' : action==='save'&&err.name!=='TimeoutError'?'Not saved: ':'')+err.message;status.classList.add('error');if(localStatus)localStatus.textContent='Connection failed: '+err.message;return persisted}
-    finally {busy=false;controls.forEach(el=>el.disabled=false);pane.querySelectorAll('[data-sources] button').forEach(el=>el.disabled=false);showSaveState();refresh()}
+    finally {busy=false;pane.classList.remove('is-busy');controls.forEach(el=>el.disabled=false);pane.querySelectorAll('[data-sources] button').forEach(el=>el.disabled=false);showSaveState();refresh()}
   }
   for(const prefix of ['', 'embed-']) {
     f(prefix+'provider').addEventListener('change',()=>{
@@ -261,14 +279,15 @@ async function renderAITab(container, options = {}) {
       pane.querySelectorAll('datalist')[prefix ? 1 : 0].replaceChildren();f('reindex').checked=false;invalidate(prefix);refresh()
     })
     for(const key of ['baseURL','apiKey','clearKey']) f(prefix+key).addEventListener('input',()=>invalidate(prefix))
-    f(prefix+'modelChoice').addEventListener('change',async e=>{if(!e.target.value)return;f(prefix+'model').value=e.target.value;if(!prefix&&!sources.find(s=>s.id===defaultID)?.model)defaultID=selectedID;markDirty();await perform('save')})
+    f(prefix+'modelChoice').addEventListener('change',async e=>{if(!e.target.value)return;f(prefix+'model').value=e.target.value;if(!prefix&&!sources.find(s=>s.id===defaultID)?.model)defaultID=selectedID;markDirty();await perform(prefix ? 'save' : 'chat')})
   }
   pane.querySelector('[data-add-source]').addEventListener('click',()=>{
     syncSource();const id='source_'+Array.from(crypto.getRandomValues(new Uint8Array(6)),b=>b.toString(16).padStart(2,'0')).join('')
     sources.push({id,name:'New source',provider:'openai',baseURL:defaults.openai,apiKey:'',model:''});editSource(id);markDirty();f('sourceName').focus()
   })
-  pane.querySelector('[data-default-source]').addEventListener('click',()=>{
-    syncSource();defaultID=selectedID;f('reindex').checked=false;markDirty();catalogs.delete('embedding');showModels('embed-');drawSources();refresh();perform('save')
+  pane.querySelector('[data-default-source]').addEventListener('click',async()=>{
+    if (selectedID===defaultID) { status.textContent='This source is already the default.'; return }
+    syncSource();defaultID=selectedID;f('reindex').checked=false;markDirty();catalogs.delete('embedding');showModels('embed-');drawSources();refresh();await perform('chat')
   })
   pane.querySelector('[data-remove-source]').addEventListener('click',async()=>{
     if(sources.length===1)return
@@ -293,10 +312,10 @@ async function renderAITab(container, options = {}) {
   form.addEventListener('submit',e=>{e.preventDefault();perform('save')})
   pane.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>perform(b.dataset.action)))
   try {
-    if(!options.admin) {const me=await fetch('/api/me').then(r=>r.json());if(me.multiUser){form.remove();pane.querySelector('[data-action="reset"]').hidden=saved.serverDefaultsAvailable===false
+    if(!options.admin) {const me=await fetch('/api/me').then(r=>r.json());if(me.multiUser){form.remove()
     pane.querySelector('[data-source]').textContent='AI providers are configured by the global administrator in Admin → AI provider.';return}}
     await load()
     form.hidden=false
-    status.textContent='Enter a provider URL or API key, click Connect, then choose a model. Selecting a model saves the form; other edits stay unsaved until Save changes.'
+    status.textContent=''
   } catch(err) {status.textContent=err.message;status.classList.add('error');form.querySelectorAll('button').forEach(b=>b.disabled=true)}
 }

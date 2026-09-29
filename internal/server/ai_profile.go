@@ -205,8 +205,8 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "invalid AI configuration")
 			return
 		}
-		if b.Action != "save" && b.Action != "test" && b.Action != "models" && b.Action != "embedding_models" && b.Action != "embedding_test" {
-			writeErr(w, 400, "choose save, test, models, embedding_models or embedding_test")
+		if b.Action != "save" && b.Action != "chat" && b.Action != "test" && b.Action != "models" && b.Action != "embedding_models" && b.Action != "embedding_test" {
+			writeErr(w, 400, "choose save, chat, test, models, embedding_models or embedding_test")
 			return
 		}
 		if err := b.normalize(); err != nil {
@@ -222,7 +222,7 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 		if b.APIKey == "" && !b.ClearKey && old != nil && old.Provider == b.Provider && old.BaseURL == b.BaseURL {
 			b.APIKey = old.APIKey
 		}
-		if b.Sources != nil || b.Action == "save" {
+		if b.Sources != nil || b.Action == "save" || b.Action == "chat" {
 			if err := s.prepareSources(&b.aiProfile, old); err != nil {
 				writeErr(w, 400, err.Error())
 				return
@@ -250,7 +250,7 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, err.Error())
 			return
 		}
-		if b.Action == "save" || strings.HasPrefix(b.Action, "embedding_") {
+		if b.Action == "save" || b.Action == "chat" || strings.HasPrefix(b.Action, "embedding_") {
 			if err := s.prepareEmbedding(&b.aiProfile, old); err != nil {
 				writeErr(w, 400, err.Error())
 				return
@@ -285,8 +285,11 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]any{"ok": true, "dimension": dim})
 			return
 		}
-		if b.Action == "save" {
-			if err := s.saveAIProfile(r.Context(), currentUser(r), &b.aiProfile, old); err != nil {
+		if b.Action == "save" || b.Action == "chat" {
+			// Avoid an unnecessary embedding probe for chat-only edits. A
+			// changed effective embedding connection still requires validation.
+			checkEmbedding := b.Action == "save"
+			if err := s.saveAIProfileMode(r.Context(), currentUser(r), &b.aiProfile, old, checkEmbedding); err != nil {
 				writeErr(w, 409, err.Error())
 				return
 			}

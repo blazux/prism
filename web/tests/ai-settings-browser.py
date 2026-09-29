@@ -2,12 +2,13 @@ from pathlib import Path
 SOURCE = (Path(__file__).resolve().parents[1] / "ai-settings.js").read_text()
 
 import json
+import os
 from playwright.sync_api import sync_playwright
 with sync_playwright() as p:
- b=p.chromium.launch(headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+ b=p.chromium.launch(headless=True,executable_path=os.environ.get('CHROMIUM_EXECUTABLE'),args=['--no-sandbox','--disable-dev-shm-usage'])
  page=b.new_page()
  state={'source':'configured','provider':'openai','baseURL':'https://api.openai.com/v1','model':'','chatVision':True,'defaultSource':'primary','sources':[{'id':'primary','name':'OpenAI','provider':'openai','baseURL':'https://api.openai.com/v1','model':'','keyConfigured':False}], 'embedding':{'useSameProvider':True,'sourceID':'','provider':'openai','baseURL':'https://api.openai.com/v1','model':''},'embeddingStatus':'not configured'}
- calls=[];fail={'save':False,'models':False};errors=[]
+ calls=[];fail={'save':False,'chat':False,'models':False};errors=[]
  page.on('pageerror',lambda e:errors.append(str(e)))
  def route(r):
   if '/api/ai/config' not in r.request.url:
@@ -16,7 +17,7 @@ with sync_playwright() as p:
   data=r.request.post_data_json;calls.append(data);a=data['action']
   if fail.get(a,False):r.fulfill(status=502,json={'error':'Fixture provider unavailable'});return
   if a.endswith('models'):r.fulfill(json={'models':['model-a','model-b'] if a=='models' else ['embed-a']});return
-  if a=='save':
+  if a in ('save','chat'):
    state.update(data)
    for src in state['sources']:
     src['keyConfigured']=bool(src.get('apiKey')) or src.get('keyConfigured',False);src.pop('apiKey',None)
@@ -33,8 +34,11 @@ with sync_playwright() as p:
  page.get_by_text('Connected · 2 models',exact=True).wait_for()
  assert not any(v['action']=='save' for v in calls)
  page.locator('[name=modelChoice]').select_option('model-a')
- page.get_by_text('Saved — configuration is active.',exact=True).wait_for()
+ page.get_by_text('All changes saved.',exact=True).wait_for()
  assert state['model']=='model-a'
+ assert page.locator('[data-default-source]').is_hidden()
+ assert page.locator('[data-save]').is_hidden()
+ assert page.locator('[data-current-model]').inner_text()=='model-a'
  reopen()
  assert page.locator('[name=modelChoice]').input_value()=='model-a'
  assert page.locator('[name=apiKey]').input_value()==''
@@ -51,8 +55,24 @@ with sync_playwright() as p:
  page.locator('[data-action=models]').click()
  page.get_by_text('Connected · 2 models',exact=True).wait_for()
  page.locator('[name=modelChoice]').select_option('model-b')
- page.get_by_text('Saved — configuration is active.',exact=True).wait_for()
+ page.get_by_text('All changes saved.',exact=True).wait_for()
  assert len(state['sources'])==2
+ assert page.locator('[data-default-source]').is_visible()
+ page.locator('[data-default-source]').click()
+ page.get_by_text('All changes saved.',exact=True).wait_for()
+ assert calls[-1]['action']=='chat'
+ assert state['model']=='model-b'
+ assert state['defaultSource']==state['sources'][1]['id']
+ assert page.locator('[data-default-source]').is_hidden()
+ assert page.locator('[data-action=models]').is_enabled()
+ reopen()
+ assert page.locator('[name=modelChoice]').input_value()=='model-b'
+ page.locator('[data-sources] button').first.click()
+ page.locator('[data-default-source]').click()
+ page.get_by_text('All changes saved.',exact=True).wait_for()
+ assert state['model']=='model-a'
+ page.locator('[data-sources] button').nth(1).click()
+ print('Use as default saves chat, releases controls and persists on reopen: OK',flush=True)
  page.once('dialog',lambda dialog:dialog.accept())
  page.locator('[data-remove-source]').click()
  page.get_by_text('Source removed and saved.',exact=True).wait_for()
@@ -66,11 +86,11 @@ with sync_playwright() as p:
  fail['models']=False
  page.locator('[data-action=models]').click()
  page.get_by_text('Connected · 2 models',exact=True).wait_for()
- fail['save']=True
+ fail['chat']=True
  page.locator('[name=modelChoice]').select_option('model-b')
- page.get_by_text('Not saved: Fixture provider unavailable',exact=True).wait_for()
+ page.locator('[data-status]').filter(has_text='Fixture provider unavailable').wait_for()
  assert state['model']=='model-a'
- assert 'Not saved yet' in page.locator('[data-save-state]').inner_text()
+ assert 'Unsaved changes' in page.locator('[data-save-state]').inner_text()
  page.once('dialog',lambda dialog:dialog.dismiss())
  page.locator('#leave').click()
  assert page.url=='https://fixture.test/'

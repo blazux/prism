@@ -49,6 +49,8 @@ html,body{height:100%;overflow:hidden;margin:0}
 .pane{display:none;max-width:760px}
 .pane.active{display:block}
 h2{font-size:15px;margin:0 0 4px}
+.pane>h2:first-child{display:inline-block;margin-right:8px}
+.pane-scope{display:inline-block;margin:0 0 8px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;color:var(--text3);font-size:10.5px;line-height:1.2}
 .hint{color:var(--text3);font-size:12px;margin-bottom:14px}
 table{width:100%;border-collapse:collapse;margin-top:8px}
 th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--border);font-size:12.5px;vertical-align:top}
@@ -93,6 +95,15 @@ button.mini{padding:3px 8px;font-size:11.5px;margin:0 3px 3px 0}
 .tgl input:disabled + .sl{opacity:.4;cursor:not-allowed}
 code{font-size:12px}
 #status{margin-left:8px;color:var(--accent);font-size:12px}
+@media(max-width:760px){
+ #adm-main{flex-direction:column}
+ #adm-nav{width:auto;flex-direction:row;overflow-x:auto;padding:0 6px;border-right:0;border-bottom:1px solid var(--border);scrollbar-width:thin}
+ #adm-nav .nav-head{display:none}
+ #adm-nav .nav-item{flex:0 0 auto;padding:9px 11px;white-space:nowrap}
+ #adm-content{padding:16px;overflow-x:auto}
+ .pane{max-width:100%}
+ .pane table{min-width:520px}
+}
 </style></head><body><div id="adm">
 <div id="adm-top">
 <a id="adm-back" href="/" target="_top" style="display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--text3);font-size:12.5px;transition:color .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>PRISM</a>
@@ -103,14 +114,14 @@ code{font-size:12px}
   <div id="adm-nav"></div>
   <div id="adm-content">
     <div class="pane" data-pane="ai"><div id="admin-ai-settings"></div></div>
-    <div class="pane" data-pane="users"><h2>Users</h2><div class="hint">Approve accounts and manage roles.</div>
+    <div class="pane" data-pane="users"><h2>Users</h2><span class="pane-scope">Deployment</span><div class="hint">Approve accounts and manage roles.</div>
       <table id="utbl"><thead><tr><th>User</th><th>Status</th><th>Role</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
-    <div class="pane" data-pane="groups"><h2>Groups</h2><div class="hint">Create groups, manage members and per-group model access.</div>
+    <div class="pane" data-pane="groups"><h2>Groups</h2><span class="pane-scope">Deployment</span><div class="hint">Create groups, manage members and per-group model access.</div>
       <div class="row"><input id="gname" placeholder="new group name"><button class="primary" onclick="createGroup()">Create</button></div>
       <div id="groups"></div></div>
-    <div class="pane" data-pane="tools"><h2>Global tool policy</h2><div class="hint"><b>Open to members</b> — everyone's agent can call it. <b>Admins only</b> — members are blocked. <b>Disabled</b> — nobody, admins and shared agents included. This is the ceiling — groups can only tighten it further. Everything is open by default on this trusted deployment.</div>
+    <div class="pane" data-pane="tools"><h2>Global tool policy</h2><span class="pane-scope">Deployment</span><div class="hint"><b>Open to members</b> — everyone's agent can call it. <b>Admins only</b> — members are blocked. <b>Disabled</b> — nobody, admins and shared agents included. This is the ceiling — groups can only tighten it further. Everything is open by default on this trusted deployment.</div>
       <div id="gtools" class="tool-box"></div></div>
-    <div class="pane" data-pane="usage"><h2>Usage</h2><div class="hint">Activity across the platform — counts only, no conversation content. <select id="us-days" onchange="loadUsage()" style="margin-left:6px"><option value="1">last 24 h</option><option value="7" selected>last 7 days</option><option value="30">last 30 days</option></select></div>
+    <div class="pane" data-pane="usage"><h2>Usage</h2><span class="pane-scope">Deployment</span><div class="hint">Activity across the platform — counts only, no conversation content. <select id="us-days" onchange="loadUsage()" style="margin-left:6px"><option value="1">last 24 h</option><option value="7" selected>last 7 days</option><option value="30">last 30 days</option></select></div>
       <div id="us-cards" class="row" style="flex-wrap:wrap;gap:10px;margin:12px 0"></div>
         <div id="us-tel" style="display:none"></div>
 
@@ -122,11 +133,11 @@ code{font-size:12px}
       </div>
       <h3 style="font-size:13px;margin:18px 0 6px">Audit trail</h3><div id="us-audit" style="font-size:12px"></div>
       <h3 style="font-size:13px;margin:18px 0 6px">Recent errors</h3><div id="us-errors" style="font-size:12px"></div></div>
-    <div class="pane" data-pane="logs"><h2>Logs</h2><div class="hint">Live server log (last 5000 lines kept in memory; stderr still goes to docker logs).
+    <div class="pane" data-pane="logs"><h2>Logs</h2><span class="pane-scope">Deployment</span><div class="hint">Live server log (last 5000 lines kept in memory; stderr still goes to docker logs).
       <input id="lg-filter" placeholder="filter (e.g. webex, error)" style="margin-left:6px" oninput="clearTimeout(window._lgT);window._lgT=setTimeout(loadLogs,300)">
       <label style="margin-left:10px;font-size:12px"><input type="checkbox" id="lg-auto" onchange="autoLogs()"> auto-refresh</label></div>
       <pre id="lg-out" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;line-height:1.5;max-height:70vh;overflow:auto;white-space:pre-wrap;word-break:break-all"></pre></div>
-    <div class="pane" data-pane="platform"><h2>Apps</h2><div class="hint">Toggle an app <b>OFF</b> to hide it for everyone (left rail, palette, settings). Use it to remove features that don't apply to your deployment — e.g. Email when corporate mailboxes can't connect.</div>
+    <div class="pane" data-pane="platform"><h2>Apps</h2><span class="pane-scope">Deployment</span><div class="hint">Toggle an app <b>OFF</b> to hide it for everyone (left rail, palette, settings). Use it to remove features that don't apply to your deployment — e.g. Email when corporate mailboxes can't connect.</div>
       <div id="papps" class="tool-box"></div>
       <h2 style="margin-top:26px">Models</h2><div class="hint">Choose which chat models users can pick. <b>None selected = all models available.</b> Group-level grants (Groups pane) can tighten this further. Global admins always see every model.</div>
       <div id="pmodels" class="tool-box"></div>
@@ -136,7 +147,7 @@ code{font-size:12px}
 // adminConsoleMid: the group-admin panes, then the script — shared helpers and
 // everything from Users down to Logs.
 const adminConsoleMid = `
-    <div class="pane" data-pane="agent"><h2>Shared agent</h2><div class="hint">The agent your members mention in the room. It runs with the rights you set here.</div>
+    <div class="pane" data-pane="agent"><h2>Shared agent</h2><span class="pane-scope">Group</span><div class="hint">The agent your members mention in the room. It runs with the rights you set here.</div>
       <label>Group</label><select id="ag-group"></select>
       <label>Name (members mention @Name)</label><input id="ag-name" placeholder="Assistant" style="width:100%">
       <label>Avatar</label>
@@ -163,7 +174,7 @@ const adminConsoleMid = `
       <div class="hint" style="margin-bottom:6px">Where scheduled jobs post (cron with deliver:"webex"). Only group spaces the bot was added to are listed — add the bot to a space, then refresh.</div>
       <div class="row"><select id="wx-room" style="min-width:260px"></select><button onclick="loadWebexRooms()">Refresh list</button><span id="wx-room-status" class="hint" style="margin:0"></span></div>
       <div class="row"><button class="primary" onclick="saveWebex()">Save Webex</button><button onclick="disconnectWebex()">Disconnect</button><span id="wx-status"></span></div></div>
-    <div class="pane" data-pane="rag"><h2>Knowledge base (RAG)</h2><div class="hint">Collections shared with the whole group: the shared agent and every member's agent search them. Members see them read-only in their settings — you curate them here. Uploading to a new name creates the collection; uploading a file with the same name as an existing document replaces it.</div>
+    <div class="pane" data-pane="rag"><h2>Knowledge base (RAG)</h2><span class="pane-scope">Group</span><div class="hint">Collections shared with the whole group: the shared agent and every member's agent search them. Members see them read-only in their settings — you curate them here. Uploading to a new name creates the collection; uploading a file with the same name as an existing document replaces it.</div>
       <label>Group</label><select id="rg-group"></select>
       <div id="grag" class="list" style="max-height:none"></div>
       <div class="row">
@@ -179,16 +190,16 @@ const adminConsoleMid = `
         </div>
         <div id="grag-prog-text" class="hint" style="margin:5px 0 0"></div>
       </div></div>
-    <div class="pane" data-pane="mcp"><h2>MCP servers</h2><div class="hint">Servers connected here are shared with the whole group: the shared agent and every member's personal agent can call their tools. Members see this list read-only in their settings.</div>
+    <div class="pane" data-pane="mcp"><h2>MCP servers</h2><span class="pane-scope">Group</span><div class="hint">Servers connected here are shared with the whole group: the shared agent and every member's personal agent can call their tools. Members see this list read-only in their settings.</div>
       <label>Group</label><select id="mc-group"></select>
       <div id="gmcp" class="list" style="max-height:none"></div>
       <div class="row"><input id="gmcp-name" placeholder="name"><input id="gmcp-url" placeholder="http://host:port/mcp" style="flex:1;min-width:220px"><select id="gmcp-secret"><option value="">— no auth —</option></select><button class="primary" onclick="addGroupMCP()">Connect</button><span id="gmcp-status"></span></div>
       <div class="hint">Transport (Streamable HTTP / legacy SSE) is auto-detected from the URL. To authenticate, pick a stored secret — it is sent as a <code>Bearer</code> token, or create one inline from the picker below.</div></div>
-    <div class="pane" data-pane="secrets"><h2>Group secrets</h2><div class="hint">Secrets stored here are scoped to this group only — used for its MCP servers / group tools, isolated from every other group. Members see the list read-only; only group admins add or remove them.</div>
+    <div class="pane" data-pane="secrets"><h2>Group secrets</h2><span class="pane-scope">Group</span><div class="hint">Secrets stored here are scoped to this group only — used for its MCP servers / group tools, isolated from every other group. Members see the list read-only; only group admins add or remove them.</div>
       <label>Group</label><select id="gs-group"></select>
       <div id="gsecrets" class="list" style="max-height:none"></div>
       <div class="row"><input id="gs-name" placeholder="name"><input id="gs-value" type="password" placeholder="value"><button class="primary" onclick="addGroupSecret()">Save</button><span id="gs-status"></span></div></div>
-    <div class="pane" data-pane="access"><h2>Group tool access</h2><div class="hint">Toggle a tool <b>ON</b> to let your group's members use it, <b>OFF</b> to restrict it to admins. You can only tighten the global policy, never loosen it — tools locked globally stay admin-only.</div>
+    <div class="pane" data-pane="access"><h2>Group tool access</h2><span class="pane-scope">Group</span><div class="hint">Toggle a tool <b>ON</b> to let your group's members use it, <b>OFF</b> to restrict it to admins. You can only tighten the global policy, never loosen it — tools locked globally stay admin-only.</div>
       <label>Group</label><select id="ac-group"></select>
       <div id="ac-tools" class="tool-box"></div></div>
   </div>
