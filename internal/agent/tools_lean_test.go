@@ -42,8 +42,9 @@ func TestLeanToolsPreserveContracts(t *testing.T) {
 
 func TestLeanToolSelectionPreservesDynamicAndDisabled(t *testing.T) {
 	on, off := true, false
-	// A provider-supplied tool sharing a native name must retain its own contract.
-	dynamic := ollama.Tool{Type: "function", Function: ollama.ToolFunction{Name: "widget", Description: "Provider-owned contract"}}
+	// A provider-supplied tool with a distinct name retains its own contract.
+	// Name collisions are covered separately: Anthropic rejects duplicate names.
+	dynamic := ollama.Tool{Type: "function", Function: ollama.ToolFunction{Name: "provider_widget", Description: "Provider-owned contract"}}
 	a := &Agent{executor: &ToolExecutor{telephonyTools: []ollama.Tool{dynamic}}, limits: Limits{LeanPrompt: &on}, disabledTools: []string{"cron"}}
 	for _, lean := range []bool{true, false, true} {
 		if lean {

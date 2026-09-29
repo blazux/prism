@@ -16,18 +16,24 @@ import (
 // emitting a message Anthropic will reject.
 
 type apiRequest struct {
-	Model       string       `json:"model"`
-	System      []textBlock  `json:"system,omitempty"`
-	Messages    []apiMessage `json:"messages"`
-	Tools       []apiTool    `json:"tools,omitempty"`
-	MaxTokens   int          `json:"max_tokens"`
-	Temperature *float64     `json:"temperature,omitempty"`
-	Stream      bool         `json:"stream"`
+	Model        string        `json:"model"`
+	System       []textBlock   `json:"system,omitempty"`
+	Messages     []apiMessage  `json:"messages"`
+	Tools        []apiTool     `json:"tools,omitempty"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+	MaxTokens    int           `json:"max_tokens"`
+	Temperature  *float64      `json:"temperature,omitempty"`
+	Stream       bool          `json:"stream"`
 }
 
 type textBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
+type cacheControl struct {
 	Type string `json:"type"`
-	Text string `json:"text"`
 }
 
 type apiMessage struct {
@@ -59,13 +65,18 @@ type imageSource struct {
 }
 
 type apiTool struct {
-	Name        string                `json:"name"`
-	Description string                `json:"description"`
-	InputSchema ollama.ToolParameters `json:"input_schema"`
+	Name         string                `json:"name"`
+	Description  string                `json:"description"`
+	InputSchema  ollama.ToolParameters `json:"input_schema"`
+	CacheControl *cacheControl         `json:"cache_control,omitempty"`
 }
 
 // buildTools converts the pivot tool list.
 func buildTools(in []ollama.Tool) []apiTool {
+	return buildToolsWithCachePrefix(in, 0)
+}
+
+func buildToolsWithCachePrefix(in []ollama.Tool, nativeCount int) []apiTool {
 	if len(in) == 0 {
 		return nil
 	}
@@ -81,15 +92,39 @@ func buildTools(in []ollama.Tool) []apiTool {
 			InputSchema: schema,
 		})
 	}
+	// Native tools precede custom/MCP tools. Preserve their cache even when a
+	// custom tool is registered during this turn. The final breakpoint still
+	// caches the full tool set once it stabilizes.
+	if nativeCount > 0 && nativeCount < len(out) {
+		out[nativeCount-1].CacheControl = &cacheControl{Type: "ephemeral"}
+	}
+	// Tool definitions precede the system prompt and conversation in Anthropic's
+	// cache key. They are large and generally unchanged across an agent loop.
+	out[len(out)-1].CacheControl = &cacheControl{Type: "ephemeral"}
 	return out
 }
 
 // buildSystem extracts the system turns from the pivot history into the
 // top-level system field, where this API expects them.
 func buildSystem(in []ollama.Message) []textBlock {
+	return buildSystemWithCachePrefix(in, 0)
+}
+
+func buildSystemWithCachePrefix(in []ollama.Message, prefixBytes int) []textBlock {
 	var blocks []textBlock
 	for _, m := range in {
 		if m.Role != "system" {
+			continue
+		}
+		if prefixBytes > 0 && prefixBytes <= len(m.Content) {
+			prefix := m.Content[:prefixBytes]
+			if strings.TrimSpace(prefix) != "" {
+				blocks = append(blocks, textBlock{Type: "text", Text: prefix, CacheControl: &cacheControl{Type: "ephemeral"}})
+			}
+			if suffix := m.Content[prefixBytes:]; strings.TrimSpace(suffix) != "" {
+				blocks = append(blocks, textBlock{Type: "text", Text: suffix})
+			}
+			prefixBytes = 0
 			continue
 		}
 		if text := strings.TrimSpace(m.Content); text != "" {

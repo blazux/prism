@@ -21,6 +21,44 @@ func TestBuildSystemHoistsThePromptOutOfTheHistory(t *testing.T) {
 	}
 }
 
+func TestBuildSystemCachesOnlyStablePrefix(t *testing.T) {
+	stable := "You are PRISM.\n\nStable instructions.\n"
+	dynamic := "\nCurrent date and time: 12:00."
+	got := buildSystemWithCachePrefix([]ollama.Message{{Role: "system", Content: stable + dynamic}}, len(stable))
+	if len(got) != 2 || got[0].Text != stable || got[1].Text != dynamic {
+		t.Fatalf("system prompt changed at cache boundary: %+v", got)
+	}
+	if got[0].CacheControl == nil || got[0].CacheControl.Type != "ephemeral" || got[1].CacheControl != nil {
+		t.Fatalf("cache boundary must precede dynamic context: %+v", got)
+	}
+}
+
+func TestBuildToolsCachesLastDefinition(t *testing.T) {
+	tools := []ollama.Tool{
+		{Function: ollama.ToolFunction{Name: "read_file"}},
+		{Function: ollama.ToolFunction{Name: "widget"}},
+	}
+	got := buildTools(tools)
+	if len(got) != 2 || got[0].CacheControl != nil || got[1].CacheControl == nil {
+		t.Fatalf("only the last tool should end the cacheable catalog: %+v", got)
+	}
+	if got[1].CacheControl.Type != "ephemeral" {
+		t.Fatalf("unexpected cache type: %+v", got[1].CacheControl)
+	}
+	if buildTools(nil) != nil {
+		t.Fatal("an empty tool catalog must not add a cache marker")
+	}
+}
+
+func TestBuildToolsKeepsNativePrefixWhenCustomToolsChange(t *testing.T) {
+	native := ollama.Tool{Function: ollama.ToolFunction{Name: "widget"}}
+	first := buildToolsWithCachePrefix([]ollama.Tool{native, {Function: ollama.ToolFunction{Name: "custom_a"}}}, 1)
+	second := buildToolsWithCachePrefix([]ollama.Tool{native, {Function: ollama.ToolFunction{Name: "custom_a"}}, {Function: ollama.ToolFunction{Name: "custom_b"}}}, 1)
+	if first[0].CacheControl == nil || second[0].CacheControl == nil || second[2].CacheControl == nil || second[1].CacheControl != nil {
+		t.Fatalf("native and full catalog need distinct breakpoints: %+v / %+v", first, second)
+	}
+}
+
 func TestBuildMessagesDropsSystemTurns(t *testing.T) {
 	msgs := []ollama.Message{
 		{Role: "system", Content: "prompt"},

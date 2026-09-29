@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"prism/internal/memory"
+	"prism/internal/usagecost"
 )
 
 // ─── log ring buffer ────────────────────────────────────────────────────────────
@@ -147,6 +148,25 @@ func (s *Server) handleAdminUsage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "no database")
 		return
 	}
+	if taskID := r.URL.Query().Get("taskId"); taskID != "" {
+		session := r.URL.Query().Get("session")
+		if session == "" || len(session) > 200 || len(taskID) > 240 {
+			writeErr(w, http.StatusBadRequest, "session and taskId required")
+			return
+		}
+		legacy := strings.HasPrefix(taskID, "legacy:")
+		if legacy && taskID != "legacy:"+session {
+			writeErr(w, http.StatusBadRequest, "invalid legacy taskId")
+			return
+		}
+		requests, err := ms.ModelUsageRequests(r.Context(), session, taskID, legacy)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "usage trace unavailable")
+			return
+		}
+		writeJSON(w, map[string]interface{}{"calls": traceTaskCost(requests), "truncated": len(requests) == 500})
+		return
+	}
 	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 	if days <= 0 || days > 90 {
 		days = 7
@@ -167,6 +187,11 @@ func (s *Server) handleAdminUsage(w http.ResponseWriter, r *http.Request) {
 	byUserTools, _ := ms.UsageByUser(ctx, "tool_call", since, 20)
 	audit, _ := ms.RecentUsageEvents(ctx, "audit", 30)
 	errs, _ := ms.RecentUsageEvents(ctx, "error_log", 20)
+	usageGroups, usageErr := ms.RecentModelUsageGroups(ctx, since, 500)
+	taskCosts := summarizeTaskCosts(usageGroups)
+	if len(taskCosts) > 40 {
+		taskCosts = taskCosts[:40]
+	}
 
 	// Resolve user ids to display names for the pane.
 	names := map[string]string{}
@@ -182,6 +207,8 @@ func (s *Server) handleAdminUsage(w http.ResponseWriter, r *http.Request) {
 		"models": nz(models), "tools": nz(tools), "channels": nz(channels),
 		"byUserChat": nz(byUserChat), "byUserTools": nz(byUserTools),
 		"audit": audit, "errors": errs, "userNames": names,
+		"taskCosts":            taskCosts,
+		"usageCostPricingAsOf": usagecost.PricingAsOf, "usageCostError": usageErr != nil,
 	})
 }
 

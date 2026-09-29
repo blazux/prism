@@ -125,6 +125,11 @@ code{font-size:12px}
       <div id="us-cards" class="row" style="flex-wrap:wrap;gap:10px;margin:12px 0"></div>
         <div id="us-tel" style="display:none"></div>
 
+      <h3 style="font-size:13px;margin:18px 0 6px">Recent model work</h3>
+      <div class="hint">Estimated Claude API chat cost in USD, not a full bill. Auxiliary model calls, discounts and missing usage are excluded. Older events are grouped by session rather than task.</div>
+      <div id="us-costs" style="overflow-x:auto;margin:8px 0 16px"></div>
+      <div id="us-cost-detail" style="overflow-x:auto;margin:8px 0 16px"></div>
+
       <div class="row" style="align-items:flex-start;gap:22px;flex-wrap:wrap">
         <div style="flex:1;min-width:260px"><h3 style="font-size:13px;margin:10px 0 6px">Chats by user</h3><div id="us-users"></div>
           <h3 style="font-size:13px;margin:16px 0 6px">Models</h3><div id="us-models"></div></div>
@@ -519,12 +524,39 @@ function usBars(el,rows,names){const host=$(el);host.innerHTML='';if(!rows||!row
    '<span style="width:70px;text-align:right;color:var(--text3)">'+r.n+(r.qty>r.n?' · ~'+(r.qty>=1000?Math.round(r.qty/1000)+'k':r.qty)+' tok':'')+'</span>';
   host.appendChild(row);});}
 function usCard(label,val){return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:10px 16px;min-width:110px"><div style="font-size:21px;font-weight:700">'+val+'</div><div style="font-size:11px;color:var(--text3)">'+label+'</div></div>';}
+function renderUsageCosts(d){const host=$('us-costs');if(!host)return;
+ if(d.usageCostError){host.innerHTML='<div class="hint">Cost data unavailable.</div>';return;}
+ const rows=d.taskCosts||[];window._usageTasks=rows;$('us-cost-detail').innerHTML='';if(!rows.length){host.innerHTML='<div class="hint">No provider token data in this period.</div>';return;}
+ const num=n=>Number(n||0).toLocaleString();
+ let html='<table style="width:100%;font-size:12px"><thead><tr><th>When</th><th>User / session</th><th>Model</th><th>Calls</th><th>Input / cached</th><th>Output</th><th>Est. USD</th><th></th></tr></thead><tbody>';
+ rows.forEach((t,i)=>{const who=d.userNames&&d.userNames[String(t.userId)]||('u'+t.userId);
+  const scope=who+' · '+t.session+(t.legacy?' (session total)':'');
+  const cached=t.inputTokens?Math.round(100*t.cacheReadTokens/t.inputTokens):0;
+  const cost=(t.unpricedCalls?'≥ ':'~ ')+Number(t.knownCostUsd||0).toFixed(3)+(t.unpricedCalls?' · '+t.unpricedCalls+' unpriced':'');
+  html+='<tr><td>'+esc(new Date(t.last).toLocaleString())+'</td><td title="'+esc(scope)+'">'+esc(scope)+'</td><td>'+esc((t.models||[]).join(', '))+'</td><td>'+num(t.calls)+'</td><td>'+num(t.inputTokens)+' / '+cached+'% read</td><td>'+num(t.outputTokens)+'</td><td>'+esc(cost)+'</td><td><button onclick="showUsageTask('+i+')">Details</button></td></tr>';
+ });
+ host.innerHTML=html+'</tbody></table><div class="hint">Prices checked '+esc(d.usageCostPricingAsOf||'')+'. Latest 40 tasks from up to 500 model/task groups; amounts exclude unpriced calls.</div>';
+}
+async function showUsageTask(i){const t=(window._usageTasks||[])[i],box=$('us-cost-detail');if(!t||!box)return;
+ box.innerHTML='<div class="hint">Loading model calls…</div>';
+ const d=await jget('/api/admin/usage?session='+encodeURIComponent(t.session)+'&taskId='+encodeURIComponent(t.taskId));
+ if(!d){box.innerHTML='<div class="hint">Cost trace unavailable.</div>';return;}
+ const calls=d.calls||[],max=Math.max(0.001,...calls.map(c=>Number(c.cumulativeCostUsd||0)));
+ let html='<h3 style="font-size:13px">Cost trace · '+esc(t.session)+(t.legacy?' (whole session)':'')+'</h3>';
+ html+='<table style="width:100%;font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Model</th><th>Input</th><th>Cache read / write</th><th>Output</th><th>Messages</th><th>Prompt / tools</th><th>Call USD</th><th>Cumulative USD</th></tr></thead><tbody>';
+ let unknown=false;calls.forEach((c,j)=>{if(!c.costKnown)unknown=true;
+  const cumulative=Number(c.cumulativeCostUsd||0),width=Math.max(2,Math.round(100*cumulative/max));
+  html+='<tr><td>'+(j+1)+'</td><td>'+esc(new Date(c.ts).toLocaleTimeString())+'</td><td>'+esc(c.model)+'</td><td>'+Number(c.inputTokens||0).toLocaleString()+'</td><td>'+Number(c.cacheReadTokens||0).toLocaleString()+' / '+Number(c.cacheWriteTokens||0).toLocaleString()+'</td><td>'+Number(c.outputTokens||0).toLocaleString()+'</td><td>'+Number(c.messageCount||0)+'</td><td>'+Number(c.systemBytes||0).toLocaleString()+' / '+Number(c.toolBytes||0).toLocaleString()+' B</td><td>'+(c.costKnown?'$'+Number(c.costUsd).toFixed(3):'unknown')+'</td><td style="min-width:100px"><div style="background:var(--bg2);height:5px;border-radius:3px"><div style="width:'+width+'%;height:5px;background:#6b8afd;border-radius:3px"></div></div>'+(unknown?'≥ ':'')+'$'+cumulative.toFixed(3)+'</td></tr>';
+ });
+ box.innerHTML=html+'</tbody></table>'+(d.truncated?'<div class="hint">Trace truncated after 500 calls.</div>':'');
+}
 async function loadUsage(){const days=$('us-days').value;const d=await jget('/api/admin/usage?days='+days);if(!d)return;
  const k=d.kinds||{},kd=d.kindsDay||{};
  $('us-cards').innerHTML=usCard('active today',d.activeDay||0)+usCard('active 7d',d.activeWeek||0)+
   usCard('chats today',kd.chat_turn||0)+usCard('chats '+days+'d',k.chat_turn||0)+
   usCard('tool calls '+days+'d',k.tool_call||0)+usCard('channel msgs '+days+'d',k.channel_msg||0)+usCard('logins '+days+'d',k.login||0);
  usBars('us-users',d.byUserChat,d.userNames);usBars('us-models',d.models);usBars('us-tools',d.tools);usBars('us-channels',d.channels);
+ renderUsageCosts(d);
  const fmt=e=>{const t=new Date(e.ts).toLocaleString();const who=d.userNames&&d.userNames[String(e.userId)]||('u'+e.userId);
   let m='';try{const o=JSON.parse(e.meta||'{}');m=Object.entries(o).filter(([k2,v])=>v!==null&&v!=='').map(([k2,v])=>k2+'='+(typeof v==='object'?JSON.stringify(v):v)).join(' ');}catch(_){ }
   return '<div style="padding:3px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text3)">'+t+'</span> <b>'+esc(who)+'</b> '+esc(e.item)+' <span style="color:var(--text3)">'+esc(m.slice(0,160))+'</span></div>';};

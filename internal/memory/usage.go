@@ -96,6 +96,97 @@ func (s *Store) UsageByUser(ctx context.Context, kind string, since time.Time, l
 	return s.usageBy(ctx, "user_id::text", kind, since, limit)
 }
 
+// ModelUsageGroup is one model's provider-reported usage within a task. Old
+// events lack task IDs and are grouped by session, explicitly marked legacy.
+type ModelUsageGroup struct {
+	UserID       int64
+	Session      string
+	TaskID       string
+	Legacy       bool
+	Model        string
+	Calls        int64
+	Missing      int64
+	Input        int64
+	Output       int64
+	CacheRead    int64
+	CacheWrite   int64
+	MaxToolBytes int64
+	First        time.Time
+	Last         time.Time
+}
+
+// RecentModelUsageGroups aggregates in PostgreSQL, so the admin pane does not
+// load prompts or per-call JSON. The limit bounds rendered groups, not calls.
+func (s *Store) RecentModelUsageGroups(ctx context.Context, since time.Time, limit int) ([]ModelUsageGroup, error) {
+	if limit <= 0 || limit > 2000 {
+		limit = 500
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT user_id, session,
+			COALESCE(NULLIF(meta #>> '{measurement,taskId}', ''), 'legacy:' || session) AS task_id,
+			(meta #>> '{measurement,taskId}') IS NULL AS legacy,
+			item, COUNT(*),
+			COUNT(*) FILTER (WHERE meta #>> '{measurement,usage,input_tokens}' IS NULL
+				OR meta #>> '{measurement,usage,output_tokens}' IS NULL),
+			COALESCE(SUM((meta #>> '{measurement,usage,input_tokens}')::bigint), 0),
+			COALESCE(SUM((meta #>> '{measurement,usage,output_tokens}')::bigint), 0),
+			COALESCE(SUM((meta #>> '{measurement,usage,cache_read_tokens}')::bigint), 0),
+			COALESCE(SUM((meta #>> '{measurement,usage,cache_write_tokens}')::bigint), 0),
+			COALESCE(MAX((meta #>> '{measurement,tool_bytes}')::bigint), 0),
+			MIN(ts), MAX(ts)
+		FROM usage_events
+		WHERE kind = 'model_request' AND ts >= $1
+		GROUP BY user_id, session, task_id, legacy, item
+		ORDER BY MAX(ts) DESC LIMIT $2
+	`, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ModelUsageGroup
+	for rows.Next() {
+		var g ModelUsageGroup
+		if err := rows.Scan(&g.UserID, &g.Session, &g.TaskID, &g.Legacy, &g.Model,
+			&g.Calls, &g.Missing, &g.Input, &g.Output, &g.CacheRead, &g.CacheWrite,
+			&g.MaxToolBytes, &g.First, &g.Last); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+type ModelUsageRequest struct {
+	TS          time.Time       `json:"ts"`
+	Model       string          `json:"model"`
+	Measurement json.RawMessage `json:"measurement"`
+}
+
+// ModelUsageRequests returns a chronological, content-free cost trace. The
+// legacy path groups a whole session because old events have no task ID.
+func (s *Store) ModelUsageRequests(ctx context.Context, session, taskID string, legacy bool) ([]ModelUsageRequest, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT ts, item, COALESCE(meta->'measurement', '{}')
+		FROM usage_events WHERE kind = 'model_request' AND session = $1
+			AND (($3 AND meta #>> '{measurement,taskId}' IS NULL)
+				OR (NOT $3 AND meta #>> '{measurement,taskId}' = $2))
+		ORDER BY ts, id LIMIT 500
+	`, session, taskID, legacy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ModelUsageRequest
+	for rows.Next() {
+		var request ModelUsageRequest
+		if err := rows.Scan(&request.TS, &request.Model, &request.Measurement); err != nil {
+			return nil, err
+		}
+		out = append(out, request)
+	}
+	return out, rows.Err()
+}
+
 // UsageKindCounts returns event counts per kind since the cutoff.
 func (s *Store) UsageKindCounts(ctx context.Context, since time.Time) (map[string]int64, error) {
 	rows, err := s.pool.Query(ctx, `

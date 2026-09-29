@@ -12,7 +12,9 @@ over the same WebSocket the dashboard uses, and reports for each task:
   scheduled, answer contains the fact…),
 - **tool calls** — how many tries it took,
 - **tool errors** — how many of those tries failed,
-- **duration**.
+- **duration**,
+- **estimated Claude chat cost** — provider tokens priced at published API
+  rates, including 5-minute cache reads/writes; never an execution limit.
 
 A change is accepted when, on the deployment's everyday model, the success
 rate does not drop, mean tool calls do not rise by more than 15 % and mean
@@ -40,6 +42,15 @@ Small local models are not deterministic: record baselines with `-runs 3`
 Each task runs in its own fresh session `eval-<name>` (deleted before and
 after), and fixtures are created/removed through `/api/builtin`, outside the
 agent. `-keep` leaves sessions and fixtures in place for inspection.
+
+The optional live scenario in `weather-live.json` checks the full public API
+→ local JSON → widget → scheduled refresh path. It calls Open-Meteo and a
+real Claude model, so run it only on a disposable local instance with test
+credits; the fixture cleans up its widget, cron and files afterward:
+
+```bash
+go run ./cmd/prism-eval -tasks eval/weather-live.json -model anthropic::claude-sonnet-5
+```
 
 ## CalDAV, against a disposable server
 
@@ -117,11 +128,18 @@ breakdowns; do not add them again. `reasoning_tokens`, when reported, is part of
 not zero. Interrupted streams may have partial or missing usage. Snapshot counts
 are cumulative per request; only the last reported snapshot is recorded.
 
+The report also shows priced/unpriced request counts, input/output/cache tokens
+and the estimated cost for supported Claude models. Unknown prices or missing
+provider counts remain unpriced, not zero. Prices are kept in
+`internal/usagecost/pricing.go` and must be reviewed when models or rates change.
+
 These records **do not cover auxiliary vision captions, deep-research model calls,
 compaction or embeddings**, and are not a complete bill. The legacy admin chat-turn
 estimate is separate; never add it to provider counts. In PostgreSQL, records use
 `usage_events.kind=model_request`, qty=1 and meta.measurement; no prompts, tool
-results or credentials are added to these telemetry records. No price is inferred.
+results or credentials are added to these telemetry records. New records include a
+content-free task ID shared with subagents; older records can only be grouped by
+session. Admin → Usage shows these aggregates, with partial-cost caveats.
 
 Adapters follow [OpenAI's streaming usage contract](https://developers.openai.com/api/reference/resources/chat)
 and [Anthropic's cumulative streaming usage](https://platform.claude.com/docs/en/build-with-claude/streaming),

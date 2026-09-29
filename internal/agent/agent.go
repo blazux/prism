@@ -352,32 +352,54 @@ func (a *Agent) SetActiveTools(disabledNames []string) {
 // disabled tools. Called on every Ollama request so dynamic tools (custom Python
 // scripts, MCP tools) are always up-to-date without requiring a session restart.
 func (a *Agent) buildToolList() []ollama.Tool {
-	all := append(nativeToolsFor(a.leanPrompt()), a.executor.AllDynamicTools()...)
+	all, _ := a.buildToolListWithCachePrefix()
+	return all
+}
+
+func (a *Agent) buildToolListWithCachePrefix() ([]ollama.Tool, int) {
+	native := nativeToolsFor(a.leanPrompt())
+	all := append(native, a.executor.AllDynamicTools()...)
 	available := all[:0]
-	for _, tool := range all {
+	nativeKept := 0
+	seen := make(map[string]bool, len(all))
+	for i, tool := range all {
 		if a.executor.hiddenTools[tool.Function.Name] {
 			continue
 		}
 		if tool.Function.Name == "subagent" && a.executor.serverTools["subagent"] == nil {
 			continue
 		}
+		// A script manually written in agent_tools/ can share its declared name
+		// with the canonical file produced by register_tool. Anthropic rejects
+		// duplicate tool names, so expose only the first dispatchable definition.
+		if seen[tool.Function.Name] {
+			continue
+		}
+		seen[tool.Function.Name] = true
 		available = append(available, tool)
+		if i < len(native) {
+			nativeKept++
+		}
 	}
 	all = available
 	if len(a.disabledTools) == 0 {
-		return all
+		return all, nativeKept
 	}
 	disabled := make(map[string]bool, len(a.disabledTools))
 	for _, n := range a.disabledTools {
 		disabled[n] = true
 	}
 	filtered := make([]ollama.Tool, 0, len(all))
-	for _, t := range all {
+	nativeEnabled := 0
+	for i, t := range all {
 		if !disabled[t.Function.Name] {
 			filtered = append(filtered, t)
+			if i < nativeKept {
+				nativeEnabled++
+			}
 		}
 	}
-	return filtered
+	return filtered, nativeEnabled
 }
 
 // New creates a new Agent. personality is the editable system prompt section loaded
@@ -1006,6 +1028,11 @@ func (a *Agent) timeLocation() *time.Location {
 // buildSystemPrompt assembles the full system prompt for the current request.
 // learningsCtx is a pre-fetched snippet from the agent-learnings RAG (may be empty).
 func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) string {
+	prompt, _ := a.buildSystemPromptWithCachePrefix(ctx, learningsCtx)
+	return prompt
+}
+
+func (a *Agent) buildSystemPromptWithCachePrefix(ctx context.Context, learningsCtx string) (string, int) {
 	var sb strings.Builder
 	// Layered personality: base (default) + this session's own adaptation.
 	persona := a.basePersonality
@@ -1051,6 +1078,9 @@ func (a *Agent) buildSystemPrompt(ctx context.Context, learningsCtx string) stri
 		}
 		sb.WriteString(systemPromptCoreTailFor(lean))
 	}
+	// Everything above is stable during the tool loop. Live context, the clock
+	// and late turn guidance below may change between requests.
+	cachePrefixBytes := sb.Len()
 
 	// Channel guidance: the "telegram" session is the user texting from their phone.
 	if a.sessionID == telegramSessionID {
@@ -1174,7 +1204,7 @@ You control the call through tools — the words alone do nothing:
 For ANY factual question (opening hours, prices, services, procedures, addresses…), you MUST call rag_search FIRST and answer only from what it returns — never from memory, never invent. If it returns nothing relevant, say plainly that you don't have that information and offer to take a message.`)
 	}
 
-	return sb.String()
+	return sb.String(), cachePrefixBytes
 }
 
 // Chat processes a user message (with optional images) and streams events.
@@ -1221,6 +1251,13 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		dbContent += fmt.Sprintf(" [%d image(s) attached]", len(images))
 	}
 	userMessage.DBID = a.saveMessageToDB(ctx, ollama.Message{Role: "user", Content: dbContent})
+	// The user-message row is a unique, content-free task ID. Child agents share
+	// it via context; tests without a DB still get a per-turn fallback.
+	taskID := fmt.Sprintf("%d", userMessage.DBID)
+	if userMessage.DBID == 0 {
+		taskID = fmt.Sprintf("local-%d", time.Now().UnixNano())
+	}
+	ctx = withTaskID(ctx, taskID)
 	a.histMu.Lock()
 	a.history = append(a.history, userMessage)
 	historyLen := len(a.history)
@@ -1589,7 +1626,7 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 	if err := consumeModelCall(ctx); err != nil {
 		return "", nil, "", err
 	}
-	prompt := a.buildSystemPrompt(ctx, learningsCtx)
+	prompt, cachePrefixBytes := a.buildSystemPromptWithCachePrefix(ctx, learningsCtx)
 
 	a.histMu.Lock()
 	messages := append([]ollama.Message{
@@ -1597,11 +1634,13 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 	}, a.history...)
 	a.histMu.Unlock()
 
-	tools := a.buildToolList()
+	tools, cacheToolPrefixCount := a.buildToolListWithCachePrefix()
 	req := ollama.ChatRequest{
-		Model:    a.model,
-		Messages: messages,
-		Tools:    tools,
+		Model:                  a.model,
+		Messages:               messages,
+		Tools:                  tools,
+		CacheSystemPrefixBytes: cachePrefixBytes,
+		CacheToolPrefixCount:   cacheToolPrefixCount,
 		// On the phone the caller waits in silence while the model reasons, so the
 		// thinking budget is pure dead air. Turn it off for voice turns — and
 		// whenever the user switched reasoning off in Settings.
@@ -1618,13 +1657,17 @@ func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan
 	complete := false
 	defer func() {
 		raw, _ := json.Marshal(tools)
-		record := &ModelUsage{Scope: "main_chat", Model: a.model, Profile: a.promptProfile(), DurationMS: time.Since(started).Milliseconds(), SystemBytes: len(prompt), ToolBytes: len(raw), MessageCount: len(messages), Complete: complete, Usage: measured}
+		record := &ModelUsage{TaskID: taskIDFromContext(ctx), Scope: "main_chat", Model: a.model, Profile: a.promptProfile(), DurationMS: time.Since(started).Milliseconds(), SystemBytes: len(prompt), ToolBytes: len(raw), MessageCount: len(messages), Complete: complete, Usage: measured}
 		select {
 		case events <- Event{Type: "model_usage", Usage: record}:
 		case <-ctx.Done():
 		}
 		if a.memStore != nil {
-			a.memStore.AddUsage(ctx, 0, a.sessionID, "model_request", a.model, 1, map[string]interface{}{"measurement": record})
+			// A stopped browser turn still consumed provider tokens. Persist the
+			// final counter independently of its cancelled request context.
+			usageCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			a.memStore.AddUsage(usageCtx, 0, a.sessionID, "model_request", a.model, 1, map[string]interface{}{"measurement": record})
+			cancel()
 		}
 	}()
 	ch := make(chan ollama.StreamEvent, 100)

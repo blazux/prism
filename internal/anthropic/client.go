@@ -160,12 +160,13 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	// plain text with no signature, so it could not replay them faithfully —
 	// asking for them would break the very next tool turn.
 	payload := apiRequest{
-		Model:     req.Model,
-		System:    buildSystem(req.Messages),
-		Messages:  buildMessages(req.Messages),
-		Tools:     buildTools(req.Tools),
-		MaxTokens: req.Options.NumPredict,
-		Stream:    true,
+		Model:        req.Model,
+		System:       buildSystemWithCachePrefix(req.Messages, req.CacheSystemPrefixBytes),
+		Messages:     buildMessages(req.Messages),
+		Tools:        buildToolsWithCachePrefix(req.Tools, req.CacheToolPrefixCount),
+		CacheControl: &cacheControl{Type: "ephemeral"},
+		MaxTokens:    req.Options.NumPredict,
+		Stream:       true,
 	}
 	if payload.MaxTokens <= 0 {
 		payload.MaxTokens = defaultMaxTokens

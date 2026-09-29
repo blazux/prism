@@ -128,6 +128,12 @@ func TestChatStreamsTextAndToolCalls(t *testing.T) {
 	if len(sent.Tools) != 1 || sent.Tools[0].Name != "read_file" {
 		t.Errorf("tools go out under their registered name, got %+v", sent.Tools)
 	}
+	if sent.CacheControl == nil || sent.CacheControl.Type != "ephemeral" {
+		t.Errorf("automatic conversation caching is missing: %+v", sent.CacheControl)
+	}
+	if sent.Tools[0].CacheControl == nil || sent.Tools[0].CacheControl.Type != "ephemeral" {
+		t.Errorf("stable tool catalog cache breakpoint is missing: %+v", sent.Tools[0])
+	}
 	if sent.MaxTokens != defaultMaxTokens {
 		t.Errorf("max_tokens is mandatory, expected the default %d, got %d", defaultMaxTokens, sent.MaxTokens)
 	}

@@ -206,6 +206,12 @@ type ChatRequest struct {
 	Tools    []Tool    `json:"tools,omitempty"`
 	Stream   bool      `json:"stream"`
 	Options  Options   `json:"options,omitempty"`
+	// CacheSystemPrefixBytes is the stable prefix of the first system message.
+	// Anthropic places a cache breakpoint there; other backends ignore it.
+	CacheSystemPrefixBytes int `json:"-"`
+	// CacheToolPrefixCount is the number of stable native tools at the start
+	// of Tools. Anthropic can retain that prefix when dynamic tools change.
+	CacheToolPrefixCount int `json:"-"`
 	// NoThinking asks the model to skip extended reasoning for this turn. Set on
 	// the voice channel and on short compaction calls. Wire-neutral: each
 	// backend translates it. Ollama's Think field is set only when the model
