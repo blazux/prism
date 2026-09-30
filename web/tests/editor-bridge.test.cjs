@@ -3,14 +3,14 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{web
 function fixture(options={}){
  let state={app:'email',id:'1',to:'a@example.invalid',subject:'Test',body:'Hello',readonly:false};
  const listeners={},messages=[],parent={postMessage:d=>messages.push(d)},origin='http://localhost';
- const ctx=vm.createContext({window:{},TextEncoder,crypto:webcrypto,parent,location:{origin},document:{addEventListener(){}},addEventListener:(k,fn)=>listeners[k]=fn});
+ const ctx=vm.createContext({window:{},TextEncoder,crypto:webcrypto,parent,location:{origin,pathname:'/apps/email.html'},document:{addEventListener(){}},addEventListener:(k,fn)=>listeners[k]=fn});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../editor-bridge.js'),'utf8'),ctx);
  const bridge=ctx.window.PrismEditor.connect({read:()=>state,fields:options.fields||['to','subject','body'],types:options.types,context:s=>'Editing '+s.id,idleContext:()=> 'Reading inbox',update:async p=>Object.assign(state,p)});
  async function call(args,extra={}){messages.length=0;await listeners.message({source:parent,origin,data:{type:'editor-request',id:'request',expires_at:Date.now()+30000,args},...extra});return messages.find(x=>x.type==='editor-response')?.result;}
  return {bridge,call,messages,set:s=>state=s,get:()=>state,parent,origin};
 }
 test('read and patch active draft, preserving omitted fields; publish/close context',async()=>{
- const f=fixture();f.bridge.publish();assert.match(f.messages[0].text,/Editing 1/);
+ const f=fixture();assert.deepEqual(JSON.parse(JSON.stringify(f.messages[0])),{type:'editor-ready',app:'email'});f.bridge.publish();assert.match(f.messages.find(m=>m.type==='context').text,/Editing 1/);
  const read=await f.call({action:'read'});assert.equal(read.body,'Hello');
  const result=await f.call({action:'update',revision:read.revision,body:'Polished'});
  assert.equal(result.status,'updated');assert.equal(f.get().to,'a@example.invalid');assert.equal(f.get().body,'Polished');

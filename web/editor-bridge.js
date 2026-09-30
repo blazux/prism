@@ -59,6 +59,10 @@ window.PrismEditor = {
       } catch (err) { response = {error:err.message}; }
       parent.postMessage({type:'editor-response',id:d.id,result:response},location.origin);
     });
+    // Announce readiness only after the request listener exists. The parent can
+    // then release an agent call that arrived while this iframe was loading.
+    const app = (location.pathname || '').split('/').pop().replace(/\.html$/, '');
+    parent.postMessage({type:'editor-ready',app},location.origin);
     document.addEventListener('input', publish);
     document.addEventListener('change', publish);
     return {publish, snapshot};

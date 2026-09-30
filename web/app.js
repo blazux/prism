@@ -173,6 +173,20 @@ function maybeRefreshApp(msg) {
 
 // Only the currently displayed built-in app can answer this browser's editor RPC.
 const pendingEditorRequests = new Map()
+let activeEditorSource = null
+function deliverEditorRequest(pending) {
+  if (pending.delivered) return
+  pending.delivered = true
+  pending.source.postMessage({...pending.message, type:'editor-request'}, location.origin)
+}
+function markEditorReady(source, app) {
+  const frame = document.getElementById('app-frame')
+  if (frame?.contentWindow !== source || currentView?.type !== 'app' || currentView.name !== app) return
+  activeEditorSource = source
+  for (const pending of pendingEditorRequests.values()) {
+    if (pending.source === source && pending.socket === ws) deliverEditorRequest(pending)
+  }
+}
 function requestActiveEditor(msg) {
   const frame = document.getElementById('app-frame')
   if (currentView?.type !== 'app' || !['email','notes','tasks','calendar'].includes(currentView.name) || !frame?.contentWindow) {
@@ -180,9 +194,18 @@ function requestActiveEditor(msg) {
     return
   }
   const source = frame.contentWindow, socket = ws
-  const timer = setTimeout(() => pendingEditorRequests.delete(msg.id), Math.max(0, msg.expires_at - Date.now()))
-  pendingEditorRequests.set(msg.id, {source, socket, timer})
-  source.postMessage({...msg, type:'editor-request'}, location.origin)
+  // Resolve slightly before the server's deadline. If the bridge never starts,
+  // the agent gets a useful error instead of the generic 30-second timeout.
+  const delay = Math.max(0, msg.expires_at - Date.now() - 250)
+  const timer = setTimeout(() => {
+    const pending = pendingEditorRequests.get(msg.id)
+    if (!pending) return
+    pendingEditorRequests.delete(msg.id)
+    if (pending.socket === ws) send({type:'editor_response', id:msg.id, data:{error:'The editor app did not become ready. Keep it open and read it again.'}})
+  }, delay)
+  const pending = {source, socket, timer, message:msg, delivered:false}
+  pendingEditorRequests.set(msg.id, pending)
+  if (activeEditorSource === source) deliverEditorRequest(pending)
 }
 
 // ─── Server messages ──────────────────────────────────────────────────────────
@@ -1143,6 +1166,9 @@ function boardName(id) {
 // full-pane app iframe. Apps are the same HTML used by board widgets, just
 // maximized — same REST data underneath.
 function setView(view) {
+  // A contentWindow object can survive iframe navigation. Require the newly
+  // loaded document to announce readiness before routing editor calls to it.
+  activeEditorSource = null
   currentView = view
   const dash  = document.getElementById('dashboard')
   const dock  = document.getElementById('widget-dock')
@@ -2278,6 +2304,10 @@ window.addEventListener('message', e => {
   if (e.origin !== location.origin && !remoteWidget) return
   const d = e.data
   if (!d || !d.type) return
+  if (d.type === 'editor-ready') {
+    markEditorReady(e.source, d.app)
+    return
+  }
   if (d.type === 'prism-widget-ready' && remoteWidget) {
     fetch(WIDGET_HOSTING.grantURL, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })
       .then(async response => { if (!response.ok) throw new Error('Widget access unavailable'); return response.json() })
