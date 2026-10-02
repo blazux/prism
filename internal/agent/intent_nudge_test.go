@@ -9,6 +9,9 @@ import (
 // (2026-08-20) must trigger the nudge; genuine final reports must not.
 func TestAnnounceTailRe(t *testing.T) {
 	shouldMatch := []string{
+		"Je relis les fondations pour coller à leurs API exactes.",
+		"Les fondations sont conformes à mes souvenirs. J'écris le module diagrammes — d'abord le noyau géométrique partagé.",
+		"Fondations vérifiées. J’écris maintenant le module diagrammes thermodynamiques.",
 		"OK, je continue. Je corrige l'outil pour ne garder que les vrais Free to Keep (pas les free-to-play), je remets le cron.",
 		"Je passe la suite à la réalisation. D'abord je resserre l'outil sur le flag free_to_keep (les 3 vrais jeux payés→gratuits).",
 		"La data est nickel — 3 vrais Free to Keep avec prix, dates, scores, images locales. Je crée le widget.",
@@ -23,12 +26,12 @@ func TestAnnounceTailRe(t *testing.T) {
 		"Salut ! Ouais, ça roule bien 🔥 Tous les systèmes en vert, le serveur tourne, rien qui fume.",
 	}
 	for _, s := range shouldMatch {
-		if !announceTailRe.MatchString(replyTail(s)) {
+		if !shouldNudgeAnnouncement(s) {
 			t.Errorf("expected nudge for: %q", s)
 		}
 	}
 	for _, s := range shouldNotMatch {
-		if announceTailRe.MatchString(replyTail(s)) {
+		if shouldNudgeAnnouncement(s) {
 			t.Errorf("false positive nudge for: %q", s)
 		}
 	}

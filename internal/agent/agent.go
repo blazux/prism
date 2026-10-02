@@ -975,16 +975,14 @@ const intentNudgeMsg = "Execution reminder: a reply without tool calls ends this
 // in the tail of a reply. French first (the fleet's working language), then
 // English. Deliberately conservative: past-tense reports ("je viens de créer",
 // "widget created") must not match.
-var announceTailRe = regexp.MustCompile(`(?i)\b(je (vais|m'en occupe|m'y mets|m'attaque|continue|commence|reprends|relance|corrige|crée|génère|lance|passe|termine|finis|fais|remets|resserre|répare|modifie|change|déploie|installe|configure|vérifie|teste|récupère|télécharge|écris|prépare|construis|patche?)|on (va|s'y met)|maintenant je|i('ll| will| am going to|'m going to)|let me|now i|next i)\b`)
+var announceTailRe = regexp.MustCompile(`(?i)\b(je (vais|m'en occupe|m'y mets|m'attaque|continue|commence|reprends|relance|relis|lis|corrige|crée|génère|lance|passe|termine|finis|fais|remets|resserre|répare|modifie|change|déploie|installe|configure|vérifie|teste|récupère|télécharge|écris|prépare|construis|patche?)|j['’](écris|ecris)|on (va|s'y met)|maintenant je|i('ll| will| am going to|'m going to)|let me|now i|next i)\b`)
 
-// A conservative small-model fallback only. Never override a question or an
-// explicit wait, including a clarification phrased without a question mark.
+// Never override a question or an explicit wait, including a clarification
+// phrased without a question mark. All prompt profiles can announce work
+// without calling a tool; the harness must handle that consistently.
 var waitingForUserRe = regexp.MustCompile(`(?i)(\b(wait|waiting|await|awaiting|until|unless|clarif|confirm|which|whether|please (provide|specify|choose|tell)|let me know|need (you|your))|j.attends|en attente|avant de|besoin de|précis|precis|confirme|dis.moi|dites.moi|indique|quel(le|s|les)?\b|si tu|si vous|une fois)`)
 
-func shouldNudgeAnnouncement(profile, response string) bool {
-	if profile != "guided" {
-		return false
-	}
+func shouldNudgeAnnouncement(response string) bool {
 	visible := stripThinkingBlocks(response)
 	if strings.ContainsAny(visible, "?？") || waitingForUserRe.MatchString(visible) {
 		return false
@@ -1317,6 +1315,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 	var emptyRetried bool
 	intentNudges := 0
+	intentNudgePending := false
 	visionRetry := false
 	// True once the user rejected a tool call this turn. The model then ends its
 	// reply on "what would you like instead?" — which the intent-nudge heuristic
@@ -1335,7 +1334,8 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		// bloat accumulating within one long multi-tool-call turn.
 		a.compactLiveContextIfNeeded(ctx, events)
 
-		fullContent, toolCalls, providerBlocks, doneReason, err := a.callOllama(ctx, learningsCtx, events)
+		fullContent, toolCalls, providerBlocks, doneReason, err := a.callOllamaWithReminder(ctx, learningsCtx, events, intentNudgePending)
+		intentNudgePending = false
 		if ctx.Err() != nil {
 			events <- Event{Type: "stream_end"}
 			return
@@ -1436,12 +1436,11 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		if len(toolCalls) == 0 {
 			// Reply ends on an announced action with nothing to run it: nudge
 			// the model to act instead of ending the turn (see announceTailRe).
-			if !toolRejected && intentNudges < maxIntentNudges && shouldNudgeAnnouncement(a.promptProfile(), fullContent) {
+			if !toolRejected && intentNudges < maxIntentNudges && shouldNudgeAnnouncement(fullContent) {
 				intentNudges++
 				log.Printf("[agent] reply ends on an announcement with no tool calls — nudging to act (%d/%d)", intentNudges, maxIntentNudges)
-				a.histMu.Lock()
-				a.history = append(a.history, ollama.Message{Role: "system", Content: intentNudgeMsg})
-				a.histMu.Unlock()
+				// Keep the reminder only in the next request's leading system message.
+				intentNudgePending = true
 				continue
 			}
 			events <- Event{Type: "stream_end"}
@@ -1667,10 +1666,17 @@ func isVisionUnsupportedError(err error) bool {
 }
 
 func (a *Agent) callOllama(ctx context.Context, learningsCtx string, events chan<- Event) (string, []ollama.ToolCall, []json.RawMessage, string, error) {
+	return a.callOllamaWithReminder(ctx, learningsCtx, events, false)
+}
+
+func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string, events chan<- Event, remindToAct bool) (string, []ollama.ToolCall, []json.RawMessage, string, error) {
 	if err := consumeModelCall(ctx); err != nil {
 		return "", nil, nil, "", err
 	}
 	prompt, cachePrefixBytes := a.buildSystemPromptWithCachePrefix(ctx, learningsCtx)
+	if remindToAct {
+		prompt += "\n\n" + intentNudgeMsg
+	}
 	if catalogFromContext(ctx) != nil {
 		prompt += "\n\nClaude tool loading is active: exec_command, read_file, write_file, widget, cron, prism_help and tool_catalog are initially visible. Other permitted tools require tool_catalog load before use. Load exact names directly when known from this prompt or the user; list only if names are unknown. Load related tools together. Loaded tools appear on the next model call."
 	}

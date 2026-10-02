@@ -48,26 +48,33 @@ func TestClarificationEndsActualAgentLoop(t *testing.T) {
 }
 
 func TestAnnouncementFallbackProfiles(t *testing.T) {
-	for _, p := range []string{"guided", "standard", "minimal"} {
-		if got := shouldNudgeAnnouncement(p, "Now I'll create the widget."); got != (p == "guided") {
-			t.Fatalf("profile %s: %v", p, got)
-		}
+	for _, profile := range []string{"guided", "standard", "minimal"} {
+		t.Run(profile, func(t *testing.T) {
+			b := &stoppingBackend{capturingBackend: capturingBackend{reply: "Les fondations sont conformes. J'écris le module diagrammes."}}
+			a := &Agent{ollama: b, executor: &ToolExecutor{}, sessionID: "fixture", limits: Limits{PromptProfile: profile, MaxIterations: 4}}
+			events := make(chan Event, 100)
+			a.Chat(t.Context(), "Crée le module diagrammes", nil, events)
+			close(events)
+			if b.calls != 2 {
+				t.Fatalf("expected one bounded reminder, got %d calls", b.calls)
+			}
+			if len(b.req.Messages) == 0 || b.req.Messages[0].Role != "system" || !strings.Contains(b.req.Messages[0].Content, intentNudgeMsg) {
+				t.Fatal("reminder missing from the leading system message")
+			}
+			for _, m := range b.req.Messages[1:] {
+				if m.Role == "system" {
+					t.Fatal("provider rejects a system message inside history")
+				}
+			}
+			for _, m := range a.history {
+				if strings.Contains(m.Content, intentNudgeMsg) {
+					t.Fatal("transient reminder leaked into conversation history")
+				}
+			}
+		})
 	}
-	if shouldNudgeAnnouncement("guided", "<think>I'll build it.</think>Quelle ville ?") {
+	if shouldNudgeAnnouncement("<think>I'll build it.</think>Quelle ville ?") {
 		t.Fatal("reasoning triggered execution")
-	}
-	b := &stoppingBackend{capturingBackend: capturingBackend{reply: "Now I'll create the widget."}}
-	a := &Agent{ollama: b, executor: &ToolExecutor{}, sessionID: "fixture", limits: Limits{PromptProfile: "guided", MaxIterations: 4}}
-	events := make(chan Event, 100)
-	a.Chat(t.Context(), "Create a widget", nil, events)
-	close(events)
-	if b.calls != 2 {
-		t.Fatalf("expected one bounded reminder, got %d calls", b.calls)
-	}
-	for _, m := range a.history {
-		if m.Content == intentNudgeMsg && m.Role != "system" {
-			t.Fatal("reminder impersonates user")
-		}
 	}
 }
 
