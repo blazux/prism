@@ -12,7 +12,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -149,12 +148,12 @@ func (c *slackChannel) handleMessage(ctx context.Context, api *slack.Client, ev 
 	}
 	c.setConf(slackOwnerChanKey, ev.Channel) // remember the DM channel for deliveries
 
-	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, channelTurnTimeout)
 	defer cancel()
 	resp, err := c.s.runHeadlessChat(runCtx, "slack", text, "", trustedCallerContext())
 	if err != nil {
 		log.Printf("[slack] chat: %v", err)
-		api.PostMessage(ev.Channel, slack.MsgOptionText("⚠️ Sorry, something went wrong.", false))
+		api.PostMessage(ev.Channel, slack.MsgOptionText(channelFailureMessage(err), false))
 		return
 	}
 	if strings.TrimSpace(resp) == "" {

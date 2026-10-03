@@ -45,7 +45,7 @@ const (
 	// before this; it exists so the connection cannot be held open indefinitely.
 	syncWebhookTimeout = 2 * time.Minute
 
-	// asyncWebhookTimeout bounds the detached run. Matches the channel handlers.
+	// asyncWebhookTimeout bounds detached webhook runs independently of channels.
 	asyncWebhookTimeout = 10 * time.Minute
 )
 

@@ -44,3 +44,6 @@ Still in **Admin → Shared agent**, in the **Webex integration** section:
 - To disconnect, open the same section and click **Disconnect** (clears the token
   for that group).
 - Reaching the agent from Webex does **not** require Prism to be internet-facing.
+- A Webex turn can run for up to one hour. Messages in one space stay in order;
+  work in another space can continue independently. Prism reports an expired
+  turn explicitly instead of sending `(no response)`.

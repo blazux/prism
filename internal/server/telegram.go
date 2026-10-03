@@ -276,12 +276,12 @@ func (s *Server) handleTelegramMessage(ctx context.Context, api string, userID, 
 
 	s.tgAction(api, chatID, "typing")
 	s.store().AddUsage(ctx, userID, session, "channel_msg", "telegram", 1, nil)
-	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, channelTurnTimeout)
 	defer cancel()
 	resp, err := s.runHeadlessChat(runCtx, session, text, "", s.callerContextForUser(ctx, u, session))
 	if err != nil {
 		log.Printf("[telegram] chat: %v", err)
-		s.tgSend(api, chatID, "⚠️ Sorry, something went wrong.")
+		s.tgSend(api, chatID, channelFailureMessage(err))
 		return
 	}
 	if strings.TrimSpace(resp) == "" {

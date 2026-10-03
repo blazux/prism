@@ -7,9 +7,22 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"time"
 )
+
+// Channel turns have no waiting HTTP client. Give complex work room to finish,
+// while still bounding a stalled turn and keeping shutdown cancellation intact.
+const channelTurnTimeout = time.Hour
+
+func channelFailureMessage(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "⏳ The task reached the one-hour limit and was stopped. You can ask the agent to continue."
+	}
+	return "⚠️ Sorry, something went wrong."
+}
 
 type Channel interface {
 	Name() string

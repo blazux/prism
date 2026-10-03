@@ -327,7 +327,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 		close(events)
 	}()
 
-	response, runErr := collectHeadlessResponse(events, tap, sessionID)
+	response, runErr := collectHeadlessResponse(ctx, events, tap, sessionID)
 
 	log.Printf("[chat-headless] session=%q response=%d chars", sessionID, len(response))
 	// Usage: one chat turn, tokens estimated (chars/4 in+out) until backend
@@ -340,7 +340,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 }
 
 // collectHeadlessResponse propagates execution failures to webhook and channel callers.
-func collectHeadlessResponse(events <-chan agent.Event, tap func(agent.Event), sessionID string) (string, error) {
+func collectHeadlessResponse(ctx context.Context, events <-chan agent.Event, tap func(agent.Event), sessionID string) (string, error) {
 	// Collect only the FINAL assistant message. Reset on each tool call so the
 	// step-by-step planning narration the agent emits between tools doesn't get
 	// concatenated into one delivered message (e.g. a Telegram reply). Also skip
@@ -376,6 +376,12 @@ func collectHeadlessResponse(events <-chan agent.Event, tap func(agent.Event), s
 		}
 	}
 
+	// Agent.Chat exits quietly when its context is cancelled between tool calls.
+	// Without this check, channel callers turn a timed-out task into the misleading
+	// "(no response)" fallback even though the agent did not finish its turn.
+	if err := ctx.Err(); err != nil && runErr == nil {
+		return "", err
+	}
 	return response.String(), runErr
 }
 

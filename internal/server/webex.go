@@ -86,7 +86,7 @@ type webexChannel struct {
 	// queues holds one inbox per space, drained by one worker goroutine each.
 	// Agent turns used to run inline on the Mercury read loop, which meant a
 	// single connection — shared by every space of the group — read no further
-	// message until the current turn finished (up to the 10-minute cap). Two
+	// message until the current turn finished (up to the channel turn cap). Two
 	// members talking in two different spaces queued behind each other for no
 	// reason. Per-space so ordering within a conversation is still guaranteed:
 	// a follow-up can never overtake the message it follows.
@@ -584,12 +584,12 @@ func (c *webexChannel) handleMessage(ctx context.Context, m webexMessage) {
 	cc := c.s.callerContextForGroup(ctx, c.groupID).withSenderGate(c.guardFor(m.PersonEmail))
 
 	ms.AddUsage(ctx, 0, sessionID, "channel_msg", "webex", 1, nil)
-	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, channelTurnTimeout)
 	defer cancel()
 	resp, err := c.s.runHeadlessChatTap(runCtx, sessionID, text, cfg.AgentModel, cc, nil, roomLimits(cfg))
 	if err != nil {
 		log.Printf("[webex-g%d] chat: %v", c.groupID, err)
-		c.postMarkdown(ctx, m.RoomID, "⚠️ Sorry, something went wrong.")
+		c.postMarkdown(ctx, m.RoomID, channelFailureMessage(err))
 		return
 	}
 	if strings.TrimSpace(resp) == "" {

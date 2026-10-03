@@ -52,7 +52,9 @@ pushed to your Telegram chat — no need to be at the dashboard.
   first.
 - Manual tool approval does not apply over Telegram: tool calls run in auto
   mode.
-- A single Telegram turn is limited to 10 minutes.
+- A Telegram turn can run for up to one hour. The answer is sent when the turn
+  finishes, even if you close Telegram. If the limit is reached, Prism says so
+  explicitly instead of sending `(no response)`.
 
 ## Asking the agent
 

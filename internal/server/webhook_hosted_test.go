@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"net/http/httptest"
 	"prism/internal/agent"
 	"prism/internal/memory"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHostedWebhookConcurrencyAndPayload(t *testing.T) {
@@ -38,9 +41,24 @@ func TestHeadlessResponseReportsFailure(t *testing.T) {
 			events <- agent.Event{Type: "error", Content: "provider unavailable"}
 		}
 		close(events)
-		response, err := collectHeadlessResponse(events, nil, "fixture")
+		response, err := collectHeadlessResponse(context.Background(), events, nil, "fixture")
 		if response != "Result" || (err != nil) != failed {
 			t.Fatalf("response=%q err=%v", response, err)
 		}
+	}
+}
+
+func TestHeadlessResponseReportsExpiredTurn(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	events := make(chan agent.Event, 1)
+	events <- agent.Event{Type: "stream", Content: "I'll check"}
+	close(events)
+	response, err := collectHeadlessResponse(ctx, events, nil, "fixture")
+	if response != "" || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expired turn: response=%q err=%v", response, err)
+	}
+	if got := channelFailureMessage(err); !strings.Contains(got, "one-hour limit") {
+		t.Fatalf("expired channel turn should explain its limit, got %q", got)
 	}
 }

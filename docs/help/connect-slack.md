@@ -42,3 +42,5 @@ Slack — the first person to message it is linked as the owner.
 - Scheduled jobs can push to Slack too — ask e.g. "every morning at 8, summarize
   my unread emails and send it to me on Slack".
 - Reaching the agent from Slack does **not** require Prism to be internet-facing.
+- A Slack turn can run for up to one hour. Prism reports an expired turn
+  explicitly instead of sending `(no response)`.
