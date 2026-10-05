@@ -15,7 +15,7 @@ test('profile UI migrates legacy choices, posts Minimal and rejects failed save'
   const context={document:{createElement(){const node={style:{},appendChild(){},querySelector:field};nodes.push(node);return node}},fetch:async(url,options)=>{
    if(options?.method==='POST'){posts.push(JSON.parse(options.body));return {ok:false,clone:()=>({text:async()=>JSON.stringify({error:'fixture save failed'})}),json:async()=>({error:'fixture save failed'})}}
    return {ok:true,json:async()=>url==='/api/agent/limits'?limits:{}};
-  },showToast:()=>{},icon:()=>'',escHtml:x=>x,avatarMarkup:()=>'',setTimeout:()=>{}};
+  },showToast:()=>{},icon:()=>'',escHtml:x=>x,avatarMarkup:()=>'',settingsHeading:()=>'',setTimeout:()=>{}};
   vm.createContext(context);vm.runInContext(html.slice(html.indexOf('async function settingsFetch('),html.indexOf('function getConfig()'))+source,context);
   await context.renderAgentTab({appendChild(){}});
   assert.match(nodes[1].innerHTML,new RegExp('value="'+selected+'" selected'));

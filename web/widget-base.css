@@ -17,8 +17,10 @@ img,svg,canvas,video{max-width:100%;height:auto}
 pre{overflow:auto;max-width:100%}
 /* Any element the agent marks as a self-contained scroll region. */
 .scroll-x{overflow-x:auto;max-width:100%}
-::-webkit-scrollbar{width:8px;height:8px}
-::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+*{scrollbar-width:thin;scrollbar-color:var(--border2) transparent}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--text3)}
 ::-webkit-scrollbar-track{background:transparent}
 h1,h2,h3,h4{margin:0 0 .4em;font-weight:600;line-height:1.2}
 h1{font-size:18px}h2{font-size:15px}h3{font-size:13px}h4{font-size:12px;color:var(--text2)}

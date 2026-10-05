@@ -874,7 +874,7 @@ body {
   cursor: pointer;
   transition: background 0.15s;
 }
-#editor-save-btn:hover { background: #7c9bff; }
+#editor-save-btn:hover { filter: brightness(1.1); }
 
 #editor-codemirror {
   flex: 1;
@@ -1725,7 +1725,7 @@ body {
   flex-shrink: 0;
   transition: background 0.15s, transform 0.1s;
 }
-#send-btn:hover { background: #7c9bff; }
+#send-btn:hover { filter: brightness(1.1); }
 #send-btn:active { transform: scale(0.93); }
 #send-btn.loading { background: var(--bg4); cursor: not-allowed; }
 
@@ -1745,14 +1745,14 @@ body {
   align-items: center;
   justify-content: center;
   color: #fff;
-  box-shadow: 0 4px 20px rgba(107, 138, 253, 0.4);
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--accent) 35%, transparent);
   transition: background 0.15s, transform 0.2s, box-shadow 0.15s, opacity 0.2s, visibility 0.2s;
   z-index: 210;
 }
 #chat-fab:hover {
-  background: #7c9bff;
+  filter: brightness(1.1);
   transform: scale(1.06);
-  box-shadow: 0 6px 24px rgba(107, 138, 253, 0.55);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 48%, transparent);
 }
 #chat-fab:active { transform: scale(0.96); }
 
@@ -1760,6 +1760,7 @@ body {
 #chat-fab.active { opacity: 0; visibility: hidden; transform: scale(0.8); }
 
 /* ── Scrollbars ──────────────────────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }

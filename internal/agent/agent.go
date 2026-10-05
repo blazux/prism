@@ -1462,7 +1462,12 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			}
 			a.histMu.Lock()
 			a.toolSeq++
-			toolID := fmt.Sprintf("tool_%d", a.toolSeq)
+			// The browser keeps earlier tool blocks when the user switches models.
+			// That switch creates a fresh Agent (and resets toolSeq), so a sequence-
+			// only ID would update an old block and leave the new one "Running…".
+			// The turn ID (saved user-message ID, or a local fallback) is
+			// different for each turn and already available here.
+			toolID := fmt.Sprintf("tool_%s_%d", taskID, a.toolSeq)
 			a.histMu.Unlock()
 
 			events <- Event{
