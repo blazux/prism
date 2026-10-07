@@ -50,6 +50,22 @@ Set `PRISM_TOKEN` in `.env` to protect access to your dashboard, and choose your
 docker compose up -d
 ```
 
+On ARM64 hosts, build the server from source if the published server image does
+not support your architecture:
+
+```bash
+docker compose build prism-server
+docker compose up -d --no-build
+```
+
+ProtonMail Bridge is excluded from the default stack because its upstream image
+currently supports AMD64 only. If you need Proton Mail on a supported host, see
+[the setup guide](docs/help/protonmail-bridge.md) and start the optional service:
+
+```bash
+docker compose --profile protonmail up -d protonmail-bridge
+```
+
 PostgreSQL (pgvector), SearXNG and Traefik are included. Open [http://localhost:48080](http://localhost:48080) and sign in with your token.
 
 **3. Connect your first model.**

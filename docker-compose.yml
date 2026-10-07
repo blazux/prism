@@ -74,7 +74,8 @@ services:
 
   # Traefik reverse proxy — routes *.localhost subdomains to service containers
   traefik:
-    image: traefik:v3.2
+    # Docker 29 requires API negotiation supported by current Traefik.
+    image: traefik:v3.6.25
     container_name: prism-traefik
     command:
       - "--providers.docker=true"
@@ -169,6 +170,8 @@ services:
   # In Prism Email → ProtonMail → Advanced: host (IMAP & SMTP) = "protonmail-bridge",
   # IMAP port 143, SMTP port 25, STARTTLS + self-signed.
   protonmail-bridge:
+    # Optional: upstream currently supplies no ARM64 image.
+    profiles: [protonmail]
     build:
       context: .
       dockerfile: Dockerfile.protonmail-bridge
