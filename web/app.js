@@ -412,14 +412,18 @@ async function deleteWidget(id) {
   const rec = widgets.get(id)
   if (rec?.locked) { showToast({ title: 'Widget locked', message: 'Unlock it before deleting.', level: 'warning' }); return }
   const title = rec?.title || id
-  const ok = await prismConfirm({
-    title: 'Delete widget',
-    message: `Delete “${title}” permanently? This cannot be undone.`,
-    confirmText: 'Delete',
-    danger: true,
-  })
-  if (!ok) return
-  send({ type: 'remove_plugin', id })
+  const session = currentSessionID
+  try {
+    const preview = await PrismResources.request(session, null, { widget: id })
+    const ids = await PrismResources.confirm(`Delete “${title}”`, preview)
+    if (ids === null) return
+    const result = await PrismResources.request(session, { action: 'cleanup', widget: id, ids, dry_run: false })
+    if ((result.removed || []).includes(`widget:${session}/${id}`)) {
+      if (currentSessionID === session) { removeWidget(id); refreshBoardContext() }
+      showToast({ title: 'Widget deleted', message: PrismResources.summary(result), level: 'info' })
+    } else showToast({ title: 'Widget retained', message: 'It is locked or still in use. Refresh the resource inventory.', level: 'warning' })
+  } catch (error) { showToast({ title: 'Deletion failed', message: error.message, level: 'error' }) }
+
 }
 
 // removeWidget handles a plugin_unload (server confirmed the widget is gone).
@@ -1771,15 +1775,20 @@ function renderBoardList(sessions) {
       del.textContent = '×'
       del.onclick = async (e) => {
         e.stopPropagation()
-        const ok = await prismConfirm({
-          title: 'Delete workspace',
-          message: `Delete “${sess.name}” and all its history? This cannot be undone.`,
-          confirmText: 'Delete',
-          danger: true,
-        })
-        if (!ok) return
-        await fetch(`/api/sessions/${sess.id}`, { method: 'DELETE' })
-        loadSessions()
+        try {
+          const preview = await PrismResources.request(sess.id, null, { board: 'true' })
+          const ids = await PrismResources.confirm(`Delete “${sess.name}”`, preview, true)
+          if (ids === null) return
+          const response = await fetch(`/api/sessions/${encodeURIComponent(sess.id)}`, {
+            method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources: ids }),
+          })
+          const text = await response.text()
+          let result
+          try { result = JSON.parse(text) } catch {}
+          if (!response.ok) throw new Error(result?.error || text || 'Workspace deletion failed.')
+          showToast({ title: 'Workspace deleted', message: PrismResources.summary(result || {}), level: 'info' })
+          await loadSessions()
+        } catch (error) { showToast({ title: 'Deletion failed', message: error.message, level: 'error' }) }
       }
       item.appendChild(del)
     }

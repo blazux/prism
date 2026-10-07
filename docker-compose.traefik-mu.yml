@@ -1,0 +1,18 @@
+# Optional overlay for the PRIMARY Prism's Traefik, after the prism-mu project
+# has created its network. Keep this overlay in the primary deployment command
+# when recreating Traefik. No extra proxy or host port is needed.
+#
+# docker compose -f docker-compose.yml -f docker-compose.override.yml \
+#   -f docker-compose.traefik-mu.yml up -d --no-deps traefik
+services:
+  traefik:
+    networks:
+      default:
+      multi-edge:
+        aliases:
+          - traefik
+
+networks:
+  multi-edge:
+    external: true
+    name: prism-mu_default

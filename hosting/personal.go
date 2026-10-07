@@ -16,6 +16,7 @@ import (
 // PersonalConfig contains resolved resources only. It deliberately cannot carry
 // deployment model credentials, enterprise configuration or a host Docker socket.
 type PersonalConfig struct {
+	CheckExecutions                                                                     func(context.Context, string) error
 	WebhookURL                                                                          func(string, string) string
 	ServiceURL                                                                          func(int) string
 	DialWorkspace                                                                       func(context.Context, int) (net.Conn, error)
@@ -31,6 +32,7 @@ func personalAssets() server.Config {
 }
 func OpenPersonalEnvironment(ctx context.Context, cfg PersonalConfig) (*PersonalEnvironment, error) {
 	c := personalAssets()
+	c.ExecutionCheck = cfg.CheckExecutions
 	c.DisableAIServerDefaults = true
 	c.HostedPersonal = true
 	c.WebhookConcurrency = 2

@@ -9,6 +9,7 @@
 <!-- Applies the saved theme (sets CSS vars on :root) before the page renders -->
 <script src="/theme.js"></script>
 <script src="/modal.js"></script>
+<script src="/resources.js"></script>
 <script src="/ai-settings.js"></script>
 <link rel="stylesheet" href="/ai-settings.css">
 <style>
@@ -402,6 +403,7 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span> Calendar
       </div>
       <div class="nav-head">Capabilities</div>
+      <div class="nav-item" data-tab="resources"><span class="nav-icon">▦</span> Resources</div>
       <div class="nav-item" data-tab="tools">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span> Tools
       </div>
@@ -519,6 +521,7 @@ function renderTab(tab) {
   content.innerHTML = ''
   if (tab === 'profile') renderProfileTab(content)
   else if (tab === 'tools')   renderToolsTab(content)
+  else if (tab === 'resources') renderResourcesTab(content)
   else if (tab === 'agent') renderAgentTab(content)
   else if (tab === 'ai') renderAITab(content)
   else if (tab === 'channels') renderChannelsTab(content)
@@ -1137,6 +1140,7 @@ const TOOL_CATEGORIES = [
     tools: [
       { id: 'add_widget',    name: 'Create widget',  desc: 'Generate and add an HTML/JS panel to the dashboard' },
       { id: 'remove_widget', name: 'Remove widget',  desc: 'Remove an existing widget from the dashboard' },
+      { id: 'resources', name: 'Resources', desc: 'Inspect dependencies, link dedicated backends and review cleanup' },
     ]
   },
   {
@@ -1195,6 +1199,102 @@ const TOOL_CATEGORIES = [
     ]
   },
 ]
+
+async function renderResourcesTab(container) {
+  const page = document.createElement('div')
+  page.className = 'settings-page'
+  container.appendChild(page)
+  page.innerHTML = settingsHeading('Resources', 'Review backend usage, link resources to widgets, and clean up old workspaces. Data and legacy resources are retained unless explicitly selected.', 'Workspace environment') + `
+    <div class="config-section" style="padding:12px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <select aria-label="Resource filter" id="res-filter"><option value="all">All resources</option><option value="old">Old / unassigned workspaces</option></select>
+        <button class="btn" id="res-refresh">Refresh</button>
+        <span id="res-count" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
+      </div>
+      <div id="res-list" style="overflow:auto;max-height:55vh"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <button class="btn" id="res-clean" disabled>Review cleanup</button>
+        <select aria-label="Widget to link" id="res-widget"><option value="">Link selected resources to…</option></select>
+        <button class="btn" id="res-link" disabled>Link</button>
+      </div>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:0">Detected usage is a safeguard, not a complete code analysis. Keep resources used through dynamic paths or external clients. A link declares a backend dedicated to the widget; other consumers still protect it.</p>
+      <div id="res-status" role="status" style="font-size:12px;margin-top:8px;white-space:pre-wrap"></div>
+    </div>`
+  const filter = page.querySelector('#res-filter')
+  const widget = page.querySelector('#res-widget')
+  const status = page.querySelector('#res-status')
+  const clean = page.querySelector('#res-clean')
+  const link = page.querySelector('#res-link')
+  const selected = new Set()
+  let rows = [], sessions = [], session = 'default', busy = false
+  const setBusy = value => { busy = value; page.querySelector('#res-refresh').disabled = value; updateButtons() }
+  const updateButtons = () => { clean.disabled = busy || !selected.size; link.disabled = busy || !selected.size || !widget.value }
+  const render = () => {
+    const live = new Set(sessions.map(s => s.id))
+    const shown = rows.filter(r => filter.value === 'all' || (filter.value === 'old' ? r.kind !== 'widget' && (!r.session || !live.has(r.session)) : r.session === filter.value))
+    page.querySelector('#res-count').textContent = `${shown.length} resources · ${selected.size} selected`
+    const list = page.querySelector('#res-list')
+    list.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--text3)"><th></th><th style="padding:6px">Resource</th><th style="padding:6px">Created from</th><th style="padding:6px">Usage</th></tr></thead><tbody></tbody></table>'
+    const body = list.querySelector('tbody')
+    for (const r of shown) {
+      const tr = document.createElement('tr')
+      tr.style.borderTop = '1px solid var(--border)'
+      const origin = sessions.find(s => s.id === r.session)?.name || (r.session ? `${r.session} (deleted)` : 'Legacy / unknown')
+      const usage = r.missing ? 'Missing' : r.kind === 'widget' ? 'Dashboard widget' : r.usedBy.length ? `${r.usedBy.length} consumer(s)` : (r.protected ? 'Protected' : r.tracked ? 'No detected consumer' : 'Unknown usage')
+      tr.innerHTML = `<td style="padding:6px"><label class="toggle-switch" style="display:inline-block;vertical-align:middle"><input type="checkbox" aria-label="Select ${escHtml(r.id)}" ${selected.has(r.id) ? 'checked' : ''} ${r.protected || r.kind === 'widget' ? 'disabled' : ''}><span class="toggle-track"></span></label></td><td style="padding:6px;word-break:break-word">${escHtml(r.id)}</td><td style="padding:6px;color:var(--text3)">${escHtml(origin)}</td><td style="padding:6px;color:var(--text2)">${escHtml(usage)}</td>`
+      tr.querySelector('input').onchange = e => { e.target.checked ? selected.add(r.id) : selected.delete(r.id); updateButtons(); page.querySelector('#res-count').textContent = `${shown.length} resources · ${selected.size} selected` }
+      tr.lastChild.title = [r.reason, ...r.usedBy].filter(Boolean).join('\n')
+      body.appendChild(tr)
+    }
+    if (!shown.length) { const p = document.createElement('p'); p.textContent = 'No resources match this filter.'; list.appendChild(p) }
+    updateButtons()
+  }
+  const refresh = async () => {
+    setBusy(true); status.textContent = 'Loading resources…'
+    try {
+      const response = await settingsFetch('/api/sessions')
+      if (!response.ok) throw new Error('Could not load workspaces.')
+      sessions = (await response.json()).sessions || []
+      session = sessions.find(s => s.id === localStorage.getItem('active-workspace'))?.id || sessions[0]?.id || 'default'
+      rows = await PrismResources.request(session)
+      const oldFilter = filter.value
+      filter.innerHTML = '<option value="all">All resources</option><option value="old">Old / unassigned workspaces</option>'
+      for (const s of sessions) filter.add(new Option(s.name, s.id))
+      filter.value = [...filter.options].some(o => o.value === oldFilter) ? oldFilter : 'all'
+      widget.innerHTML = '<option value="">Link selected resources to…</option>'
+      for (const r of rows.filter(r => r.kind === 'widget' && !r.protected)) widget.add(new Option(`${sessions.find(s => s.id === r.session)?.name || r.session} / ${r.name}`, r.id))
+      selected.clear(); status.textContent = ''; render()
+    } catch (error) { status.textContent = error.message || 'Inventory failed.' }
+    finally { setBusy(false) }
+  }
+  filter.onchange = render
+  widget.onchange = updateButtons
+  page.querySelector('#res-refresh').onclick = refresh
+  clean.onclick = async () => {
+    setBusy(true); status.textContent = ''
+    try {
+      const ids = [...selected]
+      const preview = await PrismResources.request(session, { action: 'cleanup', ids })
+      if (!preview.plan.remove.length) { status.textContent = 'Nothing can be removed: the selected resources are protected or still in use.'; return }
+      const confirmed = await PrismResources.confirm('Clean up selected resources', preview, false, true)
+      if (confirmed === null) return
+      const result = await PrismResources.request(session, { action: 'cleanup', ids: [...ids, ...confirmed], dry_run: false })
+      await refresh(); status.textContent = PrismResources.summary(result)
+    } catch (error) { status.textContent = error.message }
+    finally { setBusy(false) }
+  }
+  link.onclick = async () => {
+    const target = rows.find(r => r.id === widget.value)
+    if (!target) return
+    const ids = [...selected]
+    if (!await PrismModal.confirm(`Replace the dedicated resource links for “${target.name}” with these ${ids.length} resource(s)? Shared resources stay protected; data is kept on widget deletion.`, { title: 'Link resources' })) return
+    setBusy(true)
+    try { await PrismResources.request(target.session, { action: 'link', widget: target.name, ids }); await refresh(); status.textContent = 'Resource links saved.' }
+    catch (error) { status.textContent = error.message }
+    finally { setBusy(false) }
+  }
+  await refresh()
+}
 
 async function renderToolsTab(container) {
   await computeRagManage() // resolves MULTI_USER before the personal-MCP guard below runs

@@ -106,6 +106,24 @@ func Remove(dir, name string) error {
 	defer root.Close()
 	return root.Remove(name)
 }
+
+// RemoveAll confines a directory-tree deletion to the supplied trusted root,
+// without traversing symlinks outside it.
+func RemoveAll(dir, name string) error {
+	name, err := Name(name)
+	if err != nil {
+		return err
+	}
+	if name == "." {
+		return fmt.Errorf("cannot remove the workspace root")
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.RemoveAll(name)
+}
 func ReadDir(dir, name string) ([]os.DirEntry, error) {
 	f, err := Open(dir, name)
 	if err != nil {

@@ -181,6 +181,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 		return
 	}
+	// Serialize directory/session creation with the deletion gate. A stale tab
+	// must not recreate a dashboard after its resources have been removed.
+	s.runsMu.Lock()
+	if s.deletingSessions[sessionID] {
+		s.runsMu.Unlock()
+		conn.WriteJSON(map[string]any{"type": "error", "content": "workspace is being deleted or has been deleted"})
+		conn.Close()
+		return
+	}
 
 	// Ensure session exists in DB (owned by the connecting user)
 	s.mu.RLock()
@@ -194,6 +203,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
 	s.mkdirManaged(sessionPluginDir)
+	s.runsMu.Unlock()
 
 	ai, err := s.aiConfigFor(r.Context(), requestUserID(r))
 	if err != nil {
@@ -779,13 +789,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 		case "remove_plugin":
 			if msg.ID != "" {
-				if err := s.removeManaged(filepath.Join(sessionPluginDir, msg.ID+".html")); err != nil && !os.IsNotExist(err) {
-					log.Printf("[remove_plugin] delete html %s: %v", msg.ID, err)
+				args, _ := json.Marshal(map[string]any{"action": "remove", "id": msg.ID})
+				if _, _, err := executor.Execute(r.Context(), "widget", args); err != nil {
+					client.sendJSON(map[string]any{"type": "error", "content": err.Error()})
+					continue
 				}
-				if err := s.removeManaged(filepath.Join(sessionPluginDir, msg.ID+".meta.json")); err != nil && !os.IsNotExist(err) {
-					log.Printf("[remove_plugin] delete meta %s: %v", msg.ID, err)
-				}
-				client.sendJSON(map[string]interface{}{"type": "plugin_unload", "id": msg.ID})
 				client.ag.InjectNote("[Dashboard] The user removed widget '" + msg.ID + "' from the dashboard. It no longer exists.")
 			}
 

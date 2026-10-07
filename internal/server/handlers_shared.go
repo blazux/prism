@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"prism/internal/memory"
+	"prism/internal/resources"
 )
 
 // Sharing widgets and dashboards within a group. A member publishes a widget
@@ -48,7 +49,14 @@ func (s *Server) sessionWidgets(session, only string) []memory.SharedWidget {
 		if only != "" && p.id != only {
 			continue
 		}
-		out = append(out, memory.SharedWidget{Title: p.title, Content: p.content, Cols: p.cols, Height: p.height})
+		var meta struct {
+			Resources        []string          `json:"resources"`
+			ResourceVersions map[string]string `json:"resourceVersions"`
+		}
+		if b, err := s.readManagedFile(filepath.Join(dir, p.id+".meta.json")); err == nil {
+			_ = json.Unmarshal(b, &meta)
+		}
+		out = append(out, memory.SharedWidget{Title: p.title, Content: p.content, Cols: p.cols, Height: p.height, Resources: meta.Resources, ResourceVersions: meta.ResourceVersions})
 	}
 	return out
 }
@@ -90,6 +98,8 @@ func (s *Server) callerGroupIDs(r *http.Request) map[int64]bool {
 
 // handleShared: GET lists items shared to the caller's groups; POST publishes.
 func (s *Server) handleShared(w http.ResponseWriter, r *http.Request) {
+	unlock := resources.Lock(s.cfg.WorkspaceDir)
+	defer unlock()
 	ms := s.store()
 	if ms == nil {
 		writeErr(w, http.StatusServiceUnavailable, "database unavailable")
@@ -179,6 +189,8 @@ func (s *Server) handleShared(w http.ResponseWriter, r *http.Request) {
 
 // handleSharedItem: POST /api/shared/<id>/add?session=<target>, DELETE /api/shared/<id>.
 func (s *Server) handleSharedItem(w http.ResponseWriter, r *http.Request) {
+	unlock := resources.Lock(s.cfg.WorkspaceDir)
+	defer unlock()
 	ms := s.store()
 	if ms == nil {
 		writeErr(w, http.StatusServiceUnavailable, "database unavailable")
@@ -241,7 +253,7 @@ func (s *Server) handleSharedItem(w http.ResponseWriter, r *http.Request) {
 			if err := s.writeManagedFile(filepath.Join(dir, wid+".html"), []byte(wdg.Content)); err != nil {
 				continue
 			}
-			meta, _ := json.Marshal(map[string]interface{}{"title": wdg.Title, "cols": cols, "height": height})
+			meta, _ := json.Marshal(map[string]interface{}{"title": wdg.Title, "cols": cols, "height": height, "resources": wdg.Resources, "resourceVersions": wdg.ResourceVersions})
 			s.writeManagedFile(filepath.Join(dir, wid+".meta.json"), meta)
 			s.pushPluginToSession(target, wid, wdg.Title, wdg.Content, cols, height)
 			added++

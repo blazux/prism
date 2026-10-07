@@ -10,8 +10,10 @@ import (
 	"prism/internal/agent"
 	"strconv"
 	"strings"
+	"time"
 
 	"prism/internal/memory"
+	"prism/internal/workspace"
 )
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +99,9 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		s.runsMu.Lock()
+		delete(s.deletingSessions, id)
+		s.runsMu.Unlock()
 		os.MkdirAll(filepath.Join(s.cfg.PluginDir, id), 0755)
 		json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "name": body.Name})
 
@@ -129,14 +134,54 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "DELETE":
-		s.cancelRun(&Client{user: currentUser(r), sessionID: id})
-		if err := ms.DeleteSession(r.Context(), id); err != nil {
-			http.Error(w, err.Error(), 400)
+		var body struct {
+			Resources []string `json:"resources"`
+		}
+		if r.ContentLength != 0 {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+				http.Error(w, "invalid cleanup selection", 400)
+				return
+			}
+		}
+		if id == "default" {
+			http.Error(w, "cannot delete the default session", 400)
 			return
 		}
-		// Remove session plugin dir
-		os.RemoveAll(filepath.Join(s.cfg.PluginDir, id))
-		w.WriteHeader(204)
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		release, err := s.quiesceSession(ctx, &Client{user: currentUser(r), sessionID: id})
+		if err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		deleted := false
+		defer func() { release(deleted) }()
+		result, err := s.resourceExecutor(r, id).DeleteDashboard(ctx, body.Resources, func() error {
+			root, err := os.OpenRoot(s.cfg.WorkspaceDir)
+			if err != nil {
+				return err
+			}
+			defer root.Close()
+			if rel, err := filepath.Rel(s.cfg.WorkspaceDir, filepath.Join(s.cfg.PluginDir, id)); err == nil && !strings.HasPrefix(rel, "..") {
+				if err := root.RemoveAll(rel); err != nil {
+					return err
+				}
+			} else {
+				// Standalone deployments may configure plugins outside WorkspaceDir.
+				if err := workspace.RemoveAll(s.cfg.PluginDir, id); err != nil {
+					return err
+				}
+			}
+			return ms.DeleteSession(ctx, id)
+		})
+		if err != nil {
+			w.WriteHeader(409)
+			json.NewEncoder(w).Encode(map[string]any{"error": err.Error(), "cleanup": result})
+			return
+		}
+		deleted = true
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
 
 	case "PATCH":
 		var body struct {

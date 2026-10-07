@@ -63,7 +63,8 @@ func TestCronInstallCommitsOnlyOnSuccess(t *testing.T) {
 	for _, success := range []bool{false, true} {
 		script := "#!/bin/sh\nexit 42\n"
 		if success {
-			script = "#!/bin/sh\nexit 0\n"
+			// The fake runtime must acknowledge supervised command completion.
+			script = "#!/bin/sh\nfor arg do id=$arg; done\nprintf '\\036PRISM_EXEC_FINISHED:%s\\037' \"$id\" >&2\nexit 0\n"
 		}
 		if err := os.WriteFile(executable, []byte(script), 0700); err != nil {
 			t.Fatal(err)

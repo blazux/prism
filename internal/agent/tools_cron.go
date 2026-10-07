@@ -12,6 +12,7 @@ import (
 
 	"prism/internal/cronclock"
 	"prism/internal/docker"
+	"prism/internal/resources"
 	"prism/internal/timeprefs"
 )
 
@@ -172,6 +173,8 @@ func (e *ToolExecutor) cronList(ctx context.Context) (string, error) {
 }
 
 func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, description string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	if name == "" || schedule == "" || command == "" {
 		return "", fmt.Errorf("name, schedule, and command are required")
 	}
@@ -197,10 +200,19 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 	current = strings.TrimSpace(current)
 
 	marker := "# agent-job: " + name
-	if strings.Contains(current, marker) {
+	exists := false
+	for _, job := range ParseCronJobs(current) {
+		if job.Name == name {
+			exists = true
+		}
+	}
+	if exists {
 		return "", fmt.Errorf("a job named %q already exists; remove it first with cron action=remove", name)
 	}
 
+	if err := e.recordResource(ctx, "cron:"+name, false); err != nil {
+		return "", err
+	}
 	zone, err := e.prepareCronTimezone(ctx, schedule)
 	if err != nil {
 		return "", err
@@ -221,7 +233,7 @@ func (e *ToolExecutor) cronAdd(ctx context.Context, name, schedule, command, des
 	}
 
 	if err := e.writeCrontab(ctx, newCrontab); err != nil {
-		return fmt.Sprintf("cron add failed: %v", err), nil
+		return "", fmt.Errorf("cron add failed: %w", err)
 	}
 	// displayCommand: the injected PRISM_TOKEN must not land in the model's
 	// context (cron_list strips it the same way).
@@ -264,6 +276,8 @@ func (e *ToolExecutor) cronCommandLine(command string) string {
 // enabled. Owner check as in cronRemove: a job that belongs to another user is
 // never touched. Mirrors server/handlers_cron.go's mutateJob.
 func (e *ToolExecutor) cronEditBlock(ctx context.Context, name string, edit func(desc, line string, enabled bool) (string, string, bool)) (*CronJob, string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	current, err := e.docker.Exec(ctx, docker.ReadCrontabCommand, 10*time.Second)
 	if err != nil {
 		// A failed exec is NOT an empty crontab: reporting "no cron jobs yet"
@@ -281,7 +295,7 @@ func (e *ToolExecutor) cronEditBlock(ctx context.Context, name string, edit func
 		return target, "", nil // nothing changed (e.g. pausing an already-paused job): don't rewrite
 	}
 	if err := e.writeCrontab(ctx, content); err != nil {
-		return nil, fmt.Sprintf("cron update failed: %v", err), nil
+		return nil, "", fmt.Errorf("cron update failed: %w", err)
 	}
 	return target, "", nil
 }
@@ -447,6 +461,12 @@ func (e *ToolExecutor) cronUpdate(ctx context.Context, name, schedule, command, 
 }
 
 func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
+	return e.cronRemoveUnlocked(ctx, name)
+}
+
+func (e *ToolExecutor) cronRemoveUnlocked(ctx context.Context, name string) (string, error) {
 	current, err := e.docker.Exec(ctx, docker.ReadCrontabCommand, 10*time.Second)
 	if err != nil {
 		return "", docker.CronReadError(err, current)
@@ -500,22 +520,8 @@ func (e *ToolExecutor) cronRemove(ctx context.Context, name string) (string, err
 	}
 
 	newCrontab := strings.TrimSpace(strings.Join(kept, "\n"))
-	if newCrontab == "" {
-		if _, err := e.docker.Exec(ctx, "crontab -r 2>/dev/null || true", 10*time.Second); err != nil {
-			return fmt.Sprintf("crontab -r failed: %v", err), nil
-		}
-		// Keep the persisted mirror in sync with the now-empty live crontab —
-		// Dockerfile.agent's CMD reinstalls it (`crontab /workspace/.crontab`)
-		// on every container restart. Leaving stale content here after
-		// removing the last job would resurrect it on the next restart.
-		persistPath := filepath.Join(e.workspaceDir, ".crontab")
-		if err := e.writeManagedFile(persistPath, nil); err != nil {
-			return fmt.Sprintf("cron_remove failed: %v", err), nil
-		}
-	} else {
-		if err := e.writeCrontab(ctx, newCrontab+"\n"); err != nil {
-			return fmt.Sprintf("cron_remove failed: %v", err), nil
-		}
+	if err := e.writeCrontab(ctx, newCrontab+"\n"); err != nil {
+		return "", fmt.Errorf("cron remove failed: %w", err)
 	}
 	return fmt.Sprintf("Removed job %q", name), nil
 }

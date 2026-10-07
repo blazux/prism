@@ -19,6 +19,7 @@ import (
 // scope never resolved for service-token self-calls). Bundling them into one
 // value with one apply step makes "forgot a field" structurally harder.
 type CallerContext struct {
+	MutationGate  func() error
 	Guard         agent.ToolGuard
 	RAGScope      string
 	PersonalScope string // "" = let the executor derive it from the session id itself
@@ -36,6 +37,7 @@ type CallerContext struct {
 // apply sets every field this bundles onto an executor in one call, instead
 // of the 3-6 individual Set* calls each entry point used to repeat by hand.
 func (cc CallerContext) apply(e *agent.ToolExecutor) {
+	e.SetResourceMutationGuard(cc.MutationGate)
 	e.SetToolGuard(cc.Guard)
 	e.SetRAGScope(cc.RAGScope)
 	if cc.PersonalScope != "" {
@@ -94,6 +96,15 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 		aid = scopeUser.ID
 	}
 	return CallerContext{
+		MutationGate: func() error {
+			s.runsMu.Lock()
+			blocked := s.deletingSessions[sessionID]
+			s.runsMu.Unlock()
+			if blocked {
+				return fmt.Errorf("workspace is being deleted or has been deleted; switch to an existing workspace")
+			}
+			return nil
+		},
 		Guard:        s.buildUserGuard(ctx, u),
 		RAGScope:     scope,
 		HiddenTools:  s.hiddenToolsFor(ctx, sessionID, scope),

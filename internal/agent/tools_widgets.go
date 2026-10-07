@@ -6,16 +6,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"prism/internal/resources"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type pluginMeta struct {
-	Title  string `json:"title"`
-	Cols   int    `json:"cols"`
-	Height int    `json:"height"`
-	Locked bool   `json:"locked,omitempty"`
+	Resources        []string          `json:"resources,omitempty"`
+	ResourceVersions map[string]string `json:"resourceVersions,omitempty"`
+	Title            string            `json:"title"`
+	Cols             int               `json:"cols"`
+	Height           int               `json:"height"`
+	Locked           bool              `json:"locked,omitempty"`
 	// Open is the window lifecycle flag. nil/absent means "open" (the default
 	// for freshly created widgets). false means the user minimized the window
 	// but kept the widget — it lives in the dock and can be reopened.
@@ -213,7 +217,20 @@ func extractConsoleIssues(result string) string {
 	return sb.String()
 }
 
-func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content string, cols, height int) (string, []string, error) {
+func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content string, cols, height int, bindings ...[]string) (string, []string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer func() { unlock() }()
+	var versions map[string]string
+	if len(bindings) > 0 {
+		if err := e.validateResourceBindings(ctx, bindings[0]); err != nil {
+			return "", nil, err
+		}
+		var err error
+		versions, err = e.resourceVersions(ctx, bindings[0])
+		if err != nil {
+			return "", nil, err
+		}
+	}
 	// Headless conversations (group room, Webex, Telegram, cron) have no
 	// dashboard: a widget written here would silently go nowhere. Refuse with a
 	// clear explanation so the model answers in text instead of claiming success.
@@ -261,7 +278,17 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 		return "", nil, fmt.Errorf("write plugin: %w", err)
 	}
 
-	meta, _ := json.Marshal(pluginMeta{Title: title, Cols: cols, Height: height})
+	// Replacing HTML must preserve dependency declarations and window state.
+	m := pluginMeta{}
+	if b, err := e.readManagedFile(metaPath); err == nil {
+		_ = json.Unmarshal(b, &m)
+	}
+	m.Title, m.Cols, m.Height = title, cols, height
+	if len(bindings) > 0 {
+		m.Resources = uniqueResources(bindings[0])
+		m.ResourceVersions = versions
+	}
+	meta, _ := json.Marshal(m)
 	if err := e.writeManagedFile(metaPath, meta); err != nil {
 		return "", nil, fmt.Errorf("write widget meta: %w", err)
 	}
@@ -273,15 +300,30 @@ func (e *ToolExecutor) addUIPlugin(ctx context.Context, id, title, content strin
 	if replaced {
 		msg = fmt.Sprintf("Widget '%s' (id %s) already existed — REPLACED it entirely (cols=%d, height=%dpx). Use action=update to change only some fields of an existing widget.", title, id, cols, height)
 	}
+	unlock()
+	unlock = func() {}
 	report, images := e.previewWidget(ctx, id)
 	return msg + "\n" + report, images, nil
 }
 
-func (e *ToolExecutor) updateUIPlugin(ctx context.Context, id, title, content string, cols, height int) (string, []string, error) {
+func (e *ToolExecutor) updateUIPlugin(ctx context.Context, id, title, content string, cols, height int, bindings ...[]string) (string, []string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer func() { unlock() }()
+	var versions map[string]string
+	if len(bindings) > 0 {
+		if err := e.validateResourceBindings(ctx, bindings[0]); err != nil {
+			return "", nil, err
+		}
+		var err error
+		versions, err = e.resourceVersions(ctx, bindings[0])
+		if err != nil {
+			return "", nil, err
+		}
+	}
 	if e.headless {
 		return "", nil, fmt.Errorf("widgets are unavailable here: this conversation has no dashboard (group room / messaging channel). Present the information as a text or markdown reply instead")
 	}
-	if id == "" {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\") {
 		return "", nil, fmt.Errorf("id is required")
 	}
 	metaPath := filepath.Join(e.pluginDir, id+".meta.json")
@@ -308,6 +350,10 @@ func (e *ToolExecutor) updateUIPlugin(ctx context.Context, id, title, content st
 	if height > 0 {
 		m.Height = height
 	}
+	if len(bindings) > 0 {
+		m.Resources = uniqueResources(bindings[0])
+		m.ResourceVersions = versions
+	}
 
 	meta, _ := json.Marshal(m)
 	if err := e.writeManagedFile(metaPath, meta); err != nil {
@@ -327,42 +373,82 @@ func (e *ToolExecutor) updateUIPlugin(ctx context.Context, id, title, content st
 		e.onPluginAdd(id, m.Title, content, m.Cols, m.Height)
 	}
 	msg := fmt.Sprintf("Widget '%s' updated", id)
+	unlock()
+	unlock = func() {}
 	report, images := e.previewWidget(ctx, id)
 	return msg + "\n" + report, images, nil
 }
 
-func (e *ToolExecutor) removeUIPlugin(id string) (string, error) {
+func (e *ToolExecutor) removeUIPlugin(id string, contexts ...context.Context) (string, error) {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	r, err := e.CleanupResources(ctx, id, false, nil, false)
+	if err != nil {
+		return "", err
+	}
+	removed := false
+	for _, ref := range r.Removed {
+		if strings.HasPrefix(ref, "widget:") {
+			removed = true
+		}
+	}
+	if !removed {
+		return "", fmt.Errorf("widget %q was retained (locked or still in use)", id)
+	}
+	msg := "Plugin '" + id + "' removed."
+	removedIDs := map[string]bool{}
+	for _, ref := range r.Removed {
+		removedIDs[ref] = true
+		if !strings.HasPrefix(ref, "widget:") {
+			msg += "\nRemoved " + ref
+		}
+	}
+	for _, kept := range r.Plan.Keep {
+		if kept.Kind == "file" {
+			inUse := false
+			for _, consumer := range kept.UsedBy {
+				if !removedIDs[consumer] {
+					inUse = true
+				}
+			}
+			if !inUse {
+				msg += "\nNote: retained " + kept.ID + ". Ask the user before deleting its data."
+			}
+		} else {
+			msg += "\nRetained " + kept.ID + ": " + kept.Reason
+		}
+	}
+	return msg, nil
+}
+
+func (e *ToolExecutor) removeWidgetFiles(id string) error {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\") {
+		return fmt.Errorf("invalid widget id")
+	}
 	metaPath := filepath.Join(e.pluginDir, id+".meta.json")
 	htmlPath := filepath.Join(e.pluginDir, id+".html")
 
 	_, metaErr := os.Stat(metaPath)
 	_, htmlErr := os.Stat(htmlPath)
 	if os.IsNotExist(metaErr) && os.IsNotExist(htmlErr) {
-		return "", fmt.Errorf("widget '%s' does not exist. %s", id, e.existingWidgetsHint())
+		return fmt.Errorf("widget '%s' does not exist. %s", id, e.existingWidgetsHint())
 	}
 
-	if b, err := e.readManagedFile(metaPath); err == nil {
-		var m pluginMeta
-		if json.Unmarshal(b, &m) == nil && m.Locked {
-			return "", fmt.Errorf("widget '%s' is locked by the user and cannot be removed", id)
-		}
+	if err := e.removeManaged(htmlPath); err != nil && !os.IsNotExist(err) {
+		return err
 	}
-
-	// Read the widget's own source BEFORE deleting it — it's the only reliable
-	// signal for what data/ files fed it (see orphanedDataNote's doc comment).
-	orphanNote := e.orphanedDataNote(id, htmlPath)
-
-	e.removeManaged(htmlPath)
-	e.removeManaged(metaPath)
+	if err := e.removeManaged(metaPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 
 	if e.onPluginRem != nil {
 		e.onPluginRem(id)
 	}
-	msg := fmt.Sprintf("Plugin '%s' removed", id)
-	if orphanNote != "" {
-		msg += "\n" + orphanNote
-	}
-	return msg, nil
+	return nil
 }
 
 // widgetDataRefRe extracts data/<file> polling-file references (the pattern

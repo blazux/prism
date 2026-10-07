@@ -20,6 +20,7 @@ func TestHelpDocsCoverSettingsTabsAndAdminPanes(t *testing.T) {
 		"ai": "AI provider", "agent": "Agent", "appearance": "Appearance", "calendar": "Calendar", "channels": "Channels",
 		"email": "Email", "knowledge": "Knowledge", "mcp": "MCP", "notes": "Notes", "profile": "Profile",
 		"secrets": "Secrets", "tools": "Tools", "webhooks": "Webhooks",
+		"resources":"Resources",
 	}
 	settings, err := os.ReadFile(filepath.Join("..", "..", "web", "settings.html"))
 	if err != nil {

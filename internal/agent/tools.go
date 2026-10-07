@@ -6,6 +6,17 @@ import (
 
 var ToolDefinitions = []ollama.Tool{
 	{Type: "function", Function: ollama.ToolFunction{
+		Name: "resources", Description: "Workspace resource maintenance. list returns this dashboard's resources and dependencies, with exact IDs and consumers; widget narrows it, all=true includes the environment. Follow next_offset with offset for more pages; counts include references omitted from compact samples. link(widget, ids) replaces dedicated backend declarations. IDs: tool:name, cron:name, service:name, file:data/path. Prefer resources on widget add/update. For ordinary widget removal, widget action=remove already checks usage and reports cleanup: no global inventory is needed. cleanup previews by default; dry_run=false only for user-requested cleanup. Shared/protected resources stay; data/legacy need explicit selection. Creation provenance is not proof of exclusive usage.",
+		Parameters: ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{
+			"action":  {Type: "string", Enum: []string{"list", "link", "cleanup"}},
+			"widget":  {Type: "string", Description: "Existing widget ID on this dashboard. Required for link; optional for list and cleanup."},
+			"all":     {Type: "boolean", Description: "list only: true includes all accessible workspaces and legacy resources. Default false lists this dashboard and its dependencies."},
+			"offset":  {Type: "integer", Description: "list only: use next_offset returned by the preceding page to continue (default 0)."},
+			"ids":     {Type: "array", Items: &ollama.ToolProperty{Type: "string"}, Description: "Exact resource IDs returned by list. For link: resources dedicated to this widget. For cleanup: explicitly selected additional resources."},
+			"dry_run": {Type: "boolean", Description: "cleanup only: true previews (default), false applies the freshly checked plan."},
+		}, Required: []string{"action"}},
+	}},
+	{Type: "function", Function: ollama.ToolFunction{
 		Name: "subagent", Description: "Delegate a bounded independent task within the user's request. spawn takes task and optional context; returns id. status lists your children; wait(id) waits for a result; cancel(id) stops one. Children share your workspace, permissions, model-call budget and lifetime; no recursive delegation. Use distinct files to avoid conflicting edits. Delegate substantial independent work, not simple lookups. Wait for useful results and integrate them before finishing; unfinished children are cancelled when you stop. Children report missing user input to you.",
 		Parameters: ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{
 			"action":  {Type: "string", Enum: []string{"spawn", "status", "wait", "cancel"}},
@@ -336,14 +347,15 @@ var ToolDefinitions = []ollama.Tool{
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"action":  {Type: "string", Description: "One of: add, update, remove, list, list_shared, add_shared, share, unshare", Enum: []string{"add", "update", "remove", "list", "list_shared", "add_shared", "share", "unshare"}},
-					"id":      {Type: "string", Description: "Widget ID (add: optional, derived from title; update/remove/share: the id from list). For add_shared/unshare: the NUMERIC id from list_shared."},
-					"kind":    {Type: "string", Description: "For list_shared/share: 'widget' (default) or 'dashboard' (the whole board)."},
-					"group":   {Type: "string", Description: "For share: which group to publish to, by name — only needed when you belong to several groups."},
-					"title":   {Type: "string", Description: "Widget title shown in the card header"},
-					"content": {Type: "string", Description: "Complete self-contained HTML for the widget (include <style> and <script> tags as needed)"},
-					"cols":    {Type: "integer", Description: "Width: 1=small (default), 2=medium, 3=full-width"},
-					"height":  {Type: "integer", Description: "Height in pixels (default: 280)"},
+					"action":    {Type: "string", Description: "One of: add, update, remove, list, list_shared, add_shared, share, unshare", Enum: []string{"add", "update", "remove", "list", "list_shared", "add_shared", "share", "unshare"}},
+					"id":        {Type: "string", Description: "Widget ID (add: optional, derived from title; update/remove/share: the id from list). For add_shared/unshare: the NUMERIC id from list_shared."},
+					"kind":      {Type: "string", Description: "For list_shared/share: 'widget' (default) or 'dashboard' (the whole board)."},
+					"group":     {Type: "string", Description: "For share: which group to publish to, by name — only needed when you belong to several groups."},
+					"title":     {Type: "string", Description: "Widget title shown in the card header"},
+					"content":   {Type: "string", Description: "Complete self-contained HTML for the widget (include <style> and <script> tags as needed)"},
+					"cols":      {Type: "integer", Description: "Width: 1=small (default), 2=medium, 3=full-width"},
+					"height":    {Type: "integer", Description: "Height in pixels (default: 280)"},
+					"resources": {Type: "array", Items: &ollama.ToolProperty{Type: "string"}, Description: "Optional dedicated backends: tool:name, cron:name, file:data/path (IDs from resources list). Prism preserves shared resources; removes tracked dedicated tools/cron with the widget, retains data. Omit on update to keep existing links; [] clears links."},
 				},
 				Required: []string{"action"},
 			},

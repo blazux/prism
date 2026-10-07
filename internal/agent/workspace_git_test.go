@@ -73,10 +73,13 @@ func TestWorkspaceKeyUntrackedButPreserved(t *testing.T) {
 	}
 	run("add", ".secret_key")
 	// Fake only the Docker transport; execute real Git in the temporary workspace.
-	script := `#!/bin/bash
-command="${@: -1}"
-command="${command//\/workspace/$REVIEW_WORKSPACE}"
-exec bash -c "$command"
+	script := `#!/usr/bin/python3
+import base64,json,os,subprocess,sys
+payload=json.loads(sys.stdin.buffer.readline())
+command=payload['command'].replace('/workspace',os.environ['REVIEW_WORKSPACE'])
+result=subprocess.run(['bash','-c',command],input=base64.b64decode(payload.get('input') or ''))
+sys.stderr.write('\x1ePRISM_EXEC_FINISHED:'+sys.argv[-1]+'\x1f');sys.stderr.flush()
+sys.exit(result.returncode)
 `
 	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0700); err != nil {
 		t.Fatal(err)

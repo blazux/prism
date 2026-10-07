@@ -27,7 +27,7 @@ func OpenPersonalEnvironment(ctx context.Context, cfg Config, key []byte, execut
 	}
 	cfg.PluginDir = filepath.Join(cfg.WorkspaceDir, "plugins")
 	s := New(cfg)
-	s.docker = docker.WithExecution(execute).WithWorkspaceServices(cfg.WorkspaceDir).WithServiceURL(cfg.ServiceURL)
+	s.docker = docker.WithExecution(execute).WithExecutionCheck(cfg.ExecutionCheck).WithWorkspaceServices(cfg.WorkspaceDir).WithServiceURL(cfg.ServiceURL)
 	ms, err := memory.NewStore(ctx, cfg.PostgresURL, append([]byte(nil), key...), false)
 	if err != nil {
 		return nil, err

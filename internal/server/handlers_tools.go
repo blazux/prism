@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"prism/internal/agent"
+	"prism/workspaceexec"
 )
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +123,14 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 
+	jobCtx, finish, jobErr := s.beginSessionJob(r.Context(), sessionID)
+	if jobErr != nil {
+		writeErr(w, 409, jobErr.Error())
+		return
+	}
+	defer finish()
+	r = r.WithContext(jobCtx)
+
 	env := map[string]string{
 		"PRISM_SESSION": sessionID,
 		"PRISM_URL":     "http://prism-server:8080",
@@ -139,7 +148,7 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 
-	out, execErr := s.docker.ExecWithStdin(ctx, cmd, body, 2*time.Minute, env)
+	out, execErr := s.docker.ExecWithStdin(workspaceexec.WithScope(ctx, sessionID), cmd, body, 2*time.Minute, env)
 	w.Write(toolResponseBody(out, execErr))
 }
 
@@ -225,6 +234,14 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
+
+	jobCtx, finish, jobErr := s.beginSessionJob(r.Context(), sessionID)
+	if jobErr != nil {
+		writeErr(w, 409, jobErr.Error())
+		return
+	}
+	defer finish()
+	r = r.WithContext(jobCtx)
 
 	s.mu.RLock()
 	ms := s.memStore

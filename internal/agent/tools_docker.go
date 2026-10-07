@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"prism/internal/resources"
 	"prism/internal/workspace"
 	"regexp"
 	"strings"
@@ -12,8 +13,23 @@ import (
 )
 
 func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port int, extraPorts []int, command string, env map[string]string, volumes []string, gpu bool, purpose string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	if image == "" || name == "" || port == 0 {
 		return "", fmt.Errorf("image, name and port are required")
+	}
+	existing, err := e.docker.ListServices(ctx)
+	if err != nil {
+		return "", err
+	}
+	existed := false
+	for _, svc := range existing {
+		if svc.Name == name {
+			existed = true
+		}
+	}
+	if err := e.recordResource(ctx, "service:"+name, existed); err != nil {
+		return "", err
 	}
 	allPorts := append([]int{port}, extraPorts...)
 	hostPorts, err := e.docker.RunService(ctx, name, image, allPorts, command, env, volumes, gpu, purpose)
@@ -45,6 +61,8 @@ func (e *ToolExecutor) dockerRun(ctx context.Context, image, name string, port i
 }
 
 func (e *ToolExecutor) dockerStop(ctx context.Context, name string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	if name == "" {
 		return "", fmt.Errorf("name is required")
 	}

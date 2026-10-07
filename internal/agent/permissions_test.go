@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestToolPermission(t *testing.T) {
 	cases := []struct {
@@ -39,11 +42,11 @@ func TestToolGuard_Enforcement(t *testing.T) {
 
 	// A read-only RAG call passes the guard (then fails later for lack of a store,
 	// which is fine — we only assert it wasn't blocked by the guard).
-	if _, _, err := e.Execute(nil, "rag_search", []byte(`{"query":"x"}`)); err == errDenied {
+	if _, _, err := e.Execute(context.Background(), "rag_search", []byte(`{"query":"x"}`)); err == errDenied {
 		t.Fatal("rag_search should pass the guard for a RAG-read user")
 	}
 	// A tool call is blocked outright by the guard.
-	if _, _, err := e.Execute(nil, "web_search", []byte(`{"query":"x"}`)); err != errDenied {
+	if _, _, err := e.Execute(context.Background(), "web_search", []byte(`{"query":"x"}`)); err != errDenied {
 		t.Fatalf("web_search should be blocked by the guard, got err=%v", err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"prism/internal/resources"
 	"prism/internal/workspace"
 	"sort"
 	"strings"
@@ -98,6 +99,8 @@ func NormalizeWorkspacePath(path string) string {
 }
 
 func (e *ToolExecutor) writeFile(path, content string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	path = filepath.Clean(NormalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
@@ -106,6 +109,9 @@ func (e *ToolExecutor) writeFile(path, content string) (string, error) {
 	fullPath := filepath.Join(e.workspaceDir, path)
 	if e.isProtectedToolPath(fullPath) {
 		return "", fmt.Errorf("%q is a tool shipped with Prism and cannot be overwritten", filepath.Base(fullPath))
+	}
+	if err := e.trackWrittenResource(path, content); err != nil {
+		return "", err
 	}
 	if err := workspace.WriteFile(e.workspaceDir, path, []byte(content)); err != nil {
 		return "", err
@@ -122,6 +128,8 @@ func (e *ToolExecutor) writeFile(path, content string) (string, error) {
 // several similar lines. Callers can opt into replacing every occurrence with
 // replaceAll=true.
 func (e *ToolExecutor) editFile(path, oldText, newText string, replaceAll bool) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	path = filepath.Clean(NormalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")
@@ -303,6 +311,8 @@ func (e *ToolExecutor) isProtectedToolPath(fullPath string) bool {
 }
 
 func (e *ToolExecutor) deleteFile(path string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	path = filepath.Clean(NormalizeWorkspacePath(path))
 	if strings.HasPrefix(path, "..") {
 		return "", fmt.Errorf("invalid path")

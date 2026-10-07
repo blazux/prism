@@ -12,10 +12,32 @@ import (
 
 // SharedWidget is one widget inside a shared item's payload.
 type SharedWidget struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	Cols    int    `json:"cols"`
-	Height  int    `json:"height"`
+	Resources        []string          `json:"resources,omitempty"`
+	ResourceVersions map[string]string `json:"resourceVersions,omitempty"`
+	Title            string            `json:"title"`
+	Content          string            `json:"content"`
+	Cols             int               `json:"cols"`
+	Height           int               `json:"height"`
+}
+
+// ResourceSharedPayloads is internal lifecycle inspection, not a user API.
+// All published snapshots must protect their backends, including groups the
+// current caller does not belong to. The caller never receives these payloads.
+func (s *Store) ResourceSharedPayloads(ctx context.Context) ([]json.RawMessage, error) {
+	rows, err := s.pool.Query(ctx, `SELECT payload FROM shared_items`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []json.RawMessage{}
+	for rows.Next() {
+		var p json.RawMessage
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // SharedPayload is the JSON stored in shared_items.payload.

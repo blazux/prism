@@ -217,21 +217,53 @@ func (e *ToolExecutor) webSearch(ctx context.Context, query string) (string, err
 	return sb.String(), nil
 }
 
+// Keep the URL and Host/origin intact, including for nested frames, redirects,
+// assets and WebSockets. Only host-Docker deployments use the Compose edge
+// proxy; a hosted execution capability must never inherit this local route.
+func (e *ToolExecutor) browserServiceProxy() string {
+	if e.docker == nil || e.docker.WorkspaceDocker() || e.docker.ConfinedExecution() {
+		return ""
+	}
+	return "traefik"
+}
+
+const browserLaunchScript = `def launch_browser(playwright, service_proxy):
+    args = ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    if service_proxy:
+        # Bare localhost/127.0.0.1 remain the workspace's loopback. Docker DNS
+        # resolves the proxy, so container recreation needs no hard-coded IP.
+        args.append('--host-resolver-rules=MAP *.localhost ' + service_proxy)
+    return playwright.chromium.launch(headless=True, args=args)
+
+def local_service_hint(url, message):
+    from urllib.parse import urlparse
+    if (urlparse(url).hostname or '').endswith('.localhost') and any(
+        code in message for code in ('ERR_NAME_NOT_RESOLVED', 'ERR_CONNECTION_REFUSED', 'ERR_ADDRESS_UNREACHABLE')
+    ):
+        return ' — local service route unavailable; check that Traefik and the workspace share a Docker network and that the service is running'
+    return ''
+
+`
+
 // browserScript is written to /workspace and run inside the workspace container.
 const browserScript = `import sys, json, re
 from playwright.sync_api import sync_playwright
 
+` + browserLaunchScript + `
 url = sys.argv[1]
 js_expr = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
 ignore_https_errors = len(sys.argv) > 3 and sys.argv[3] == '1'
+service_proxy = sys.argv[4] if len(sys.argv) > 4 else ''
 
 # A failure must say WHY on stdout (not a bare exit-1 traceback that the caller
 # may never see): the diagnostic reaches the agent so it can act, instead of
 # blaming the tool. Playwright's goto errors already name the real cause.
 def load_error(url, e):
     msg = str(e).splitlines()[0] if str(e) else type(e).__name__
-    hint = ""
-    if "ERR_NAME_NOT_RESOLVED" in msg:
+    hint = local_service_hint(url, msg) if service_proxy else ''
+    if hint:
+        pass
+    elif "ERR_NAME_NOT_RESOLVED" in msg:
         hint = " — the hostname does not exist (you likely guessed the URL; find the real one with web_search, do not retry variants)"
     elif "Timeout" in msg or "timeout" in msg:
         hint = " — the page did not load in time; the site is slow or blocking automated browsers, not a problem on your side"
@@ -243,10 +275,7 @@ def load_error(url, e):
 
 try:
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-        )
+        browser = launch_browser(p, service_proxy)
         page = browser.new_page(ignore_https_errors=ignore_https_errors)
         try:
             page.goto(url, wait_until='domcontentloaded', timeout=30000)
@@ -326,7 +355,7 @@ func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (
 	if u, err := url.Parse(rawURL); err == nil && u.Scheme == "https" && isPrivateHost(u.Hostname()) {
 		ignoreHTTPS = "1"
 	}
-	cmd := fmt.Sprintf("python3 /workspace/.browser_exec.py %q %q %q 2>&1", rawURL, jsExpr, ignoreHTTPS)
+	cmd := fmt.Sprintf("python3 /workspace/.browser_exec.py %q %q %q %q 2>&1", rawURL, jsExpr, ignoreHTTPS, e.browserServiceProxy())
 
 	out, err := e.docker.Exec(ctx, cmd, 60*time.Second)
 	if err != nil {
@@ -342,6 +371,7 @@ const browserActScript = `import json, os, sys, time
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
+` + browserLaunchScript + `
 INPUT_FILE = os.environ['BROWSER_ACT_INPUT']
 SESSION_FILE = os.environ['BROWSER_ACT_SESSION']
 SCREENSHOT_DIR = '/workspace/.screenshots'
@@ -355,8 +385,7 @@ actions = config.get('actions') or []
 results = []
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True,
-        args=['--no-sandbox','--disable-dev-shm-usage','--disable-gpu'])
+    browser = launch_browser(p, config.get('service_proxy', ''))
     ctx_opts = {}
     if os.path.exists(SESSION_FILE):
         ctx_opts['storage_state'] = SESSION_FILE
@@ -388,8 +417,10 @@ with sync_playwright() as p:
             # Surface WHY the initial load failed (in the JSON result shape) rather
             # than a bare exit-1 the caller may render empty — see browserScript.
             m = str(e).splitlines()[0] if str(e) else type(e).__name__
-            hint = ""
-            if "ERR_NAME_NOT_RESOLVED" in m:
+            hint = local_service_hint(start_url, m) if config.get('service_proxy') else ''
+            if hint:
+                pass
+            elif "ERR_NAME_NOT_RESOLVED" in m:
                 hint = " — hostname does not exist (likely a guessed URL; find the real one with web_search, do not retry variants)"
             elif "Timeout" in m or "timeout" in m:
                 hint = " — page did not load in time; the site is slow or blocking automated browsers"
@@ -504,12 +535,13 @@ func (e *ToolExecutor) browserActAuth(ctx context.Context, rawURL string, rawAct
 		Actions           interface{} `json:"actions"`
 		AuthCookie        string      `json:"auth_cookie,omitempty"`
 		IgnoreHTTPSErrors bool        `json:"ignore_https_errors,omitempty"`
+		ServiceProxy      string      `json:"service_proxy,omitempty"`
 	}
 	ignoreHTTPS := false
 	if u, err := url.Parse(rawURL); err == nil && u.Scheme == "https" && isPrivateHost(u.Hostname()) {
 		ignoreHTTPS = true
 	}
-	inputJSON, err := json.Marshal(actInput{URL: rawURL, Actions: rawActions, AuthCookie: authToken, IgnoreHTTPSErrors: ignoreHTTPS})
+	inputJSON, err := json.Marshal(actInput{URL: rawURL, Actions: rawActions, AuthCookie: authToken, IgnoreHTTPSErrors: ignoreHTTPS, ServiceProxy: e.browserServiceProxy()})
 	if err != nil {
 		return "", fmt.Errorf("marshal actions: %w", err)
 	}

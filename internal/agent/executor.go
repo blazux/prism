@@ -21,9 +21,11 @@ import (
 	"prism/internal/rag"
 	"prism/internal/tasks"
 	"prism/internal/timeprefs"
+	"prism/workspaceexec"
 )
 
 type ToolExecutor struct {
+	resourceMutationGuard func() error
 	docker                *docker.Manager
 	workspaceDir          string
 	pluginDir             string
@@ -86,6 +88,8 @@ type ToolGuard func(name string, args map[string]interface{}) error
 // Used by the Webex channel to enforce per-sender permissions (RAG read, RAG
 // write, arbitrary tool calls). Pass nil to allow all tools.
 func (e *ToolExecutor) SetToolGuard(g ToolGuard) { e.toolGuard = g }
+
+func (e *ToolExecutor) SetResourceMutationGuard(g func() error) { e.resourceMutationGuard = g }
 
 func NewToolExecutor(dm *docker.Manager, workspaceDir, pluginDir, searxngURL, prismToken string) *ToolExecutor {
 	return &ToolExecutor{
@@ -632,6 +636,17 @@ func canonicalToolName(name string) string {
 // work is prioritised on. The model sees exactly the same result and error as
 // before; this is observation, not behaviour.
 func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, []string, error) {
+	ctx = workspaceexec.WithScope(ctx, e.sessionID)
+	if e.resourceMutationGuard != nil {
+		var args map[string]interface{}
+		_ = json.Unmarshal(rawArgs, &args)
+		custom := e.customMgr != nil && e.customMgr.Get(name) != nil
+		if resourceMutation(name, args) || custom {
+			if err := e.resourceMutationGuard(); err != nil {
+				return "", nil, err
+			}
+		}
+	}
 	if store := e.userStore(); store != nil {
 		_, loc := timeprefs.Read(ctx, store)
 		ctx = timeprefs.WithLocation(ctx, loc)
@@ -912,6 +927,22 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 	case "pip_install": // legacy alias
 		return wrap(e.pipInstall(ctx, str("packages")))
 	case "widget":
+		var bindings [][]string
+		if raw, present := args["resources"]; present {
+			items, ok := raw.([]interface{})
+			if !ok {
+				return "", nil, fmt.Errorf("resources must be an array of resource IDs")
+			}
+			ids := []string{}
+			for _, item := range items {
+				id, ok := item.(string)
+				if !ok {
+					return "", nil, fmt.Errorf("resources must contain strings")
+				}
+				ids = append(ids, id)
+			}
+			bindings = append(bindings, ids)
+		}
 		switch str("action") {
 		case "add":
 			colsFloat, _ := args["cols"].(float64)
@@ -924,13 +955,13 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			if height <= 0 {
 				height = 280
 			}
-			return e.addUIPlugin(ctx, str("id"), str("title"), str("content"), cols, height)
+			return e.addUIPlugin(ctx, str("id"), str("title"), str("content"), cols, height, bindings...)
 		case "update":
 			colsFloat, _ := args["cols"].(float64)
 			heightFloat, _ := args["height"].(float64)
-			return e.updateUIPlugin(ctx, str("id"), str("title"), str("content"), int(colsFloat), int(heightFloat))
+			return e.updateUIPlugin(ctx, str("id"), str("title"), str("content"), int(colsFloat), int(heightFloat), bindings...)
 		case "remove":
-			return wrap(e.removeUIPlugin(str("id")))
+			return wrap(e.removeUIPlugin(str("id"), ctx))
 		case "list":
 			return wrap(e.listUIPlugins())
 		case "list_shared":
@@ -959,13 +990,15 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 	case "list_widgets": // legacy alias
 		return wrap(e.listUIPlugins())
 	case "remove_widget": // legacy alias
-		return wrap(e.removeUIPlugin(str("id")))
+		return wrap(e.removeUIPlugin(str("id"), ctx))
 	case "update_widget": // legacy alias
 		colsFloat, _ := args["cols"].(float64)
 		heightFloat, _ := args["height"].(float64)
 		return e.updateUIPlugin(ctx, str("id"), str("title"), str("content"), int(colsFloat), int(heightFloat))
 	case "show_in_editor":
 		return wrap(e.openFile(str("path")))
+	case "resources":
+		return wrap(e.resourceTool(ctx, args))
 	case "cron":
 		switch str("action") {
 		case "list":

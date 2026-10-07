@@ -221,6 +221,11 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 // explicit turn limits for agents whose budget isn't in a user's config scope
 // (the group's shared agent — see agent.Limits; zero = config/default).
 func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, cc CallerContext, tap func(agent.Event), limits agent.Limits) (string, error) {
+	ctx, finish, err := s.beginSessionJob(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	defer finish()
 	s.mu.RLock()
 	ms := s.memStore
 	s.mu.RUnlock()

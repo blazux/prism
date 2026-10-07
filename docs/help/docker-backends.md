@@ -9,6 +9,32 @@ DOCKER_MODE=host preserves the existing behavior: services run on the host
 Docker daemon, with Traefik subdomains and allocated host ports. Existing
 installations do not need to change anything.
 
+For services exposed by Traefik, use the same `http://<name>.localhost/` URL in
+widgets, `browser_get` and `browser_act`. Prism's managed browsers resolve
+`*.localhost` to the Docker DNS alias `traefik`, preserving the URL, Host header
+and origin for assets, redirects, nested iframes and WebSockets. Bare `localhost`
+and `127.0.0.1` still refer to the workspace itself. Scripts and custom tools can
+continue using the internal container URL returned by the Docker tool.
+
+The proxy must share a Docker network with the workspace and the service. This
+is already true in the default Compose installation. A custom deployment should
+give its proxy the `traefik` network alias. Services launched by Prism set
+`traefik.docker.network` to their workspace network so a shared proxy does not
+choose another project's default network.
+
+For the side-by-side mono/multi recipe (`docker-compose.mu.yml`), the primary
+proxy can join the secondary project's network using the optional
+`docker-compose.traefik-mu.yml` overlay. Apply it to the primary deployment after
+the secondary network exists, and keep it when recreating that proxy. Existing
+secondary services may need the matching `traefik.docker.network` label when
+recreated. Compose-defined services still need their usual Traefik labels and a
+network shared with the proxy. Prism never connects networks automatically from
+an agent tool call.
+
+This browser routing applies only to the host Docker backend. Docker inside the
+workspace and hosted/Cloud execution keep their existing service URLs and access
+controls; no local proxy route is added there.
+
 ## Docker inside the workspace
 
 Set these installation variables, then recreate prism-server with Compose:

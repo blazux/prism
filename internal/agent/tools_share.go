@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"prism/internal/memory"
+	"prism/internal/resources"
 )
 
 // Group widget/dashboard sharing, agent side. Whatever a human can do from the
@@ -57,6 +58,8 @@ func (e *ToolExecutor) sharedList(ctx context.Context, kind string) (string, err
 }
 
 func (e *ToolExecutor) sharedAdd(ctx context.Context, idStr string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	if e.headless {
 		return "", fmt.Errorf("widgets are unavailable here: this conversation has no dashboard")
 	}
@@ -88,7 +91,7 @@ func (e *ToolExecutor) sharedAdd(ctx context.Context, idStr string) (string, err
 		if height <= 0 {
 			height = 280
 		}
-		if e.writeSharedWidget(wid, wdg.Title, wdg.Content, cols, height) == nil {
+		if e.writeSharedWidget(wid, wdg.Title, wdg.Content, cols, height, pluginMeta{Resources: wdg.Resources, ResourceVersions: wdg.ResourceVersions}) == nil {
 			added++
 		}
 	}
@@ -101,6 +104,8 @@ func (e *ToolExecutor) sharedAdd(ctx context.Context, idStr string) (string, err
 // has no global role, and a global admin has the gallery UI). Copies members
 // already added to their boards are kept: add_shared copies the files.
 func (e *ToolExecutor) sharedUnshare(ctx context.Context, idStr string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	if e.memStore == nil || len(e.sharingGroups) == 0 {
 		return "", fmt.Errorf("sharing is only available inside a multi-user group")
 	}
@@ -134,11 +139,16 @@ func (e *ToolExecutor) adminOfSharingGroup(id int64) bool {
 	return false
 }
 
-func (e *ToolExecutor) writeSharedWidget(id, title, content string, cols, height int) error {
+func (e *ToolExecutor) writeSharedWidget(id, title, content string, cols, height int, bindings ...pluginMeta) error {
 	if err := e.writeManagedFile(filepath.Join(e.pluginDir, id+".html"), []byte(content)); err != nil {
 		return err
 	}
-	meta, _ := json.Marshal(pluginMeta{Title: title, Cols: cols, Height: height})
+	m := pluginMeta{Title: title, Cols: cols, Height: height}
+	if len(bindings) > 0 {
+		m.Resources = bindings[0].Resources
+		m.ResourceVersions = bindings[0].ResourceVersions
+	}
+	meta, _ := json.Marshal(m)
 	e.writeManagedFile(filepath.Join(e.pluginDir, id+".meta.json"), meta)
 	if e.onPluginAdd != nil {
 		e.onPluginAdd(id, title, content, cols, height)
@@ -147,6 +157,8 @@ func (e *ToolExecutor) writeSharedWidget(id, title, content string, cols, height
 }
 
 func (e *ToolExecutor) sharePublish(ctx context.Context, widgetID, kind, groupName string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	if e.memStore == nil || len(e.sharingGroups) == 0 {
 		return "", fmt.Errorf("sharing is only available inside a multi-user group")
 	}
@@ -226,9 +238,13 @@ func (e *ToolExecutor) readBoardWidgets(only string) []memory.SharedWidget {
 			continue
 		}
 		title, cols, height := id, 1, 280
+		refs := []string{}
+		versions := map[string]string{}
 		if b, err := e.readManagedFile(filepath.Join(e.pluginDir, id+".meta.json")); err == nil {
 			var m pluginMeta
 			if json.Unmarshal(b, &m) == nil {
+				refs = m.Resources
+				versions = m.ResourceVersions
 				if m.Title != "" {
 					title = m.Title
 				}
@@ -240,7 +256,7 @@ func (e *ToolExecutor) readBoardWidgets(only string) []memory.SharedWidget {
 				}
 			}
 		}
-		out = append(out, memory.SharedWidget{Title: title, Content: string(content), Cols: cols, Height: height})
+		out = append(out, memory.SharedWidget{Title: title, Content: string(content), Cols: cols, Height: height, Resources: refs, ResourceVersions: versions})
 	}
 	return out
 }

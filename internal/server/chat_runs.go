@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -12,6 +13,7 @@ import (
 // chatRun owns execution; browser Clients are replaceable subscribers. All maps
 // belong to one Server (one hosted tenant). Keys additionally include user ID.
 type chatRun struct {
+	done           chan struct{}
 	approvalManual bool // immutable policy snapshot for this task
 	children       map[string]*childTask
 	childrenDone   sync.WaitGroup
@@ -135,6 +137,9 @@ func (s *Server) beginRun(c *Client, cancel context.CancelFunc, content string, 
 	if s.runs[runKey(c)] != nil {
 		return nil, fmt.Errorf("a task is already running in this conversation")
 	}
+	if s.deletingSessions[c.sessionID] {
+		return nil, fmt.Errorf("this workspace is being deleted")
+	}
 	active := 0
 	for _, r := range s.runs {
 		if (r.owner.user == nil && c.user == nil) || (r.owner.user != nil && c.user != nil && r.owner.user.ID == c.user.ID) {
@@ -153,7 +158,7 @@ func (s *Server) beginRun(c *Client, cancel context.CancelFunc, content string, 
 	c.mu.Lock()
 	manual := c.approvalManual
 	c.mu.Unlock()
-	r := &chatRun{approvalManual: manual, owner: c, subscribers: map[*Client]bool{c: true}, history: s.historySnapshot(c), cancel: cancel, status: "running"}
+	r := &chatRun{done: make(chan struct{}), approvalManual: manual, owner: c, subscribers: map[*Client]bool{c: true}, history: s.historySnapshot(c), cancel: cancel, status: "running"}
 	user, _ := json.Marshal(map[string]any{"type": "run_user", "content": content, "images": images})
 	r.events = append(r.events, user)
 	r.bytes = len(user)
@@ -282,6 +287,101 @@ func (s *Server) finishRun(r *chatRun, ctx context.Context) {
 		s.completedRuns[runKey(r.owner)] = &chatRun{history: r.history, events: r.events, status: status}
 	}
 	delete(s.runs, runKey(r.owner))
+	if r.done != nil {
+		close(r.done)
+	}
+}
+
+// Quiesce before removing a dashboard: cancellation alone does not guarantee
+// its parent/subagents have stopped writing. The gate prevents a new run from
+// starting between cancellation and deletion.
+func (s *Server) quiesceSession(ctx context.Context, c *Client) (func(bool), error) {
+	key := c.sessionID
+	s.runsMu.Lock()
+	if s.deletingSessions == nil {
+		s.deletingSessions = map[string]bool{}
+	}
+	if s.deletingSessions[key] {
+		s.runsMu.Unlock()
+		return nil, fmt.Errorf("workspace deletion already in progress")
+	}
+	s.deletingSessions[key] = true
+	var pending []<-chan struct{}
+	// One physical dashboard can also be used by a service-token caller.
+	// Cancel all principals, then wait outside runsMu so completion can proceed.
+	for _, r := range s.runs {
+		if r.owner.sessionID == key {
+			r.cancel()
+			pending = append(pending, r.done)
+		}
+	}
+	for job := range s.sessionJobs[key] {
+		job.cancel()
+		pending = append(pending, job.done)
+	}
+	s.runsMu.Unlock()
+	release := func(deleted bool) {
+		s.runsMu.Lock()
+		if !deleted {
+			delete(s.deletingSessions, key)
+		}
+		for run := range s.completedRuns {
+			if strings.HasSuffix(run, ":"+key) {
+				delete(s.completedRuns, run)
+			}
+		}
+		s.runsMu.Unlock()
+	}
+	for _, done := range pending {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			release(false)
+			return nil, fmt.Errorf("agent has not stopped yet; retry deletion: %w", ctx.Err())
+		}
+	}
+	if s.docker != nil {
+		if err := s.docker.CheckExecutions(ctx, key); err != nil {
+			release(false)
+			return nil, err
+		}
+	}
+	return release, nil
+}
+
+// A headless call has no browser chatRun, but still owns work in a dashboard.
+// Register before creating its directory and keep it registered until its
+// agent, tools and persistence have finished.
+type sessionJob struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func (s *Server) beginSessionJob(ctx context.Context, session string) (context.Context, func(), error) {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	if s.deletingSessions[session] {
+		return nil, nil, fmt.Errorf("workspace is being deleted or has been deleted")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	job := &sessionJob{cancel: cancel, done: make(chan struct{})}
+	if s.sessionJobs == nil {
+		s.sessionJobs = make(map[string]map[*sessionJob]bool)
+	}
+	if s.sessionJobs[session] == nil {
+		s.sessionJobs[session] = make(map[*sessionJob]bool)
+	}
+	s.sessionJobs[session][job] = true
+	return ctx, func() {
+		cancel()
+		s.runsMu.Lock()
+		defer s.runsMu.Unlock()
+		delete(s.sessionJobs[session], job)
+		if len(s.sessionJobs[session]) == 0 {
+			delete(s.sessionJobs, session)
+		}
+		close(job.done)
+	}, nil
 }
 func (s *Server) cancelRun(c *Client) {
 	s.runsMu.Lock()

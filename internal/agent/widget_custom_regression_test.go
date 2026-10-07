@@ -43,7 +43,7 @@ func TestCustomToolExecutionStatus(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	e := &ToolExecutor{workspaceDir: dir, docker: docker.NewManager("unused", dir, 0, 0)}
 	file := filepath.Join(bin, "docker")
-	if err := os.WriteFile(file, []byte("#!/bin/sh\necho 'synthetic Python failure' >&2\nexit 42\n"), 0700); err != nil {
+	if err := os.WriteFile(file, []byte("#!/bin/sh\nfor arg do id=$arg; done\necho 'synthetic Python failure' >&2\nprintf '\\036PRISM_EXEC_FINISHED:%s\\037' \"$id\" >&2\nexit 42\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	_, err := e.execCustomTool(context.Background(), &customtools.Tool{Name: "test_tool", Filename: "test.py"}, json.RawMessage(`{}`))
@@ -51,7 +51,7 @@ func TestCustomToolExecutionStatus(t *testing.T) {
 	if err == nil || !errors.As(err, &exit) || !strings.Contains(err.Error(), "synthetic Python failure") {
 		t.Fatalf("execution error lost: %v", err)
 	}
-	if err := os.WriteFile(file, []byte("#!/bin/sh\nprintf '{\"ok\":true}'\n"), 0700); err != nil {
+	if err := os.WriteFile(file, []byte("#!/bin/sh\nfor arg do id=$arg; done\nprintf '{\"ok\":true}'\nprintf '\\036PRISM_EXEC_FINISHED:%s\\037' \"$id\" >&2\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	out, err := e.execCustomTool(context.Background(), &customtools.Tool{Name: "test_tool", Filename: "test.py"}, json.RawMessage(`{}`))

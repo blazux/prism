@@ -22,6 +22,7 @@ import (
 
 	"prism/internal/cronclock"
 	"prism/internal/docker"
+	"prism/internal/resources"
 	"prism/internal/timeprefs"
 )
 
@@ -281,6 +282,8 @@ func (s *Server) upsertCronJob(name, schedule, command, desc, owner string) erro
 // sees and manages only their own jobs (owner tag "u<id>", same as the agent's
 // cron tools). A global admin sees everything, including legacy unowned jobs.
 func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
+	unlock := resources.Lock(s.cfg.WorkspaceDir)
+	defer unlock()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 

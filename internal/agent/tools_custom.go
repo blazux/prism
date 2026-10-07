@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"os"
 	"prism/internal/customtools"
+	"prism/internal/resources"
 )
 
 // slugify reduces a free-text string to lowercase [a-z0-9_-] characters, for
@@ -39,6 +41,8 @@ func slugify(s string) string {
 func toolFilename(name string) string { return slugify(name) + ".py" }
 
 func (e *ToolExecutor) registerTool(code string) (string, error) {
+	unlock := resources.Lock(e.workspaceDir)
+	defer unlock()
 	if e.customMgr == nil {
 		return "", fmt.Errorf("custom tools not configured")
 	}
@@ -81,6 +85,13 @@ func (e *ToolExecutor) registerTool(code string) (string, error) {
 	path := filepath.Join(e.customMgr.Dir(), base)
 	rel, err := filepath.Rel(e.workspaceDir, path)
 	if err != nil {
+		return "", err
+	}
+	_, statErr := os.Stat(path)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return "", statErr
+	}
+	if err := e.recordResource(context.Background(), "tool:"+name, statErr == nil); err != nil {
 		return "", err
 	}
 	if err := workspace.WriteFile(e.workspaceDir, rel, []byte(code)); err != nil {

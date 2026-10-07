@@ -23,6 +23,7 @@ import (
 )
 
 type Config struct {
+	ExecutionCheck                 func(context.Context, string) error
 	WebhookURL                     func(string, string) string
 	HostedPersonal                 bool
 	WebhookConcurrency             int
@@ -83,8 +84,10 @@ type Config struct {
 type Server struct {
 	completedRuns map[string]*chatRun
 
-	runsMu sync.Mutex
-	runs   map[string]*chatRun
+	runsMu           sync.Mutex
+	runs             map[string]*chatRun
+	deletingSessions map[string]bool                 // protected by runsMu
+	sessionJobs      map[string]map[*sessionJob]bool // headless jobs; protected by runsMu
 
 	webhookActive   atomic.Int32
 	hostedResolver  func(*http.Request) (*Server, error)
@@ -275,6 +278,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/builtin/", s.resourceRoute((*Server).handleBuiltinTool))
 	mux.HandleFunc("/api/sessions", s.resourceRoute((*Server).handleSessions))
 	mux.HandleFunc("/api/sessions/", s.resourceRoute((*Server).handleSessionByID))
+	mux.HandleFunc("/api/resources", s.resourceRoute((*Server).handleResources))
 	mux.HandleFunc("/api/chat/upload", s.resourceRoute((*Server).handleChatFileUpload))
 	mux.HandleFunc("/api/notify", s.resourceRoute((*Server).handleExternalNotify))
 	mux.HandleFunc("/api/profile", s.resourceRoute((*Server).handleProfile))

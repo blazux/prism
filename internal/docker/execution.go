@@ -18,6 +18,13 @@ func WithExecution(execute WorkspaceExecution) *Manager {
 	return &Manager{execute: execute, executionOnly: true}
 }
 
+// WithExecutionCheck lets the embedding host acknowledge remote cleanup before
+// a dashboard's files are removed. It adds no agent-facing capability.
+func (m *Manager) WithExecutionCheck(check func(context.Context, string) error) *Manager {
+	m.checkExecution = check
+	return m
+}
+
 // WorkspaceStatus reports the execution resource, independently of whether
 // this process is allowed to administer its outer Docker container.
 func (m *Manager) WorkspaceStatus(ctx context.Context) string {

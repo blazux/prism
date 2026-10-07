@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
+	"prism/workspaceexec"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +26,8 @@ type ServiceInfo struct {
 }
 
 type Manager struct {
+	executionFence workspaceexec.Fence
+	checkExecution func(context.Context, string) error
 	serviceURL     func(int) string
 	execute        WorkspaceExecution
 	executionOnly  bool
@@ -151,70 +155,75 @@ func (m *Manager) Exec(ctx context.Context, command string, timeout time.Duratio
 	if m.executionOnly {
 		return m.executeBound(ctx, command, nil, nil, timeout)
 	}
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	out, err := m.run(ctx, "docker", append(m.execPrefix(false), m.containerName, "bash", "-c", command)...)
-	return out, err
+	return m.execForeground(ctx, command, nil, timeout, nil, nil)
 }
 
-// ExecWithEnv runs a command in the container with extra environment variables
-// passed via docker exec -e flags (values never appear in the bash command string).
+// ExecWithEnv keeps secrets in Docker's environment flags, not shell strings.
 func (m *Manager) ExecWithEnv(ctx context.Context, command string, timeout time.Duration, env map[string]string) (string, error) {
 	if m.executionOnly {
 		return m.executeBound(ctx, command, nil, env, timeout)
 	}
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	args := m.execPrefix(false)
-	for k, v := range env {
-		args = append(args, "-e", k+"="+v)
-	}
-	args = append(args, m.containerName, "bash", "-c", command)
-	return m.run(ctx, "docker", args...)
+	return m.execForeground(ctx, command, nil, timeout, env, nil)
 }
 
-// ExecWithStdin runs a command in the container with stdin attached, bypassing
-// shell argument-length limits for large payloads (images, documents, etc.).
+// ExecWithStdin preserves the command's binary stdin independently of the
+// supervisor's private cancellation lease.
 func (m *Manager) ExecWithStdin(ctx context.Context, command string, stdin []byte, timeout time.Duration, env map[string]string) (string, error) {
 	if m.executionOnly {
 		return m.executeBound(ctx, command, stdin, env, timeout)
 	}
+	return m.execForeground(ctx, command, stdin, timeout, env, nil)
+}
+
+func (m *Manager) execForeground(ctx context.Context, command string, input []byte, timeout time.Duration, env map[string]string, stream *chanWriter) (string, error) {
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-
+	id := workspaceexec.ID()
 	args := m.execPrefix(true)
 	for k, v := range env {
 		args = append(args, "-e", k+"="+v)
 	}
-	args = append(args, m.containerName, "bash", "-c", command)
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdin = bytes.NewReader(stdin)
+	args = append(args, m.containerName)
+	args = append(args, workspaceexec.Arguments(id)...)
+	// Run owns cancellation: killing this CLI alone would leave the command alive.
+	cmd := exec.Command("docker", args...)
+	cmd.WaitDelay = 3 * time.Second
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if stream != nil {
+		cmd.Stdout, cmd.Stderr = stream, stream
+	}
+	err := workspaceexec.Run(ctx, cmd, id, "bash", command, input)
+	if errors.Is(err, workspaceexec.ErrUnconfirmed) {
+		m.executionFence.Remember(workspaceexec.Scope(ctx), id, func(probe context.Context) error {
+			argv := append(m.execPrefix(false), m.containerName)
+			argv = append(argv, workspaceexec.ProbeArguments(id)...)
+			_, err := m.run(probe, "docker", argv...)
+			return err
+		})
+	}
+	if stream != nil {
+		stream.flush()
+	}
+	if err != nil {
+		return stdout.String(), fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
 }
 
-func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string, <-chan error) {
-	outCh := make(chan string, 100)
-	errCh := make(chan error, 1)
+// CheckExecutions blocks resource deletion after an unconfirmed command stop.
+func (m *Manager) CheckExecutions(ctx context.Context, scope string) error {
+	if m.checkExecution != nil {
+		return m.checkExecution(ctx, scope)
+	}
+	return m.executionFence.Check(ctx, scope)
+}
 
+func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string, <-chan error) {
+	outCh, errCh := make(chan string, 100), make(chan error, 1)
 	go func() {
 		defer close(outCh)
 		defer close(errCh)
@@ -229,16 +238,11 @@ func (m *Manager) ExecStream(ctx context.Context, command string) (<-chan string
 			}
 			return
 		}
-
-		cmd := exec.CommandContext(ctx, "docker", append(m.execPrefix(false), m.containerName, "bash", "-c", command)...)
-		cmd.Stdout = &chanWriter{ch: outCh}
-		cmd.Stderr = &chanWriter{ch: outCh}
-
-		if err := cmd.Run(); err != nil {
+		_, err := m.execForeground(ctx, command, nil, 0, nil, &chanWriter{ch: outCh})
+		if err != nil {
 			errCh <- err
 		}
 	}()
-
 	return outCh, errCh
 }
 
@@ -283,6 +287,9 @@ func (m *Manager) RunService(ctx context.Context, name, image string, ports []in
 		"--volumes-from", m.containerName,
 		// Traefik labels: route <name>.localhost → container on its primary port.
 		"--label", "traefik.enable=true",
+		// A shared proxy can serve several local Prism projects. Pin the service
+		// network instead of inheriting the proxy's default project network.
+		"--label", "traefik.docker.network=" + net,
 		"--label", fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s.localhost`)", name, name),
 		"--label", fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", name, ports[0]),
 		"--label", fmt.Sprintf("traefik.http.routers.%s.middlewares=strip-frames@docker", name),
@@ -583,11 +590,14 @@ func (m *Manager) run(ctx context.Context, name string, args ...string) (string,
 }
 
 type chanWriter struct {
+	mu  sync.Mutex
 	ch  chan<- string
 	buf []byte
 }
 
 func (w *chanWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.buf = append(w.buf, p...)
 	for {
 		idx := bytes.IndexByte(w.buf, '\n')
@@ -602,6 +612,18 @@ func (w *chanWriter) Write(p []byte) (n int, err error) {
 		}
 	}
 	return len(p), nil
+}
+
+func (w *chanWriter) flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.buf) > 0 {
+		select {
+		case w.ch <- string(w.buf):
+		default:
+		}
+		w.buf = nil
+	}
 }
 
 func composeURLs(raw string, resolve func(int) string) string {
