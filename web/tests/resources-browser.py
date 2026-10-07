@@ -46,6 +46,7 @@ with sync_playwright() as p:
     page.route('**/*', route)
     page.goto('https://fixture.test/')
     page.add_style_tag(content=SOURCES['style.css'])
+    page.add_style_tag(content=settings.split('<style>', 1)[1].split('</style>', 1)[0])
     page.add_script_tag(content='''
       function settingsHeading(title, text) { return '<h2>'+title+'</h2><p>'+text+'</p>' }
       function escHtml(s) { const el=document.createElement('span'); el.textContent=s; return el.innerHTML }

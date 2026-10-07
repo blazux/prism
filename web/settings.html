@@ -126,6 +126,40 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 .settings-content-title { margin: 0; font-size: 16px; font-weight: 600; }
 .settings-content-intro { margin: 0; color: var(--text3); font-size: 12.5px; line-height: 1.5; }
 .settings-scope { padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--text3); font-size: 10.5px; line-height: 1.2; }
+/* Resources follows the compact controls and tables used elsewhere in Settings. */
+.resources-content { max-width: 880px; }
+.resources-toolbar, .resources-actions, .resources-link { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.resources-toolbar { margin-bottom: 10px; }
+.resources-toolbar > label { color: var(--text2); font-size: 12px; }
+.resources-content select { min-width: 0; max-width: 100%; cursor: pointer; }
+.resources-content select option { background: var(--bg2); color: var(--text); }
+.resources-content .btn:disabled { opacity: .45; cursor: default; }
+.resources-filter { width: 250px; }
+.resources-count { margin-left: auto; color: var(--text3); font-size: 11.5px; }
+.resources-list { overflow: auto; max-height: 55vh; border: 1px solid var(--border); border-radius: var(--radius); }
+.resources-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 12px; }
+.resources-table th { position: sticky; top: 0; z-index: 1; background: var(--bg1); text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); }
+.resources-table th, .resources-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.resources-table td { vertical-align: middle; color: var(--text2); }
+.resources-table tbody tr:last-child td { border-bottom: 0; }
+.resources-table tbody tr:hover { background: var(--bg2); }
+.resources-table .resources-select { width: 34px; }
+.resources-table .toggle-switch { display: inline-block; vertical-align: middle; margin: 0; }
+.resources-table .resources-name { color: var(--text); font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.resources-table .resources-origin { overflow-wrap: anywhere; }
+.resources-actions { margin-top: 10px; }
+.resources-link { margin-left: auto; min-width: 0; }
+.resources-widget { width: 300px; }
+.resources-hint { margin: 10px 0 0; color: var(--text3); font-size: 11.5px; line-height: 1.5; }
+.resources-status { color: var(--text2); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.resources-status:not(:empty) { margin-top: 8px; }
+.resources-empty { margin: 0; padding: 16px 10px; color: var(--text3); font-size: 12px; }
+@media (max-width: 600px) {
+  .resources-filter { flex: 1; width: auto; }
+  .resources-count { flex-basis: 100%; margin-left: 0; }
+  .resources-link { flex-basis: 100%; margin-left: 0; }
+  .resources-widget { flex: 1; width: auto; }
+}
 @media (max-width: 760px) {
   #settings-main { flex-direction: column; }
   #settings-nav { width: auto; flex-direction: row; overflow-x: auto; gap: 0; padding: 0 6px; border-right: 0; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
@@ -1202,23 +1236,26 @@ const TOOL_CATEGORIES = [
 
 async function renderResourcesTab(container) {
   const page = document.createElement('div')
-  page.className = 'settings-page'
+  page.className = 'settings-page resources-page'
   container.appendChild(page)
   page.innerHTML = settingsHeading('Resources', 'Review backend usage, link resources to widgets, and clean up old workspaces. Data and legacy resources are retained unless explicitly selected.', 'Workspace environment') + `
-    <div class="config-section" style="padding:12px">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-        <select aria-label="Resource filter" id="res-filter"><option value="all">All resources</option><option value="old">Old / unassigned workspaces</option></select>
+    <div class="config-section resources-content">
+      <div class="resources-toolbar">
+        <label for="res-filter">Workspace</label>
+        <select class="pf-field resources-filter" aria-label="Resource filter" id="res-filter"><option value="all">All resources</option><option value="old">Old / unassigned workspaces</option></select>
         <button class="btn" id="res-refresh">Refresh</button>
-        <span id="res-count" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
+        <span id="res-count" class="resources-count"></span>
       </div>
-      <div id="res-list" style="overflow:auto;max-height:55vh"></div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+      <div id="res-list" class="resources-list"></div>
+      <div class="resources-actions">
         <button class="btn" id="res-clean" disabled>Review cleanup</button>
-        <select aria-label="Widget to link" id="res-widget"><option value="">Link selected resources to…</option></select>
-        <button class="btn" id="res-link" disabled>Link</button>
+        <div class="resources-link">
+          <select class="pf-field resources-widget" aria-label="Widget to link" id="res-widget"><option value="">Link selected resources to…</option></select>
+          <button class="btn" id="res-link" disabled>Link</button>
+        </div>
       </div>
-      <p style="font-size:12px;color:var(--text3);margin-bottom:0">Detected usage is a safeguard, not a complete code analysis. Keep resources used through dynamic paths or external clients. A link declares a backend dedicated to the widget; other consumers still protect it.</p>
-      <div id="res-status" role="status" style="font-size:12px;margin-top:8px;white-space:pre-wrap"></div>
+      <p class="resources-hint">Detected usage is a safeguard, not a complete code analysis. Keep resources used through dynamic paths or external clients. A link declares a backend dedicated to the widget; other consumers still protect it.</p>
+      <div id="res-status" class="resources-status" role="status"></div>
     </div>`
   const filter = page.querySelector('#res-filter')
   const widget = page.querySelector('#res-widget')
@@ -1234,19 +1271,18 @@ async function renderResourcesTab(container) {
     const shown = rows.filter(r => filter.value === 'all' || (filter.value === 'old' ? r.kind !== 'widget' && (!r.session || !live.has(r.session)) : r.session === filter.value))
     page.querySelector('#res-count').textContent = `${shown.length} resources · ${selected.size} selected`
     const list = page.querySelector('#res-list')
-    list.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--text3)"><th></th><th style="padding:6px">Resource</th><th style="padding:6px">Created from</th><th style="padding:6px">Usage</th></tr></thead><tbody></tbody></table>'
+    list.innerHTML = '<table class="resources-table"><thead><tr><th class="resources-select" aria-label="Selection"></th><th>Resource</th><th>Created from</th><th>Usage</th></tr></thead><tbody></tbody></table>'
     const body = list.querySelector('tbody')
     for (const r of shown) {
       const tr = document.createElement('tr')
-      tr.style.borderTop = '1px solid var(--border)'
       const origin = sessions.find(s => s.id === r.session)?.name || (r.session ? `${r.session} (deleted)` : 'Legacy / unknown')
       const usage = r.missing ? 'Missing' : r.kind === 'widget' ? 'Dashboard widget' : r.usedBy.length ? `${r.usedBy.length} consumer(s)` : (r.protected ? 'Protected' : r.tracked ? 'No detected consumer' : 'Unknown usage')
-      tr.innerHTML = `<td style="padding:6px"><label class="toggle-switch" style="display:inline-block;vertical-align:middle"><input type="checkbox" aria-label="Select ${escHtml(r.id)}" ${selected.has(r.id) ? 'checked' : ''} ${r.protected || r.kind === 'widget' ? 'disabled' : ''}><span class="toggle-track"></span></label></td><td style="padding:6px;word-break:break-word">${escHtml(r.id)}</td><td style="padding:6px;color:var(--text3)">${escHtml(origin)}</td><td style="padding:6px;color:var(--text2)">${escHtml(usage)}</td>`
+      tr.innerHTML = `<td class="resources-select"><label class="toggle-switch"><input type="checkbox" aria-label="Select ${escHtml(r.id)}" ${selected.has(r.id) ? 'checked' : ''} ${r.protected || r.kind === 'widget' ? 'disabled' : ''}><span class="toggle-track"></span></label></td><td class="resources-name">${escHtml(r.id)}</td><td class="resources-origin">${escHtml(origin)}</td><td>${escHtml(usage)}</td>`
       tr.querySelector('input').onchange = e => { e.target.checked ? selected.add(r.id) : selected.delete(r.id); updateButtons(); page.querySelector('#res-count').textContent = `${shown.length} resources · ${selected.size} selected` }
       tr.lastChild.title = [r.reason, ...r.usedBy].filter(Boolean).join('\n')
       body.appendChild(tr)
     }
-    if (!shown.length) { const p = document.createElement('p'); p.textContent = 'No resources match this filter.'; list.appendChild(p) }
+    if (!shown.length) { const p = document.createElement('p'); p.className = 'resources-empty'; p.textContent = 'No resources match this filter.'; list.appendChild(p) }
     updateButtons()
   }
   const refresh = async () => {
