@@ -33,6 +33,14 @@ func (s *Server) lockRAGRequest(w http.ResponseWriter) (func(), bool) {
 	return release, true
 }
 func (s *Server) ragCaptionerFor(p *aiProfile) *rag.Captioner {
+	for _, src := range p.Sources {
+		if src.ID == p.DefaultSource && src.ModelSettings[p.Model].Vision != nil {
+			if !*src.ModelSettings[p.Model].Vision {
+				return nil
+			}
+			return rag.NewBackendCaptioner(p.backendConfig().newChatBackend(), p.Model)
+		}
+	}
 	if p.ServerDefaults || p.ChatVision == nil {
 		return s.newCaptioner()
 	}

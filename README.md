@@ -73,8 +73,8 @@ PostgreSQL (pgvector), SearXNG and Traefik are included. Open [http://localhost:
 Open **Settings → AI provider**:
 
 1. Select a source or click **+ Add a source**. Choose **OpenAI**, **Anthropic**, **Ollama** or **Other compatible** (vLLM, SGLang, llama.cpp…). OpenAI and Anthropic have preset URLs; for a local or compatible server, enter its URL and a key if required.
-2. Click **Load models**, select or enter a model that supports tool calling, then **Test model**. Local models must already be installed on your model server.
-3. Click **Use as default** for the source you want, check **Default model supports vision** if applicable, then **Save changes**. You can now talk to the agent.
+2. Click **Connect**, then choose a model that supports tool calling. Choosing it saves automatically. Local models must already be installed on your model server.
+3. Click **Use as default** for the source you want, if it is not already the default. You can now talk to the agent. **Model settings…** lets you override the context window and image support for an individual model; its **Save** does not change your default model.
 
 For Ollama running on the Docker host, use `http://host-gateway:11434`; for an OpenAI-compatible server, include `/v1` in its URL. `localhost` inside the Prism container refers to that container, not your host.
 
@@ -301,7 +301,7 @@ The `.env` file supplies installation settings and optional AI defaults. Docker 
 - **Replies come back empty or cut off on a reasoning model.** It spent the whole budget thinking. Lower the reasoning effort in **Settings → Agent** (or `OPENAI_REASONING_EFFORT`), or switch reasoning off there.
 - **Reasoning effort has no effect behind LiteLLM.** `drop_params: true` strips `reasoning_effort` before it reaches the model — add `allowed_openai_params: ["reasoning_effort"]` to the route's `litellm_params`.
 - **"Iteration limit reached".** The agent hit its per-message cap on a long task — not a bug, a budget. Raise it in **Settings → Agent → Turn budget** (default 75, up to 500), or just say "continue".
-- **Widget previews look wrong / the agent says it can't see.** Choose a vision-capable model and check **Default model supports vision** in **AI provider**. Ask the agent for help with your model's capabilities.
+- **Widget previews look wrong / the agent says it can't see.** Choose a vision-capable model and set **Vision support → Supports images** in **AI provider → Model settings…**. Ask the agent for help with your model's capabilities.
 - **You changed the embedding model.** Test it in **AI provider**, confirm the index rebuild, then click **Save changes**. Prism applies it automatically. Document search is temporarily unavailable during rebuilding; a failed rebuild retains the original index. Correct the configuration and save again to retry. Do not delete your volumes.
 - **Upgrading.** `docker compose pull && docker compose up -d` (or `--build` if you build locally). Schema migrations run at start, nothing to do — [docs/UPGRADING.md](docs/UPGRADING.md) is the contract.
 - **Timezone.** Choose an IANA name in **Settings → Profile** (for example `America/Martinique` or `Europe/Paris`), or use the browser timezone button. It applies without restarting. `TZ` remains the deployment fallback. New/rescheduled cron jobs capture your preference; existing jobs keep their timezone. Calendar/task forms display browser-local time.

@@ -197,12 +197,20 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var b struct {
 			aiProfile
-			Action   string `json:"action"`
-			ClearKey bool   `json:"clearKey"`
-			SourceID string `json:"sourceID"`
+			Action   string                   `json:"action"`
+			ClearKey bool                     `json:"clearKey"`
+			SourceID string                   `json:"sourceID"`
+			Settings ollama.ModelCapabilities `json:"settings"`
 		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&b) != nil {
 			writeErr(w, 400, "invalid AI configuration")
+			return
+		}
+		if b.Action == "model_info" || b.Action == "model_settings" {
+			if old == nil || old.ServerDefaults {
+				old = s.environmentAIProfile()
+			}
+			s.handleModelSettings(w, r, old, b.Action, b.SourceID, b.Model, b.Settings)
 			return
 		}
 		if b.Action != "save" && b.Action != "chat" && b.Action != "test" && b.Action != "models" && b.Action != "embedding_models" && b.Action != "embedding_test" {
@@ -365,6 +373,12 @@ func (s *Server) aiSettingsTool(u *memory.User) func(context.Context, map[string
 		}
 		if strings.HasPrefix(argStr(args, "action"), "ai_source_") {
 			return s.aiSourceTool(ctx, u, args)
+		}
+		if action := argStr(args, "action"); action == "ai_model_get" || action == "ai_model_set" {
+			if s.store() == nil {
+				return "", errors.New("AI settings require the database")
+			}
+			return s.aiModelSettingsTool(ctx, u, args)
 		}
 		id := int64(0)
 		if u != nil {

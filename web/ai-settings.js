@@ -38,10 +38,11 @@ async function renderAITab(container, options = {}) {
           <label class="ai-field">Source name<input name="sourceName" maxlength="100" placeholder="e.g. Local Ollama"></label>
           <div class="ai-subsection">
             ${connection('')}${model('', '')}
+            <div class="ai-model-settings-row"><span class="ai-hint" data-model-capabilities>Context: automatic</span><button type="button" class="ai-button" data-model-settings>Model settings…</button></div>
           </div>
           <div class="ai-default-action"><span data-default-action-help>Make this model the default for new conversations.</span><button class="ai-button" type="button" data-default-source>Use as default</button></div>
         </div>
-        <div class="ai-row ai-vision"><div><div class="ai-row-title">Default model supports vision</div><div class="ai-hint">Enable if the default model accepts images. Required for image attachments and visual widget checks.</div></div><label class="toggle-switch"><input name="chatVision" type="checkbox" aria-label="Default model supports vision"><span class="toggle-track"></span></label></div>
+        <input name="chatVision" type="checkbox" hidden aria-label="Legacy vision fallback">
       </section>
       <section class="ai-section">
         <div class="config-cat-header"><span class="config-cat-name">Document search</span></div>
@@ -58,15 +59,31 @@ async function renderAITab(container, options = {}) {
       </section>
       <div class="ai-footer">
         <div class="ai-actions"><button class="ai-button primary" type="submit" data-save>Save other changes</button><button class="ai-button" type="button" data-action="reset" hidden>Use server settings</button></div>
-        <p class="ai-hint">Choosing a model saves automatically. Use Save other changes for names, vision and embedding options. Keys are stored encrypted and never displayed.</p>
+        <p class="ai-hint">Choosing a model saves automatically. Use Save other changes for names and embedding options. Keys are stored encrypted and never displayed.</p>
       </div>
     </form>
-    <p class="ai-status" data-status role="status" aria-live="polite"></p>`
+    <p class="ai-status" data-status role="status" aria-live="polite"></p>
+    <dialog class="ai-model-dialog" aria-labelledby="ai-model-title">
+      <form data-model-form>
+        <h3 id="ai-model-title">Model settings</h3>
+        <p class="ai-hint" data-model-source></p>
+        <label class="ai-field">Model<input name="settingsModel" list="ai-settings-models" required maxlength="200" spellcheck="false"><datalist id="ai-settings-models"></datalist></label>
+        <label class="ai-field">Context window<select name="contextMode"><option value="auto">Automatic</option><option value="manual">Set token limit</option></select></label>
+        <label class="ai-field" data-context-limit hidden>Context window (tokens)<input name="contextWindow" type="number" min="4096" max="2000000" step="1" placeholder="e.g. 500000"></label>
+        <p class="ai-hint" data-context-detected></p>
+        <label class="ai-field">Vision support<select name="modelVision"><option value="auto">Automatic</option><option value="yes">Supports images</option><option value="no">Text only</option></select></label>
+        <p class="ai-hint" data-vision-detected></p>
+        <p class="ai-hint">Prism manages conversation compaction automatically. These settings do not change your default model.</p>
+        <p class="ai-status" data-model-status role="status" aria-live="polite"></p>
+        <div class="ai-model-footer"><button class="ai-button" type="button" data-model-reset>Reset to automatic</button><div><button class="ai-button" type="button" data-model-close>Close</button><button class="ai-button primary" type="submit">Save</button></div></div>
+      </form>
+    </dialog>`
   const form = pane.querySelector('form'), status = pane.querySelector('[data-status]')
   form.hidden=true
   const f = name => form.elements.namedItem(name)
   let saved = null, busy = false, sources = [], selectedID = null, defaultID = null, dirty = false
   const catalogs = new Map()
+  const modelInfo = new Map()
   const warnOnLeave=e=>{if(pane.isConnected&&(dirty||busy)){e.preventDefault();e.returnValue=''}}
   const warnOnNavigate=e=>{if(!pane.isConnected||(!dirty&&!busy)||!e.target.closest('a[href],.nav-item')||pane.contains(e.target))return;if(!window.confirm(busy?'Configuration is still being saved or checked. Leave this page?':'Your changes have not been saved. Leave this page?')){e.preventDefault();e.stopImmediatePropagation()}}
   window.addEventListener('beforeunload',warnOnLeave)
@@ -144,6 +161,39 @@ async function renderAITab(container, options = {}) {
     const src=sources.find(s=>s.id===e.sourceID)
     return src ? {...e,provider:src.provider,baseURL:src.baseURL} : e
   }
+  function modelTokenLabel(value) {
+    const n=Number(value)
+    if(n>=1000000 && n%1000000===0)return `${n/1000000}M`
+    if(n>=1000 && n%1000===0)return `${n/1000}k`
+    return n.toLocaleString('en-US')
+  }
+  function modelInfoKey(src, model) { return JSON.stringify([src.id,src.provider,src.baseURL,model]) }
+  async function fetchModelInfo(sourceID, model) {
+    const r=await fetchConfig('/api/ai/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'model_info',sourceID,model})})
+    const data=await r.json()
+    if(!r.ok)throw new Error(data.error || 'Cannot read model capabilities')
+    return data
+  }
+  function showModelCapabilities(selected, stored) {
+    const el=pane.querySelector('[data-model-capabilities]'), model=f('model').value
+    if(!stored || !model || stored.provider!==selected?.provider || stored.baseURL!==selected?.baseURL) {
+      el.textContent='Choose and save a model to see its capabilities.'
+      return
+    }
+    const key=modelInfoKey(stored,model)
+    let entry=modelInfo.get(key)
+    if(!entry) {
+      entry={loading:true};modelInfo.set(key,entry)
+      fetchModelInfo(stored.id,model).then(data=>{entry.data=data}).catch(()=>{entry.failed=true}).finally(()=>{
+        entry.loading=false
+        if(pane.isConnected && modelInfo.get(key)===entry)refresh()
+      })
+    }
+    const cfg=selected?.modelSettings?.[model] || {}, detected=entry.data?.detected || {}
+    const context=cfg.contextWindow ? `${modelTokenLabel(cfg.contextWindow)} tokens (manual)` : detected.contextWindow ? `${modelTokenLabel(detected.contextWindow)} tokens (auto-detected)` : entry.loading ? 'checking…' : 'not detected (conservative limit)'
+    const vision=typeof cfg.vision==='boolean' ? `${cfg.vision?'supported':'text only'} (manual)` : typeof detected.vision==='boolean' ? `${detected.vision?'supported':'text only'} (auto-detected)` : entry.loading ? 'checking…' : 'not detected (existing setting)'
+    el.textContent=`Context: ${context} · Vision: ${vision}`
+  }
   function refresh() {
     for (const prefix of ['', 'embed-']) {
       const provider = f(prefix+'provider').value, custom = provider === 'ollama' || provider === 'other' || (f(prefix+'baseURL').value && f(prefix+'baseURL').value !== defaults[provider])
@@ -159,6 +209,9 @@ async function renderAITab(container, options = {}) {
     pane.querySelector('[data-embedding-source]').hidden=f('useSameProvider').checked
     pane.querySelector('[data-embedding-connection]').hidden = f('useSameProvider').checked || !!f('embeddingSource').value
     const selected=sources.find(s=>s.id===selectedID)
+    const stored=saved?.sources?.find(s=>s.id===selectedID)
+    pane.querySelector('[data-model-settings]').disabled=busy || !stored?.model || stored.baseURL!==selected?.baseURL || stored.provider!==selected?.provider
+    showModelCapabilities(selected,stored)
     pane.querySelector('[data-editor-title]').textContent=selected?.name || 'New source'
     const defaultAction=pane.querySelector('.ai-default-action')
     defaultAction.hidden=selectedID===defaultID || !selected?.model
@@ -222,6 +275,7 @@ async function renderAITab(container, options = {}) {
     const r=await fetchConfig('/api/ai/config',{cache:'no-store'})
     if (!r.ok) throw new Error('AI configuration is unavailable. In multi-user mode, use Admin → AI provider.')
     saved=await r.json()
+    modelInfo.clear()
     sources=saved.sources.map(s=>({...s,apiKey:'',clearKey:false}));defaultID=saved.defaultSource
     selectedID=sources.some(s=>s.id===selectedID) ? selectedID : defaultID
     for (const key of ['provider','baseURL','model']) f('embed-'+key).value=saved.embedding[key] || (key==='provider' ? 'openai' : '')
@@ -273,6 +327,86 @@ async function renderAITab(container, options = {}) {
     } catch(err) {if(persisted){dirty=false;saved.model=payload('save').model}status.textContent=(persisted?'Saved, but unable to refresh the page. ' : action==='save'&&err.name!=='TimeoutError'?'Not saved: ':'')+err.message;status.classList.add('error');if(localStatus)localStatus.textContent='Connection failed: '+err.message;return persisted}
     finally {busy=false;pane.classList.remove('is-busy');controls.forEach(el=>el.disabled=false);pane.querySelectorAll('[data-sources] button').forEach(el=>el.disabled=false);showSaveState();refresh()}
   }
+  const dialog=pane.querySelector('dialog'), modelForm=dialog.querySelector('form')
+  const mf=name=>modelForm.elements.namedItem(name)
+  const modelStatus=dialog.querySelector('[data-model-status]')
+  let modelSourceID=null, modelGeneration=0, modelWorking=false
+  function modelControls(working) {
+    modelWorking=working
+    modelForm.querySelectorAll('input,select,button').forEach(el=>el.disabled=working && !el.hasAttribute('data-model-close'))
+  }
+  function contextFields() {
+    const manual=mf('contextMode').value==='manual'
+    dialog.querySelector('[data-context-limit]').hidden=!manual
+    mf('contextWindow').required=manual
+  }
+  async function modelRequest(action, settings) {
+    const r=await fetchConfig('/api/ai/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,sourceID:modelSourceID,model:mf('settingsModel').value.trim(),settings})})
+    const data=await r.json()
+    if(!r.ok)throw new Error(data.error || 'Cannot update model settings')
+    return data
+  }
+  async function readModelInfo() {
+    const generation=++modelGeneration
+    modelControls(true);modelStatus.classList.remove('error');modelStatus.textContent='Checking model capabilities…'
+    try {
+      const id=mf('settingsModel').value.trim()
+      const data=await fetchModelInfo(modelSourceID,id)
+      if(generation!==modelGeneration || !dialog.open)return
+      const src=saved.sources.find(s=>s.id===modelSourceID)
+      if(src){modelInfo.set(modelInfoKey(src,id),{data,loading:false});refresh()}
+      mf('contextMode').value=data.settings?.contextWindow?'manual':'auto'
+      mf('contextWindow').value=data.settings?.contextWindow || ''
+      mf('modelVision').value=data.settings?.vision===true?'yes':data.settings?.vision===false?'no':'auto'
+      const detected=data.detected?.contextWindow
+      mf('contextMode').options[0].textContent=detected ? `Automatic — ${modelTokenLabel(detected)} tokens` : 'Automatic — not detected'
+      mf('modelVision').options[0].textContent=typeof data.detected?.vision==='boolean' ? `Automatic — ${data.detected.vision?'supported':'text only'}` : 'Automatic — existing setting'
+      dialog.querySelector('[data-vision-detected]').textContent=data.detected?.vision===true?'Provider reports image support.':data.detected?.vision===false?'Provider reports a text-only model.':'Image support was not reported. Automatic keeps your existing configuration.'
+      dialog.querySelector('[data-context-detected]').textContent=detected ? `Automatic limit: ${Number(detected).toLocaleString('en-US')} tokens, reported by the provider. For Ollama, this respects its configured context.` : 'The provider did not report a context window. Prism uses a conservative limit; enter the server’s effective token limit if known.'
+      modelStatus.textContent=''
+      contextFields()
+    } catch(err) {if(generation===modelGeneration){modelStatus.textContent=err.message;modelStatus.classList.add('error')}}
+    finally {if(generation===modelGeneration)modelControls(false)}
+  }
+  pane.querySelector('[data-model-settings]').addEventListener('click',()=>{
+    modelSourceID=selectedID
+    const src=saved.sources.find(s=>s.id===modelSourceID)
+    dialog.querySelector('[data-model-source]').textContent=src.name+' · '+src.provider
+    const list=dialog.querySelector('datalist');list.replaceChildren()
+    for(const id of new Set([src.model,...(catalogs.get(modelSourceID)||[]),...Object.keys(src.modelSettings||{})])) {
+      const o=document.createElement('option');o.value=id;list.append(o)
+    }
+    mf('settingsModel').value=src.model
+    dialog.showModal();void readModelInfo()
+  })
+  mf('settingsModel').addEventListener('change',()=>{if(mf('settingsModel').value.trim())void readModelInfo()})
+  mf('contextMode').addEventListener('change',contextFields)
+  dialog.querySelector('[data-model-reset]').addEventListener('click',()=>{
+    mf('contextMode').value='auto';mf('contextWindow').value='';mf('modelVision').value='auto';contextFields()
+    modelStatus.textContent='Click Save to restore automatic settings for this model.'
+  })
+  dialog.querySelector('[data-model-close]').addEventListener('click',()=>dialog.close())
+  dialog.addEventListener('cancel',e=>{if(modelWorking){e.preventDefault();return}})
+  dialog.addEventListener('close',()=>{modelGeneration++;modelControls(false)})
+  modelForm.addEventListener('submit',async e=>{
+    e.preventDefault();if(modelWorking || !modelForm.reportValidity())return
+    const settings={contextWindow:mf('contextMode').value==='manual'?Number(mf('contextWindow').value):0}
+    if(mf('modelVision').value!=='auto')settings.vision=mf('modelVision').value==='yes'
+    const sourceID=modelSourceID, id=mf('settingsModel').value.trim(), generation=++modelGeneration
+    modelControls(true);modelStatus.classList.remove('error');modelStatus.textContent='Saving…'
+    try {
+      await modelRequest('model_settings',settings)
+      for(const list of [sources,saved.sources]) {
+        const src=list.find(s=>s.id===sourceID);if(!src)continue
+        src.modelSettings={...(src.modelSettings||{})}
+        if(!settings.contextWindow && settings.vision===undefined)delete src.modelSettings[id]
+        else src.modelSettings[id]={...settings}
+      }
+      refresh()
+      if(generation===modelGeneration)modelStatus.textContent='Saved. Applied to the next message using this model.'
+    }catch(err){if(generation===modelGeneration){modelStatus.textContent=err.message;modelStatus.classList.add('error')}}
+    finally {if(generation===modelGeneration)modelControls(false)}
+  })
   for(const prefix of ['', 'embed-']) {
     f(prefix+'provider').addEventListener('change',()=>{
       f(prefix+'baseURL').value=defaults[f(prefix+'provider').value];f(prefix+'apiKey').value='';f(prefix+'model').value='';f(prefix+'clearKey').checked=false

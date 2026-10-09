@@ -160,40 +160,26 @@ func TestSummarizeDroppedSpan_FailureIsReported(t *testing.T) {
 	}
 }
 
-// When the summary fails, the compaction still happens (the context must
-// shrink) but the note left in history and the UI line both say the details
-// are LOST — never a bland placeholder the model could mistake for context.
-func TestCompactLiveContext_FailedSummaryLeavesHonestNote(t *testing.T) {
+// A failed summarizer must never destroy the original exchanges.
+func TestCompactLiveContext_FailedSummaryRetainsHistory(t *testing.T) {
 	origBudget := liveContextCharBudget
 	liveContextCharBudget = 1000
 	defer func() { liveContextCharBudget = origBudget }()
-
 	var history []ollama.Message
 	for i := 0; i < 20; i++ {
-		history = append(history,
-			ollama.Message{Role: "user", Content: string(make([]byte, 100))},
-			ollama.Message{Role: "assistant", Content: string(make([]byte, 100))},
-		)
+		history = append(history, ollama.Message{Role: "user", Content: strings.Repeat("u", 100)}, ollama.Message{Role: "assistant", Content: strings.Repeat("a", 100)})
 	}
 	a := &Agent{model: "test", ollama: &fakeSummarizeBackend{err: errors.New("boom")}, history: history}
 	events := make(chan Event, 10)
 	a.compactLiveContextIfNeeded(context.Background(), events)
 	close(events)
-
-	if len(a.history) >= len(history) {
-		t.Fatalf("history must still shrink on a failed summary: before=%d after=%d", len(history), len(a.history))
+	if len(a.history) != len(history) || a.history[0].Content != history[0].Content {
+		t.Fatal("failed compaction discarded original history")
 	}
-	if !strings.Contains(a.history[0].Content, "could NOT be summarized") || !strings.Contains(a.history[0].Content, "boom") {
-		t.Fatalf("note must say the summary failed and why, got %q", a.history[0].Content)
-	}
-	var progress string
-	for _, ev := range drainEvents(events) {
-		if ev.Type == "progress" {
-			progress = ev.Content
+	for ev := range events {
+		if ev.Type == "progress" && !strings.Contains(ev.Content, "retained") {
+			t.Fatalf("misleading progress: %s", ev.Content)
 		}
-	}
-	if !strings.Contains(progress, "summary failed") {
-		t.Fatalf("UI progress line must not claim success, got %q", progress)
 	}
 }
 
@@ -321,9 +307,9 @@ func TestNeedsProactiveCompaction_SoftThreshold(t *testing.T) {
 	if a.needsProactiveCompaction() {
 		t.Fatal("50% of budget must not trigger the proactive pass")
 	}
-	a.history = append(a.history, ollama.Message{Role: "assistant", Content: string(make([]byte, 300))})
+	a.history = append(a.history, ollama.Message{Role: "assistant", Content: string(make([]byte, 400))})
 	if !a.needsProactiveCompaction() {
-		t.Fatal("80% of budget must trigger the proactive pass")
+		t.Fatal("90% of budget must trigger the proactive pass")
 	}
 }
 

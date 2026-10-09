@@ -15,13 +15,14 @@ import (
 )
 
 type aiSource struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-	BaseURL  string `json:"baseURL"`
-	APIKey   string `json:"apiKey,omitempty"`
-	Model    string `json:"model"`
-	ClearKey bool   `json:"clearKey,omitempty"`
+	ID            string                              `json:"id"`
+	Name          string                              `json:"name"`
+	Provider      string                              `json:"provider"`
+	BaseURL       string                              `json:"baseURL"`
+	APIKey        string                              `json:"apiKey,omitempty"`
+	Model         string                              `json:"model"`
+	ClearKey      bool                                `json:"clearKey,omitempty"`
+	ModelSettings map[string]ollama.ModelCapabilities `json:"modelSettings,omitempty"`
 }
 
 func (s aiSource) profile() aiProfile {
@@ -43,6 +44,9 @@ func (p *aiProfile) normalizeSources() error {
 		}
 		seen[src.ID] = true
 		src.Name = strings.TrimSpace(src.Name)
+		if err := validateModelSettings(src.ModelSettings); err != nil {
+			return err
+		}
 		if src.Name == "" {
 			src.Name = src.ID
 		}
@@ -115,6 +119,16 @@ func (s *Server) prepareSources(p, old *aiProfile) error {
 		}
 		for i := range p.Sources {
 			src := &p.Sources[i]
+			// Older tools/clients omit model settings. Retain overrides only
+			// while the same source still refers to the same provider endpoint.
+			if src.ModelSettings == nil {
+				for _, prev := range old.Sources {
+					if src.ID == prev.ID && src.Provider == prev.Provider && src.BaseURL == prev.BaseURL {
+						src.ModelSettings = prev.ModelSettings
+						break
+					}
+				}
+			}
 			if src.ClearKey {
 				src.APIKey = ""
 			} else if src.APIKey == "" {
@@ -132,7 +146,7 @@ func (s *Server) prepareSources(p, old *aiProfile) error {
 func publicSources(p *aiProfile) []map[string]any {
 	out := []map[string]any{}
 	for _, s := range p.Sources {
-		out = append(out, map[string]any{"id": s.ID, "name": s.Name, "provider": s.Provider, "baseURL": s.BaseURL, "model": s.Model, "keyConfigured": s.APIKey != ""})
+		out = append(out, map[string]any{"id": s.ID, "name": s.Name, "provider": s.Provider, "baseURL": s.BaseURL, "model": s.Model, "keyConfigured": s.APIKey != "", "modelSettings": s.ModelSettings})
 	}
 	return out
 }
@@ -195,6 +209,9 @@ func (b *sourcesBackend) Chat(ctx context.Context, req ollama.ChatRequest, out c
 		return
 	}
 	req.Model = model
+	if src.Provider == "ollama" && src.ModelSettings[model].ContextWindow > 0 {
+		req.Options.NumCtx = src.ModelSettings[model].ContextWindow
+	}
 	src.profile().backendConfig().newChatBackend().Chat(ctx, req, out)
 }
 func (b *sourcesBackend) Ping(ctx context.Context) error {
@@ -202,14 +219,9 @@ func (b *sourcesBackend) Ping(ctx context.Context) error {
 	return src.profile().backendConfig().newChatBackend().Ping(ctx)
 }
 func (b *sourcesBackend) ContextBudgetChars() int {
-	n := 0
-	for _, src := range b.sources {
-		v := src.profile().backendConfig().newChatBackend().ContextBudgetChars()
-		if v > 0 && (n == 0 || v < n) {
-			n = v
-		}
-	}
-	return n
+	// Model-specific budgets are obtained through ModelCapabilities. A small
+	// unused source must not constrain a different selected model.
+	return 0
 }
 func (b *sourcesBackend) ListModels(ctx context.Context) ([]string, error) {
 	type result struct {
@@ -325,6 +337,7 @@ func (s *Server) aiSourceTool(ctx context.Context, u *memory.User, args map[stri
 		src.Provider, src.BaseURL = cp.Provider, cp.BaseURL
 		if src.Provider != prior.Provider || src.BaseURL != prior.BaseURL {
 			src.APIKey = ""
+			src.ModelSettings = nil
 		}
 		if name := argStr(args, "key_secret"); name != "" {
 			if memory.ValidateScriptSecretName(name) != nil {

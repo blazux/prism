@@ -126,6 +126,15 @@ func TestSubagentInheritsParentToolDenials(t *testing.T) {
 	var calls atomic.Int32
 	var denied atomic.Bool
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/model_group/info") {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
+			fmt.Fprint(w, `{"data":[{"id":"fixture"}]}`)
+			return
+		}
+
 		var req struct {
 			Messages []struct {
 				Role    string `json:"role"`

@@ -39,28 +39,14 @@ type Event struct {
 }
 
 const (
-	// maxHistoryMessages triggers summarization when user+assistant count exceeds this.
-	maxHistoryMessages = 40
-	// keepRecentMessages is how many recent messages to keep after summarization.
-	keepRecentMessages = 20
 	// defaultSessionID is used for single-user deployments.
 	defaultSessionID = "default"
 	// telegramSessionID is the reserved session for the Telegram bridge.
 	telegramSessionID = "telegram"
 )
 
-// liveContextCharBudget is roughly how large Agent.history's total content is
-// allowed to get before compactLiveContextIfNeeded kicks in. This is
-// deliberately independent of — and not synced with — MaybeSummarize's
-// DB-side thresholds above: that's the agent's long-term memory, summarized
-// on its own schedule, and it's fine if what it keeps diverges from what the
-// live chat keeps. This constant governs what actually gets replayed to the
-// LLM on every call (see callOllama) — a long-running session (same Agent,
-// many turns) would otherwise grow this unbounded until the backend rejects
-// the prompt as too long, with "new chat" as the only recourse. Character-
-// based like every other size cap in this codebase (no tokenizer dependency
-// anywhere here). Override via LIVE_CONTEXT_CHAR_BUDGET for a deployment
-// running a model with a known-larger/smaller context.
+// Fallback for a provider with unknown context capacity. An explicit env value
+// remains an operator ceiling; otherwise known models use their own window.
 var liveContextCharBudget = func() int {
 	if v := os.Getenv("LIVE_CONTEXT_CHAR_BUDGET"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -97,29 +83,32 @@ const historyTruncatedNote = "[Older messages in this conversation were not repl
 // see effectiveHistoryBudget below.
 
 type Agent struct {
-	location        *time.Location
-	ollama          ollama.Backend
-	executor        *ToolExecutor
-	model           string
-	histMu          sync.Mutex // guards history, toolSeq and historyLoaded (Chat goroutine vs WS read pump: InjectNote, ResetHistory, SetSession)
-	history         []ollama.Message
-	toolSeq         int // monotonically increasing tool call ID across all iterations
-	disabledTools   []string
-	ragCtxFn        func() string                                  // returns live RAG context block for system prompt
-	mcpCtxFn        func() string                                  // returns MCP servers context block for system prompt
-	userProfileFn   func() string                                  // returns full user profile for system prompt injection
-	skillsCtxFn     func() string                                  // returns saved-skills index for system prompt
-	servicesCtxFn   func() string                                  // returns the live index of agent-deployed docker services
-	viewCtxFn       func() string                                  // returns what the user is currently looking at
-	globalCtxFn     func() string                                  // global assistant: overview of all workspaces
-	learningsCtxFn  func(ctx context.Context, query string) string // searches agent-learnings RAG for relevant past lessons
-	memStore        *memory.Store
-	usageRecorder   UsageRecorder // independent of history storage for ephemeral subagents
-	usageScope      string
-	sessionID       string
-	personality     string // this session's own editable section (the adaptation, or the base for the default session)
-	basePersonality string // default personality prepended for non-default sessions (layered model)
-	agentName       string // optional global agent name injected into the prompt
+	location             *time.Location
+	ollama               ollama.Backend
+	executor             *ToolExecutor
+	model                string
+	histMu               sync.Mutex // guards history, toolSeq and historyLoaded (Chat goroutine vs WS read pump: InjectNote, ResetHistory, SetSession)
+	history              []ollama.Message
+	modelContextTokens   int
+	contextOverheadChars int
+	contextCharsPerToken float64
+	toolSeq              int // monotonically increasing tool call ID across all iterations
+	disabledTools        []string
+	ragCtxFn             func() string                                  // returns live RAG context block for system prompt
+	mcpCtxFn             func() string                                  // returns MCP servers context block for system prompt
+	userProfileFn        func() string                                  // returns full user profile for system prompt injection
+	skillsCtxFn          func() string                                  // returns saved-skills index for system prompt
+	servicesCtxFn        func() string                                  // returns the live index of agent-deployed docker services
+	viewCtxFn            func() string                                  // returns what the user is currently looking at
+	globalCtxFn          func() string                                  // global assistant: overview of all workspaces
+	learningsCtxFn       func(ctx context.Context, query string) string // searches agent-learnings RAG for relevant past lessons
+	memStore             *memory.Store
+	usageRecorder        UsageRecorder // independent of history storage for ephemeral subagents
+	usageScope           string
+	sessionID            string
+	personality          string // this session's own editable section (the adaptation, or the base for the default session)
+	basePersonality      string // default personality prepended for non-default sessions (layered model)
+	agentName            string // optional global agent name injected into the prompt
 	// limits are the per-turn budget (iteration cap, extended reasoning) loaded
 	// from config by loadProfile each turn; limitsOverride is set by headless
 	// callers (the group's shared agent) whose config lives elsewhere and wins
@@ -541,6 +530,17 @@ func clampHistoryTail(entries []memory.HistoryEntry, maxRows int) ([]memory.Hist
 
 // loadHistoryFromDB populates a.history from the DB on first call.
 func (a *Agent) loadHistoryFromDB(ctx context.Context) {
+	// Fetch the active span after the persisted summary, with a proportional
+	// safety bound rather than truncating a 500k-token model to 200 rows.
+	replayRows := historyReplayMaxMessages
+	if os.Getenv("HISTORY_REPLAY_MAX_MESSAGES") == "" {
+		if n := a.effectiveHistoryBudget() / 128; n > replayRows {
+			replayRows = n
+		}
+		if replayRows > 20000 {
+			replayRows = 20000
+		}
+	}
 	a.histMu.Lock()
 	defer a.histMu.Unlock()
 	if a.historyLoaded || a.memStore == nil {
@@ -552,8 +552,8 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 	// Read one row beyond the cap so a truncation is detectable, and only the
 	// tail — the head of a long-running space's history can never fit the
 	// model's context anyway. See historyReplayMaxMessages.
-	maxRows := historyReplayMaxMessages
-	entries, err := a.memStore.LoadHistoryTail(ctx, a.sessionID, maxRows+1)
+	maxRows := replayRows
+	entries, err := a.memStore.LoadActiveHistoryTail(ctx, a.sessionID, maxRows+1)
 	if err != nil {
 		log.Printf("[agent] load history: %v", err)
 		return
@@ -608,8 +608,8 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 }
 
 // compactLiveContextIfNeeded shrinks the LIVE in-memory history when it gets
-// critically large, independent of and not synced with MaybeSummarize's
-// DB-side long-term memory (see liveContextCharBudget's doc comment). Never
+// critically large, independently of
+// the immutable stored transcript. Never
 // touches tool-result CONTENT — never truncates an MCP or any other tool's
 // payload, only decides whether an older message is kept or replaced by a
 // short summary of the span it was part of. Only ever cuts at a "user"
@@ -617,30 +617,77 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 // from the assistant message that requested them — this also means it can
 // never discard the CURRENT task's own working data, only completed older
 // turns.
-// effectiveHistoryBudget is the char cap live compaction enforces: the backend's
-// own context-derived budget when it has one (Ollama, from num_ctx), otherwise
-// the large configured default (OpenAI/Anthropic size their own context). This
-// is what keeps a long session's assembled prompt inside a small-context local
-// model without needlessly over-compacting a large-context backend.
+// effectiveHistoryBudget reserves output and the measured system/tools payload,
+// then sizes history from the selected model's effective context window.
+func (a *Agent) modelInputBudgetChars() int {
+	a.histMu.Lock()
+	tokens, overhead, ratio := a.modelContextTokens, a.contextOverheadChars, a.contextCharsPerToken
+	a.histMu.Unlock()
+	if tokens <= 0 {
+		return 0
+	}
+	if ratio <= 0 {
+		ratio = 3.5
+	}
+	if overhead == 0 {
+		overhead = int(10_000 * ratio)
+	}
+	return int(float64(tokens-modelOutputReserve(tokens))*ratio) - overhead
+}
+
 func (a *Agent) effectiveHistoryBudget() int {
 	budget := liveContextCharBudget
-	if a.ollama != nil {
+	a.histMu.Lock()
+	known := a.modelContextTokens > 0
+	a.histMu.Unlock()
+	if known {
+		budget = a.modelInputBudgetChars()
+		if budget < 1024 {
+			budget = 1024
+		}
+		if os.Getenv("LIVE_CONTEXT_CHAR_BUDGET") != "" && liveContextCharBudget < budget {
+			budget = liveContextCharBudget
+		}
+	} else if a.ollama != nil {
 		if b := a.ollama.ContextBudgetChars(); b > 0 && b < budget {
 			budget = b
 		}
 	}
-	// A caller-supplied budget only ever tightens: a chat channel wants a short
-	// window for latency, but it can't hand the backend more than it accepts.
 	if b := a.limitsOverride.HistoryBudgetChars; b > 0 && b < budget {
 		budget = b
 	}
 	return budget
 }
 
+func modelOutputReserve(tokens int) int {
+	reserve := tokens / 4
+	if reserve > ollama.DefaultNumPredict {
+		reserve = ollama.DefaultNumPredict
+	}
+	return reserve
+}
+
+func (a *Agent) refreshModelCapabilities(ctx context.Context) {
+	var info ollama.ModelCapabilities
+	if provider, ok := a.ollama.(ollama.CapabilitiesProvider); ok {
+		info, _ = provider.ModelCapabilities(ctx, a.model)
+	}
+	a.histMu.Lock()
+	a.modelContextTokens = info.ContextWindow
+	a.histMu.Unlock()
+	if info.Vision != nil {
+		a.SetChatBlind(!*info.Vision)
+		a.executor.SetChatBlind(!*info.Vision)
+		if !*info.Vision {
+			a.stripHistoryImages()
+		}
+	}
+}
+
 func (a *Agent) compactLiveContextIfNeeded(ctx context.Context, events chan<- Event) {
 	budget := a.effectiveHistoryBudget()
 	if a.liveHistoryChars() > budget {
-		a.compactLiveContextTo(ctx, events, budget/2)
+		a.compactLiveContextTo(ctx, events, int(float64(budget)*0.6))
 	}
 }
 
@@ -650,7 +697,7 @@ func (a *Agent) liveHistoryChars() int {
 	defer a.histMu.Unlock()
 	total := 0
 	for _, m := range a.history {
-		total += len(m.Content)
+		total += messageContextChars(m)
 	}
 	return total
 }
@@ -660,7 +707,7 @@ func (a *Agent) liveHistoryChars() int {
 // compactLiveContextProactively), well before the hard budget forces one in
 // the foreground at the start of a turn — where the user waits through the
 // summarization call with nothing but a progress line.
-const liveContextSoftRatio = 0.7
+const liveContextSoftRatio = 0.85
 
 // needsProactiveCompaction reports whether the live history has crossed the
 // soft threshold.
@@ -680,17 +727,17 @@ func (a *Agent) compactLiveContextProactively() {
 	if !a.needsProactiveCompaction() {
 		return
 	}
-	go a.compactLiveContextTo(context.Background(), nil, a.effectiveHistoryBudget()/2)
+	go a.compactLiveContextTo(context.Background(), nil, int(float64(a.effectiveHistoryBudget())*0.6))
 }
 
 // forceCompactLiveContext compacts even when the live history is nominally under
 // budget — the recovery path when a turn came back truncated (empty output at
-// done_reason=length): shrink toward half the effective budget to free
+// done_reason=length): shrink toward 60% of the effective budget to free
 // generation room before retrying. A no-op when there's nothing older safe to
 // drop (a single huge in-progress turn), in which case the caller surfaces the
 // "start a new chat" notice.
 func (a *Agent) forceCompactLiveContext(ctx context.Context, events chan<- Event) {
-	a.compactLiveContextTo(ctx, events, a.effectiveHistoryBudget()/2)
+	a.compactLiveContextTo(ctx, events, int(float64(a.effectiveHistoryBudget())*0.6))
 }
 
 // compactLiveContextTo replaces the oldest completed turns with a summary until
@@ -703,13 +750,13 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 	a.histMu.Lock()
 	total := 0
 	for _, m := range a.history {
-		total += len(m.Content)
+		total += messageContextChars(m)
 	}
 	// Walk forward from the start until the KEPT tail is back under the target,
 	// then advance to the next "user" boundary for safety.
 	cut, kept := 0, total
 	for cut < len(a.history) && kept > target {
-		kept -= len(a.history[cut].Content)
+		kept -= messageContextChars(a.history[cut])
 		cut++
 	}
 	for cut < len(a.history) && a.history[cut].Role != "user" {
@@ -724,6 +771,13 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 	a.histMu.Unlock()
 
 	summary, err := a.summarizeDroppedSpan(ctx, dropped)
+	if err != nil {
+		log.Printf("[agent] session=%s compaction failed; history retained: %v", a.sessionID, err)
+		if events != nil {
+			events <- Event{Type: "progress", Content: "Context summary failed; conversation retained. Retry when the provider is available."}
+		}
+		return
+	}
 
 	a.histMu.Lock()
 	if a.historyGen != genBefore {
@@ -738,15 +792,7 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 		log.Printf("[agent] session=%s compaction aborted: history changed concurrently (gen %d -> %d)", a.sessionID, genBefore, a.historyGen)
 		return
 	}
-	// The note is honest either way: when the summary failed, the model is told
-	// the details are gone rather than being handed a bland placeholder it
-	// might mistake for the actual context.
-	var note string
-	if err == nil {
-		note = "[Context compacted automatically — summary of the earlier exchanges: " + summary + "]"
-	} else {
-		note = "[Context compacted automatically — the earlier exchanges could NOT be summarized (" + err.Error() + "), so their details are lost. If something from before this point matters, ask the user instead of guessing.]"
-	}
+	note := "[Context compacted automatically — summary of the earlier exchanges: " + summary + "]"
 	// Splice against the CURRENT history, not a tail captured before the
 	// summarization call: this may be a background pass and the next turn may
 	// already have appended its own messages after the cut. Only gen-bumping
@@ -766,19 +812,11 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 	a.persistLiveCompaction(note, beforeID)
 	a.histMu.Unlock()
 
-	if err == nil {
-		log.Printf("[agent] session=%s compacted live context: dropped %d messages, kept %d (summary %d chars)", a.sessionID, len(dropped), len(tail), len(summary))
-		if events != nil {
-			events <- Event{Type: "progress", Content: fmt.Sprintf(
-				"Context compacted (%d older messages summarized) to stay within the model's limits.", len(dropped))}
-		}
-		return
-	}
-	log.Printf("[agent] session=%s compacted live context WITHOUT a summary: dropped %d messages, kept %d — %v", a.sessionID, len(dropped), len(tail), err)
+	log.Printf("[agent] session=%s compacted live context: dropped %d messages, kept %d (summary %d chars)", a.sessionID, len(dropped), len(tail), len(summary))
 	if events != nil {
-		events <- Event{Type: "progress", Content: fmt.Sprintf(
-			"Context compacted (%d older messages dropped) but their summary failed (%v) — the assistant no longer has their details.", len(dropped), err)}
+		events <- Event{Type: "progress", Content: fmt.Sprintf("Context compacted (%d older messages summarized) to stay within the model's limits.", len(dropped))}
 	}
+
 }
 
 // firstDBID returns the row id of the first persisted message in msgs (0 if none).
@@ -1251,6 +1289,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	a.loadProfile()
 
 	// Load history from DB on first call in this session
+	a.refreshModelCapabilities(ctx)
 	a.loadHistoryFromDB(ctx)
 
 	// Text-only OpenAI-compatible models reject image parts with a hard 400. Keep
@@ -1377,7 +1416,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				a.histMu.Lock()
 				histChars := 0
 				for _, m := range a.history {
-					histChars += len(m.Content)
+					histChars += messageContextChars(m)
 				}
 				a.histMu.Unlock()
 				contextBound := histChars > a.effectiveHistoryBudget()/2
@@ -1444,10 +1483,6 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				continue
 			}
 			events <- Event{Type: "stream_end"}
-			// Trigger summarization asynchronously after the turn completes
-			if a.memStore != nil {
-				go a.memStore.MaybeSummarize(context.Background(), a.sessionID, a.ollama, a.model, maxHistoryMessages, keepRecentMessages)
-			}
 			return
 		}
 
@@ -1686,15 +1721,22 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 		prompt += "\n\nClaude tool loading is active: exec_command, read_file, write_file, widget, cron, prism_help and tool_catalog are initially visible. Other permitted tools require tool_catalog load before use. Load exact names directly when known from this prompt or the user; list only if names are unknown. Load related tools together. Loaded tools appear on the next model call."
 	}
 
-	a.histMu.Lock()
-	messages := append([]ollama.Message{
-		{Role: "system", Content: prompt},
-	}, a.history...)
-	a.histMu.Unlock()
-
 	tools, cacheToolPrefixCount := a.buildToolListWithCachePrefix()
 	if catalog := catalogFromContext(ctx); catalog != nil {
 		tools, cacheToolPrefixCount = catalog.selectTools(tools)
+	}
+
+	toolJSON, _ := json.Marshal(tools)
+	a.histMu.Lock()
+	a.contextOverheadChars = len(prompt) + len(toolJSON)
+	a.histMu.Unlock()
+	a.compactLiveContextIfNeeded(ctx, events)
+	a.histMu.Lock()
+	messages := append([]ollama.Message{{Role: "system", Content: prompt}}, a.history...)
+	contextTokens := a.modelContextTokens
+	a.histMu.Unlock()
+	if contextTokens > 0 && a.liveHistoryChars() > a.modelInputBudgetChars() {
+		return "", nil, nil, "", errors.New("the conversation does not fit this model's context window; its history was retained. Retry if summarization failed, choose a larger-context model or lighter prompt profile, or start a new conversation")
 	}
 	req := ollama.ChatRequest{
 		Model:                  a.model,
@@ -1708,8 +1750,11 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 		NoThinking:      a.channel == voiceChannel || !a.turnThinking,
 		ReasoningEffort: a.turnReasoningEffort,
 	}
-	// num_ctx is filled in by the Ollama client (ollama.NumCtx); the OpenAI and
-	// Anthropic backends ignore it and size their own context.
+	if contextTokens > 0 {
+		req.Options.NumPredict = modelOutputReserve(contextTokens)
+	}
+	// The sources router forwards an explicit per-model num_ctx to Ollama;
+	// OpenAI/Anthropic receive only the generation ceiling.
 
 	log.Printf("[agent] → ollama: %d messages, %d tools, prompt_len=%d", len(messages), len(tools), len(prompt))
 
@@ -1723,6 +1768,20 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 	complete := false
 	defer func() {
 		raw, _ := json.Marshal(tools)
+		a.histMu.Lock()
+		a.contextOverheadChars = len(prompt) + len(raw)
+		if measured != nil && measured.InputTokens != nil && *measured.InputTokens > 0 && imageBytes == 0 {
+			totalBytes := len(prompt) + len(raw) + historyContentBytes + toolArgumentBytes
+			ratio := float64(totalBytes) / float64(*measured.InputTokens)
+			if ratio < 1 {
+				ratio = 1
+			}
+			if ratio > 4 {
+				ratio = 4
+			}
+			a.contextCharsPerToken = ratio
+		}
+		a.histMu.Unlock()
 		record := &ModelUsage{
 			TaskID: taskIDFromContext(ctx), Scope: scope, Model: a.model, Profile: a.promptProfile(),
 			DurationMS: time.Since(started).Milliseconds(), SystemBytes: len(prompt), ToolBytes: len(raw),
@@ -1838,6 +1897,11 @@ func (a *Agent) emitToolSideEffects(toolName string, rawArgs json.RawMessage, ev
 func (a *Agent) SetBackend(backend ollama.Backend, model string) {
 	a.ollama = backend
 	a.model = model
+	a.histMu.Lock()
+	a.modelContextTokens = 0
+	a.contextOverheadChars = 0
+	a.contextCharsPerToken = 0
+	a.histMu.Unlock()
 }
 
 // ReloadStoredHistory is used by an idle browser agent after another tab completed

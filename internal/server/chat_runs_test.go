@@ -38,6 +38,15 @@ func checkDashboardRunReplay(t *testing.T, user *memory.User) {
 	release := make(chan struct{})
 	var calls atomic.Int32
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/model_group/info") {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"data":[{"id":"fixture"}]}`)
+			return
+		}
 		calls.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Beginning. \"}}]}\n\n")

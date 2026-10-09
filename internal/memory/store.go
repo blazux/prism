@@ -681,13 +681,27 @@ func (s *Store) LoadHistory(ctx context.Context, sessionID string) ([]HistoryEnt
 // to then throw most of it away made each message slower than the last. The
 // tail is the only part that can still fit the model's context anyway.
 func (s *Store) LoadHistoryTail(ctx context.Context, sessionID string, limit int) ([]HistoryEntry, error) {
+	return s.loadHistoryTail(ctx, sessionID, limit, 0)
+}
+
+// LoadActiveHistoryTail avoids reading already-summarized transcript rows.
+// The UI's LoadHistoryTail remains unchanged and retains the full transcript.
+func (s *Store) LoadActiveHistoryTail(ctx context.Context, sessionID string, limit int) ([]HistoryEntry, error) {
+	var before int64
+	if lc := s.GetLiveCompaction(ctx, sessionID); lc != nil {
+		before = lc.BeforeID
+	}
+	return s.loadHistoryTail(ctx, sessionID, limit, before)
+}
+
+func (s *Store) loadHistoryTail(ctx context.Context, sessionID string, limit int, before int64) ([]HistoryEntry, error) {
 	q := `
 		SELECT id, role, content, tool_calls, created_at
 		FROM conversation_history
-		WHERE session_id = $1
+		WHERE session_id = $1 AND id >= $2
 		ORDER BY id ASC
 	`
-	args := []interface{}{sessionID}
+	args := []interface{}{sessionID, before}
 	if limit > 0 {
 		// Take the newest rows, then flip back to insertion order — the order
 		// the agent and the UI both replay.
@@ -695,9 +709,9 @@ func (s *Store) LoadHistoryTail(ctx context.Context, sessionID string, limit int
 			SELECT id, role, content, tool_calls, created_at FROM (
 				SELECT id, role, content, tool_calls, created_at
 				FROM conversation_history
-				WHERE session_id = $1
+				WHERE session_id = $1 AND id >= $2
 				ORDER BY id DESC
-				LIMIT $2
+				LIMIT $3
 			) t ORDER BY id ASC
 		`
 		args = append(args, limit)

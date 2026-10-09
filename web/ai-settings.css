@@ -55,6 +55,15 @@
 .ai-settings .ai-footer .ai-hint { margin-top: 0; }
 .ai-settings .ai-status { min-height: 18px; color: var(--text2); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .ai-settings .ai-status.error { color: var(--red); }
+.ai-settings .ai-model-settings-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:9px; }
+.ai-settings .ai-model-settings-row .ai-hint { margin:0; overflow-wrap:anywhere; }
+.ai-settings .ai-model-settings-row .ai-button { flex-shrink:0; }
+.ai-settings .ai-model-dialog { box-sizing:border-box; width:min(440px, calc(100vw - 24px)); max-height:calc(100vh - 32px); margin:auto; padding:18px; background:var(--bg1); color:var(--text); border:1px solid var(--border2); border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.4); }
+.ai-settings .ai-model-dialog::backdrop { background:rgba(0,0,0,.45); backdrop-filter:blur(2px); }
+.ai-settings .ai-model-dialog h3 { font-size:15px; margin:0 0 5px; }
+.ai-settings .ai-model-dialog .ai-status { margin:8px 0; }
+.ai-settings .ai-model-footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; border-top:1px solid var(--border); padding-top:12px; }
+.ai-settings .ai-model-footer > div { display:flex; gap:8px; }
 @media (max-width: 600px) {
   .ai-settings .ai-source-toolbar { flex-wrap: wrap; }
   .ai-settings .ai-sources { flex-basis: 100%; }
