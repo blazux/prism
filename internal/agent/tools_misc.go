@@ -302,7 +302,44 @@ func (e *ToolExecutor) mcpWriteScope() (scope, denial string) {
 	if e.globalAdmin {
 		return g, ""
 	}
-	return "", fmt.Sprintf("MCP servers for group %s are managed by its group admin (admin console → MCP servers). You are a member, not an admin, so you cannot add or remove them — tell the user to ask a group admin.", groupName)
+	return "", fmt.Sprintf("MCP servers for group %s are managed by its group admin (admin console → MCP servers). You are a member, not an admin, so you cannot change them — tell the user to ask a group admin.", groupName)
+}
+
+func (e *ToolExecutor) mcpRefreshServer(ctx context.Context, name string) (string, error) {
+	scope, denial := e.mcpWriteScope()
+	if denial != "" {
+		return denial, nil
+	}
+	if e.mcpMgr == nil {
+		return "MCP not available (Postgres required)", nil
+	}
+	if name == "" {
+		return "", fmt.Errorf("name is required (from mcp action=list)")
+	}
+	servers, err := e.mcpMgr.List(ctx, scope)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, server := range servers {
+		names = append(names, server.Name)
+		if !strings.EqualFold(server.Name, name) && server.ID != name {
+			continue
+		}
+		tools, err := e.mcpMgr.Refresh(ctx, scope, server.ID)
+		if err != nil {
+			return "", fmt.Errorf("could not refresh MCP tools; previous list kept: %w", err)
+		}
+		if e.onMCPReload != nil {
+			e.onMCPReload()
+		}
+		state := "available to use"
+		if !server.Enabled {
+			state = "still disabled"
+		}
+		return fmt.Sprintf("MCP server '%s' refreshed: %d tools, %s. Configuration and credentials kept.", server.Name, len(tools), state), nil
+	}
+	return fmt.Sprintf("No MCP server named %q — nothing changed. Configured servers: %s", name, strings.Join(names, ", ")), nil
 }
 
 func (e *ToolExecutor) mcpAddServer(ctx context.Context, name, url, authSecret string) (string, error) {

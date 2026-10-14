@@ -26,6 +26,29 @@ with a role: **member** or **admin**. Per-group model grants live there too.
   **MCP**, **Secrets**, **Tool access**.
 - **Member** — no console. Settings only.
 
+## Shared widgets gallery
+
+Open **Shared widgets** in the header to browse your group's publications.
+Each card shows its title, author, optional description and a static preview.
+Click the preview to enlarge it, then **Add to workspace** to copy the widget
+to the current workspace. You can also select several cards and **Add selected**.
+
+Use a widget's **Share** button or the gallery's **Share** tab to publish it.
+An optional description (up to 1,000 characters) explains what it does. Prism
+automatically captures the visible widget; a dashboard uses its first widget
+as the cover. The image may contain the data visible at publication time.
+The capture stays with the share even if the original widget is removed.
+Browsing previews never executes the shared widget's code.
+
+The agent can do the same with `widget action=share id=<widget-id>
+description="..."`. It needs no vision model to generate a preview.
+
+Existing shares remain available after upgrading, with no description or
+preview until republished. **No preview available** also appears if the
+capture browser was unavailable; this does not prevent sharing or adding.
+Previews follow the share's group access. Unsharing deletes the publication
+and its preview, while copies already added to workspaces are kept.
+
 ## The Room and the shared agent
 Members of a group get a **Room** app in the left rail: a chat where the group
 talks together and to the group's **shared agent**. Pick the group at the top;

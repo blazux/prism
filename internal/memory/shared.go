@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
 
 // SharedWidget is one widget inside a shared item's payload.
 type SharedWidget struct {
+	ID               string            `json:"id,omitempty"` // original ID, for publication preview only
 	Resources        []string          `json:"resources,omitempty"`
 	ResourceVersions map[string]string `json:"resourceVersions,omitempty"`
 	Title            string            `json:"title"`
@@ -50,16 +53,30 @@ type SharedPayload struct {
 // {"widgets":[{"title","content","cols","height"}, ...]} — one entry for a
 // "widget", many for a "dashboard".
 type SharedItem struct {
-	ID        int64           `json:"id"`
-	GroupID   int64           `json:"groupId"`
-	GroupName string          `json:"groupName,omitempty"`
-	Kind      string          `json:"kind"` // "widget" | "dashboard"
-	Title     string          `json:"title"`
-	OwnerID   int64           `json:"ownerId"`
-	OwnerName string          `json:"ownerName"`
-	Count     int             `json:"count"`             // number of widgets (gallery convenience)
-	Payload   json.RawMessage `json:"payload,omitempty"` // omitted from list responses
-	CreatedAt time.Time       `json:"createdAt"`
+	Description string          `json:"description,omitempty"`
+	HasPreview  bool            `json:"hasPreview"`
+	Preview     []byte          `json:"-"` // immutable JPEG; never inline in the catalogue/model context
+	ID          int64           `json:"id"`
+	GroupID     int64           `json:"groupId"`
+	GroupName   string          `json:"groupName,omitempty"`
+	Kind        string          `json:"kind"` // "widget" | "dashboard"
+	Title       string          `json:"title"`
+	OwnerID     int64           `json:"ownerId"`
+	OwnerName   string          `json:"ownerName"`
+	Count       int             `json:"count"`             // number of widgets (gallery convenience)
+	Payload     json.RawMessage `json:"payload,omitempty"` // omitted from list responses
+	CreatedAt   time.Time       `json:"createdAt"`
+}
+
+const MaxSharedDescription = 1000
+const MaxSharedPreviewBytes = 2 << 20
+
+func SharedDescription(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if utf8.RuneCountInString(value) > MaxSharedDescription {
+		return "", fmt.Errorf("description must be at most %d characters", MaxSharedDescription)
+	}
+	return value, nil
 }
 
 func (s *Store) ShareItem(ctx context.Context, it SharedItem) (int64, error) {
@@ -69,11 +86,18 @@ func (s *Store) ShareItem(ctx context.Context, it SharedItem) (int64, error) {
 	if len(it.Payload) == 0 {
 		it.Payload = json.RawMessage("{}")
 	}
+	description, err := SharedDescription(it.Description)
+	if err != nil {
+		return 0, err
+	}
+	if len(it.Preview) > MaxSharedPreviewBytes {
+		return 0, errors.New("shared preview is too large")
+	}
 	var id int64
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO shared_items (group_id, kind, title, owner_id, owner_name, payload)
-		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-		it.GroupID, it.Kind, it.Title, it.OwnerID, it.OwnerName, it.Payload).Scan(&id)
+	err = s.pool.QueryRow(ctx, `
+		INSERT INTO shared_items (group_id, kind, title, owner_id, owner_name, payload, description, preview)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+		it.GroupID, it.Kind, it.Title, it.OwnerID, it.OwnerName, it.Payload, description, it.Preview).Scan(&id)
 	return id, err
 }
 
@@ -94,7 +118,7 @@ func (s *Store) SharedItemsForGroups(ctx context.Context, groupIDs []int64, kind
 	for rows.Next() {
 		var it SharedItem
 		if err := rows.Scan(&it.ID, &it.GroupID, &it.GroupName, &it.Kind, &it.Title,
-			&it.OwnerID, &it.OwnerName, &it.Count, &it.CreatedAt); err != nil {
+			&it.OwnerID, &it.OwnerName, &it.Count, &it.CreatedAt, &it.Description, &it.HasPreview); err != nil {
 			return nil, err
 		}
 		out = append(out, it)
@@ -111,7 +135,8 @@ func sharedListQuery(groupIDs []int64, kind string) (string, []interface{}) {
 		where += fmt.Sprintf(" AND si.kind = $%d", len(args))
 	}
 	q := `SELECT si.id, si.group_id, g.name, si.kind, si.title, si.owner_id, si.owner_name,
-		COALESCE(jsonb_array_length(si.payload->'widgets'),0), si.created_at
+		COALESCE(jsonb_array_length(si.payload->'widgets'),0), si.created_at,
+		si.description, COALESCE(octet_length(si.preview),0) > 0
 		FROM shared_items si JOIN groups g ON g.id = si.group_id
 		WHERE ` + where + ` ORDER BY si.id DESC`
 	return q, args
@@ -123,13 +148,20 @@ func (s *Store) SharedItemByID(ctx context.Context, id int64) (SharedItem, bool,
 		return it, false, nil
 	}
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, group_id, kind, title, owner_id, owner_name, payload, created_at
+		SELECT id, group_id, kind, title, owner_id, owner_name, payload, created_at, description, COALESCE(octet_length(preview),0) > 0
 		FROM shared_items WHERE id = $1`, id).Scan(
-		&it.ID, &it.GroupID, &it.Kind, &it.Title, &it.OwnerID, &it.OwnerName, &it.Payload, &it.CreatedAt)
+		&it.ID, &it.GroupID, &it.Kind, &it.Title, &it.OwnerID, &it.OwnerName, &it.Payload, &it.CreatedAt, &it.Description, &it.HasPreview)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return it, false, nil
 	}
 	return it, err == nil, err
+}
+
+// SharedPreview is called only after checking the item's group membership.
+func (s *Store) SharedPreview(ctx context.Context, id int64) ([]byte, error) {
+	var preview []byte
+	err := s.pool.QueryRow(ctx, `SELECT preview FROM shared_items WHERE id=$1`, id).Scan(&preview)
+	return preview, err
 }
 
 func (s *Store) DeleteSharedItem(ctx context.Context, id int64) error {

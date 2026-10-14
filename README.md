@@ -11,6 +11,7 @@ Yes, another AI dashboard. Except this one runs on your own hardware, with local
 <details>
 <summary>More screenshots</summary>
 
+<img src="example1.png" width="700" alt="Project management dashboard with a task board, Gantt chart, team workload, and documents">
 <img src="chat.png" width="700" alt="Chat with the agent">
 <img src="settings.png" width="700" alt="Agent settings">
 

@@ -969,7 +969,7 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		case "add_shared":
 			return wrap(e.sharedAdd(ctx, str("id")))
 		case "share":
-			return wrap(e.sharePublish(ctx, str("id"), str("kind"), str("group")))
+			return wrap(e.sharePublish(ctx, str("id"), str("kind"), str("group"), str("description")))
 		case "unshare":
 			return wrap(e.sharedUnshare(ctx, str("id")))
 		default:
@@ -1151,6 +1151,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			return wrap(e.mcpListServers(ctx))
 		case "add":
 			return wrap(e.mcpAddServer(ctx, str("name"), str("url"), str("auth_secret")))
+		case "refresh":
+			return wrap(e.mcpRefreshServer(ctx, str("name")))
 		case "remove":
 			return wrap(e.mcpRemoveServer(ctx, str("name")))
 		case "enable":
@@ -1158,7 +1160,7 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		case "disable":
 			return wrap(e.mcpSetEnabled(ctx, str("name"), false))
 		default:
-			return "", nil, fmt.Errorf("mcp: unknown action %q (expected list, add, remove, enable, disable)", str("action"))
+			return "", nil, fmt.Errorf("mcp: unknown action %q (expected list, add, refresh, remove, enable, disable)", str("action"))
 		}
 	case "list_secrets": // legacy alias
 		return wrap(e.listSecrets(ctx))

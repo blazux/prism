@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,6 +14,9 @@ import (
 	"prism/internal/memory"
 	"prism/internal/ollama"
 )
+
+var ErrServerNotFound = errors.New("MCP server not found")
+var ErrServerChanged = errors.New("MCP server configuration changed during refresh; try again")
 
 // ServerConfig is the full view of a configured MCP server including its cached tools.
 type ServerConfig struct {
@@ -86,14 +90,66 @@ func (m *Manager) Connect(ctx context.Context, sessionID, name, url, authSecret 
 
 	toolsJSON, _ := json.Marshal(tools)
 	id := slugify(name)
+	m.clientsMu.Lock()
+	defer m.clientsMu.Unlock()
 	if err := ms.MCPUpsertServer(ctx, sessionID, id, name, url, authSecret, true, toolsJSON); err != nil {
 		return nil, fmt.Errorf("save server: %w", err)
 	}
 
-	m.clientsMu.Lock()
 	m.clients[sessionID+":"+id] = client
-	m.clientsMu.Unlock()
 
+	return tools, nil
+}
+
+// Refresh reconnects with the existing credentials and replaces the cached
+// tools only after a complete successful discovery. Disabled servers stay off.
+func (m *Manager) Refresh(ctx context.Context, sessionID, id string) ([]Tool, error) {
+	ms := m.getStore()
+	if ms == nil {
+		return nil, fmt.Errorf("database not available (Postgres required)")
+	}
+	rows, err := ms.MCPListServers(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var previous *memory.MCPServerRow
+	for i := range rows {
+		if rows[i].ID == id {
+			previous = &rows[i]
+			break
+		}
+	}
+	if previous == nil {
+		return nil, ErrServerNotFound
+	}
+	connCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	authHeader, err := m.bearerFor(connCtx, sessionID, previous.AuthSecret)
+	if err != nil {
+		return nil, err
+	}
+	client := NewClient(previous.URL, authHeader)
+	if err := client.Initialize(connCtx); err != nil {
+		return nil, fmt.Errorf("initialize: %w", err)
+	}
+	tools, err := client.ListTools(connCtx)
+	if err != nil {
+		return nil, fmt.Errorf("list tools: %w", err)
+	}
+	toolsJSON, err := json.Marshal(tools)
+	if err != nil {
+		return nil, err
+	}
+	m.clientsMu.Lock()
+	defer m.clientsMu.Unlock()
+	updated, err := ms.MCPRefreshTools(connCtx, *previous, toolsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("save tools: %w", err)
+	}
+	if !updated {
+		return nil, ErrServerChanged
+	}
+	m.clients[sessionID+":"+id] = client
 	return tools, nil
 }
 
@@ -104,9 +160,12 @@ func (m *Manager) RemoveByID(ctx context.Context, sessionID, id string) error {
 		return fmt.Errorf("database not available")
 	}
 	m.clientsMu.Lock()
+	defer m.clientsMu.Unlock()
+	if err := ms.MCPDeleteServer(ctx, sessionID, id); err != nil {
+		return err
+	}
 	delete(m.clients, sessionID+":"+id)
-	m.clientsMu.Unlock()
-	return ms.MCPDeleteServer(ctx, sessionID, id)
+	return nil
 }
 
 // Remove deletes a server by its human name (converts to slug first).

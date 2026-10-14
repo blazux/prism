@@ -347,17 +347,34 @@ func (c *Client) Initialize(ctx context.Context) error {
 
 // ListTools fetches the tools exposed by the server.
 func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
-	result, err := c.call(ctx, "tools/list", map[string]interface{}{})
-	if err != nil {
-		return nil, err
+	tools := []Tool{}
+	params := map[string]interface{}{}
+	seen := map[string]bool{}
+	for {
+		result, err := c.call(ctx, "tools/list", params)
+		if err != nil {
+			return nil, err
+		}
+		var resp struct {
+			Tools      []Tool `json:"tools"`
+			NextCursor string `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(result, &resp); err != nil {
+			return nil, fmt.Errorf("decode tools: %w", err)
+		}
+		if resp.Tools == nil {
+			return nil, fmt.Errorf("invalid tools/list response: tools array required")
+		}
+		tools = append(tools, resp.Tools...)
+		if resp.NextCursor == "" {
+			return tools, nil
+		}
+		if seen[resp.NextCursor] {
+			return nil, fmt.Errorf("invalid tools/list response: repeated pagination cursor")
+		}
+		seen[resp.NextCursor] = true
+		params["cursor"] = resp.NextCursor
 	}
-	var resp struct {
-		Tools []Tool `json:"tools"`
-	}
-	if err := json.Unmarshal(result, &resp); err != nil {
-		return nil, fmt.Errorf("decode tools: %w", err)
-	}
-	return resp.Tools, nil
 }
 
 // CallTool invokes a named tool and returns the concatenated text output.

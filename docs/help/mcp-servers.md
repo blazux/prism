@@ -18,7 +18,11 @@ the agent's toolset immediately. MCP needs Postgres.
 - On success the status shows how many tools were loaded, and the server
   appears above with its tool count and the tool cards.
 
-Each server row has a toggle and a **✕**:
+Each server row has **Refresh**, a toggle and a **✕**:
+- **Refresh** reconnects and reloads the full tools list after you update the
+  MCP server. Added, removed and changed tools are saved immediately, without
+  recreating the server. Its URL, authentication and enabled state are kept.
+  If discovery fails, the previous tools list is retained and an error is shown.
 - **Toggle off** keeps the server configured but withdraws its tools from the
   agent (the cards dim). Toggle on to get them back.
 - **✕** deletes the server after a confirmation.
@@ -30,7 +34,11 @@ of individual ones.
 The agent can list the connected servers and their tools ("which MCP servers
 do I have?"). In personal mode it can also **add** one ("connect the MCP
 server at http://host:3000 as github"), **remove** one, and **disable** or
-**enable** one without forgetting it ("switch the github server off for now").
+**enable** one without forgetting it ("switch the github server off for now"),
+or **refresh** its tools ("refresh the github MCP server", using
+`mcp action=refresh name=github`).
+In shared mode these changes are available to a **group admin**, for the active
+group's servers; a plain member is told to ask a group admin.
 For a server that
 needs a token, it first asks you for it through the secure secret dialog, then
 uses that secret as the bearer token — an integration credential (email
@@ -40,11 +48,11 @@ password, bot tokens…) is refused for this purpose.
 In multi-user mode MCP is **group-scoped**:
 
 - **Personal servers are unavailable.** The add form is gone from Settings, and
-  the agent's add/remove actions are refused with a pointer to the Admin
-  console.
+  only a group admin can change the group's servers, including refreshing them.
 - A **group admin** connects servers in **Admin console → MCP**: pick the
   **Group**, enter **name**, **URL**, pick a group secret for auth (or create
-  one inline from the picker), **Connect**. **remove** deletes one. OAuth works
+  one inline from the picker), **Connect**. **Refresh** reloads its tools using
+  the existing credentials; **remove** deletes one. OAuth works
   the same way as above.
 - Members see the group's servers in **Settings → MCP** (*Managed by the group
   admin — available to your agent and the shared agent (read-only)*), and each
@@ -62,6 +70,6 @@ In multi-user mode MCP is **group-scoped**:
   the tool — see the tools help.
 - Errors returned by the server are shown as-is under the form.
 
-## Asking the agent
-
-"List my MCP servers" always works. Adding or removing one through the agent works in single-user mode, and in shared mode for a **group admin** (the server is then added to the group, exactly as from the admin console); a plain member is told to ask a group admin. A server that requires an OAuth sign-in cannot be added by the agent — it needs the browser consent page from Settings → MCP or the admin console.
+A new OAuth sign-in needs browser consent from Settings → MCP or the admin
+console. Refresh reuses the existing credentials; it does not open a consent
+page. If access has been revoked, authorize the server again from the interface.

@@ -359,7 +359,7 @@ async function loadGroupMCP(){const g=$('mc-group').value;if(!g)return;
  list.forEach(sv=>{const el=document.createElement('div');el.style.flexDirection='column';el.style.alignItems='stretch';
   const auth=sv.authSecret?' · 🔑 '+esc(sv.authSecret):'';
   let html='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span><b>'+esc(sv.name)+'</b> <span style="color:var(--text3)">'+esc(sv.url)+' · '+((sv.tools||[]).length)+' tools'+auth+'</span></span>'+
-   '<button class="mini" onclick="removeGroupMCP(\''+esc(sv.id)+'\')">remove</button></div>';
+   '<span style="display:flex;gap:6px"><button class="mini" title="Reconnect and update the tools list" onclick="refreshGroupMCP(\''+esc(sv.id)+'\',this)">Refresh</button><button class="mini" onclick="removeGroupMCP(\''+esc(sv.id)+'\')">remove</button></span></div>';
   (sv.tools||[]).forEach(t=>{const a=pol[t.name]||'open';
    html+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0 3px 14px;font-size:12px">'+
     '<code style="'+(a==='disabled'?'opacity:.45;text-decoration:line-through':'')+'">'+esc(t.name)+'</code>'+accessSel(t.name)+'</div>';});
@@ -390,6 +390,15 @@ async function addGroupMCP(){const g=$('mc-group').value;if(!g)return;const n=$(
  $('gmcp-status').textContent=r.ok?'connected ✓':'error';setTimeout(()=>$('gmcp-status').textContent='',2500);
  if(r.ok){$('gmcp-name').value='';$('gmcp-url').value='';$('gmcp-secret').value='';}loadGroupMCP();}
 async function removeGroupMCP(id){const g=$('mc-group').value;if(!g)return;await fetch('/api/group/mcp?group='+g+'&id='+encodeURIComponent(id),{method:'DELETE'});loadGroupMCP();}
+async function refreshGroupMCP(id,btn){const g=$('mc-group').value;if(!g)return;
+ const controls=btn.parentElement.querySelectorAll('button');controls.forEach(b=>b.disabled=true);btn.textContent='Refreshing…';
+ $('gmcp-status').textContent='';
+ try{const r=await fetch('/api/group/mcp?group='+g+'&id='+encodeURIComponent(id),{method:'POST',signal:AbortSignal.timeout(25000)});
+  const d=await r.json();if(!r.ok)throw new Error(d.error||'Could not refresh. Previous list kept.');
+  if($('mc-group').value!==g)return;
+  await loadGroupMCP();$('gmcp-status').textContent='Refreshed · '+d.count+' tools';
+ }catch(e){if($('mc-group').value===g)$('gmcp-status').textContent='Refresh failed. Previous list kept. '+e.message;}
+ finally{controls.forEach(b=>b.disabled=false);btn.textContent='Refresh';}}
 // ── Group knowledge base (RAG) ──
 // La description est ce que l'agent lit pour savoir QUAND fouiller une collection :
 // elle est injectée telle quelle dans son prompt système (bloc « ## Knowledge Base

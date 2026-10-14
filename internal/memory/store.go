@@ -425,6 +425,9 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS shared_items_group_idx ON shared_items(group_id, id DESC)`,
+		// Additive migration: existing shares keep their IDs, payloads and access.
+		`ALTER TABLE shared_items ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE shared_items ADD COLUMN IF NOT EXISTS preview BYTEA`,
 		// Inbound webhooks: an external HTTP call becomes an agent turn wrapped in a
 		// stored prompt. The id is the URL segment and must be unique on its own —
 		// the inbound request cannot tell us which scope to look in.
@@ -1184,4 +1187,16 @@ func (s *Store) MCPSetEnabled(ctx context.Context, sessionID, id string, enabled
 		UPDATE mcp_servers SET enabled = $1 WHERE session_id = $2 AND id = $3
 	`, enabled, sessionID, id)
 	return err
+}
+
+// MCPRefreshTools updates only the catalogue, without re-enabling the server or
+// overwriting its configuration. The snapshot prevents an in-flight refresh
+// from resurrecting a deleted server or updating a replacement configuration.
+func (s *Store) MCPRefreshTools(ctx context.Context, previous MCPServerRow, toolsJSON []byte) (bool, error) {
+	result, err := s.pool.Exec(ctx, `
+		UPDATE mcp_servers SET tools_json = $1
+		WHERE session_id = $2 AND id = $3 AND created_at = $4
+		  AND url = $5 AND auth_secret = $6 AND name = $7
+	`, toolsJSON, previous.SessionID, previous.ID, previous.CreatedAt, previous.URL, previous.AuthSecret, previous.Name)
+	return result.RowsAffected() == 1, err
 }

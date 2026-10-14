@@ -367,7 +367,7 @@ func (e *ToolExecutor) browserExec(ctx context.Context, rawURL, jsExpr string) (
 	return out, nil
 }
 
-const browserActScript = `import json, os, sys, time
+const browserActScript = `import json, os, sys, time, uuid
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
 
@@ -391,6 +391,8 @@ with sync_playwright() as p:
         ctx_opts['storage_state'] = SESSION_FILE
     if config.get('ignore_https_errors'):
         ctx_opts['ignore_https_errors'] = True
+    if config.get('viewport'):
+        ctx_opts['viewport'] = config['viewport']
     context = browser.new_context(**ctx_opts)
     # Authenticated widget preview: attach the Prism service cookie, scoped to the
     # start URL's host but every path on it (path='/') — a widget calls /api/...
@@ -412,7 +414,7 @@ with sync_playwright() as p:
 
     if start_url:
         try:
-            page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
+            navigation_response = page.goto(start_url, wait_until='domcontentloaded', timeout=30000)
         except Exception as e:
             # Surface WHY the initial load failed (in the JSON result shape) rather
             # than a bare exit-1 the caller may render empty — see browserScript.
@@ -430,7 +432,7 @@ with sync_playwright() as p:
             browser.close()
             sys.exit(1)
         page.wait_for_timeout(500)
-        results.append({'action':'navigate','status':'ok','url':page.url})
+        results.append({'action':'navigate','status':'ok','url':page.url,'http_status':navigation_response.status if navigation_response else None})
 
     for action in actions:
         atype = action.get('type','')
@@ -456,7 +458,7 @@ with sync_playwright() as p:
                 page.wait_for_selector(action['selector'], timeout=15000)
                 results.append({'action':'wait_for','selector':action['selector'],'status':'ok'})
             elif atype == 'screenshot':
-                fname = str(int(time.time()*1000)) + '.png'
+                fname = str(int(time.time()*1000)) + '-' + uuid.uuid4().hex[:12] + '.png'
                 path = os.path.join(SCREENSHOT_DIR, fname)
                 page.screenshot(path=path, full_page=bool(action.get('full_page')))
                 results.append({'action':'screenshot','status':'ok','url':'/screenshots/'+fname})
@@ -519,6 +521,10 @@ func (e *ToolExecutor) browserAct(ctx context.Context, rawURL string, rawActions
 // origin only — used for authenticated widget previews on multi-user Prism,
 // without ever sending the token to any other site the agent browses.
 func (e *ToolExecutor) browserActAuth(ctx context.Context, rawURL string, rawActions interface{}, authToken string) (string, error) {
+	return e.browserActAuthViewport(ctx, rawURL, rawActions, authToken, nil)
+}
+
+func (e *ToolExecutor) browserActAuthViewport(ctx context.Context, rawURL string, rawActions interface{}, authToken string, viewport map[string]int) (string, error) {
 	if rawURL != "" {
 		if err := validateBrowserURL(rawURL); err != nil {
 			return "", err
@@ -531,17 +537,18 @@ func (e *ToolExecutor) browserActAuth(ctx context.Context, rawURL string, rawAct
 	}
 
 	type actInput struct {
-		URL               string      `json:"url,omitempty"`
-		Actions           interface{} `json:"actions"`
-		AuthCookie        string      `json:"auth_cookie,omitempty"`
-		IgnoreHTTPSErrors bool        `json:"ignore_https_errors,omitempty"`
-		ServiceProxy      string      `json:"service_proxy,omitempty"`
+		URL               string         `json:"url,omitempty"`
+		Actions           interface{}    `json:"actions"`
+		AuthCookie        string         `json:"auth_cookie,omitempty"`
+		IgnoreHTTPSErrors bool           `json:"ignore_https_errors,omitempty"`
+		ServiceProxy      string         `json:"service_proxy,omitempty"`
+		Viewport          map[string]int `json:"viewport,omitempty"`
 	}
 	ignoreHTTPS := false
 	if u, err := url.Parse(rawURL); err == nil && u.Scheme == "https" && isPrivateHost(u.Hostname()) {
 		ignoreHTTPS = true
 	}
-	inputJSON, err := json.Marshal(actInput{URL: rawURL, Actions: rawActions, AuthCookie: authToken, IgnoreHTTPSErrors: ignoreHTTPS, ServiceProxy: e.browserServiceProxy()})
+	inputJSON, err := json.Marshal(actInput{URL: rawURL, Actions: rawActions, AuthCookie: authToken, IgnoreHTTPSErrors: ignoreHTTPS, ServiceProxy: e.browserServiceProxy(), Viewport: viewport})
 	if err != nil {
 		return "", fmt.Errorf("marshal actions: %w", err)
 	}

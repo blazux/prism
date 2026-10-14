@@ -156,11 +156,15 @@ func (e *ToolExecutor) writeSharedWidget(id, title, content string, cols, height
 	return nil
 }
 
-func (e *ToolExecutor) sharePublish(ctx context.Context, widgetID, kind, groupName string) (string, error) {
+func (e *ToolExecutor) sharePublish(ctx context.Context, widgetID, kind, groupName, description string) (string, error) {
 	unlock := resources.Lock(e.workspaceDir)
 	defer unlock()
 	if e.memStore == nil || len(e.sharingGroups) == 0 {
 		return "", fmt.Errorf("sharing is only available inside a multi-user group")
+	}
+	description, err := memory.SharedDescription(description)
+	if err != nil {
+		return "", err
 	}
 	grp, err := e.resolveShareGroup(groupName)
 	if err != nil {
@@ -185,9 +189,10 @@ func (e *ToolExecutor) sharePublish(ctx context.Context, widgetID, kind, groupNa
 		return "", fmt.Errorf("nothing to share (widget not found on this board, or the board is empty)")
 	}
 	payload, _ := json.Marshal(memory.SharedPayload{Widgets: widgets})
+	preview, previewErr := e.CaptureSharedPreview(ctx, widgets[0])
 	if _, err := e.memStore.ShareItem(ctx, memory.SharedItem{
 		GroupID: grp.GroupID, Kind: kind, Title: title,
-		OwnerID: e.actingUserID, OwnerName: "the agent", Payload: payload,
+		OwnerID: e.actingUserID, OwnerName: "the agent", Payload: payload, Description: description, Preview: preview,
 	}); err != nil {
 		return "", err
 	}
@@ -195,7 +200,11 @@ func (e *ToolExecutor) sharePublish(ctx context.Context, widgetID, kind, groupNa
 	if where == "" {
 		where = "your group"
 	}
-	return fmt.Sprintf("Shared %d widget(s) as %q with %s.", len(widgets), title, where), nil
+	message := fmt.Sprintf("Shared %d widget(s) as %q with %s.", len(widgets), title, where)
+	if previewErr != nil {
+		message += " Preview unavailable; the share is still usable."
+	}
+	return message, nil
 }
 
 func (e *ToolExecutor) resolveShareGroup(name string) (memory.Membership, error) {
@@ -256,7 +265,7 @@ func (e *ToolExecutor) readBoardWidgets(only string) []memory.SharedWidget {
 				}
 			}
 		}
-		out = append(out, memory.SharedWidget{Title: title, Content: string(content), Cols: cols, Height: height, Resources: refs, ResourceVersions: versions})
+		out = append(out, memory.SharedWidget{ID: id, Title: title, Content: string(content), Cols: cols, Height: height, Resources: refs, ResourceVersions: versions})
 	}
 	return out
 }

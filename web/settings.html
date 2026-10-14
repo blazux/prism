@@ -1620,7 +1620,7 @@ async function renderMCPTab(container) {
   container.appendChild(page)
   page.innerHTML = MULTI_USER
     ? settingsHeading('MCP servers', 'Group servers are managed in Admin. You can see the tools available to your agent here.', 'Group · read-only')
-    : settingsHeading('MCP servers', 'Connect external tools for your agent. Changes save when you connect or remove a server.', 'Personal')
+    : settingsHeading('MCP servers', 'Connect external tools for your agent. Refresh a server after updating its tools. Changes save immediately.', 'Personal')
 
   // Personal MCP servers only exist in single-user mode — MULTI_USER retires
   // the personal scope entirely (server-side too), so don't even fetch it there.
@@ -1719,6 +1719,7 @@ function renderMCPServerList(page) {
   for (const srv of mcpServers) {
     const card = document.createElement('div')
     card.className = 'mcp-server-card'
+    card.dataset.serverId = srv.id
     const toolCount = srv.tools ? srv.tools.length : 0
     card.innerHTML = `
       <div class="mcp-server-header">
@@ -1728,13 +1729,15 @@ function renderMCPServerList(page) {
         </div>
         <div class="mcp-server-actions">
           <span class="mcp-tool-count">${toolCount} tool${toolCount !== 1 ? 's' : ''}</span>
-          <label class="toggle-switch" title="${srv.enabled ? 'Désactiver' : 'Activer'}">
+          <button class="mcp-server-refresh" title="Reconnect and update the tools list">Refresh</button>
+          <label class="toggle-switch" title="${srv.enabled ? 'Disable' : 'Enable'}">
             <input type="checkbox" ${srv.enabled ? 'checked' : ''} data-srv-id="${escHtml(srv.id)}">
             <span class="toggle-track"></span>
           </label>
           <button class="mcp-server-del" title="Delete" data-srv-id="${escHtml(srv.id)}">✕</button>
         </div>
-      </div>`
+      </div>
+      <div class="mcp-add-status mcp-refresh-status" role="status" aria-live="polite"></div>`
 
     if (toolCount > 0) {
       const toolsSection = document.createElement('div')
@@ -1755,7 +1758,37 @@ function renderMCPServerList(page) {
     card.querySelector('.mcp-server-del').addEventListener('click', function() {
       deleteMCPServer(this.dataset.srvId)
     })
+    card.querySelector('.mcp-server-refresh').addEventListener('click', function() {
+      refreshMCPServer(srv, card, page)
+    })
     listEl.appendChild(card)
+  }
+}
+
+async function refreshMCPServer(srv, card, page) {
+  const status = card.querySelector('.mcp-refresh-status')
+  const controls = card.querySelectorAll('button, input')
+  controls.forEach(el => el.disabled = true)
+  status.textContent = 'Refreshing…'
+  status.className = 'mcp-add-status mcp-refresh-status'
+  try {
+    const res = await settingsFetch(`/api/mcp/servers/${encodeURIComponent(srv.id)}?session=${encodeURIComponent(SESSION)}`, { method: 'POST', signal: AbortSignal.timeout(25000) })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Could not refresh. Previous list kept.')
+    srv.tools = data.tools || []
+    if (!page.isConnected) return
+    renderMCPServerList(page)
+    const updated = [...page.querySelectorAll('.mcp-server-card')].find(el => el.dataset.serverId === srv.id)
+    if (updated) {
+      const message = updated.querySelector('.mcp-refresh-status')
+      message.textContent = `Refreshed · ${data.count} tool${data.count !== 1 ? 's' : ''}${srv.enabled ? '' : ' · server remains disabled'}`
+      message.className = 'mcp-add-status mcp-refresh-status ok'
+    }
+  } catch (e) {
+    status.textContent = 'Refresh failed. Previous list kept. ' + e.message
+    status.className = 'mcp-add-status mcp-refresh-status error'
+  } finally {
+    controls.forEach(el => el.disabled = false)
   }
 }
 

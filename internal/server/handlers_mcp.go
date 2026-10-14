@@ -122,7 +122,7 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == "OPTIONS" {
-		w.Header().Set("Access-Control-Allow-Methods", "DELETE, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, DELETE, PATCH, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		return
 	}
@@ -147,6 +147,11 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 	scope := s.personalMCPScope(r, sessionID)
 
 	switch r.Method {
+	case http.MethodPost:
+		if s.refreshMCPServer(w, r, scope, id) {
+			s.broadcastMCP(sessionID)
+		}
+
 	case "DELETE":
 		if err := s.mcpMgr.RemoveByID(r.Context(), scope, id); err != nil {
 			http.Error(w, err.Error(), 500)
@@ -174,6 +179,23 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", 405)
 	}
+}
+
+// POST on an existing server reconnects it without replacing its settings.
+func (s *Server) refreshMCPServer(w http.ResponseWriter, r *http.Request, scope, id string) bool {
+	tools, err := s.mcpMgr.Refresh(r.Context(), scope, id)
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, mcp.ErrServerNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, mcp.ErrServerChanged) {
+			status = http.StatusConflict
+		}
+		writeErr(w, status, "Could not refresh MCP tools. Previous list kept. "+err.Error())
+		return false
+	}
+	writeJSON(w, map[string]interface{}{"ok": true, "count": len(tools), "tools": tools})
+	return true
 }
 
 // broadcastMCP pushes updated MCP server list to all WS clients for a session.

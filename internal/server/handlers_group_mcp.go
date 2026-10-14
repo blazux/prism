@@ -18,6 +18,7 @@ import (
 //
 // GET    /api/group/mcp?group=<id>            → {servers}
 // POST   /api/group/mcp?group=<id>            → {name,url,authSecret} connect
+// POST   /api/group/mcp?group=<id>&id=<srvID> → refresh existing server tools
 // DELETE /api/group/mcp?group=<id>&id=<srvID> → remove
 func (s *Server) handleGroupMCP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -55,6 +56,10 @@ func (s *Server) handleGroupMCP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		if !s.isGroupAdminOf(r.Context(), u, groupID) {
 			writeErr(w, http.StatusForbidden, "group admin only")
+			return
+		}
+		if id := r.URL.Query().Get("id"); id != "" {
+			s.refreshMCPServer(w, r, scope, id)
 			return
 		}
 		var b struct {

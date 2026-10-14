@@ -56,7 +56,7 @@ func (s *Server) sessionWidgets(session, only string) []memory.SharedWidget {
 		if b, err := s.readManagedFile(filepath.Join(dir, p.id+".meta.json")); err == nil {
 			_ = json.Unmarshal(b, &meta)
 		}
-		out = append(out, memory.SharedWidget{Title: p.title, Content: p.content, Cols: p.cols, Height: p.height, Resources: meta.Resources, ResourceVersions: meta.ResourceVersions})
+		out = append(out, memory.SharedWidget{ID: p.id, Title: p.title, Content: p.content, Cols: p.cols, Height: p.height, Resources: meta.Resources, ResourceVersions: meta.ResourceVersions})
 	}
 	return out
 }
@@ -129,14 +129,20 @@ func (s *Server) handleShared(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var body struct {
-			Kind     string `json:"kind"`
-			GroupID  int64  `json:"groupId"`
-			Session  string `json:"session"`
-			WidgetID string `json:"widgetId"`
-			Title    string `json:"title"`
+			Kind        string `json:"kind"`
+			GroupID     int64  `json:"groupId"`
+			Session     string `json:"session"`
+			WidgetID    string `json:"widgetId"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
 		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&body) != nil {
 			writeErr(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		description, err := memory.SharedDescription(body.Description)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if !u.IsGlobalAdmin() && !s.userInGroup(r.Context(), u.ID, body.GroupID) {
@@ -172,15 +178,20 @@ func (s *Server) handleShared(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		payload, _ := json.Marshal(memory.SharedPayload{Widgets: widgets})
+		preview, previewErr := s.resourceExecutor(r, session).CaptureSharedPreview(r.Context(), widgets[0])
 		id, err := ms.ShareItem(r.Context(), memory.SharedItem{
 			GroupID: body.GroupID, Kind: kind, Title: title,
-			OwnerID: u.ID, OwnerName: u.DisplayName, Payload: payload,
+			OwnerID: u.ID, OwnerName: u.DisplayName, Payload: payload, Description: description, Preview: preview,
 		})
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, map[string]interface{}{"id": id, "count": len(widgets)})
+		warning := ""
+		if previewErr != nil {
+			warning = "Preview unavailable; the share is still usable."
+		}
+		writeJSON(w, map[string]interface{}{"id": id, "count": len(widgets), "hasPreview": len(preview) > 0, "warning": warning})
 
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -219,6 +230,25 @@ func (s *Server) handleSharedItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodGet && action == "preview":
+		if !u.IsGlobalAdmin() && !s.userInGroup(r.Context(), u.ID, item.GroupID) {
+			writeErr(w, http.StatusForbidden, "you are not a member of that group")
+			return
+		}
+		preview, err := ms.SharedPreview(r.Context(), id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "could not load preview")
+			return
+		}
+		if len(preview) == 0 {
+			writeErr(w, http.StatusNotFound, "preview unavailable")
+			return
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Write(preview)
+
 	case r.Method == http.MethodPost && action == "add":
 		if !u.IsGlobalAdmin() && !s.userInGroup(r.Context(), u.ID, item.GroupID) {
 			writeErr(w, http.StatusForbidden, "you are not a member of that group")
