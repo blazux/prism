@@ -99,7 +99,7 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       </div>
       <label>Outbound caller ID name</label><input id="sip-callerid_name" style="width:100%">
       <label>Transfer method</label><select id="sip-transfer_method" style="width:100%"><option value="bridge">bridge (Asterisk stays in the media path)</option><option value="refer">refer (SIP REFER to the softswitch)</option></select>
-      <div class="row"><button class="primary" onclick="saveTelSip()">Save &amp; apply</button><span id="tel-smsg" class="hint" style="margin:0"></span></div>
+      <div class="row"><button id="tel-sip-save" class="primary" onclick="saveTelSip()">Save &amp; apply</button><span id="tel-smsg" class="hint" style="margin:0"></span></div>
       <div class="hint" style="margin-top:6px">"Save &amp; apply" re-registers the trunk without restarting Asterisk. Detailed voices/phrases/dictionary config still lives in the Vox interface for now.</div>
     </div>
 `
@@ -189,7 +189,8 @@ async function loadTelVoiceGreeting(){
  $('tel-clonebox').style.display=cloneable?'flex':'none';
  $('tel-voicehint').textContent=cloneable
    ? 'Voices come from your ElevenLabs account. Add more from the ElevenLabs Voice Library and they appear here.'
-   : 'The local voice engine ('+((b&&b.backend)||'local')+') has a single fixed voice — switch to ElevenLabs to pick or clone one.';
+   : b ? 'The '+(b.backend||'local')+' voice engine does not support voice cloning.'
+       : 'Voice engine status unavailable. Check the phone stack; cloning is disabled until its capabilities are known.';
  const d=await jget('/api/vox/tts/voices');
  const voices=(d&&d.voices)||[];
  sel.innerHTML=voices.length
@@ -346,12 +347,34 @@ const saveHandling=()=>saveCfgFields(TEL_HANDLING,'tel-hmsg');
 // by asking the agent — that is what its place_call tool is for. A form would be a
 // second, dumber door onto the same queue.
 
+async function telephonyResponseError(r,fallback){
+ const d=await r.json().catch(()=>null);
+ return d&&typeof d.detail==='string'?d.detail:d&&typeof d.error==='string'?d.error:fallback+' (HTTP '+r.status+')';
+}
 async function saveTelSip(){
- const m=$('tel-smsg');m.textContent='Applying…';
- const body={};SIP_FIELDS.forEach(f=>body['sip_'+f]=$('sip-'+f)?$('sip-'+f).value.trim():'');
- const pw=$('sip-password').value;if(pw)body.sip_password=pw;
- const r=await fetch('/api/vox/sip',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
- if(r.ok){await fetch('/api/vox/sip/apply',{method:'POST'});m.textContent='✓ Saved & applied';$('sip-password').value='';setTimeout(()=>{m.textContent='';loadTelephony();},1500);}
- else m.textContent='Failed ('+r.status+')';
+ const m=$('tel-smsg'),button=$('tel-sip-save');
+ if(button&&button.disabled)return;
+ if(button)button.disabled=true;
+ m.textContent='Saving…';let saved=false;
+ try{
+  const current=await jget('/api/vox/sip');
+  if(!current){m.textContent='Cannot load current SIP settings; nothing was saved.';return;}
+  const body={};
+  // Preserve hidden settings even against an older phone-stack API.
+  [...SIP_FIELDS,'registrar_match','transport_mode','udp_port'].forEach(f=>{
+   if(Object.prototype.hasOwnProperty.call(current,'sip_'+f))body['sip_'+f]=current['sip_'+f];
+  });
+  SIP_FIELDS.forEach(f=>{if($('sip-'+f))body['sip_'+f]=$('sip-'+f).value.trim();});
+  body.sip_password=$('sip-password').value; // blank explicitly means unchanged
+  const r=await fetch('/api/vox/sip',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok){m.textContent=await telephonyResponseError(r,'Could not save SIP settings');return;}
+  saved=true;$('sip-password').value='';m.textContent='Saved. Applying…';
+  const applied=await fetch('/api/vox/sip/apply',{method:'POST'});
+  if(!applied.ok){m.textContent='Saved, but could not apply: '+await telephonyResponseError(applied,'Reload failed');return;}
+  const result=await applied.json();
+  if(result.ok!==true){m.textContent='Saved, but could not apply: '+(result.detail||'Reload not confirmed');return;}
+  m.textContent='✓ Saved & applied';setTimeout(()=>{m.textContent='';loadTelephony();},1500);
+ }catch(e){m.textContent=(saved?'Saved, but could not apply: ':'Could not save SIP settings: ')+e.message;}
+ finally{if(button)button.disabled=false;}
 }
 `

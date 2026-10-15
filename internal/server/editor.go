@@ -14,8 +14,11 @@ func (c *Client) editorTool(ctx context.Context, args map[string]any) (string, e
 		return "", fmt.Errorf("the initiating editor is offline; ask the user to reopen it before editing unsaved content")
 	}
 	action, _ := args["action"].(string)
-	if action != "read" && action != "update" {
-		return "", fmt.Errorf("editor action must be read or update")
+	if action != "read" && action != "update" && action != "open" {
+		return "", fmt.Errorf("editor action must be open, read or update")
+	}
+	if action == "open" && args["app"] != "email" {
+		return "", fmt.Errorf("editor open currently supports app=email; open Mail in this browser first")
 	}
 	if action == "update" {
 		if rev, _ := args["revision"].(string); rev == "" {

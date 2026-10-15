@@ -30,10 +30,17 @@ window.PrismEditor = {
       if (new TextEncoder().encode(JSON.stringify(out)).length > 18000) throw Error('Editor metadata is too large to read safely. Shorten its title or recipient fields.');
       return out;
     }
-    async function handle(args) {
+    async function handle(args, expiresAt) {
       const state = snapshot();
       if (args.action === 'read') return result(state, args.offset);
-      if (args.action !== 'update') throw Error('Expected read or update.');
+      if (args.action === 'open') {
+        if (!options.open) throw Error('Opening an editor is not supported by this app. Open Mail to draft an email.');
+        if (state) throw Error('An editor is already open. Read it and update its revision instead; nothing was replaced.');
+        await options.open(args, expiresAt);
+        publish();
+        return {status:'opened', ...result(snapshot())};
+      }
+      if (args.action !== 'update') throw Error('Expected open, read or update.');
       if (!state || state.revision !== args.revision) throw Error('The editor changed. Read it again before updating; nothing was overwritten.');
       if (state.readonly) throw Error('This editor is currently read-only.');
       const patch = {};
@@ -55,7 +62,7 @@ window.PrismEditor = {
       let response;
       try {
         if (!Number.isFinite(d.expires_at) || Date.now() >= d.expires_at) throw Error('Editor request expired. Read again.');
-        response = await handle(d.args || {});
+        response = await handle(d.args || {}, d.expires_at);
       } catch (err) { response = {error:err.message}; }
       parent.postMessage({type:'editor-response',id:d.id,result:response},location.origin);
     });

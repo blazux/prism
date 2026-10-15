@@ -78,3 +78,37 @@ func TestEditorCancelledRequestIsRemoved(t *testing.T) {
 		t.Fatal("pending request leaked")
 	}
 }
+
+func TestEditorOpenMailUsesInitiatingBrowserAndReturnsRevision(t *testing.T) {
+	c := &Client{send: make(chan []byte, 1)}
+	if _, err := c.editorTool(context.Background(), map[string]any{"action": "open", "app": "notes"}); err == nil {
+		t.Fatal("unsupported app accepted")
+	}
+	done := make(chan error, 1)
+	go func() {
+		result, err := c.editorTool(context.Background(), map[string]any{"action": "open", "app": "email", "folder": "Projects", "uid": 17})
+		if err == nil && !strings.Contains(result, "revision") {
+			t.Error("missing new draft revision")
+		}
+		done <- err
+	}()
+	var request struct {
+		ID   string         `json:"id"`
+		Args map[string]any `json:"args"`
+	}
+	select {
+	case data := <-c.send:
+		if err := json.Unmarshal(data, &request); err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no browser request")
+	}
+	if request.Args["action"] != "open" || request.Args["folder"] != "Projects" {
+		t.Fatalf("wrong request: %v", request.Args)
+	}
+	c.editorResponse(request.ID, json.RawMessage(`{"status":"opened","app":"email","revision":"new","body":"Quoted original"}`))
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

@@ -373,7 +373,11 @@ function renderList() {
   if (!messages.length) { setList('<div class="placeholder" style="padding:30px">No messages</div>'); return; }
   const l = document.getElementById('mlist'); l.innerHTML = '';
   // Newest first, by actual message date.
-  const sorted = messages.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).filter(passesFilter);
+  const timestamp = m => { const t=Date.parse(m.date);return Number.isFinite(t)?t:-Infinity; };
+  const sorted = messages.slice().sort((a, b) => {
+    const left=timestamp(a),right=timestamp(b);
+    return left===right?(b.uid||0)-(a.uid||0):left>right?-1:1;
+  }).filter(passesFilter);
   if (!sorted.length) { setList('<div class="placeholder" style="padding:30px">No messages in this filter</div>'); return; }
   let curGroup = null;
   for (const m of sorted) {
@@ -493,8 +497,9 @@ async function aiSummarize() {
 
 async function aiReply() {
   if (!current) return;
+  const original = current;
   replyUid = current.uid;
-  openCompose('AI reply draft', current.from, reSubject(current.subject), 'Drafting…');
+  openCompose('AI reply draft', current.from, reSubject(current.subject), quotedReply(original, 'Drafting…'));
   const generation = composeGeneration;
   const ta = document.getElementById('c-body');
   const snapshot = () => JSON.stringify(['c-to','c-subject','c-body'].map(id => document.getElementById(id).value));
@@ -502,9 +507,9 @@ async function aiReply() {
   const active = () => generation === composeGeneration && snapshot() === initialDraft;
   try {
     const draft = await assist('email_reply', emailPlain());
-    if (active()) { ta.value = draft; publishMailContext(); }
+    if (active()) { ta.value = quotedReply(original, draft); publishMailContext(); }
   } catch (e) {
-    if (active()) { ta.value = ''; document.getElementById('c-err').textContent = 'Draft failed: ' + e.message; publishMailContext(); }
+    if (active()) { ta.value = quotedReply(original); document.getElementById('c-err').textContent = 'Draft failed: ' + e.message; publishMailContext(); }
   }
 }
 
@@ -560,10 +565,16 @@ async function triage(scope='all'){
 
 function compose() { replyUid = 0; openCompose('New message', '', '', ''); }
 function reSubject(s) { return /^re:/i.test(s || '') ? s : 'Re: ' + (s || ''); }
+function quotedReply(message, answer='') {
+  const body = looksHTML(message.body) ? stripHtml(message.body) : (message.body || '');
+  const date = new Date(message.date);
+  const when = Number.isFinite(date.getTime()) ? 'On '+date.toLocaleString() : 'In the original message';
+  return answer+'\n\n'+when+', '+(message.from || 'the sender')+' wrote:\n'+body.replace(/\r\n?/g,'\n').split('\n').map(line=>'> '+line).join('\n');
+}
 function reply() {
   if (!current) return;
   replyUid = current.uid;
-  openCompose('Reply', current.from, reSubject(current.subject), '');
+  openCompose('Reply', current.from, reSubject(current.subject), quotedReply(current));
 }
 function replyAll() {
   if (!current) return;
@@ -573,7 +584,7 @@ function replyAll() {
   const emails = (`${current.from}, ${current.to || ''}, ${current.cc || ''}`.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || []);
   const seen = new Set(), list = [];
   for (const e of emails) { const le = e.toLowerCase(); if (!mine.has(le) && !seen.has(le)) { seen.add(le); list.push(e); } }
-  openCompose('Reply all', list.join(', '), reSubject(current.subject), '');
+  openCompose('Reply all', list.join(', '), reSubject(current.subject), quotedReply(current));
 }
 function forward() {
   if (!current) return;
@@ -587,9 +598,9 @@ let replyFolder="INBOX";
 let composeSnapshot='', sendingMail=false;
 let composeGeneration = 0;
 let composeAtts = []; // File objects to attach
-function openCompose(title, to, subject, body) {
+function openCompose(title, to, subject, body, sourceFolder=folder) {
   composeGeneration++;
-  replyFolder=folder;
+  replyFolder=sourceFolder;
   document.getElementById('compose-title').textContent = title;
   document.getElementById('c-to').value = to || '';
   document.getElementById('c-subject').value = subject || '';
@@ -599,6 +610,7 @@ function openCompose(title, to, subject, body) {
   composeSnapshot=JSON.stringify([to||'',subject||'',body||'']);
   document.getElementById('overlay').classList.add('open');
   document.getElementById(to?'c-body':'c-to').focus();
+  if(to)document.getElementById('c-body').setSelectionRange?.(0,0);
   publishMailContext();
 }
 function renderComposeAtts() {
@@ -640,6 +652,9 @@ function stripHtml(s) {
   try {
     // DOMParser is inert — it does not run scripts or load resources.
     const doc = new DOMParser().parseFromString(s || '', 'text/html');
+    doc.querySelectorAll('style,script,noscript,template,head').forEach(el=>el.remove());
+    doc.querySelectorAll('br').forEach(el=>el.replaceWith('\n'));
+    doc.querySelectorAll('p,div,li,tr,blockquote,h1,h2,h3,h4').forEach(el=>el.append('\n'));
     return (doc.body.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
   } catch { return (s || '').replace(/<[^>]+>/g, ' ').trim(); }
 }
@@ -653,8 +668,28 @@ async function closeCompose(force=false) {
 }
 
 function publishMailContext() { if (typeof mailEditor !== 'undefined') mailEditor.publish(); }
+async function openMailComposer(args, expiresAt) {
+  if(args.app!=='email')throw Error('This app only opens email composers.');
+  if(Object.keys(args).some(key=>!['action','app','uid','folder'].includes(key)))throw Error('Open accepts only app, folder and uid. Use update with the returned revision to write the draft.');
+  const uid=args.uid===undefined?0:args.uid;
+  if(!Number.isSafeInteger(uid)||uid<0||uid>4294967295)throw Error('Pass a valid numeric message UID, or omit uid for a new email.');
+  if(args.folder!==undefined&&typeof args.folder!=='string')throw Error('Folder must be the exact mailbox name.');
+  const generation=composeGeneration,sourceFolder=args.folder||'INBOX';
+  const check=()=>{
+    if(Date.now()>=expiresAt)throw Error('Composer request expired; nothing was opened.');
+    if(sendingMail||composeGeneration!==generation||document.getElementById('overlay').classList.contains('open'))throw Error('The composer changed or another draft is open; nothing was replaced. Read the editor again.');
+  };
+  check();
+  if(!uid){compose();return;}
+  const message=(await PrismAPI.api('/api/email/read?folder='+encodeURIComponent(sourceFolder)+'&uid='+uid)).message;
+  check();
+  if(!message||message.uid!==uid)throw Error('The original message could not be loaded; no draft was opened.');
+  replyUid=uid;
+  openCompose('Reply',message.from,reSubject(message.subject),quotedReply(message),sourceFolder);
+}
 const mailEditor = PrismEditor.connect({
   fields:['to','subject','body'],
+  open:openMailComposer,
   read:() => {
     if (!document.getElementById('overlay').classList.contains('open')) return null;
     return {app:'email',id:String(composeGeneration),to:document.getElementById('c-to').value,subject:document.getElementById('c-subject').value,body:document.getElementById('c-body').value,reply_to:replyUid?{folder:replyFolder,uid:replyUid}:null,attachments:composeAtts.map(f=>({name:f.name,size:f.size})),readonly:sendingMail};

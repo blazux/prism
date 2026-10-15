@@ -908,7 +908,7 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.agentSettings(ctx, str("action"), args))
 	case "editor":
 		if e.editorToolFn == nil {
-			return "", nil, fmt.Errorf("no live editor connected; use this tool from the browser chat with a note or email draft open")
+			return "", nil, fmt.Errorf("no live editor connected; use this tool from the browser chat with the corresponding app open")
 		}
 		return wrap(e.editorToolFn(ctx, args))
 	case "webhook", "pim_source", "channel", "subagent":

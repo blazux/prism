@@ -78,15 +78,26 @@ and Add to calendar. Forward and Mark unread are in **More (…)**.
 fields, with attachments and Send at the bottom. Failed sends keep your draft;
 closing an edited draft asks before discarding it. Drafts in this composer are
 not saved to the server automatically.
+Reply and Reply all include the original message as quoted text below your
+answer. The list sorts by the actual timestamp, regardless of the sender's timezone.
 
 ## Writing together with the agent
 
-Open New message or Reply, then ask in chat, for example “make this more concise”
-or “suggest a subject”. The composer becomes the active context, including its
+With Mail open, ask the agent to prepare a reply or a new message; it can open
+the composer itself. You can also open New message or Reply, then ask in chat,
+for example “make this more concise” or “suggest a subject”. The composer becomes the active context, including its
 current unsaved text. Closing it restores the context of the message or folder.
-The agent uses `editor action=read`, then `editor action=update revision=...`
+To open a draft, use `editor action=open app=email`; include the original
+`folder` and numeric `uid` for a reply (folder defaults to INBOX), or omit uid
+for a new message. This returns the draft and revision. It will not replace
+an existing composer or a draft opened while the message is loading. Mail must
+already be the active app in the browser connected to this chat.
+
+For an existing draft, use `editor action=read`, then `editor action=update revision=...`
 with only the changed `to`, `subject` or `body` fields. Changes appear directly
 in the composer. This does not send mail and does not store a server-side draft.
+When replacing a reply body, keep the quoted original below the answer unless
+the user wants it removed.
 For a long body, follow `next_offset` while `truncated=true` before rewriting it.
 If the user types or changes documents after the read, an update is rejected;
 read again and reconsider the change. Do not retry a stale replacement blindly.

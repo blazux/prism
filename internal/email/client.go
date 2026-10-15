@@ -158,7 +158,7 @@ func (c Config) fetchByUIDs(cl *imapclient.Client, uids []imap.UID) ([]Message, 
 	if len(uids) == 0 {
 		return nil, nil
 	}
-	msgs, err := cl.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{Envelope: true, Flags: true, UID: true}).Collect()
+	msgs, err := cl.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{Envelope: true, InternalDate: true, Flags: true, UID: true}).Collect()
 	if err != nil {
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
@@ -283,10 +283,11 @@ func (c Config) Read(uid uint32) (Message, error) {
 
 	uidSet := imap.UIDSetNum(imap.UID(uid))
 	opts := &imap.FetchOptions{
-		Envelope:    true,
-		Flags:       true,
-		UID:         true,
-		BodySection: []*imap.FetchItemBodySection{{}},
+		Envelope:     true,
+		InternalDate: true,
+		Flags:        true,
+		UID:          true,
+		BodySection:  []*imap.FetchItemBodySection{{}},
 	}
 	msgs, err := cl.Fetch(uidSet, opts).Collect()
 	if err != nil {
@@ -389,10 +390,9 @@ func (c Config) Search(query string, limit int) ([]Message, error) {
 	if len(uids) == 0 {
 		return nil, nil
 	}
-	if len(uids) > limit {
-		uids = uids[len(uids)-limit:] // most recent UIDs
-	}
-	msgs, err := cl.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{Envelope: true, Flags: true, UID: true}).Collect()
+	// Imported messages can have newer UIDs but older dates. Sort lightweight
+	// metadata before applying the limit, rather than keeping the highest UIDs.
+	msgs, err := cl.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{Envelope: true, InternalDate: true, Flags: true, UID: true}).Collect()
 	if err != nil {
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
@@ -402,20 +402,25 @@ func (c Config) Search(query string, limit int) ([]Message, error) {
 		msg.Folder = c.mailbox()
 		out = append(out, msg)
 	}
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Date.Equal(out[j].Date) {
+			return out[i].UID > out[j].UID
+		}
+		return out[i].Date.After(out[j].Date)
+	})
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }
 
 func toMessage(m *imapclient.FetchMessageBuffer) Message {
-	msg := Message{UID: uint32(m.UID), Seen: hasFlag(m.Flags, imap.FlagSeen)}
+	msg := Message{UID: uint32(m.UID), Seen: hasFlag(m.Flags, imap.FlagSeen), Date: msgDate(m)}
 	if m.Envelope != nil {
 		msg.Subject = m.Envelope.Subject
 		msg.From = addr(m.Envelope.From)
 		msg.To = addrList(m.Envelope.To)
 		msg.Cc = addrList(m.Envelope.Cc)
-		msg.Date = m.Envelope.Date
 		msg.MessageID = m.Envelope.MessageID
 	}
 	return msg

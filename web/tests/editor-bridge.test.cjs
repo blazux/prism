@@ -5,7 +5,7 @@ function fixture(options={}){
  const listeners={},messages=[],parent={postMessage:d=>messages.push(d)},origin='http://localhost';
  const ctx=vm.createContext({window:{},TextEncoder,crypto:webcrypto,parent,location:{origin,pathname:'/apps/email.html'},document:{addEventListener(){}},addEventListener:(k,fn)=>listeners[k]=fn});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../editor-bridge.js'),'utf8'),ctx);
- const bridge=ctx.window.PrismEditor.connect({read:()=>state,fields:options.fields||['to','subject','body'],types:options.types,context:s=>'Editing '+s.id,idleContext:()=> 'Reading inbox',update:async p=>Object.assign(state,p)});
+ const bridge=ctx.window.PrismEditor.connect({read:()=>state,fields:options.fields||['to','subject','body'],types:options.types,context:s=>'Editing '+s.id,idleContext:()=> 'Reading inbox',update:async p=>Object.assign(state,p),open:options.open?async(a,expires)=>{state=await options.open(a,expires);}:undefined});
  async function call(args,extra={}){messages.length=0;await listeners.message({source:parent,origin,data:{type:'editor-request',id:'request',expires_at:Date.now()+30000,args},...extra});return messages.find(x=>x.type==='editor-response')?.result;}
  return {bridge,call,messages,set:s=>state=s,get:()=>state,parent,origin};
 }
@@ -41,4 +41,16 @@ test('typed calendar fields accept booleans and reject string flags atomically',
  const f=fixture({fields:['all_day','body'],types:{all_day:'boolean'}});const r=await f.call({action:'read'});
  assert.match((await f.call({action:'update',revision:r.revision,all_day:'true',body:'wrong'})).error,/Unsupported/);assert.equal(f.get().body,'Hello');
  assert.equal((await f.call({action:'update',revision:r.revision,all_day:true})).status,'updated');assert.equal(f.get().all_day,true);
+});
+test('open returns the new draft and revision, without overwriting an active editor',async()=>{
+ let opened=0;
+ const f=fixture({open:async(args,expires)=>{opened++;assert.equal(args.app,'email');assert.ok(expires>Date.now());return {app:'email',id:'new',body:'Quoted original',readonly:false};}});
+ assert.match((await f.call({action:'open',app:'email'})).error,/already open/);assert.equal(opened,0);
+ f.set(null);const result=await f.call({action:'open',app:'email'});
+ assert.equal(result.status,'opened');assert.equal(result.body,'Quoted original');assert.ok(result.revision);
+ assert.equal((await f.call({action:'update',revision:result.revision,body:'My reply'})).status,'updated');
+ assert.equal(opened,1);
+});
+test('apps without an open callback continue to reject open',async()=>{
+ const f=fixture();f.set(null);assert.match((await f.call({action:'open',app:'email'})).error,/not supported/);
 });
