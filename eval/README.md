@@ -112,6 +112,23 @@ go test ./internal/calendar/ ./internal/tasks/ -run Live -v
 Without those variables the tests skip, so the everyday `go test ./...` stays
 self-contained.
 
+## Dashboard delivery regressions
+
+The `interface-delivery` tasks distinguish a request to build an interactive tool
+(without saying “widget”) from an explicitly backend-only CLI tool. The first
+must add a dashboard interface; the second must create a working script without
+a widget. Existing `docker-run-and-embed` and `answer-not-widget-*` scenarios cover
+explicit Docker embedding and ordinary chat answers. Run these against a
+disposable instance with a real model, separately for each prompt profile:
+
+```sh
+go run ./cmd/prism-eval -only interface-delivery -runs 3
+go run ./cmd/prism-eval -only docker-run-and-embed
+go run ./cmd/prism-eval -only answer-not-widget
+```
+
+These are full-stack model evaluations, not part of the offline Go tests.
+
 ## Writing a task
 
 ```json

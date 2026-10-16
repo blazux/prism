@@ -1229,7 +1229,10 @@ func (a *Agent) buildSystemPromptWithCachePrefix(ctx context.Context, learningsC
 	// ones this size of model actually follows (see systemPromptRole's measurements).
 	if !minimal {
 		sb.WriteString(systemPromptGrounding)
-		sb.WriteString(systemPromptDeliverable)
+	}
+	// The dashboard delivery contract applies equally to every prompt profile.
+	sb.WriteString(systemPromptDeliverable)
+	if !minimal {
 		if lean {
 			// A capable model over-delivers; the small-model act-turn crutch is
 			// replaced by the harness fact it cannot guess (a reply without a tool

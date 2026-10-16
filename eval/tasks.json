@@ -836,5 +836,77 @@
         }
       }
     ]
+  },
+  {
+    "name": "interface-tool-default-dashboard",
+    "tags": [
+      "widgets",
+      "interface-delivery",
+      "core"
+    ],
+    "prompt": "Build a simple interactive expense tracking tool called 'Eval Expenses'. I want to enter a label and an amount, add expenses, see their total, and remove an entry. Keeping entries only while the page is open is fine; no external services or accounts are needed.",
+    "checks": [
+      {
+        "tool": "widget",
+        "args": {
+          "action": "list"
+        },
+        "contains": "Eval Expenses",
+        "no_error": true
+      }
+    ],
+    "max_tool_calls": 5,
+    "cleanup": [
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": ".browser_session_eval-interface-tool-default-dashboard.json"
+        }
+      }
+    ]
+  },
+  {
+    "name": "interface-tool-backend-only",
+    "tags": [
+      "widgets",
+      "interface-delivery",
+      "discipline"
+    ],
+    "prompt": "Create only a command-line Python tool at eval/expense_total.py that takes numeric amounts as arguments and prints their sum. No user interface or dashboard panel. Use only the Python standard library.",
+    "checks": [
+      {
+        "tool": "read_file",
+        "args": {
+          "path": "eval/expense_total.py"
+        },
+        "contains": "import",
+        "no_error": true
+      },
+      {
+        "tool": "exec_command",
+        "args": {
+          "command": "python3 eval/expense_total.py 12 8"
+        },
+        "contains": "20",
+        "no_error": true
+      },
+      {
+        "tool": "widget",
+        "args": {
+          "action": "list"
+        },
+        "contains": "No widgets on the dashboard.",
+        "no_error": true
+      }
+    ],
+    "max_tool_calls": 4,
+    "cleanup": [
+      {
+        "tool": "delete_file",
+        "args": {
+          "path": "eval/expense_total.py"
+        }
+      }
+    ]
   }
 ]

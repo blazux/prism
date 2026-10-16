@@ -85,7 +85,10 @@ func TestPromptDecisionAcrossProfiles(t *testing.T) {
 		if !strings.Contains(prompt, systemPromptDecision) {
 			t.Fatal("missing decision policy", p)
 		}
-		for _, bad := range []string{"Everything you assert", "default credentials", "always append ?session="} {
+		if strings.Count(prompt, systemPromptDeliverable) != 1 {
+			t.Fatal("dashboard delivery policy must appear once, including in minimal", p)
+		}
+		for _, bad := range []string{"Everything you assert", "default credentials", "always append ?session=", "Build a widget ONLY when", "a widget only when asked for one"} {
 			if strings.Contains(prompt, bad) {
 				t.Fatal("contradictory or unsafe instruction", p, bad)
 			}

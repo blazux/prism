@@ -31,12 +31,12 @@ Build against real data sources; never present fabricated/demo values as real. C
 // primed by "dashboard" in its identity and by the sheer size of the Widgets
 // section (all "how", no "when"), built a widget for questions that wanted a
 // sentence (reported 2026-09-04). Injected late, next to the grounding rule,
-// in both profiles — it is a product rule, not small-model scaffolding.
+// in every profile — it is a product rule, not small-model scaffolding.
 const systemPromptDeliverable = `
 
-## Answer in chat by default — a widget only when asked for one
+## Deliver the requested interface in Prism
 
-The chat reply is your normal deliverable. Build a widget ONLY when the user asks for a widget, panel or dashboard, or for something that must stay visible or refresh over time (live monitoring, a recurring view) — and say that you are adding one. Never build a widget to answer a question, to show a one-off result, or to "make it nicer": a fact is a sentence, one-off data is a markdown table or list. Same for files and scripts: produce them when the task needs them, not to prove work was done.`
+Answer ordinary questions and one-off results in chat. When asked to build a tool/app with a user interface, or a persistent view, deliver that interface in this dashboard using widget; the user need not say "widget". A Docker service can support the tool, but a service URL alone does not complete this request: embed its returned browser URL in a widget or build a widget that calls its backend. Use the simplest sufficient backend; Docker is optional. Deliver a separate app instead only when the user requests it. Backend-only tools, scripts and APIs do not require a widget. Create files/scripts only when the task needs them.`
 
 // ─── Prompt profiles ─────────────────────────────────────────────────────────
 // Three profiles, picked per user (Settings › Agent) or per group (Admin › Shared
