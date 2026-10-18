@@ -358,7 +358,21 @@ func (e *ToolExecutor) listFiles(path string) (string, error) {
 
 func (e *ToolExecutor) aptInstall(ctx context.Context, packages string) (string, error) {
 	if e.docker.ConfinedExecution() {
-		return "System packages cannot be installed into this read-only workspace. For Python libraries use install_packages with pip. For system dependencies, build an image and run it with the workspace Docker tools; mount /workspace for persistent files.", nil
+		names := strings.Fields(packages)
+		if len(names) == 0 {
+			return "", fmt.Errorf("at least one package is required")
+		}
+		quoted := make([]string, len(names))
+		for i, name := range names {
+			quoted[i] = "'" + strings.ReplaceAll(name, "'", "'\"'\"'") + "'"
+		}
+		command := "command -v prism-install-packages >/dev/null || { echo 'The workspace system installer is unavailable; this deployment needs the packages-enabled workspace image.' >&2; exit 1; }; prism-install-packages " + strings.Join(quoted, " ")
+		out, err := e.docker.Exec(ctx, packageInstallCommand(command), 5*time.Minute)
+		if err != nil {
+			return fmt.Sprintf("Install failed: %v\n%s", err, out), nil
+		}
+		// The bound installer owns privileges and its durable package manifest.
+		return fmt.Sprintf("Installed: %s\n%s", packages, out), nil
 	}
 	cmd := fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y -qq %s", packages)
 	out, err := e.docker.Exec(ctx, packageInstallCommand(cmd), 5*time.Minute)

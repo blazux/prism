@@ -28,7 +28,7 @@ func TestFailedPipDoesNotPersistOrReportSuccess(t *testing.T) {
 		t.Fatal("failed installation persisted")
 	}
 	out, err = e.aptInstall(context.Background(), "curl")
-	if err != nil || !strings.Contains(out, "read-only") {
+	if err != nil || !strings.Contains(out, "workspace system installer") {
 		t.Fatal(out, err)
 	}
 }

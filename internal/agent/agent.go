@@ -1521,14 +1521,17 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			rejected := false
 			// Manual approval gate. Voice bypasses it — a caller can't click, and
 			// silence while the dashboard waits would read as a dead line.
-			if a.channel != voiceChannel && a.approvalNeededFn != nil && a.approvalNeededFn() && a.awaitApprovalFn != nil {
+			if tc.Function.ArgumentError == "" && a.channel != voiceChannel && a.approvalNeededFn != nil && a.approvalNeededFn() && a.awaitApprovalFn != nil {
 				if a.prepareApprovalFn != nil {
 					a.prepareApprovalFn(toolID)
 				}
 				events <- Event{Type: "approval_request", ID: toolID, Tool: tc.Function.Name, Input: tc.Function.Arguments}
 				rejected = !a.awaitApprovalFn(ctx, toolID)
 			}
-			if rejected {
+			if tc.Function.ArgumentError != "" {
+				result = "Error: " + tc.Function.ArgumentError
+				toolFailed = true
+			} else if rejected {
 				toolRejected = true
 				result = "Tool call rejected by the user. Do not retry it as-is — ask what they want done differently."
 				toolFailed = true

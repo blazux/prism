@@ -166,6 +166,9 @@ type ToolCall struct {
 type ToolCallFunction struct {
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
+	// ArgumentError rejects malformed provider input before any tool or approval.
+	// Arguments stay valid JSON for history replay; this is runtime metadata only.
+	ArgumentError string `json:"-"`
 }
 
 type Tool struct {

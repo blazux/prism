@@ -330,7 +330,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "install_packages",
-			Description: "Install workspace libraries with apt or pip. Successful installations are recorded. Read-only workspaces support persistent user-site pip libraries; use Docker images for system dependencies.",
+			Description: "Install workspace libraries with apt or pip. The deployment handles privileges and records successful installations for restoration. Python user libraries persist in the workspace. Installation failures are reported; do not claim success on failure.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{

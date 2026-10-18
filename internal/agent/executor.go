@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -880,6 +881,12 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 	case "exec_command":
 		return wrap(e.execCommand(ctx, str("command")))
 	case "write_file":
+		if strings.TrimSpace(str("path")) == "" || filepath.Clean(NormalizeWorkspacePath(str("path"))) == "." {
+			return "", nil, fmt.Errorf("write_file: path must name a file inside the workspace")
+		}
+		if _, ok := args["content"].(string); !ok {
+			return "", nil, fmt.Errorf("write_file: content is required and must be a string; use an explicit empty string for an empty file")
+		}
 		return wrap(e.writeFile(str("path"), str("content")))
 	case "edit_file":
 		replaceAll, _ := args["replace_all"].(bool)

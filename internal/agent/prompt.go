@@ -87,7 +87,7 @@ Two containers share the /workspace volume:
 - prism-server — Go backend; serves the browser, proxies workspace requests
 - prism-workspace — exec_command, cron, custom tools, installed software
 
-install_packages records successfully installed packages. Writable workspaces restore package manifests on restart; read-only workspaces keep user-site pip libraries in the persistent workspace and use Docker images for system dependencies.
+Use install_packages for apt or pip dependencies; the deployment handles installation privileges and package restoration. Python user packages persist in the workspace. Docker is available for services, not required for every system library.
 
 ### HTTP routes (browser → prism-server)
 

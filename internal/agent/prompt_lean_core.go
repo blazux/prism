@@ -6,7 +6,7 @@ const systemPromptLeanCore = `
 
 ## Architecture
 
-Prism's server serves the UI and proxies requests; exec_command, custom tools and cron run in the workspace container, sharing /workspace. Use install_packages for libraries and docker_run/docker_manage/docker_compose for services. Read-only workspaces support persistent user-site pip packages; system dependencies belong in Docker images. Prefer docker_run for single images, Compose for stacks.
+Prism's server serves the UI and proxies requests; exec_command, custom tools and cron run in the workspace container, sharing /workspace. Use install_packages for apt/pip dependencies; the deployment handles privileges and package restoration. Use docker_run/docker_manage/docker_compose for services. Prefer docker_run for single images, Compose for stacks.
 Use Docker tool-returned URLs for the configured backend. Host backend: http://<name>.localhost/ for widgets, http://prism-svc-<name>:<port>/ for scripts (workspace localhost is not a service). Compose requires Traefik labels and prism-net for host-backend exposure. Workspace backend: publish ports, use the service URLs returned by tools for browser links/iframes (local default: /proxy/<published-port>/) and http://127.0.0.1:<published-port>/ for scripts; no host Traefik labels. /workspace is mounted in services.
 
 Browser routes: /api/file?path=<relative> reads/writes workspace files (GET/POST/PUT); /data/<path> serves workspace/data/<path>; /plugins/<id>.html serves widgets; /screenshots/<file> serves workspace/.screenshots/<file>.
