@@ -205,16 +205,22 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.mkdirManaged(sessionPluginDir)
 	s.runsMu.Unlock()
 
+	wsUser := currentUser(r)
+	voiceCall := r.URL.Query().Get("channel") == voiceChannelName && isServiceIdentity(wsUser)
 	ai, err := s.aiConfigFor(r.Context(), requestUserID(r))
 	if err != nil {
 		conn.WriteJSON(map[string]any{"type": "error", "content": err.Error()})
 		conn.Close()
 		return
 	}
-	ollamaClient := ai.newChatBackend()
+	model := ai.cfg.Model
+	if voiceCall {
+		model = s.voiceModel(r.Context(), model)
+	}
+	ollamaClient := ai.chatBackendFor(model)
 
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
-	executor.SetLLM(ollamaClient, ai.cfg.Model)
+	executor.SetLLM(ollamaClient, model)
 	executor.SetChatBlind(!ai.cfg.ChatVision)
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 	executor.SetRAGProvider(s.acquireRAG)
@@ -222,14 +228,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if ms != nil {
 		executor.SetMemoryStore(ms)
 	}
-	wsUser := currentUser(r)
-
 	// A phone call docks through Prism Vox with the service token,
 	// which auth.go resolves to a GLOBAL ADMIN. Re-identify it, or a stranger who
 	// dials the number gets an admin agent — exec_command, docker, mail, secrets,
 	// and the owner's whole knowledge base. Until the caller is identified, a call
 	// is a guest. See voice.go.
-	voiceCall := r.URL.Query().Get("channel") == voiceChannelName && isServiceIdentity(wsUser)
 
 	// A known caller (their number is on their profile) is identified: they get
 	// THEIR memory and knowledge — inter-channel continuity — but still only the
@@ -319,8 +322,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		tools["subagent"] = s.subagentTool(client, executor)
 		executor.SetServerTools(tools)
 	}
-	model := ai.cfg.Model
-
 	// Personality per identity:
 	//  - voice guest → the switchboard persona (never the owner's assistant, which
 	//    would introduce itself to a stranger as managing their mail/servers);
@@ -536,41 +537,44 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Send initial state
-	status := s.docker.WorkspaceStatus(r.Context())
-	client.sendJSON(map[string]interface{}{
-		"type":      "container_status",
-		"status":    status,
-		"model":     model,
-		"sessionID": sessionID,
-	})
-	tree := s.buildFileTree(s.cfg.WorkspaceDir)
-	client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
-
-	mcpServers, _ := s.mcpMgr.List(r.Context(), sessionID)
-	client.sendJSON(map[string]interface{}{
-		"type":   "tools_list",
-		"custom": s.customMgr.All(),
-		"mcp":    mcpServers,
-	})
-
-	// Restore persisted widgets for this session
-	for _, p := range s.loadPlugins(sessionPluginDir) {
+	if !voiceCall {
+		// Dashboard state is unnecessary on a phone connection. Vox opens one
+		// socket per turn, so avoid Docker/filesystem/MCP/widget work before reading it.
+		status := s.docker.WorkspaceStatus(r.Context())
 		client.sendJSON(map[string]interface{}{
-			"type": "plugin_load", "id": p.id, "title": p.title, "content": p.content,
-			"cols": p.cols, "height": p.height, "locked": p.locked,
-			"open": p.open, "x": p.x, "y": p.y, "w": p.w, "h": p.h,
+			"type":      "container_status",
+			"status":    status,
+			"model":     model,
+			"sessionID": sessionID,
 		})
-	}
+		tree := s.buildFileTree(s.cfg.WorkspaceDir)
+		client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
 
-	// Send recent notification history
-	if ms != nil {
-		if notifs, err := ms.GetRecentNotifications(r.Context(), sessionID, 50); err == nil && len(notifs) > 0 {
-			client.lastNotifID = notifs[len(notifs)-1].ID
+		mcpServers, _ := s.mcpMgr.List(r.Context(), sessionID)
+		client.sendJSON(map[string]interface{}{
+			"type":   "tools_list",
+			"custom": s.customMgr.All(),
+			"mcp":    mcpServers,
+		})
+
+		// Restore persisted widgets for this session
+		for _, p := range s.loadPlugins(sessionPluginDir) {
 			client.sendJSON(map[string]interface{}{
-				"type":          "notifications_history",
-				"notifications": notifs,
+				"type": "plugin_load", "id": p.id, "title": p.title, "content": p.content,
+				"cols": p.cols, "height": p.height, "locked": p.locked,
+				"open": p.open, "x": p.x, "y": p.y, "w": p.w, "h": p.h,
 			})
+		}
+
+		// Send recent notification history
+		if ms != nil {
+			if notifs, err := ms.GetRecentNotifications(r.Context(), sessionID, 50); err == nil && len(notifs) > 0 {
+				client.lastNotifID = notifs[len(notifs)-1].ID
+				client.sendJSON(map[string]interface{}{
+					"type":          "notifications_history",
+					"notifications": notifs,
+				})
+			}
 		}
 	}
 
@@ -584,7 +588,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	// Background poller: pushes notifications created by cron scripts (outside of chat turns)
 	done := make(chan struct{})
 	defer close(done)
-	if ms != nil {
+	if ms != nil && !voiceCall {
 		go func() {
 			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()
@@ -662,7 +666,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				executor.SetChatBlind(!ai.cfg.ChatVision)
 				client.ag.SetChatBlind(!ai.cfg.ChatVision)
 				model = ai.cfg.Model
-				be := ai.newChatBackend()
+				if voiceCall {
+					model = s.voiceModel(r.Context(), model)
+				}
+				be := ai.chatBackendFor(model)
 				executor.SetLLM(be, model)
 				client.ag.SetBackend(be, model)
 				client.sendJSON(map[string]any{"type": "model_set", "model": model})

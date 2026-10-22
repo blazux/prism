@@ -1103,6 +1103,10 @@ func (a *Agent) buildSystemPromptWithCachePrefix(ctx context.Context, learningsC
 		persona += a.personality
 	}
 
+	if a.channel == voiceChannel {
+		return a.buildVoiceSystemPrompt(ctx, learningsCtx, persona)
+	}
+
 	if a.agentName != "" {
 		sb.WriteString("Your name is ")
 		sb.WriteString(a.agentName)
@@ -1243,29 +1247,6 @@ func (a *Agent) buildSystemPromptWithCachePrefix(ctx context.Context, learningsC
 			sb.WriteString(systemPromptActTurn)
 		}
 
-	}
-
-	// Channel layer: the phone constrains the *form* of the answer, not
-	// who the agent is. Kept last so it wins over anything the personality says
-	// about formatting. Everything here is read aloud by a TTS.
-	if a.channel == voiceChannel {
-		sb.WriteString(`
-
-## You are on a phone call — speak, don't write
-Your reply is read aloud by a speech synthesiser to someone holding a phone. Therefore:
-- Answer in spoken French, in SHORT sentences. Be brief: a caller cannot skim.
-- NO markdown, NO emoji, NO bullet lists, NO headings, NO code blocks, NO URLs.
-- Never write symbols meant to be seen (*, #, backticks, arrows) — they get spoken.
-- Give at most one or two key points, then stop. Ask one question at a time.
-- Spell out nothing and never dictate long identifiers or links; offer to send them instead.
-- If you need to think, do it briefly — the caller is waiting in silence.
-
-You control the call through tools — the words alone do nothing:
-- To hang up: when the caller has clearly finished (says goodbye, "c'est tout merci", "au revoir"), say a short farewell AND call end_call in the same turn. Saying goodbye without calling end_call leaves the line open.
-- To transfer: when the caller asks to reach a person, call transfer_call (never just say you are transferring).
-- To take a message: when the caller wants to leave one, or the person is unavailable, call take_message.
-
-For ANY factual question (opening hours, prices, services, procedures, addresses…), you MUST call rag_search FIRST and answer only from what it returns — never from memory, never invent. If it returns nothing relevant, say plainly that you don't have that information and offer to take a message.`)
 	}
 
 	return sb.String(), cachePrefixBytes

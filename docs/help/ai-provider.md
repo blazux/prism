@@ -16,6 +16,16 @@ You can configure several sources of the same provider type, including multiple 
 
 On first opening, the form includes the current connection and the other environment-configured connections. Saving adopts this source list without dropping the other connections. Existing single-connection API/tool updates edit the default source and retain the others.
 
+## Phone conversations
+
+When PrismVox is connected, a global administrator can choose a separate
+model in **Admin → Telephony → Conversation model — recognised callers**.
+Configure its source in **AI provider** first, select the phone model, then click
+**Save model**. The setting applies to new calls and does not change the web
+model, embeddings, caller profile, memory, knowledge scope or permitted tools.
+Choose **Default AI model** to follow the deployment default again. Unknown
+callers use the switchboard model configured in PrismVox's call handling.
+
 ## Embeddings and document search
 
 **Use same provider** follows the default conversation source and reuses its URL and credential, but you must choose a separate embedding model. Existing independent server settings remain independent when opening the form. Anthropic has no embedding endpoint: uncheck the switch and choose another embedding connection. No provider is silently substituted.

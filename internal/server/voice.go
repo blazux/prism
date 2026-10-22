@@ -87,6 +87,7 @@ const (
 	voiceChannelName = "voice"
 
 	cfgVoicePersonality = "voice_personality"
+	cfgVoiceModel       = "voice_model"
 	// Set once the persona above has been handed to Vox, which owns it from then
 	// on. A flag, not a text comparison: an admin who deliberately reverted to the
 	// default must not have their old words pushed back over it.
@@ -276,10 +277,18 @@ func (s *Server) voiceRAGScope(ctx context.Context) string {
 	return voiceGuestScope
 }
 
-// handleVoiceConfig (GET/PUT /api/voice) manages the switchboard persona shown to
-// unknown callers and the public RAG scope they may read. Admin-only; it shapes
-// what every anonymous caller experiences. Lives behind the Téléphonie app, which
-// only appears when a Prism Vox stack is docked.
+// voiceModel is a per-call override; empty preserves the deployment default.
+func (s *Server) voiceModel(ctx context.Context, fallback string) string {
+	if ms := s.store(); ms != nil {
+		if model, _, err := ms.GetConfig(ctx, cfgVoiceModel); err == nil && strings.TrimSpace(model) != "" {
+			return strings.TrimSpace(model)
+		}
+	}
+	return fallback
+}
+
+// handleVoiceConfig manages the switchboard persona and the model for Prism
+// phone conversations. Partial updates preserve fields older clients omit.
 func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	if u == nil || !s.isAdminUser(r.Context(), u) {
@@ -311,32 +320,69 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 			"defaultPersonality": defaultVoicePersonality,
 			"ragScope":           rawScope, // "" = isolated (callers read nothing)
 			"voxDocked":          s.cfg.VoxURL != "",
+			"model":              s.voiceModel(r.Context(), ""),
 		})
 
 	case http.MethodPut:
 		var b struct {
-			Personality string `json:"personality"`
+			Personality *string `json:"personality"`
+			Model       *string `json:"model"`
 		}
-		if json.NewDecoder(r.Body).Decode(&b) != nil {
-			writeErr(w, http.StatusBadRequest, "bad body")
+		if json.NewDecoder(r.Body).Decode(&b) != nil || (b.Personality == nil && b.Model == nil) {
+			writeErr(w, http.StatusBadRequest, "personality or model required")
 			return
 		}
-		// The switchboard's knowledge base is a fixed reserved scope (voiceGuestScope),
-		// managed via the RAG endpoints — no scope to set here, only the persona.
-		persona := strings.TrimSpace(b.Personality)
-		if s.cfg.VoxURL != "" {
-			// One store, Vox's. Writing here as well would leave two copies to
-			// disagree, and the one that answers the phone would not be this one.
-			if err := s.setVoxSystemPrompt(r.Context(), persona); err != nil {
-				writeErr(w, http.StatusBadGateway, "the phone stack did not accept the change: "+err.Error())
+		if b.Model != nil {
+			if s.cfg.MultiUser && !u.IsGlobalAdmin() {
+				writeErr(w, http.StatusForbidden, "the voice model is managed by a global administrator")
 				return
 			}
-			writeJSON(w, map[string]any{"ok": true})
-			return
+			model := strings.TrimSpace(*b.Model)
+			if len(model) > 256 || strings.ContainsAny(model, "\r\n\t") {
+				writeErr(w, http.StatusBadRequest, "invalid voice model")
+				return
+			}
+			if id, raw, qualified := strings.Cut(model, "::"); qualified {
+				ai, err := s.aiConfigFor(r.Context(), requestUserID(r))
+				if err != nil {
+					writeErr(w, 503, "AI configuration unavailable")
+					return
+				}
+				found := false
+				for _, src := range ai.cfg.AISources {
+					if src.ID == id {
+						found = true
+						break
+					}
+				}
+				if !found || raw == "" {
+					writeErr(w, 400, "select a model from a configured AI source")
+					return
+				}
+			}
+			if model != "" && !s.userCanUseModel(r.Context(), u, model) {
+				writeErr(w, 403, "this voice model is not allowed")
+				return
+			}
+			*b.Model = model
 		}
-		if err := ms.SetConfig(r.Context(), cfgVoicePersonality, persona); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
+		if b.Personality != nil {
+			persona := strings.TrimSpace(*b.Personality)
+			if s.cfg.VoxURL != "" {
+				if err := s.setVoxSystemPrompt(r.Context(), persona); err != nil {
+					writeErr(w, http.StatusBadGateway, "the phone stack did not accept the change: "+err.Error())
+					return
+				}
+			} else if err := ms.SetConfig(r.Context(), cfgVoicePersonality, persona); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
+		}
+		if b.Model != nil {
+			if err := ms.SetConfig(r.Context(), cfgVoiceModel, *b.Model); err != nil {
+				writeErr(w, 500, err.Error())
+				return
+			}
 		}
 		writeJSON(w, map[string]any{"ok": true})
 

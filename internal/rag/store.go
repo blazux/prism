@@ -401,6 +401,14 @@ func (s *Store) DeleteDocumentInScope(ctx context.Context, id int64, prefix stri
 	return tag.RowsAffected() > 0, nil
 }
 
+// HasContent avoids embedding a query when its collection has nothing to search.
+// It is read afresh so the first indexed document is immediately discoverable.
+func (s *Store) HasContent(ctx context.Context, collection string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rag_chunks WHERE collection=$1)`, collection).Scan(&exists)
+	return exists, err
+}
+
 // Search performs a cosine similarity search and returns the top-k chunks.
 func (s *Store) Search(ctx context.Context, collection string, embedding []float32, limit int) ([]SearchResult, error) {
 	vec := pgvector.NewVector(embedding)

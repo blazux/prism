@@ -520,13 +520,17 @@ func (e *ToolExecutor) SearchLearnings(ctx context.Context, query string) string
 	if ragStore == nil || ragEmbedder == nil || query == "" {
 		return ""
 	}
+	collection := e.pcol(learningsCollection)
+	if populated, err := ragStore.HasContent(ctx, collection); err != nil || !populated {
+		return ""
+	}
 
 	embedding, err := ragEmbedder.Embed(ctx, query)
 	if err != nil {
 		return ""
 	}
 
-	results, err := ragStore.Search(ctx, e.pcol(learningsCollection), embedding, 3)
+	results, err := ragStore.Search(ctx, collection, embedding, 3)
 	if err != nil || len(results) == 0 {
 		return ""
 	}

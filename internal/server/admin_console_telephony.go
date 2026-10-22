@@ -36,6 +36,14 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       </div>
       <div class="row"><button class="primary" onclick="saveTelVoiceGreeting()">Save voice &amp; greeting</button><span id="tel-gmsg" class="hint" style="margin:0"></span></div>
 
+      <h2 style="margin-top:26px;font-size:15px">Conversation model — recognised callers</h2>
+      <div class="row" style="gap:8px;align-items:center">
+        <select id="tel-model" aria-label="Phone conversation model" style="flex:1" disabled><option>Loading…</option></select>
+        <button id="tel-model-save" class="primary" onclick="saveVoiceModel()" disabled>Save model</button>
+      </div>
+      <div class="hint">Choose a model configured in AI provider. The default follows the deployment's AI model. Applies to new calls; the caller keeps their Prism profile, memory and permitted tools.</div>
+      <div id="tel-model-msg" class="hint" role="status"></div>
+
       <h2 style="margin-top:26px;font-size:15px">Switchboard — unknown callers</h2>
       <div class="hint">Role and tone for a caller the agent doesn't recognise. Never any access to tools/files/personal data.</div>
       <label>Personality</label><textarea id="tel-persona" placeholder="Loading…" style="min-height:150px"></textarea>
@@ -75,6 +83,9 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       <div id="tel-phrases"></div>
       <div class="row"><button class="primary" onclick="savePhrases()">Save phrases</button><span id="tel-pmsg" class="hint" style="margin:0"></span></div>
 
+      <details style="margin-top:16px"><summary>Speech providers</summary>
+        <iframe id="tel-speech-providers" title="Speech providers" src="/api/vox/voice/editor" style="width:100%;height:220px;border:0;margin-top:8px" loading="lazy"></iframe>
+      </details>
       <h2 style="margin-top:26px;font-size:15px">Pronunciation</h2>
       <div class="hint">How the agent reads acronyms aloud. Comma-separated.</div>
       <div id="tel-dict"></div>
@@ -159,9 +170,15 @@ async function deleteVoiceKB(name){
  if(!await PrismModal.confirm('Delete "'+name+'" and all its documents?',{danger:true}))return;
  await fetch('/api/rag/collections?scope=voice&name='+encodeURIComponent(name),{method:'DELETE'});loadVoiceKB();
 }
+window.addEventListener('message',event=>{
+ const frame=$('tel-speech-providers');
+ if(event.origin!==location.origin||event.source!==frame?.contentWindow)return;
+ if(event.data?.type==='prismconnect-voice-height')frame.style.height=Math.min(900,Math.max(160,event.data.height))+'px';
+ if(event.data?.type==='prismconnect-voice-saved')loadTelVoiceGreeting();
+});
 async function loadTelephony(){
  const v=await jget('/api/voice');
- if(v)$('tel-persona').value=v.personality||'';
+ if(v){$('tel-persona').value=v.personality||'';loadVoiceModel(v.model||'');}
  loadVoiceKB();
  loadTelDirectory();       // who can receive a transfer, and how
  loadOutContacts();        // who the agent can call by name
@@ -171,6 +188,24 @@ async function loadTelephony(){
  if(s){SIP_FIELDS.forEach(f=>{if($('sip-'+f))$('sip-'+f).value=s['sip_'+f]||'';});}
  const st=await jget('/api/vox/sip/status');
  $('tel-sipstatus').innerHTML=(st&&st.endpoint_state==='online')?'✅ Trunk <b>online</b> — the number rings.':(st?'⚠️ Trunk <b>'+esc(st.endpoint_state||'?')+'</b> — check the config.':'Status unavailable.');
+}
+async function loadVoiceModel(selected){
+ const sel=$('tel-model'), button=$('tel-model-save');
+ try{
+  const data=await jget('/api/models');if(!data)throw new Error('Could not load models.');
+  const choices=data.models||[];sel.replaceChildren(new Option('Default AI model',''));
+  for(const model of choices)sel.add(new Option(data.labels?.[model]||model,model));
+  if(selected&&!choices.includes(selected))sel.add(new Option(selected+' (unavailable)',selected));
+  sel.value=selected;sel.disabled=false;button.disabled=false;
+ }catch(e){$('tel-model-msg').textContent=e.message;}
+}
+async function saveVoiceModel(){
+ const button=$('tel-model-save'), msg=$('tel-model-msg');button.disabled=true;msg.textContent='Saving…';
+ try{
+  const r=await fetch('/api/voice',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:$('tel-model').value}),signal:AbortSignal.timeout(15000)});
+  if(!r.ok){const d=await r.json();throw new Error(d.error||'Could not save the phone model.');}
+  msg.textContent='Saved · applies to new calls';
+ }catch(e){msg.textContent=e.message;}finally{button.disabled=false;}
 }
 async function saveTelVoice(){
  const m=$('tel-vmsg');m.textContent='Saving…';
@@ -262,6 +297,8 @@ const TEL_DICT=[
 ];
 const TEL_HANDLING=[
  ['transfer_dialog_turns','Max exchanges with a transfer recipient','1–10. The caller waits on hold meanwhile; a noisy line may need more.','num'],
+ ['llm_url_standard','Standard model API root (optional)','Include /v1. Empty uses the deployment gateway; separate endpoints receive no gateway API key.','in'],
+ ['llm_url_oncall','On-call model API root (optional)','Empty uses the deployment gateway.','in'],
  ['llm_model_standard','Micro-task model — inbound','Model alias on the LLM gateway.','in'],
  ['llm_model_oncall','Micro-task model — outbound missions','Model alias on the LLM gateway.','in'],
 ];
