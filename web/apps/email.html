@@ -409,6 +409,15 @@ function renderList() {
 }
 
 let readingGeneration=0;
+function emailHTMLWithExternalLinks(raw) {
+  const doc = new DOMParser().parseFromString(raw, 'text/html');
+  doc.querySelectorAll('a[href], area[href]').forEach(link => {
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener noreferrer');
+  });
+  const doctype = doc.doctype ? new XMLSerializer().serializeToString(doc.doctype) + '\n' : '';
+  return doctype + doc.documentElement.outerHTML;
+}
 async function openMessage(uid) {
   const readingID=++readingGeneration;
   document.getElementById('mail').classList.add('reading-open');
@@ -456,7 +465,7 @@ async function openMessage(uid) {
       const frame = document.createElement('iframe');
       frame.className = 'rhtml';
       frame.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
-      frame.srcdoc = raw;
+      frame.srcdoc = emailHTMLWithExternalLinks(raw);
       reading.appendChild(frame);
     } else {
       const div = document.createElement('div');
