@@ -4,6 +4,8 @@
 
 *Also known as: Probably Runs Interesting Stuff Magically*
 
+**[Documentation](https://www.thelastserver.com/docs/installation/)**
+
 Yes, another AI dashboard. Except this one runs on your own hardware, with local models or the AI providers you choose, and has the slightly unsettling property of being able to modify its own environment.
 
 <img src="gui.png" width="700" alt="PRISM dashboard">
@@ -32,6 +34,8 @@ Is this a great idea? Probably. Does it make you slightly nervous? It should. Th
 ---
 
 ## Quick start
+
+See the [installation guide](https://www.thelastserver.com/docs/installation/) for detailed setup instructions and links to the configuration reference.
 
 Docker + Docker Compose are the only host requirements. Use a local model server or an API provider; the AI connection is configured in the interface.
 
