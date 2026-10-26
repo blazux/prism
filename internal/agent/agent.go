@@ -1556,8 +1556,16 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				Images:  toolImages,
 				IsError: toolFailed,
 			}
-			if tc.Function.Name == "add_attachment" && len(toolImages) > 0 {
-				events <- Event{Type: "attachment", Images: toolImages}
+			if tc.Function.Name == "add_attachment" && !toolFailed {
+				var attached struct {
+					Attachment struct {
+						Name string `json:"name"`
+						URL  string `json:"url"`
+					} `json:"attachment"`
+				}
+				if json.Unmarshal([]byte(result), &attached) == nil && attached.Attachment.URL != "" {
+					events <- Event{Type: "attachment", Images: toolImages, Path: attached.Attachment.URL, Title: attached.Attachment.Name}
+				}
 			}
 
 			// Detect retry loops: same tool + same args + same result 3 times in a row.

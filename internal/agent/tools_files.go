@@ -2,7 +2,11 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -450,19 +454,39 @@ func (e *ToolExecutor) addAttachment(path string) (string, []string, error) {
 	data, err := workspace.ReadFile(e.workspaceDir, path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return e.notFoundHint(path, fullPath).Error(), nil, nil // teach: siblings + closest name
+			return "", nil, e.notFoundHint(path, fullPath)
 		}
-		return fmt.Sprintf("ERROR: could not read %q: %v", path, err), nil, nil
+		return "", nil, fmt.Errorf("could not read %q: %w", path, err)
 	}
-	ext := strings.ToLower(filepath.Ext(path))
-	if !imageExts[ext] {
-		return fmt.Sprintf("Attached %q to your response (non-image file — download will be available).", filepath.Base(path)), nil, nil
+	session := e.sessionID
+	if session == "" {
+		session = "default"
 	}
-	return fmt.Sprintf("Attached %q to your response.", filepath.Base(path)), []string{base64.StdEncoding.EncodeToString(data)}, nil
+	idBytes := make([]byte, 16)
+	if _, err := rand.Read(idBytes); err != nil {
+		return "", nil, err
+	}
+	id := hex.EncodeToString(idBytes)
+	name := filepath.Base(path)
+	if err := workspace.WriteFile(e.workspaceDir, AttachmentFilePath(session, id, name), data); err != nil {
+		return "", nil, err
+	}
+	query := url.Values{"session": {session}, "id": {id}, "name": {name}}
+	result, _ := json.Marshal(map[string]any{"message": "File attached to your response.", "attachment": map[string]string{"name": name, "url": "/api/chat/attachment?" + query.Encode()}})
+	if !imageExts[strings.ToLower(filepath.Ext(path))] {
+		return string(result), nil, nil
+	}
+	return string(result), []string{base64.StdEncoding.EncodeToString(data)}, nil
 }
 
 // Preserve the install status while bounding returned logs, without a pipeline
 // whose last successful command hides the package manager's failure.
 func packageInstallCommand(command string) string {
 	return "prism_install_log=$(mktemp) || exit 1; trap 'rm -f \"$prism_install_log\"' EXIT HUP INT TERM; (" + command + ") >\"$prism_install_log\" 2>&1; prism_install_status=$?; tail -c 8000 \"$prism_install_log\"; exit \"$prism_install_status\""
+}
+
+// AttachmentFilePath isolates immutable response copies by chat session.
+func AttachmentFilePath(session, id, name string) string {
+	scope := sha256.Sum256([]byte(session))
+	return filepath.Join(".attachments", hex.EncodeToString(scope[:]), id, name)
 }

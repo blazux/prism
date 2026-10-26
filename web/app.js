@@ -234,7 +234,7 @@ function handleServerMsg(msg) {
     case 'editor_request': requestActiveEditor(msg); break
     case 'stream':          appendStream(msg.content); break
     case 'stream_end':      finalizeStream(); break
-    case 'attachment':      pendingAttachments.push(...(msg.images || [])); break
+    case 'attachment':      pendingAttachments.push(msg); break
     case 'tool_use':        appendToolUse(msg); trackPimTool(msg); break
     case 'tool_result':     appendToolResult(msg); maybeRefreshApp(msg); break
     case 'progress':        appendProgress(msg.content); break
@@ -685,23 +685,35 @@ function appendStream(content) {
   if (wasAtBottom) scrollChat(true)
 }
 
+function appendResponseAttachment(parent, attachment) {
+  const box = document.createElement('div')
+  box.className = 'tool-block-images chat-response-attachments'
+  for (const b64 of attachment.images || []) {
+    const image = document.createElement('img')
+    image.src = 'data:image/jpeg;base64,' + b64
+    image.alt = attachment.title || 'attachment'
+    box.appendChild(image)
+  }
+  if (attachment.path && attachment.path.startsWith('/api/chat/attachment?')) {
+    const link = document.createElement('a')
+    link.href = attachment.path
+    link.download = attachment.title || 'attachment'
+    link.textContent = '↓ ' + (attachment.title || 'Download attachment')
+    box.appendChild(link)
+  }
+  if (box.childNodes.length) parent.appendChild(box)
+}
+
 function finalizeStream() {
   const wasAtBottom = chatWasAtBottom()
+  if (!currentAssistantEl && pendingAttachments.length) appendStream('')
   if (currentAssistantEl) {
     currentAssistantEl.classList.remove('cursor')
     currentAssistantEl.innerHTML = renderMarkdown(currentAssistantContent)
     if (pendingAttachments.length > 0) {
       const assistantDiv = currentAssistantEl.closest('.chat-msg.assistant')
       if (assistantDiv) {
-        const imgContainer = document.createElement('div')
-        imgContainer.className = 'tool-block-images'
-        pendingAttachments.forEach(b64 => {
-          const img = document.createElement('img')
-          img.src = 'data:image/jpeg;base64,' + b64
-          img.alt = 'attachment'
-          imgContainer.appendChild(img)
-        })
-        assistantDiv.appendChild(imgContainer)
+        pendingAttachments.forEach(attachment => appendResponseAttachment(assistantDiv, attachment))
       }
       pendingAttachments = []
     }
@@ -843,6 +855,12 @@ function restoreChatHistory(messages) {
           <div class="tool-block-output${isError ? ' error' : ''}">${escHtml(m.content || '(no output)')}</div>
         </div>`
       msgs.appendChild(div)
+      if (m.toolName === 'add_attachment') {
+        try {
+          const result = JSON.parse(m.content)
+          if (result.attachment) appendResponseAttachment(div, {path: result.attachment.url, title: result.attachment.name})
+        } catch {}
+      }
     }
   }
   const sep2 = document.createElement('div')

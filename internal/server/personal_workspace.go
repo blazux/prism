@@ -100,6 +100,8 @@ func PersonalWorkspaceHandler(resolve func(*http.Request) (WorkspaceAccess, erro
 			s.handleTasks(w, r)
 		case "/api/events":
 			s.handleEvents(w, r)
+		case "/api/chat/attachment":
+			s.handleChatAttachment(w, r)
 		case "/api/files":
 			if r.Method != http.MethodGet {
 				http.Error(w, "method not allowed", 405)

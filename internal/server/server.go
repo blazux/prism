@@ -279,6 +279,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/sessions", s.resourceRoute((*Server).handleSessions))
 	mux.HandleFunc("/api/sessions/", s.resourceRoute((*Server).handleSessionByID))
 	mux.HandleFunc("/api/resources", s.resourceRoute((*Server).handleResources))
+	mux.HandleFunc("/api/chat/attachment", s.resourceRoute((*Server).handleChatAttachment))
 	mux.HandleFunc("/api/chat/upload", s.resourceRoute((*Server).handleChatFileUpload))
 	mux.HandleFunc("/api/notify", s.resourceRoute((*Server).handleExternalNotify))
 	mux.HandleFunc("/api/profile", s.resourceRoute((*Server).handleProfile))
