@@ -36,3 +36,8 @@ See the "connecting-accounts" and provider-specific help for step-by-step setup.
 The agent has access to this documentation. Ask it things like "how do I connect
 my iCloud calendar?", "what can you do?", or "help me set up Google Calendar" and
 it will walk you through it.
+
+## Phone calls
+
+Connect PrismVox to answer and place phone calls. See [Telephony with PrismVox](telephony.md)
+for model routing and the four sections in **Admin → Telephony**.

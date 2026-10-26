@@ -19,12 +19,12 @@ On first opening, the form includes the current connection and the other environ
 ## Phone conversations
 
 When PrismVox is connected, a global administrator can choose a separate
-model in **Admin → Telephony → Conversation model — recognised callers**.
+model in **Admin → Telephony → Agents & models → Conversation model — recognised callers**.
 Configure its source in **AI provider** first, select the phone model, then click
 **Save model**. The setting applies to new calls and does not change the web
 model, embeddings, caller profile, memory, knowledge scope or permitted tools.
 Choose **Default AI model** to follow the deployment default again. Unknown
-callers use the switchboard model configured in PrismVox's call handling.
+callers use the switchboard model configured in **Admin → Telephony → Agents & models → PrismVox model — unknown callers & outbound calls**.
 
 ## Embeddings and document search
 

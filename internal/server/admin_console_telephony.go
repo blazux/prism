@@ -12,30 +12,10 @@ package server
 // — this pane is an editor, not a second copy.
 
 // adminTelephonyPane is the pane markup, inserted after Apps.
-const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Telephony</h2><span class="pane-scope">Deployment</span><div class="hint">This deployment is docked with a Prism Vox phone stack. The agent also answers the phone: a known caller (number on their profile) gets their own agent, an unknown one gets the switchboard configured here.</div>
-
-      <div class="hint" style="margin-top:10px">Everything here is stored by the phone stack itself — this page writes to it directly, so there is no second copy to keep in sync. <b>Placing calls and watching activity are not forms:</b> ask the agent ("appelle le plombier et prends rendez-vous", "quels appels sont en attente ?") or build a widget against <code>/api/vox/…</code>, which any admin session can reach.</div>
-
-      <h2 style="margin-top:18px;font-size:15px">Voice &amp; greeting — every call</h2>
-      <div class="hint">How the agent sounds, and the first thing it says when it picks up. This applies to <em>every</em> caller — known or not — so it sits above the switchboard, which only shapes what it says to strangers.</div>
-      <div class="row" style="gap:12px;align-items:flex-end">
-        <div style="flex:1"><label>Voice</label><select id="tel-voice" style="width:100%"><option>Loading…</option></select></div>
-        <button class="mini" onclick="previewVoice()">Preview</button>
-      </div>
-      <div id="tel-voicehint" class="hint" style="margin-top:4px"></div>
-      <label style="margin-top:10px">Greeting — unknown caller <span class="hint" style="margin:0">— spoken on pickup, before the agent thinks at all</span></label>
-      <textarea id="tel-greeting" placeholder="Loading…" style="min-height:60px"></textarea>
-      <label style="margin-top:10px">Greeting — someone we recognise <span class="hint" style="margin:0">— when the number matches a profile. <code>%s</code> = their name; leave it out and the line is spoken as written.</span></label>
-      <textarea id="tel-greeting-known" placeholder="Loading…" style="min-height:60px"></textarea>
-      <div class="hint" style="margin-top:4px">Two greetings because the caller is told who picked up before a single word is generated: a colleague should not hear "you have reached the switchboard". This one also tells you, on the very first second of a test call, which brain took it.</div>
-      <div class="row" style="gap:8px;margin-top:6px;align-items:center" id="tel-clonebox">
-        <span class="filebtn"><input type="file" id="tel-clonefile" accept="audio/*" onchange="showPicked('tel-clonefile','tel-clonefilename')"><button type="button" onclick="document.getElementById('tel-clonefile').click()">Choose a voice sample…</button></span>
-        <span id="tel-clonefilename" class="filename"></span>
-        <input id="tel-clonename" placeholder="New voice name" style="width:170px">
-        <button class="primary" onclick="cloneVoice()">Clone voice</button>
-      </div>
-      <div class="row"><button class="primary" onclick="saveTelVoiceGreeting()">Save voice &amp; greeting</button><span id="tel-gmsg" class="hint" style="margin:0"></span></div>
-
+const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Telephony</h2><span class="pane-scope">Deployment</span>
+<style>.tel-section{margin:16px 0;border:1px solid var(--border);border-radius:8px}.tel-section>summary{padding:14px;cursor:pointer;font-weight:600}.tel-section-body{padding:0 14px 16px}.tel-section-body h3{font-size:15px;margin:20px 0 8px}</style>
+<div class="hint">Connected to PrismVox. Recognised callers use their Prism agent; unknown callers use the Vox switchboard. Outbound calls use the Vox outbound agent. Saved agent settings apply to new calls.</div>
+<details class="tel-section" open><summary>Agents &amp; models</summary><div class="tel-section-body">
       <h2 style="margin-top:26px;font-size:15px">Conversation model — recognised callers</h2>
       <div class="row" style="gap:8px;align-items:center">
         <select id="tel-model" aria-label="Phone conversation model" style="flex:1" disabled><option>Loading…</option></select>
@@ -45,7 +25,7 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       <div id="tel-model-msg" class="hint" role="status"></div>
 
       <h2 style="margin-top:26px;font-size:15px">Switchboard — unknown callers</h2>
-      <div class="hint">Role and tone for a caller the agent doesn't recognise. Never any access to tools/files/personal data.</div>
+      <div class="hint">Instructions for callers whose number does not match a Prism profile. Personal Prism memory and files are not shared with the switchboard.</div>
       <label>Personality</label><textarea id="tel-persona" placeholder="Loading…" style="min-height:150px"></textarea>
       <label>Knowledge base <span class="hint" style="margin:0">— the one collection the switchboard may read, and read out loud to strangers</span></label>
       <select id="tel-kbsel" style="width:100%" onchange="saveVoiceKBChoice()"><option>Loading…</option></select>
@@ -53,8 +33,8 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
         <span id="tel-kbmsg" class="hint" style="margin:0"></span>
         <button id="tel-kbdel" class="mini" style="display:none" onclick="deleteSelectedVoiceKB()">Delete this collection</button>
       </div>
-      <div class="hint" style="margin-top:8px">Pick an existing collection — group collections are the ones you upload to as usual in RAG, so the same documents serve your members and the switchboard. <b>Anything you point at here is readable by unknown callers</b>, so a group collection is a deliberate choice, not a shortcut.</div>
-      <div class="hint" style="margin-top:8px">Or keep a base that belongs to the switchboard alone and to nobody else:</div>
+      <div class="hint" style="margin-top:8px">Selection is saved immediately. <b>Documents in the selected collection are available to unknown callers.</b> Manage group documents in Knowledge Base.</div>
+      <div class="hint" style="margin-top:8px">Upload documents to a switchboard collection:</div>
       <div class="row" style="gap:8px;margin-top:4px;align-items:center">
         <span class="filebtn"><input type="file" id="tel-kbfile" accept=".pdf,.txt,.md,.docx,.html,.csv" onchange="showPicked('tel-kbfile','tel-kbfilename')"><button type="button" onclick="document.getElementById('tel-kbfile').click()">Choose a file…</button></span>
         <span id="tel-kbfilename" class="filename"></span>
@@ -64,12 +44,51 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       </div>
       <div class="row"><button class="primary" onclick="saveTelVoice()">Save switchboard</button><span id="tel-vmsg" class="hint" style="margin:0"></span></div>
 
+<h3>PrismVox model — unknown callers &amp; outbound calls</h3><div id="tel-inbound-model"></div>
+<div class="row"><button class="primary" onclick="saveCfgFields(TEL_INBOUND_MODEL,'tel-imsg')">Save PrismVox model</button><span id="tel-imsg" class="hint" role="status"></span></div><h3>Outbound instructions</h3><div class="hint">PrismVox runs outbound missions and conversations with transfer recipients, including when connected to Prism. The mission is added to these instructions for each outbound call.</div><div id="tel-outbound-model"></div>
+<div class="row"><button class="primary" onclick="saveCfgFields(TEL_OUTBOUND_MODEL,'tel-omsg')">Save outbound instructions</button><span id="tel-omsg" class="hint" role="status"></span></div></div></details>
+<details class="tel-section"><summary>Voice &amp; greeting</summary><div class="tel-section-body">
+      <h2 style="margin-top:18px;font-size:15px">Voice &amp; inbound greetings</h2>
+      <div class="hint">The voice applies to all calls. Inbound greetings are spoken on pickup, before the first generated response.</div>
+      <div class="row" style="gap:12px;align-items:flex-end">
+        <div style="flex:1"><label>Voice</label><select id="tel-voice" style="width:100%"><option>Loading…</option></select></div>
+        <button class="mini" onclick="previewVoice()">Preview</button>
+      </div>
+      <div id="tel-voicehint" class="hint" style="margin-top:4px"></div>
+      <label style="margin-top:10px">Greeting — unknown caller <span class="hint" style="margin:0">— spoken on pickup, before the agent thinks at all</span></label>
+      <textarea id="tel-greeting" placeholder="Loading…" style="min-height:60px"></textarea>
+      <label style="margin-top:10px">Greeting — someone we recognise <span class="hint" style="margin:0">— when the number matches a profile. <code>%s</code> = their name; leave it out and the line is spoken as written.</span></label>
+      <textarea id="tel-greeting-known" placeholder="Loading…" style="min-height:60px"></textarea>
+      <div class="hint" style="margin-top:4px">The recognised-caller greeting is used when the incoming number matches an approved Prism profile.</div>
+      <div class="row" style="gap:8px;margin-top:6px;align-items:center" id="tel-clonebox">
+        <span class="filebtn"><input type="file" id="tel-clonefile" accept="audio/*" onchange="showPicked('tel-clonefile','tel-clonefilename')"><button type="button" onclick="document.getElementById('tel-clonefile').click()">Choose a voice sample…</button></span>
+        <span id="tel-clonefilename" class="filename"></span>
+        <input id="tel-clonename" placeholder="New voice name" style="width:170px">
+        <button class="primary" onclick="cloneVoice()">Clone voice</button>
+      </div>
+      <div class="row"><button class="primary" onclick="saveTelVoiceGreeting()">Save voice &amp; greeting</button><span id="tel-gmsg" class="hint" style="margin:0"></span></div>
+
+      <details style="margin-top:16px"><summary>Speech providers</summary>
+        <iframe id="tel-speech-providers" title="Speech providers" src="/api/vox/voice/editor" style="width:100%;height:220px;border:0;margin-top:8px" loading="lazy"></iframe>
+      </details>
+      <h2 style="margin-top:26px;font-size:15px">Spoken phrases</h2>
+      <div class="hint">Messages used at specific stages of a call or as fallbacks when no response is generated. Keep <code>%s</code> placeholders for names and the reason for the call.</div>
+      <div id="tel-phrases"></div>
+      <div class="row"><button class="primary" onclick="savePhrases()">Save phrases</button><span id="tel-pmsg" class="hint" style="margin:0"></span></div>
+
+      <h2 style="margin-top:26px;font-size:15px">Pronunciation</h2>
+      <div class="hint">How the agent reads acronyms aloud. Comma-separated.</div>
+      <div id="tel-dict"></div>
+      <div class="row"><button class="primary" onclick="saveDict()">Save dictionary</button><span id="tel-dmsg" class="hint" style="margin:0"></span></div>
+
+</div></details>
+<details class="tel-section"><summary>Transfers &amp; directories</summary><div class="tel-section-body">
       <h2 style="margin-top:26px;font-size:15px">Transfer directory</h2>
-      <div class="hint">Everyone who can receive a transferred call: approved accounts with a phone number on their profile. Nobody else is transferable — that is the rule, not a limitation. <b>Blind</b> puts the caller straight through. <b>Attended</b> asks their name and reason first, announces them, and lets the recipient decline. Each person sets this on their own profile; you can override it here.</div>
+      <div class="hint">Everyone who can receive a transferred call: approved accounts with a phone number on their profile. <b>Blind</b> puts the caller straight through. <b>Attended</b> asks their name and reason first, announces them, and lets the recipient decline. Each person sets this on their own profile; you can override it here.</div>
       <div id="tel-dir">Loading…</div>
 
       <h2 style="margin-top:26px;font-size:15px">Outbound directory</h2>
-      <div class="hint">People and businesses the agent can <b>call</b> — the plumber, a supplier, a customer. Ask it in plain words ("appelle le plombier et prends rendez-vous") and it looks the number up here. Separate from the transfer directory above on purpose: these contacts receive calls, they never receive transfers.</div>
+      <div class="hint">People and businesses the agent can <b>call</b> — the plumber, a supplier, a customer. Ask it in plain words ("appelle le plombier et prends rendez-vous") and it looks the number up here. These contacts receive outbound calls; they are not transfer destinations.</div>
       <div id="tel-out">Loading…</div>
       <div class="row" style="gap:6px;margin-top:8px">
         <input id="tel-outname" placeholder="Name, e.g. le plombier" style="flex:1">
@@ -78,24 +97,13 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
         <span id="tel-outmsg" class="hint" style="margin:0"></span>
       </div>
 
-      <h2 style="margin-top:26px;font-size:15px">Spoken phrases</h2>
-      <div class="hint">Fixed lines the call itself speaks, in French — not the agent improvising. Three of them are <b>always</b> used (hold, transfer, connecting): they cover network latency right before an irreversible action, where a hallucinated name would betray the caller. The others are fallbacks the agent normally supersedes. <code>%s</code> is a placeholder — keep it.</div>
-      <div id="tel-phrases"></div>
-      <div class="row"><button class="primary" onclick="savePhrases()">Save phrases</button><span id="tel-pmsg" class="hint" style="margin:0"></span></div>
-
-      <details style="margin-top:16px"><summary>Speech providers</summary>
-        <iframe id="tel-speech-providers" title="Speech providers" src="/api/vox/voice/editor" style="width:100%;height:220px;border:0;margin-top:8px" loading="lazy"></iframe>
-      </details>
-      <h2 style="margin-top:26px;font-size:15px">Pronunciation</h2>
-      <div class="hint">How the agent reads acronyms aloud. Comma-separated.</div>
-      <div id="tel-dict"></div>
-      <div class="row"><button class="primary" onclick="saveDict()">Save dictionary</button><span id="tel-dmsg" class="hint" style="margin:0"></span></div>
-
       <h2 style="margin-top:26px;font-size:15px">Call handling</h2>
-      <div class="hint">The phone stack runs a few micro-tasks on its own model — re-prompting a silent caller, announcing a transfer, judging whether the recipient accepted, summarising the call. The <em>conversation</em> itself is this agent's brain; these are not.</div>
+      <div class="hint">Limit the number of exchanges with a transfer recipient while the caller waits on hold.</div>
       <div id="tel-handling"></div>
       <div class="row"><button class="primary" onclick="saveHandling()">Save call handling</button><span id="tel-hmsg" class="hint" style="margin:0"></span></div>
 
+</div></details>
+<details class="tel-section"><summary>Phone connection</summary><div class="tel-section-body">
       <h2 style="margin-top:26px;font-size:15px">SIP trunk</h2>
       <div class="hint" id="tel-sipstatus">Loading status…</div>
       <label>Registrar (host)</label><input id="sip-registrar" style="width:100%">
@@ -111,7 +119,8 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
       <label>Outbound caller ID name</label><input id="sip-callerid_name" style="width:100%">
       <label>Transfer method</label><select id="sip-transfer_method" style="width:100%"><option value="bridge">bridge (Asterisk stays in the media path)</option><option value="refer">refer (SIP REFER to the softswitch)</option></select>
       <div class="row"><button id="tel-sip-save" class="primary" onclick="saveTelSip()">Save &amp; apply</button><span id="tel-smsg" class="hint" style="margin:0"></span></div>
-      <div class="hint" style="margin-top:6px">"Save &amp; apply" re-registers the trunk without restarting Asterisk. Detailed voices/phrases/dictionary config still lives in the Vox interface for now.</div>
+      <div class="hint" style="margin-top:6px">"Save &amp; apply" re-registers the trunk without restarting Asterisk.</div>
+</div></details>
     </div>
 `
 
@@ -296,19 +305,23 @@ const TEL_DICT=[
  ['tts_spell_exceptions','Never spell out','Read as a word despite looking like an acronym, e.g. "OK".','in'],
 ];
 const TEL_HANDLING=[
- ['transfer_dialog_turns','Max exchanges with a transfer recipient','1–10. The caller waits on hold meanwhile; a noisy line may need more.','num'],
- ['llm_url_standard','Standard model API root (optional)','Include /v1. Empty uses the deployment gateway; separate endpoints receive no gateway API key.','in'],
- ['llm_url_oncall','On-call model API root (optional)','Empty uses the deployment gateway.','in'],
- ['llm_model_standard','Micro-task model — inbound','Model alias on the LLM gateway.','in'],
- ['llm_model_oncall','Micro-task model — outbound missions','Model alias on the LLM gateway.','in'],
+ ['transfer_dialog_turns','Max exchanges with a transfer recipient','1–10. Empty uses 3.','num'],
+];
+const TEL_INBOUND_MODEL=[
+ ['llm_model_standard','PrismVox conversation model','Used for unknown callers, outbound calls, transfer recipients, summaries and console chats. Empty uses the Vox deployment default.','in'],
+ ['llm_url_standard','Model API root (optional)','Include /v1. Empty uses the Vox deployment gateway; separate endpoints receive no gateway API key.','url'],
+];
+const TEL_OUTBOUND_MODEL=[
+ ['outbound_system_prompt','Instructions — outbound calls','The opening is generated from the mission.','ta'],
 ];
 let TEL_CFG={};
 function renderCfgFields(boxId,spec){
  $(boxId).innerHTML=spec.map(([k,label,hint,kind])=>{
   const v=esc(TEL_CFG[k]||'');
   const field=kind==='ta'?'<textarea id="cf-'+k+'" style="min-height:44px">'+v+'</textarea>'
-    :'<input id="cf-'+k+'"'+(kind==='num'?' type="number" min="1" max="10"':'')+' value="'+v+'" style="width:100%">';
-  return '<label style="margin-top:8px">'+label+'</label><div class="hint" style="margin:0 0 3px">'+hint+'</div>'+field;
+    :'<input id="cf-'+k+'"'+(kind==='num'?' type="number" min="1" max="10"':kind==='url'?' type="url"':'')+' value="'+v+'" style="width:100%">';
+  const markup = '<label style="margin-top:8px">'+label+'</label><div class="hint" style="margin:0 0 3px">'+hint+'</div>'+field;
+  return kind==='url'?'<details style="margin-top:10px"><summary>Advanced: model endpoint</summary>'+markup+'</details>':markup;
  }).join('');
 }
 async function loadPhoneCfg(){
@@ -316,6 +329,8 @@ async function loadPhoneCfg(){
  renderCfgFields('tel-phrases',TEL_PHRASES);
  renderCfgFields('tel-dict',TEL_DICT);
  renderCfgFields('tel-handling',TEL_HANDLING);
+ renderCfgFields('tel-inbound-model',TEL_INBOUND_MODEL);
+ renderCfgFields('tel-outbound-model',TEL_OUTBOUND_MODEL);
  $('tel-greeting').value=TEL_CFG.greeting||'';
  // Empty in the config table = the compiled-in default is in force. Showing it
  // rather than an empty box is what makes the field editable instead of a

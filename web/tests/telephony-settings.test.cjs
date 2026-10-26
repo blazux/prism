@@ -13,6 +13,7 @@ function harness({current,save,apply,password=''}={}){
  };
  const calls=[];
  const ctx={
+  window:{addEventListener:()=>{}},
   $:id=>elements[id],esc:s=>s,loadTelephony:()=>{},setTimeout:()=>{},
   jget:async()=>current===undefined?{sip_transport_mode:'udp',sip_udp_port:'5090',sip_registrar_match:'192.0.2.0/24',sip_password:'',unused:'ignore'}:current,
   fetch:async(url,options)=>{calls.push({url,options});const result=url.endsWith('/apply')?apply:save;if(result instanceof Error)throw result;return result||json(url.endsWith('/apply')?{ok:true,detail:'Reloaded'}:{ok:true});},
