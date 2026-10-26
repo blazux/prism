@@ -4,11 +4,11 @@ The agent is the point of Prism. Treat it like a capable assistant with hands on
 all your tools, not a search box.
 
 ## What it can do
-- **Operate the apps**: read/triage/send email, add or query calendar events,
+- **Operate the apps**: the agent can read, sort and send email, add or query calendar events,
   manage tasks, create and edit notes.
 - **Connect things**: "turn this email into a task", "block an hour tomorrow for
   the report", "save this research as a note".
-- **Research**: web search and deeper multi-step research; read web pages.
+- **Research**: the agent can search the web, read pages and investigate a question through several research steps.
 - **Knowledge (RAG)**: ingest documents into collections and answer from them;
   the "Add to knowledge" button in Notes feeds the same store.
 - **Build UI**: create widgets and dashboards (HTML) pinned to a board — ask for
@@ -59,7 +59,7 @@ base, MCP servers, tool policy, the shared agent). The agent still knows these
 pages and can walk you through them step by step.
 
 ## Channels
-- **Web**: the main dashboard chat.
+- **Web** provides the main dashboard chat.
 - **Telegram**: link your own bot in Settings → Channels to chat with your
   agent from your phone; cron jobs can push messages there too.
 - **Slack**: a single Socket Mode app for the whole deployment, connected by a
@@ -71,6 +71,31 @@ pages and can walk you through them step by step.
 ## Your profile
 
 **Settings → Profile** holds how you appear to others: a photo (Upload photo / remove), a display name (how you appear in chat and in group rooms), your first and last name and a phone number. Your login email is shown there for reference.
+
+## Memory and conversations
+
+Each workspace has its own conversation. Switching workspaces, closing the
+browser or restarting Prism preserves saved messages. Long conversations may
+be compacted into a summary for the model's context.
+
+Saved user facts and preferences are available across your workspaces. Saved
+lessons are recalled by similarity to your current request, so a lesson may not
+be recalled on every related question. Saved skills hold reusable procedures;
+the agent sees their index and loads the relevant instructions when needed.
+Ask the agent to remember a durable preference or save a procedure explicitly
+when it should carry over to future conversations.
+
+**Clear chat** permanently deletes the current workspace's messages and
+conversation summary after confirmation. It does not archive them. Saved user
+facts, lessons, skills, widgets and files remain. Clearing a conversation does
+not clear conversations in other workspaces.
+
+In shared mode, each user's agent searches that user's own conversations and
+uses that user's saved facts, lessons and skills across workspaces. A group's
+shared agent has its own group memory and skills; its history search covers
+that group's agent conversations in the Room and Webex. Joining a group does
+not merge members' personal memories. Knowledge collections shared by the
+group remain available according to group permissions.
 
 ## Background work and subagents
 

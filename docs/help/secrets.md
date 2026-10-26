@@ -6,8 +6,8 @@ without sending the entered value through the chat. Secrets need Postgres; witho
 shows *Indisponible (Postgres requis)*.
 
 ## Settings → Secrets
-- **Add a secret**: a **Name** (e.g. `MY_API_KEY`) and a **Value**, then
-  **Save**. Each row shows the name and the environment variable it becomes
+- To add a secret, enter a **Name** such as `MY_API_KEY` and its **Value**, then
+  click **Save**. Each row shows the name and the environment variable it becomes
   (`$MY_API_KEY`). Values are never shown again; **✕** deletes.
 - The env var name is the secret name uppercased, with anything that is not a
   letter or digit turned into `_` (`openai_key` → `$OPENAI_KEY`). Use a name
@@ -17,8 +17,8 @@ shows *Indisponible (Postgres requis)*.
 
 In a shared deployment the tab has two sections:
 
-- **Personal secrets** — yours only. No other member, and not the group's
-  shared agent, can see or use them.
+- **Personal secrets** belong to you. Other members and the group’s shared
+  agent cannot see or use them.
 - **Group secrets** — shared with the whole group: every member's agent gets
   them (a common account's login, an API key for a group MCP server). Tick
   **Group secret — shared, usable by every member** when adding one (pick the

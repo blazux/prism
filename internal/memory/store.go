@@ -165,8 +165,10 @@ type HistoryHit struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// SearchHistory full-text searches user/assistant messages across all sessions.
-func (s *Store) SearchHistory(ctx context.Context, query string, limit int) ([]HistoryHit, error) {
+// SearchHistory searches a user's own sessions or a shared agent's group sessions.
+// Empty scope preserves the single-user deployment-wide search. Filtering must
+// happen before ranking/LIMIT so other owners cannot displace permitted hits.
+func (s *Store) SearchHistory(ctx context.Context, query string, limit int, scope string) ([]HistoryHit, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 15
 	}
@@ -175,9 +177,13 @@ func (s *Store) SearchHistory(ctx context.Context, query string, limit int) ([]H
 		FROM conversation_history
 		WHERE role IN ('user', 'assistant')
 		  AND content_tsv @@ websearch_to_tsquery('simple', $1)
+		  AND ($3 = ''
+		    OR (left($3, 1) = 'u' AND starts_with(session_id, $3 || '-'))
+		    OR (left($3, 1) = 'g' AND
+		      (session_id = 'room-' || $3 OR starts_with(session_id, 'webex-' || $3 || '-'))))
 		ORDER BY ts_rank(content_tsv, websearch_to_tsquery('simple', $1)) DESC, created_at DESC
 		LIMIT $2
-	`, query, limit)
+	`, query, limit, scope)
 	if err != nil {
 		return nil, err
 	}

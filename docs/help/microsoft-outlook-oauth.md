@@ -41,4 +41,4 @@ your Outlook calendar.
 
 ## Troubleshooting
 - "redirect_uri_mismatch": the redirect URI must match Prism's exactly.
-- Secret not working: make sure you copied the secret **Value**, not its ID.
+- If the secret is rejected, check that you copied its **Value**, not its ID.

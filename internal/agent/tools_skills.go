@@ -6,17 +6,33 @@ import (
 	"strings"
 
 	"prism/internal/skills"
+	"prism/internal/workspace"
 )
 
-func (e *ToolExecutor) skillsMgr() *skills.Manager {
-	return skills.NewManager(filepath.Join(e.workspaceDir, "skills"))
+func (e *ToolExecutor) skillsMgr() (*skills.Manager, error) {
+	scope, err := e.durableMemoryScope()
+	if err != nil {
+		return nil, err
+	}
+	// Keep single-user skills in place. Legacy multi-user skills have no owner
+	// metadata: retain those files, but never expose them as a personal library.
+	if scope != "" {
+		if err := workspace.MkdirAll(e.workspaceDir, "skills", 0755); err != nil {
+			return nil, err
+		}
+	}
+	return skills.NewManager(filepath.Join(e.workspaceDir, "skills", scope)), nil
 }
 
 // SkillsIndex returns a compact "name — when to use" list of every saved skill,
 // injected into the system prompt so the agent knows what it can recall. Empty
 // when there are no skills.
 func (e *ToolExecutor) SkillsIndex() string {
-	list, err := e.skillsMgr().List()
+	mgr, err := e.skillsMgr()
+	if err != nil {
+		return ""
+	}
+	list, err := mgr.List()
 	if err != nil || len(list) == 0 {
 		return ""
 	}
@@ -35,7 +51,10 @@ func (e *ToolExecutor) SkillsIndex() string {
 
 // skillTool implements the `skill` tool: add / list / get / delete.
 func (e *ToolExecutor) skillTool(action, name, description, whenToUse, body string) (string, error) {
-	mgr := e.skillsMgr()
+	mgr, err := e.skillsMgr()
+	if err != nil {
+		return "", err
+	}
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "add", "save", "update":
 		if err := mgr.Save(skills.Skill{Name: name, Description: description, WhenToUse: whenToUse, Body: body}); err != nil {

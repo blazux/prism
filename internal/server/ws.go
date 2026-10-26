@@ -236,7 +236,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	// A known caller (their number is on their profile) is identified: they get
 	// THEIR memory and knowledge — inter-channel continuity — but still only the
-	// voice-safe tools. An unknown caller stays a public switchboard guest.
+	// personal organizer tools within their account permissions. An unknown caller
+	// stays a public switchboard guest.
 	var voiceUser *memory.User
 	var voiceDir []memory.DirEntry // the phone directory = Prism user profiles
 	if voiceCall {
@@ -245,32 +246,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ragScope string
-	if voiceCall && voiceUser != nil {
-		ragScope = s.ragScopeFor(r.Context(), voiceUser)
-		log.Printf("[voice] caller %q identified as user %d (%s) → own scope %q, voice-safe tools",
-			r.URL.Query().Get("caller"), voiceUser.ID, voiceUser.DisplayName, ragScope)
-		CallerContext{
-			Guard:         voiceGuard(voiceKnownAllowedTools),
-			RAGScope:      ragScope,
-			PersonalScope: fmt.Sprintf("u%d", voiceUser.ID), // their memory/profile
-			HiddenTools:   voiceHiddenTools(voiceKnownAllowedTools),
-			MultiUser:     s.cfg.MultiUser,
-		}.apply(executor)
-	} else if voiceCall {
-		ragScope = s.voiceRAGScope(r.Context())
-		log.Printf("[voice] inbound call from %q → guest identity (tools deny-by-default, rag scope %q)",
-			r.URL.Query().Get("caller"), ragScope)
-		CallerContext{
-			Guard:    voiceGuard(voiceGuestAllowedTools),
-			RAGScope: ragScope,
-			// Pin an isolated personal scope: without it personalScope() falls back
-			// to the rag scope and a caller could read the owner's profile / learnings.
-			PersonalScope: voiceGuestScope,
-			HiddenTools:   voiceHiddenTools(voiceGuestAllowedTools),
-			MultiUser:     s.cfg.MultiUser,
-		}.apply(executor)
-		// Deliberately no custom tools and no MCP for a guest: built-ins only, and
-		// only the allow-listed ones survive.
+	callerUser := wsUser
+	if voiceCall {
+		callerUser = voiceUser
+		cc := s.callerContextForVoice(r.Context(), voiceUser, sessionID)
+		ragScope = cc.RAGScope
+		cc.apply(executor)
+		if voiceUser != nil {
+			log.Printf("[voice] caller identified as user %d (%s) → own scope %q, personal tools", voiceUser.ID, voiceUser.DisplayName, ragScope)
+		} else {
+			log.Printf("[voice] guest identity (tools deny-by-default, rag scope %q)", ragScope)
+		}
 	} else {
 		executor.SetCustomTools(s.customMgr, func() {
 			s.customMgr.Reload()
@@ -293,21 +279,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		cc.apply(executor)
 	}
 
-	// Every branch above configured scope/guard; the help tool is the same for
-	// all of them and must not depend on which branch ran.
-	executor.SetHelp(s.helpFn(), s.integrationsStatusFor(wsUser))
-	executor.SetGlobalAdmin(wsUser != nil && wsUser.IsGlobalAdmin())
-	executor.SetRAGReadOnly(!s.canManageRAGScope(r.Context(), wsUser))
-	if !voiceCall {
-		executor.SetServerTools(s.serverToolsFor(wsUser))
-	}
 	ragContextFn := s.ragContextFn(ragScope)
 
 	client := &Client{
 		voice: voiceCall,
 		conn:  conn,
 		send:  make(chan []byte, 256),
-		user:  wsUser,
+		user:  callerUser,
 	}
 
 	if !voiceCall {

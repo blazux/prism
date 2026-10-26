@@ -17,11 +17,11 @@ func TestNormalizePhone(t *testing.T) {
 	}
 }
 
-// The voice channel must never expose a dangerous tool, whoever is calling —
-// guest and identified allow-lists both stay clear of host/code/secret access.
+// Both phone identities stay clear of host/code/secret access. Only known
+// callers gain personal tools; being known never grants administration.
 func TestVoiceAllowlistsAreSafe(t *testing.T) {
 	dangerous := []string{"exec_command", "docker_run", "docker_manage", "delete_file",
-		"write_file", "secrets", "email", "install_packages", "register_tool"}
+		"write_file", "secrets", "install_packages", "register_tool"}
 	for _, set := range []map[string]bool{voiceGuestAllowedTools, voiceKnownAllowedTools} {
 		for _, d := range dangerous {
 			if set[d] {
@@ -45,5 +45,13 @@ func TestVoiceHiddenToolsHidesDangerous(t *testing.T) {
 	}
 	if hidden["rag_search"] {
 		t.Error("rag_search must NOT be hidden (it is allow-listed)")
+	}
+}
+
+func TestVoicePersonalToolsRequireKnownCaller(t *testing.T) {
+	for _, name := range []string{"note", "task", "calendar", "email", "prism_help"} {
+		if voiceGuestAllowedTools[name] || !voiceKnownAllowedTools[name] {
+			t.Errorf("%s must be available only to an identified caller", name)
+		}
 	}
 }

@@ -25,10 +25,13 @@ catalogue. Optional model endpoints are under **Advanced: model endpoint**.
 An empty model field uses the Vox deployment default; an empty endpoint uses
 its deployment gateway. Different endpoints do not receive the gateway key.
 
-Recognized callers receive their Prism profile, personal memory and permitted
-knowledge through restricted voice tools. Recognition does not grant the full
-web agent's shell, file, email, calendar, MCP or custom tools. Unknown callers
-continue to converse with Vox. Outbound missions also use Vox when connected.
+Recognized callers can use their personal notes, tasks, calendar and connected
+mailbox through the same tools as in Prism. Their account permissions and hidden
+tool preferences apply to phone calls too. They also receive their profile,
+personal memory and permitted knowledge. Configure accounts and mailbox rules
+from Settings; shell, server administration, secret management, MCP and custom
+tools are unavailable by phone. Unknown callers continue to converse with Vox.
+Outbound missions also use Vox when connected.
 
 ## Voice & greeting
 
@@ -66,4 +69,5 @@ Prism recognition and memory require the connection to Prism.
 **Save changes** saves only its form. **Discard changes** reloads that form's
 saved values. Switching tabs preserves drafts; reloading the page discards
 unsaved edits. The standalone voice selector saves immediately. Pronunciation
-uses separate Save/Cancel controls, and SIP distinguishes **Save** from **Apply**.
+has its own **Save** and **Cancel** buttons. For SIP, **Save** stores the
+settings, while **Apply** saves them and reloads the trunk.

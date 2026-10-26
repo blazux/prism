@@ -23,11 +23,11 @@ runs on your own machine, against your own LLM.
 
 Prism can keep data in its own database, or bridge to your real services:
 
-- **Email** — your IMAP/SMTP mailbox (Settings → Email).
-- **Notes** — an Obsidian / Logseq Markdown vault (Settings → Notes).
-- **Calendar & Tasks** — a CalDAV account: Apple iCloud, Nextcloud, Fastmail…
-  (Settings → Calendar).
-- **Tasks** — Todoist via a personal token (Settings → Calendar).
+- **Email** connects to your IMAP/SMTP mailbox in Settings → Email.
+- **Notes** can use an Obsidian or Logseq Markdown vault configured in Settings → Notes.
+- **Calendar & Tasks** can connect to a CalDAV account such as Apple iCloud,
+  Nextcloud or Fastmail in Settings → Calendar.
+- **Tasks** can connect to Todoist with a personal token in Settings → Calendar.
 
 See the "connecting-accounts" and provider-specific help for step-by-step setup.
 

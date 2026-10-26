@@ -103,7 +103,8 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, string
 // "+1 868 555 0123", "8685550123" and "5550123"-with-context all resolve — SIP
 // From headers vary by carrier. `digits` must already be stripped to [0-9]; a
 // caller shorter than 6 digits (an internal extension) never matches, avoiding
-// false identifications. Empty profile phones are ignored.
+// false identifications. Empty profile phones are ignored. Multiple matching
+// approved profiles are ambiguous and are treated like an unknown caller.
 func (s *Store) UserByPhone(ctx context.Context, digits string) (*User, error) {
 	if len(digits) < 6 {
 		return nil, ErrUserNotFound
@@ -113,23 +114,37 @@ func (s *Store) UserByPhone(ctx context.Context, digits string) (*User, error) {
 		n = 9
 	}
 	suffix := digits[len(digits)-n:]
-	var u User
-	err := s.pool.QueryRow(ctx, `
+	rows, err := s.pool.Query(ctx, `
 		SELECT id, email, display_name, role, status, created_at
 		FROM users
 		WHERE status = 'approved'
 		  AND phone <> ''
 		  AND length(regexp_replace(phone, '\D', '', 'g')) >= $2
 		  AND right(regexp_replace(phone, '\D', '', 'g'), $2) = $1
-		LIMIT 1
-	`, suffix, n).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrUserNotFound
-	}
+		LIMIT 2
+	`, suffix, n)
 	if err != nil {
 		return nil, err
 	}
-	return &u, nil
+	defer rows.Close()
+	var match *User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		if match != nil {
+			return nil, ErrUserNotFound
+		}
+		match = &u
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if match == nil {
+		return nil, ErrUserNotFound
+	}
+	return match, nil
 }
 
 // Transfer types. A destination is either put straight through, or announced to

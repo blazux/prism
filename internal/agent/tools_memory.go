@@ -3,12 +3,28 @@ package agent
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
-// searchHistory full-text searches across every past conversation (all
-// workspaces, the assistant, Telegram) so the agent can recall what was said or
-// decided earlier even when it's not in the current context window.
+var durableMemoryScopeRe = regexp.MustCompile(`^[ug][1-9][0-9]*$`)
+
+// durableMemoryScope keeps personal memory common to the owner's workspaces,
+// and group memory common to that group's channels. Never fall back to a
+// deployment-wide library/search when a multi-user caller has no identity.
+func (e *ToolExecutor) durableMemoryScope() (string, error) {
+	if !e.multiUser {
+		return "", nil
+	}
+	scope := e.personalScope()
+	if !durableMemoryScopeRe.MatchString(scope) {
+		return "", fmt.Errorf("memory unavailable: no user or group identity for this session")
+	}
+	return scope, nil
+}
+
+// searchHistory recalls earlier discussions across the owner's workspaces and
+// channels without exposing another user's personal conversations.
 func (e *ToolExecutor) searchHistory(ctx context.Context, query string, limit int) (string, error) {
 	if e.memStore == nil {
 		return "", fmt.Errorf("history search unavailable: no database")
@@ -16,7 +32,11 @@ func (e *ToolExecutor) searchHistory(ctx context.Context, query string, limit in
 	if strings.TrimSpace(query) == "" {
 		return "", fmt.Errorf("query is required")
 	}
-	hits, err := e.memStore.SearchHistory(ctx, query, limit)
+	scope, err := e.durableMemoryScope()
+	if err != nil {
+		return "", err
+	}
+	hits, err := e.memStore.SearchHistory(ctx, query, limit, scope)
 	if err != nil {
 		return "", err
 	}

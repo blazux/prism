@@ -11,8 +11,8 @@ password** instead:
 - Gmail: turn on 2-Step Verification, then **Google Account → Security → App
   passwords**.
 - Outlook.com / Hotmail requires OAuth2, which the email client does not yet implement. Do not suggest an app password as a workaround. Microsoft Calendar OAuth is separate.
-- iCloud: **appleid.apple.com → Sign-In and Security**.
-- Yahoo: **Account Security**.
+- For iCloud, open **appleid.apple.com → Sign-In and Security** to create an application password.
+- For Yahoo, create an application password under **Account Security**.
 
 **ProtonMail is the exception**: there is no app password to go and fetch, because
 Proton has no IMAP at all. A local Bridge container logs into Proton and *generates*

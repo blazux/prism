@@ -24,7 +24,8 @@ with a role: **member** or **admin**. Per-group model grants live there too.
 - **Group admin** — opens the same console (the **Administration** link in the
   header) but only sees the panes for their groups: **Shared agent**, **RAG**,
   **MCP**, **Secrets**, **Tool access**.
-- **Member** — no console. Settings only.
+- A **member** uses personal Settings and has no access to the administration
+  console unless they also hold an administrator role.
 
 ## Shared widgets gallery
 
@@ -64,8 +65,9 @@ the group's Webex bot. Its name, avatar, model, system prompt and turn budget
 are set in **Admin console → Shared agent**.
 
 ## What is group-scoped
-Configured by a group admin in the **Admin console**; members see it read-only
-in their Settings.
+Group administrators manage the knowledge base, MCP servers and tool access in
+the **Admin console**. Members see the knowledge and MCP settings in read-only
+form. Group secrets can also be managed by members, as shown below.
 
 | Resource | Where it's managed | What members see |
 |---|---|---|
@@ -81,12 +83,24 @@ a member with no group has neither, and Settings says so (*"You're not part of
 a group yet — ask an admin to add you to one"*).
 
 ## What stays personal
-Your own agent (name, personality, avatar, turn budget), your workspaces and
-chat history, your memory and skills, your Notes, Tasks, Calendar and Email
-integrations (each member connects their own mailbox, vault, CalDAV, Google or
-Microsoft account), your personal secrets and your Telegram bot. Group things
-are additive: your agent *gains* the group's knowledge base and MCP tools, it
-doesn't lose yours.
+Your agent’s name, personality, avatar and turn budget remain personal, as do
+your workspaces, chat history, memory and skills. Each member connects their own
+mailbox, notes vault, calendar and task accounts. Personal secrets and Telegram
+bots also remain individual. Group membership adds access to the group’s
+knowledge base and MCP tools without replacing these personal settings.
+
+### Existing skill files when upgrading
+
+Personal skills are stored in `skills/u<user-id>/` under the execution
+workspace; shared-agent skills use `skills/g<group-id>/`. The agent selects its
+library automatically. Personal mode continues to use `skills/` directly.
+
+Older shared deployments may have skill JSON files directly in `skills/`.
+Those files are preserved but are not loaded into users' or groups' libraries.
+An administrator can review them and copy each file into the appropriate owner
+directory. Keep a copy of the original files until the intended agent can list
+and read the procedures. The execution workspace and administrator shell access
+remain shared infrastructure for a trusted team.
 
 ## Admin-only
 - **Slack** is a single deployment-wide bot: its card in **Settings → Channels**

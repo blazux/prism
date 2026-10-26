@@ -4,7 +4,7 @@ All of these can be driven from chat — the agent has a tool for each. Open the
 from the command palette (Ctrl+K) or by asking.
 
 ## Email
-Reads and sends through your IMAP/SMTP mailbox (configured in Settings → Email).
+The Email app reads and sends messages through the IMAP/SMTP mailbox configured in Settings → Email.
 You can triage/categorize with tags, filter by tag, search, read, reply, and send
 **with attachments**. The agent can summarize your inbox, turn an email into a
 task or a calendar event, and (with cron) send you a morning digest over Telegram.
@@ -12,8 +12,8 @@ Browse and manage folders, move/archive/trash messages, mark read/unread and
 create deterministic inbox rules. See **email** for the full UI and agent workflow.
 
 ## Calendar
-Events with title, time, location and description. Backed by Prism's database by
-default, or by a connected account: **CalDAV** (Apple iCloud, Nextcloud,
+The Calendar app manages events with a title, time, location and description.
+It stores them in Prism’s database by default, or uses a connected account: **CalDAV** (Apple iCloud, Nextcloud,
 Fastmail), **Google Calendar** or **Microsoft / Outlook** (both via your own
 OAuth app — see their dedicated guides). Connect them in Settings → Calendar;
 when several are connected, **Active sources** there picks which one the app
@@ -22,7 +22,8 @@ week". It can also edit existing events with only changed fields. All-day and
 multi-day events have matching interface and tool controls.
 
 ## Tasks
-To-do items with priority and due date. Backed by Prism's database, **CalDAV**
+The Tasks app tracks to-do items with priorities and due dates. It stores them
+in Prism’s database or uses **CalDAV**
 (Apple Reminders / Nextcloud Tasks), or **Todoist** when connected. The agent can
 add, edit, complete, reopen and delete tasks, filter by deadline or priority,
 and break an objective into tasks. See **calendar-tasks** for both workflows.
@@ -33,8 +34,9 @@ from chat: "pause the morning digest", "resume it", "run the backup at 3am
 instead", "delete the feed sync".
 
 ## Notes
-Markdown notes with `[[wikilinks]]`, a split editor with an AI toolbar, and an
-"Add to knowledge" button that pushes a note into a RAG collection. Notes live in
+The Notes app provides Markdown notes with `[[wikilinks]]` and a split editor
+with an AI toolbar. Its **Add to knowledge** button sends a note to a document
+collection for retrieval. Notes live in
 Prism's database by default, or in an **Obsidian / Logseq vault** (a folder of
 `.md` files) when connected in Settings → Notes. The agent can create and edit
 notes for you. With a note open, ask for a change directly in chat: the agent
@@ -54,10 +56,10 @@ In a shared deployment a note can be **shared with your group**
 and the author or a group admin can unshare it.
 
 ## Terminal
-A real interactive terminal into the agent's workspace container. Toggle it with
-**Ctrl+Enter**. Full TTY — `vim`, `htop`, colours, package
-installs all work. Useful for power users who want direct control of the
-environment the agent runs in.
+The Terminal opens an interactive shell in the agent’s workspace container.
+Toggle it with **Ctrl+Enter**. It supports terminal programs such as `vim` and
+`htop`, colors and package installation. Use it when you need direct access to
+the environment where the agent runs.
 
 ## Activity
 The Actions view shows completed changes, failures and inbox rule results;

@@ -611,7 +611,18 @@ window.handleChatKey = function(e) {
   setTimeout(() => autoResizeTextarea(e.target), 0)
 }
 
-window.resetChat  = function() { send({ type: 'reset_chat' }); pendingImages = []; pendingFiles = []; pendingAttachments = []; renderPreviews() }
+window.resetChat = async function() {
+  const session = currentSessionID, socket = ws
+  if (!await prismConfirm({
+    title: 'Clear this conversation?',
+    message: 'Messages and the conversation summary in this workspace will be permanently deleted. Saved memories, skills, widgets and files will be kept.',
+    confirmText: 'Clear chat', danger: true,
+  })) return
+  // A confirmation opened in another workspace must never clear the new one.
+  if (currentSessionID !== session || ws !== socket) return
+  send({ type: 'reset_chat' })
+  pendingImages = []; pendingFiles = []; pendingAttachments = []; renderPreviews()
+}
 
 window.cancelChat = function() {
   send({ type: 'cancel' })

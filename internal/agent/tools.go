@@ -695,7 +695,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "search_history",
-			Description: "Full-text search across ALL past conversations — every workspace, the global assistant, and Telegram. Use it to recall what was said or decided earlier (even in another session) when the current context doesn't contain it. Returns matching messages with their date and session.",
+			Description: "Full-text search across your past conversations, including other workspaces, the assistant, and Telegram. Use it to recall what was said or decided earlier when the current context doesn't contain it. Returns matching messages with their date and session.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{

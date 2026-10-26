@@ -16,13 +16,13 @@ You can also just tell the agent "from now on, answer in French and keep it
 short" — it can rewrite its own personality.
 
 ## Per-workspace adaptations
-Each workspace gets a collapsible card at the bottom of the tab. Open one, type
-extra instructions, **Save**. They are layered *on top of* the default
+Each workspace gets a collapsible card at the bottom of the tab. Open a card, enter
+the additional instructions and click **Save**. They are layered *on top of* the default
 personality for that workspace only; leave it blank to use the default as-is.
 
 ## Turn budget
 One message can trigger many model calls (every tool use is one). **Max
-iterations per turn** caps that: 10–500, blank = the default (75). If a long
+iterations per turn** caps that: enter a value from 10 to 500, or leave it blank to use the default of 75. If a long
 task stops with *"Iteration limit reached (N model calls this turn). Raise it in
 Settings › Agent, or send a follow-up to continue."*, either raise the cap or
 simply send a follow-up — the agent continues from where it stopped.
@@ -31,7 +31,7 @@ Independently of this cap, a call repeated with identical arguments and an
 identical result three times in a row is stopped early as a loop.
 
 ## Extended reasoning
-Lets thinking models (Qwen3, DeepSeek-R1, gpt-oss…) reason before answering.
+Extended reasoning lets thinking models (Qwen3, DeepSeek-R1, gpt-oss…) reason before answering.
 While it thinks, the chat shows a *Thinking…* indicator, and the finished
 reasoning is folded into a collapsible **💭 Reasoning** block above the reply.
 Turn it off for faster, cheaper replies. It applies to the Ollama and
@@ -43,12 +43,13 @@ Choose **Guided**, **Standard** or **Minimal** in Settings → Agent, then click
 **Save** below the turn settings. Group admins use Admin → Shared agent instead.
 Changes apply on the next message; use a fresh conversation for a fair comparison.
 
-- **Guided**: detailed guidance for small models (the original default).
-- **Standard**: compact operational instructions and native tool descriptions
-  (the former Lean prompt).
-- **Minimal**: essential contracts and safety policy; detailed runtime guidance is
-  available through `prism_help` with topic `agent-runtime`. Designed for capable
-  models, without inferring capabilities from their names.
+- **Guided** gives small models detailed instructions. It is the original default.
+- **Standard** provides compact operational instructions and native tool
+  descriptions. It corresponds to the former Lean prompt.
+- **Minimal** provides the essential contracts and safety policy. Detailed runtime
+  guidance is available through `prism_help` with topic `agent-runtime`. Use it
+  with a model that can work with less guidance; a model name alone does not
+  establish that capability.
 
 Existing Lean off/on settings map to Guided/Standard; nobody is switched to
 Minimal automatically. All tools and parameter schemas remain available, including
@@ -65,8 +66,8 @@ Minimal reduces the fixed input size, not necessarily the bill by the same ratio
 history, tool results, reasoning, images, caching and additional calls also matter.
 
 ## Reasoning effort
-How much a thinking model reasons before answering (only when extended
-reasoning is on). Choose **Server default**, **low**, **medium**, **high** or
+Reasoning effort controls how much a thinking model reasons before answering.
+It applies only when extended reasoning is enabled. Choose **Server default**, **low**, **medium**, **high** or
 **xhigh**. The accepted values depend on the model:
 
 - gpt-oss: low / medium / high

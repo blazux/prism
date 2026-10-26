@@ -22,12 +22,11 @@ import (
 
 	"prism/internal/agent"
 	"prism/internal/memory"
+	"prism/internal/ollama"
 )
 
-// The phone is a voice channel: NO tool that touches code, the host, files, mail
-// or secrets is ever allowed on it, whoever is calling. Identity only widens the
-// *read/memory* surface, never toward danger — so a misheard command or a spoofed
-// number can never run something destructive.
+// Known callers can use their personal organizer and connected mailbox. Host,
+// code, secret and account-setup tools remain unavailable on every phone call.
 
 // Telephony actions are the switchboard's core job — every caller, known or not,
 // may be transferred, leave a message, or have the call ended. Vox performs them.
@@ -43,15 +42,66 @@ var voiceGuestAllowedTools = union(map[string]bool{
 	"rag_search": true,
 }, voiceTelephonyTools)
 
-// voiceKnownAllowedTools — a caller identified by their profile phone. Adds
-// remembering a new fact (persisted to their personal scope, so it carries across
-// calls and to the dashboard) on top of search + telephony. Still nothing
-// dangerous: this is continuity, not host access. (search_history joins once voice
-// calls use a stable per-user session — today they don't, so it would recall nothing.)
+// Identified callers use the existing personal tools with their account's scopes
+// and permissions. Integrations must already be configured from Settings.
 var voiceKnownAllowedTools = union(map[string]bool{
 	"rag_search":     true,
 	"save_user_info": true,
+	"prism_help":     true,
+	"note":           true,
+	"task":           true,
+	"calendar":       true,
+	"email":          true,
 }, voiceTelephonyTools)
+
+// callerContextForVoice composes the phone's capability boundary with the real
+// caller's permissions. The service token only authenticates the Vox gateway.
+func (s *Server) callerContextForVoice(ctx context.Context, u *memory.User, sessionID string) CallerContext {
+	if u == nil {
+		return CallerContext{
+			Guard:    voiceGuard(voiceGuestAllowedTools),
+			RAGScope: s.voiceRAGScope(ctx), PersonalScope: voiceGuestScope,
+			HiddenTools: voiceHiddenTools(voiceGuestAllowedTools), MultiUser: s.cfg.MultiUser,
+			RAGReadOnly: true,
+		}
+	}
+	cc := s.callerContextForUser(ctx, u, sessionID)
+	cc.PersonalScope = fmt.Sprintf("u%d", u.ID)
+	// Phone session IDs are per-call, not u<id>-prefixed. Resolve personal opt-outs
+	// and group-admin visibility with the identified user, like a browser session.
+	cc.HiddenTools = union(s.hiddenToolsFor(ctx, fmt.Sprintf("u%d-voice", u.ID), cc.RAGScope),
+		voiceHiddenTools(voiceKnownAllowedTools))
+	userGuard := cc.Guard
+	if userGuard != nil {
+		for name := range voiceKnownAllowedTools {
+			if userGuard(name, nil) != nil {
+				cc.HiddenTools[name] = true
+			}
+		}
+	}
+	phoneGuard := voiceGuard(voiceKnownAllowedTools)
+	cc.Guard = func(name string, args map[string]interface{}) error {
+		if err := phoneGuard(name, args); err != nil {
+			return err
+		}
+		if name == "email" {
+			action, _ := args["action"].(string)
+			switch strings.ToLower(strings.TrimSpace(action)) {
+			case "", "list", "inbox", "read", "open", "search", "send", "reply",
+				"folders", "move", "archive", "trash", "mark_read", "mark_unread":
+			default:
+				return fmt.Errorf("email action %q is unavailable on a phone call; manage mailbox settings and rules from Settings", action)
+			}
+		}
+		if userGuard != nil {
+			return userGuard(name, args)
+		}
+		return nil
+	}
+	// No server-management implementation is needed by these personal tools.
+	cc.ServerTools = nil
+	return cc
+}
 
 // union merges tool allow-list maps into a new set.
 func union(sets ...map[string]bool) map[string]bool {
@@ -136,7 +186,7 @@ func voiceGuard(allowed map[string]bool) agent.ToolGuard {
 // even offers them — cheaper than letting it call one and burn a turn on a denial.
 func voiceHiddenTools(allowed map[string]bool) map[string]bool {
 	hidden := make(map[string]bool, len(agent.ToolDefinitions))
-	for _, t := range agent.ToolDefinitions {
+	for _, t := range append(append([]ollama.Tool{}, agent.ToolDefinitions...), agent.OutboundCallTools...) {
 		if n := t.Function.Name; !allowed[n] {
 			hidden[n] = true
 		}
@@ -406,7 +456,7 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 //
 // A match is *not* authentication — caller ID is trivially forged. It decides
 // which agent picks up and which greeting is spoken, nothing more; every
-// dangerous tool stays off the voice channel whoever is calling (see the top of
+// host/administration tools stay off the voice channel whoever is calling (see the top of
 // this file).
 func (s *Server) handleVoiceCaller(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)

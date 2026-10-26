@@ -5,8 +5,8 @@ Linear, a database, your own service. Connect one and its tools become part of
 the agent's toolset immediately. MCP needs Postgres.
 
 ## Settings → MCP (personal mode)
-- **Add an MCP server**: a **Name** (e.g. `github`), the server **URL**, and
-  optionally a stored secret used as authentication, then **Connect**. The
+- To add a server, enter a **Name** such as `github` and the server **URL**.
+  Select a stored authentication secret if required, then click **Connect**. The
   transport (Streamable HTTP or legacy SSE) is detected from the URL.
 - **Authentication with a token**: the secret you pick is sent as a `Bearer`
   token. Create it in **Settings → Secrets** first — it then appears in the
@@ -49,9 +49,10 @@ In multi-user mode MCP is **group-scoped**:
 
 - **Personal servers are unavailable.** The add form is gone from Settings, and
   only a group admin can change the group's servers, including refreshing them.
-- A **group admin** connects servers in **Admin console → MCP**: pick the
-  **Group**, enter **name**, **URL**, pick a group secret for auth (or create
-  one inline from the picker), **Connect**. **Refresh** reloads its tools using
+- A **group admin** connects servers in **Admin console → MCP**: select the
+  **Group**, enter a **name** and **URL**, then select a group secret for
+  authentication if needed. You can create a secret from the picker. Click
+  **Connect** to finish. **Refresh** reloads its tools using
   the existing credentials; **remove** deletes one. OAuth works
   the same way as above.
 - Members see the group's servers in **Settings → MCP** (*Managed by the group

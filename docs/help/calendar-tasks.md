@@ -29,7 +29,7 @@ and delete actions remain available.
 ## Calendar
 
 Use Month, Week, Day or Agenda, then click a day to create an event or an event
-to edit it. Set title, start/end dates and times, optional location and
+to edit it. Set the title, start and end dates and times, and an optional location and
  description. Check **All day** for a day or a date range. In the form the end
 date is the last included day; Prism handles the provider's exclusive end date.
 Events crossing midnight or spanning several days appear on each affected day.
@@ -38,7 +38,7 @@ Errors remain visible and a failed save does not discard your form.
 Ask “move this meeting to 3pm”, “change its location”, “remove its description”,
 “book next Monday as a day off”, or “delete this event”. The agent uses
 `calendar action=update id=...` with only changed fields. Moving only `start`
-keeps the duration. Empty description/location clears them. Invalid dates and
+keeps the duration. An empty description or location clears that field. Invalid dates and
 an end before start are refused.
 
 For `calendar action=add all_day=true`, pass `start` as a date. Omit `end` for
@@ -53,7 +53,7 @@ recurrences, invitations and alarms in the connected calendar app for now.
 
 ## Work on the open form with the agent
 
-Open a task's edit button, focus **Add a task**, or open a calendar event/new
+Click a task’s edit button, focus **Add a task**, or open an existing or new calendar
 event form. Ask for the changes in chat. The agent uses the shared `editor`
 tool: `action=read`, then `action=update` with the returned `revision` and only
 changed fields. Tasks accept `title`, `priority` and `due` (empty clears it).

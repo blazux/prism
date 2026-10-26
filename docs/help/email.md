@@ -22,8 +22,8 @@ move individual messages through Prism; the error explains this limitation.
 ## Rules
 
 **Inbox rules → + Rule** creates a named rule with one condition and one action:
-- From, To or Subject **contains** text (case-insensitive).
-- Move to a chosen folder, or mark read.
+- Match messages whose From, To or Subject field **contains** the specified text. Matching is case-insensitive.
+- Choose whether matching messages should move to a selected folder or be marked as read.
 
 **Preview matches** shows matching inbox mail without changing it. **Save**
 persists the rule. Enabled rules run approximately every minute while Prism is
