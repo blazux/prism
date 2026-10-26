@@ -573,6 +573,13 @@ async function loadUsage(){const days=$('us-days').value;const d=await jget('/ap
  $('us-errors').innerHTML=(d.errors&&d.errors.length)?d.errors.map(fmt).join(''):'<div class="hint">No errors recorded. 🎉</div>';
    loadTelephonyUsage();}
 // Telephony activity (from the docked Vox stack) shown alongside the rest of usage.
+function telToolTraceHTML(t){
+ const labels={started:'Result not received',returned:'Result returned',failed:'Failed',queued:'Requested',recorded_in_call_log_not_delivered:'Recorded in call log; not sent'};
+ const label=esc(t.tool||'?')+(t.args&&t.args.action?' · '+esc(t.args.action):'')+(t.outcome?' — '+esc(labels[t.outcome]||t.outcome):'');
+ return '<details style="margin-top:6px"><summary style="cursor:pointer">'+label+'</summary>'+
+  (t.args?'<b>Arguments</b><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(JSON.stringify(t.args,null,2))+'</pre>':'')+
+  (t.result!==undefined?'<b>Result'+(t.result_truncated?' (truncated)':'')+'</b><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(String(t.result))+'</pre>':'')+'</details>';
+}
 async function loadTelephonyUsage(){
  const box=$('us-tel');if(!box)return;
  const s=await jget('/api/vox/runtime-status');if(!s){box.style.display='none';return;}
@@ -589,7 +596,7 @@ async function loadTelephonyUsage(){
  if(!items.length)html+='<div class="hint">No calls recorded yet.</div>';
  else{html+='<table style="width:100%;border-collapse:collapse"><thead><tr style="color:var(--text3);text-align:left">'+
    '<th style="padding:5px 8px">When</th><th style="padding:5px 8px">Caller</th><th style="padding:5px 8px">Duration</th><th style="padding:5px 8px">Ended</th><th style="padding:5px 8px">Summary</th></tr></thead><tbody>';
-  html+=items.map((c,i)=>{const det=(c.turns||[]).map(t=>'<div><b style="color:var(--text3)">'+(t.role==='caller'?'Caller':'Agent')+':</b> '+esc(t.text)+'</div>').join('');
+  html+=items.map((c,i)=>{const traces=(c.tools_used||[]).map(telToolTraceHTML).join('');const det=(c.turns||[]).map(t=>'<div><b style="color:var(--text3)">'+(t.role==='caller'?'Caller':'Agent')+':</b> '+esc(t.text)+'</div>').join('')+(traces?'<div style="margin-top:10px"><b>Tools</b>'+traces+'</div>':'');
    return '<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="var e=document.getElementById(\'ut'+i+'\');e.style.display=e.style.display?\'\':\'none\'">'+
     '<td style="padding:6px 8px">'+when(c.started_at)+'</td><td style="padding:6px 8px">'+esc(c.caller_number)+'</td>'+
     '<td style="padding:6px 8px">'+dur(c.duration_secs)+'</td><td style="padding:6px 8px">'+esc(REASONS[c.end_reason]||c.end_reason||'—')+'</td>'+

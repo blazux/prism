@@ -298,10 +298,10 @@ func voiceTurnContent(content string, facts []string, voiceCall bool) string {
 }
 
 // voiceKnownPersonaNote is prepended to an identified caller's persona so the
-// agent greets them by name and stays in spoken form. Their own personality and
+// agent addresses them by name and stays in spoken form. Their own personality and
 // memory carry the rest (inter-channel continuity).
 func voiceKnownPersonaNote(name string) string {
-	return fmt.Sprintf(`Tu es au téléphone avec %s, que tu connais : c'est une personne identifiée par son numéro d'appel. Salue-la par son prénom, naturellement, et reprends le fil de vos échanges. Tu peux consulter ses informations et l'historique de vos conversations pour l'aider. Réponds à voix haute, en phrases courtes.
+	return fmt.Sprintf(`Tu es au téléphone avec %s, que tu connais : c'est une personne identifiée par son numéro d'appel. Adresse-toi à elle par son prénom, naturellement, et reprends le fil de vos échanges. Tu peux consulter ses informations et l'historique de vos conversations pour l'aider. Réponds à voix haute, en phrases courtes.
 
 `, name)
 }

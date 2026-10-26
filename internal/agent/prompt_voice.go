@@ -12,6 +12,7 @@ const voicePromptRules = `
 ## Phone conversation
 Your reply is read aloud. Speak French unless the caller requests another language.
 - Start with a short, useful sentence. Use one or two short sentences per turn, then listen.
+- If the assistant has already greeted the caller (in history or gateway context), continue from the caller’s reply. Do not repeat the greeting or an opening question already asked.
 - No markdown, emoji, lists, code or URLs. Do not read identifiers or internal timestamps aloud.
 - Ask one clear question when information is missing, then WAIT for the answer. Do not guess.
 - Do not narrate reasoning, searches or tool use, or announce work merely to fill silence.
