@@ -95,3 +95,33 @@ volumes. This local guard is not a sandbox for hostile Cloud tenants.
 Login throttling uses the direct peer address (30 login attempts per minute,
 10 signup attempts). Behind a reverse proxy those quotas are shared; distributed
 Cloud throttling and trusted proxy configuration remain deployment work.
+
+
+## Room and PrismVox supervision (October 2026)
+
+Room adds persistent tool events and response status to existing messages. The
+archive is preserved; shared channels default to a 16,000-character history budget
+before model-specific reservations. `CHANNEL_CONTEXT_CHAR_BUDGET` remains the
+operator override. Context maintenance uses the existing live compaction record.
+
+PrismVox adds audience, installation and owner metadata to call logs and outbound
+tasks, plus separate persistent supervision tables. Both UI and call agent apply
+idempotent ownership migrations; the UI creates supervision tables on startup.
+Existing call records default to `unclassified` and are administrator-only. Do not
+bulk-mark old records as standard without checking their audience. No phone-number
+heuristic is used to grant archive access retroactively.
+
+`vox_instance_id` is generated once in Prism's database. Preserve it when restoring
+the same deployment. When cloning a database into a separate installation,
+remove its `vox_instance_id` configuration key before connecting Vox so the clone
+generates a fresh identity. A fresh installation gets its own identity, even if its
+user IDs happen to match. Grant workspace access through existing group membership
+in PrismVox → Access. The raw `/api/vox/*` administration proxy is global-admin-only;
+ordinary users and signed group agents use the scoped archive/workspace routes.
+
+Monouser profile recognition uses the existing global organizer and integration
+settings. Do not enable `MULTI_USER` or migrate personal integration keys to use it.
+
+The Vox `/api/call-logs` endpoint retains `turns` and `tools_used` by default for
+existing integrations. `include_details=false` omits them. New consumers can use
+`/api/history` for metadata, exact matching totals and bounded detail pages.

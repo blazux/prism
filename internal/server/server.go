@@ -289,7 +289,12 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/voice/directory", s.resourceRoute((*Server).handleVoiceDirectory)) // Vox: who can I transfer to?
 	mux.HandleFunc("/api/voice/search", s.resourceRoute((*Server).handleVoiceSearch))       // Vox: what do we know?
 	mux.HandleFunc("/api/voice/kb", s.resourceRoute((*Server).handleVoiceKB))               // which collection the switchboard reads
-	mux.HandleFunc(voxProxyPrefix, s.resourceRoute((*Server).handleVoxProxy))               // /api/vox/* → Vox's API
+	mux.HandleFunc("/api/vox/history", s.resourceRoute((*Server).handleVoxHistory))
+	mux.HandleFunc("/api/vox-workspace", s.resourceRoute((*Server).handleVoxWorkspace))
+	mux.HandleFunc("/api/vox-workspace/access", s.resourceRoute((*Server).handleVoxWorkspaceAccess))
+	mux.HandleFunc("/api/vox-workspace/", s.resourceRoute((*Server).handleVoxWorkspaceAPI))
+	mux.HandleFunc("/prismvox", s.resourceRoute((*Server).handleVoxWorkspacePage))
+	mux.HandleFunc(voxProxyPrefix, s.resourceRoute((*Server).handleVoxProxy)) // /api/vox/* → Vox's API
 	mux.HandleFunc("/api/platform", s.resourceRoute((*Server).handlePlatform))
 	mux.HandleFunc("/api/admin/platform", s.resourceRoute((*Server).handleAdminPlatform))
 	mux.HandleFunc("/api/admin/usage", s.resourceRoute((*Server).handleAdminUsage))
@@ -360,6 +365,8 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/my/groups", s.resourceRoute((*Server).handleMyGroups))
 	mux.HandleFunc("/api/my/tool-prefs", s.resourceRoute((*Server).handleMyToolPrefs))
 	mux.HandleFunc("/api/group/members", s.resourceRoute((*Server).handleGroupMembers))
+	mux.HandleFunc("/api/room/history", s.resourceRoute((*Server).handleRoomHistory))
+	mux.HandleFunc("/api/room/context", s.resourceRoute((*Server).handleRoomContext))
 	mux.HandleFunc("/api/room/config", s.resourceRoute((*Server).handleRoomConfig))
 	mux.HandleFunc("/api/group/tool-policy", s.resourceRoute((*Server).handleGroupToolPolicy))
 	mux.HandleFunc("/api/group/mcp", s.resourceRoute((*Server).handleGroupMCP))

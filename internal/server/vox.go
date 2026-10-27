@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/memory"
 	"prism/internal/tasks"
 )
 
@@ -49,7 +50,7 @@ func isCallTaskID(id string) bool { return strings.HasPrefix(id, callTaskPrefix)
 //
 // Never fatal: if the phone stack is undocked, slow or down, the user's real tasks
 // must still load. Errors are swallowed and the list simply carries no calls.
-func (s *Server) voxPendingCallTasks(ctx context.Context) []tasks.Item {
+func (s *Server) voxPendingCallTasks(ctx context.Context, u *memory.User) []tasks.Item {
 	if s.cfg.VoxURL == "" {
 		return nil
 	}
@@ -62,6 +63,12 @@ func (s *Server) voxPendingCallTasks(ctx context.Context) []tasks.Item {
 	if s.cfg.VoxUser != "" {
 		req.SetBasicAuth(s.cfg.VoxUser, s.cfg.VoxPassword)
 	}
+	scope, scopeErr := s.voxReadScope(ctx, u, false)
+	if scopeErr != nil {
+		return nil
+	}
+	raw, _ := json.Marshal(scope)
+	req.Header.Set("X-Prism-Scope", string(raw))
 	resp, err := voxHTTP.Do(req)
 	if err != nil {
 		return nil
@@ -110,7 +117,7 @@ func (s *Server) voxPendingCallTasks(ctx context.Context) []tasks.Item {
 
 func (s *Server) handleVoxProxy(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	if u == nil || !s.isAdminUser(r.Context(), u) {
+	if u == nil || !u.IsGlobalAdmin() {
 		writeErr(w, http.StatusForbidden, "admin only")
 		return
 	}
@@ -246,4 +253,23 @@ func (s *Server) voxJSON(ctx context.Context, method, path string, in, out any) 
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func (s *Server) voxInstanceID(ctx context.Context) string {
+	ms := s.store()
+	if ms == nil {
+		return ""
+	}
+	if v, _, err := ms.GetConfig(ctx, "vox_instance_id"); err == nil && v != "" {
+		return v
+	}
+	value, err := newSessionToken()
+	if err != nil {
+		return ""
+	}
+	value, err = ms.ConfigDefault(ctx, "vox_instance_id", value)
+	if err != nil {
+		return ""
+	}
+	return value
 }

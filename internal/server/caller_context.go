@@ -123,16 +123,31 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 // (room chat, Webex space): the group-admin-defined tool policy, the group's
 // RAG/MCP scope, no personal-knowledge scope (the group itself is "the user"
 // this agent learns about — see executor.personalScope's own doc comment),
-// and no hidden-tools override (buildGroupAgentGuard is the only gate here,
-// same as before this refactor).
+// and a tool catalogue matching that same name-based group policy.
 func (s *Server) callerContextForGroup(ctx context.Context, groupID int64) CallerContext {
+	guard := s.buildGroupAgentGuard(ctx, groupID)
+	hidden := s.hiddenToolsFor(ctx, fmt.Sprintf("room-g%d", groupID), fmt.Sprintf("g%d", groupID))
+	// Group policy depends on tool names, so hide denied names before the model
+	// chooses a tool. Execution still applies the same guard.
+	hideDenied := func(name string) {
+		if guard(name, nil) != nil {
+			hidden[name] = true
+		}
+	}
+	for _, tool := range agent.ToolDefinitions {
+		hideDenied(tool.Function.Name)
+	}
+	for _, tool := range agent.OutboundCallTools {
+		hideDenied(tool.Function.Name)
+	}
 	return CallerContext{
-		Guard:     s.buildGroupAgentGuard(ctx, groupID),
-		RAGScope:  fmt.Sprintf("g%d", groupID),
-		MultiUser: s.cfg.MultiUser,
-		Groups:    []memory.Membership{{GroupID: groupID, Role: "member"}},
-		Help:      s.helpFn(),
-		Status:    s.groupStatusFor(groupID),
+		Guard:       guard,
+		HiddenTools: hidden,
+		RAGScope:    fmt.Sprintf("g%d", groupID),
+		MultiUser:   s.cfg.MultiUser,
+		Groups:      []memory.Membership{{GroupID: groupID, Role: "member"}},
+		Help:        s.helpFn(),
+		Status:      s.groupStatusFor(groupID),
 	}
 }
 

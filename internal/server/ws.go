@@ -151,7 +151,8 @@ type WSMessage struct {
 	Model          string          `json:"model,omitempty"`
 	DisabledTools  []string        `json:"disabledTools,omitempty"`
 	Images         []string        `json:"images,omitempty"` // base64 image strings for multimodal
-	Files          []ChatFile      `json:"files,omitempty"`  // parsed text file attachments
+	ImageNames     []string        `json:"imageNames,omitempty"`
+	Files          []ChatFile      `json:"files,omitempty"` // parsed text file attachments
 	// Widget window state (set_plugin_state). Pointers so callers can send a
 	// partial update — only the provided fields are written to meta.json.
 	Open *bool    `json:"open,omitempty"`
@@ -222,6 +223,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
 	executor.SetLLM(ollamaClient, model)
 	executor.SetChatBlind(!ai.cfg.ChatVision)
+	executor.SetVoxScope(s.voxScopeHeader(context.Background(), sessionID))
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 	executor.SetRAGProvider(s.acquireRAG)
 	executor.SetSessionID(sessionID)
@@ -657,6 +659,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			imageFiles, err := s.saveChatImages(msg.Images, msg.ImageNames)
+			if err != nil {
+				client.sendJSON(map[string]any{"type": "error", "content": err.Error()})
+				continue
+			}
+
 			parent := r.Context()
 			if !voiceCall {
 				parent = s.runtimeContext()
@@ -676,6 +684,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.ag.SetActiveTools(msg.DisabledTools)
 			client.ag.SetChannel(msg.Channel)
 			content := voiceTurnContent(msg.Content, msg.GatewayContext, voiceCall)
+			content = prependAttachments(content, imageFiles)
 			for _, f := range msg.Files {
 				// The browser already ran ingestAttachment via /api/chat/upload and
 				// sent back {Text, Path}; here we only build the preamble.

@@ -393,12 +393,9 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		// Outbound calls the agent still has to place are tasks too — show them
 		// in the same list (read-only; the agent places and cancels them).
 		//
-		// Admins only. Tasks are scoped per user (session_id = "u<id>"), but Vox's call
-		// queue has no owner column: every row would otherwise land in *everyone's* list,
-		// leaking who is being called and why. That matches the tools, which are
-		// admin-only by default (see defaultAdminOnly).
-		if u := currentUser(r); u != nil && s.isAdminUser(r.Context(), u) {
-			items = append(s.voxPendingCallTasks(r.Context()), items...)
+		// Vox applies the same owner/standard scope to its queue as its archive.
+		if u := currentUser(r); u != nil {
+			items = append(s.voxPendingCallTasks(r.Context(), u), items...)
 		}
 		items, err = tasks.Filter(items, r.URL.Query().Get("query"), r.URL.Query().Get("filter"), time.Now().In(timeprefs.Location(r.Context())))
 		if err != nil {

@@ -138,21 +138,26 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 
 // Config keys backing the single-user profile (no users row to update).
 const (
-	cfgProfileDisplay = "profile_display_name"
-	cfgProfileFirst   = "profile_first_name"
-	cfgProfileLast    = "profile_last_name"
-	cfgProfilePhone   = "profile_phone"
-	cfgProfileEmail   = "profile_email"
+	cfgProfileDisplay  = "profile_display_name"
+	cfgProfileFirst    = "profile_first_name"
+	cfgProfileLast     = "profile_last_name"
+	cfgProfilePhone    = "profile_phone"
+	cfgProfileTransfer = "profile_transfer"
+	cfgProfileEmail    = "profile_email"
 )
 
 func (s *Server) handleServiceProfile(w http.ResponseWriter, r *http.Request, ms *memory.Store) {
 	get := func(key string) string { v, _, _ := ms.GetConfig(r.Context(), key); return v }
 	profile := func() memory.Profile {
 		zone, loc := timeprefs.Read(r.Context(), ms)
+		transfer := get(cfgProfileTransfer)
+		if transfer != memory.TransferAttended {
+			transfer = memory.TransferBlind
+		}
 		return memory.Profile{Timezone: zone, EffectiveTimezone: loc.String(),
 			DisplayName: get(cfgProfileDisplay), FirstName: get(cfgProfileFirst),
 			LastName: get(cfgProfileLast), Phone: get(cfgProfilePhone), Email: get(cfgProfileEmail),
-			AvatarVer: ms.AvatarVer(r.Context(), "u0"),
+			AvatarVer: ms.AvatarVer(r.Context(), "u0"), Transfer: transfer,
 		}
 	}
 	switch r.Method {
@@ -164,6 +169,7 @@ func (s *Server) handleServiceProfile(w http.ResponseWriter, r *http.Request, ms
 			FirstName   string  `json:"firstName"`
 			LastName    string  `json:"lastName"`
 			Phone       string  `json:"phone"`
+			Transfer    string  `json:"transfer"`
 			Email       *string `json:"email"`
 			Timezone    *string `json:"timezone"`
 		}
@@ -178,6 +184,10 @@ func (s *Server) handleServiceProfile(w http.ResponseWriter, r *http.Request, ms
 				return
 			}
 		}
+		if b.Transfer != "" && b.Transfer != memory.TransferBlind && b.Transfer != memory.TransferAttended {
+			writeErr(w, 400, "invalid transfer type")
+			return
+		}
 		if !validProfileEmail(b.Email) {
 			writeErr(w, http.StatusBadRequest, "Enter a valid email address.")
 			return
@@ -189,6 +199,9 @@ func (s *Server) handleServiceProfile(w http.ResponseWriter, r *http.Request, ms
 		values := map[string]string{
 			cfgProfileDisplay: dn, cfgProfileFirst: strings.TrimSpace(b.FirstName),
 			cfgProfileLast: strings.TrimSpace(b.LastName), cfgProfilePhone: strings.TrimSpace(b.Phone),
+		}
+		if b.Transfer != "" {
+			values[cfgProfileTransfer] = b.Transfer
 		}
 		if b.Timezone != nil {
 			values[timeprefs.Key] = *b.Timezone

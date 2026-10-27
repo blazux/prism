@@ -75,6 +75,7 @@ type ToolExecutor struct {
 	// Vox stack for the place_call tool (agent-originated outbound calls): its API
 	// base URL and HTTP Basic credentials. Empty voxURL = no telephony stack docked.
 	voxURL, voxUser, voxPassword string
+	voxScope                     string
 }
 
 // ToolGuard authorizes a tool call before it runs. It receives the tool name and
@@ -169,6 +170,8 @@ func (e *ToolExecutor) SetVox(url, user, password string) {
 	e.voxURL, e.voxUser, e.voxPassword = strings.TrimRight(url, "/"), user, password
 }
 
+func (e *ToolExecutor) SetVoxScope(scope string) { e.voxScope = scope }
+
 // HasVox reports whether a telephony stack is docked (place_call is usable).
 func (e *ToolExecutor) HasVox() bool { return e.voxURL != "" }
 
@@ -191,6 +194,9 @@ func (e *ToolExecutor) voxDo(tool, method, path string, payload interface{}) ([]
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if e.voxScope != "" {
+		req.Header.Set("X-Prism-Scope", e.voxScope)
 	}
 	if e.voxUser != "" {
 		req.SetBasicAuth(e.voxUser, e.voxPassword)

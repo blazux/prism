@@ -261,6 +261,7 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 	}
 	executor.SetLLM(ai.newChatBackend(), ai.cfg.Model)
 	executor.SetChatBlind(!ai.cfg.ChatVision)
+	executor.SetVoxScope(s.voxScopeHeader(context.Background(), sessionID))
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 	executor.SetRAGProvider(s.acquireRAG)
 	executor.SetSessionID(sessionID)

@@ -66,10 +66,14 @@ func (s *Server) callerContextForVoice(ctx context.Context, u *memory.User, sess
 		}
 	}
 	cc := s.callerContextForUser(ctx, u, sessionID)
-	cc.PersonalScope = fmt.Sprintf("u%d", u.ID)
+	if u.ID == 0 && !s.cfg.MultiUser {
+		cc.PersonalScope = ""
+	} else {
+		cc.PersonalScope = fmt.Sprintf("u%d", u.ID)
+	}
 	// Phone session IDs are per-call, not u<id>-prefixed. Resolve personal opt-outs
 	// and group-admin visibility with the identified user, like a browser session.
-	cc.HiddenTools = union(s.hiddenToolsFor(ctx, fmt.Sprintf("u%d-voice", u.ID), cc.RAGScope),
+	cc.HiddenTools = union(s.hiddenToolsFor(ctx, voicePreferenceSession(u.ID), cc.RAGScope),
 		voiceHiddenTools(voiceKnownAllowedTools))
 	userGuard := cc.Guard
 	if userGuard != nil {
@@ -206,11 +210,60 @@ func (s *Server) resolveVoiceCaller(ctx context.Context, caller string) *memory.
 	if ms == nil {
 		return nil
 	}
+	if !s.cfg.MultiUser {
+		name, phone, _ := s.personalVoiceProfile(ctx)
+		if !phoneNumbersMatch(digits, normalizePhone(phone)) {
+			return nil
+		}
+		return &memory.User{ID: 0, Email: serviceUser.Email, Role: memory.RoleGlobalAdmin, Status: memory.StatusApproved, DisplayName: name}
+	}
+
 	u, err := ms.UserByPhone(ctx, digits)
 	if err != nil {
 		return nil
 	}
 	return u
+}
+
+func (s *Server) personalVoiceProfile(ctx context.Context) (name, phone, transfer string) {
+	ms := s.store()
+	if ms == nil {
+		return "", "", memory.TransferBlind
+	}
+	get := func(key string) string { v, _, _ := ms.GetConfig(ctx, key); return strings.TrimSpace(v) }
+	name = get(cfgProfileDisplay)
+	if name == "" {
+		name = strings.TrimSpace(get(cfgProfileFirst) + " " + get(cfgProfileLast))
+	}
+	if name == "" {
+		name = "Owner"
+	}
+	phone = get(cfgProfilePhone)
+	transfer = get(cfgProfileTransfer)
+	if transfer != memory.TransferAttended {
+		transfer = memory.TransferBlind
+	}
+	return
+}
+
+func voicePreferenceSession(id int64) string {
+	if id == 0 {
+		return "voice"
+	}
+	return fmt.Sprintf("u%d-voice", id)
+}
+func phoneNumbersMatch(a, b string) bool {
+	if len(a) < 6 || len(b) < 6 {
+		return false
+	}
+	n := len(a)
+	if n > 9 {
+		n = 9
+	}
+	if len(b) < n {
+		return false
+	}
+	return a[len(a)-n:] == b[len(b)-n:]
 }
 
 // voiceDirectory returns the phone directory (approved users with a number) — the
@@ -220,6 +273,14 @@ func (s *Server) voiceDirectory(ctx context.Context) []memory.DirEntry {
 	if ms == nil {
 		return nil
 	}
+	if !s.cfg.MultiUser {
+		name, phone, transfer := s.personalVoiceProfile(ctx)
+		if strings.TrimSpace(phone) == "" {
+			return nil
+		}
+		return []memory.DirEntry{{Name: name, Phone: phone, Transfer: transfer}}
+	}
+
 	entries, err := ms.DirectoryEntries(ctx)
 	if err != nil {
 		return nil
@@ -470,14 +531,15 @@ func (s *Server) handleVoiceCaller(w http.ResponseWriter, r *http.Request) {
 	}
 	caller := s.resolveVoiceCaller(r.Context(), r.URL.Query().Get("number"))
 	if caller == nil {
-		writeJSON(w, map[string]interface{}{"known": false})
+		writeJSON(w, map[string]interface{}{"known": false, "prism_instance": s.voxInstanceID(r.Context())})
 		return
 	}
 	writeJSON(w, map[string]interface{}{
-		"known": true,
-		// The display name is what Vox greets them with. It never sends back an
-		// email or an id: Vox has no use for either, and a switchboard should not
-		// hold a copy of the user table.
+		"known":          true,
+		"owner_id":       caller.ID,
+		"prism_instance": s.voxInstanceID(r.Context()),
+		// The name is for the greeting; owner/installation metadata above scopes
+		// the archive. Caller-supplied values never choose that archive owner.
 		"name": caller.DisplayName,
 	})
 }

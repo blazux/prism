@@ -43,9 +43,61 @@ type roomClient struct {
 type roomHub struct {
 	mu      sync.Mutex
 	clients map[*roomClient]struct{}
+	queues  map[int64][]func()
+	cancels map[int64]context.CancelFunc
 }
 
-func newRoomHub() *roomHub { return &roomHub{clients: make(map[*roomClient]struct{})} }
+func newRoomHub() *roomHub {
+	return &roomHub{clients: make(map[*roomClient]struct{}), queues: make(map[int64][]func()), cancels: make(map[int64]context.CancelFunc)}
+}
+
+// enqueue preserves arrival order and has one worker per group. This also
+// serializes context maintenance with model turns.
+func (h *roomHub) enqueue(group int64, fn func()) {
+	h.mu.Lock()
+	_, running := h.queues[group]
+	h.queues[group] = append(h.queues[group], fn)
+	h.mu.Unlock()
+	if running {
+		return
+	}
+	go func() {
+		for {
+			h.mu.Lock()
+			q := h.queues[group]
+			if len(q) == 0 {
+				delete(h.queues, group)
+				h.mu.Unlock()
+				return
+			}
+			work := q[0]
+			h.queues[group] = q[1:]
+			h.mu.Unlock()
+			work()
+		}
+	}()
+}
+func (h *roomHub) setCancel(group int64, cancel context.CancelFunc) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if cancel == nil {
+		delete(h.cancels, group)
+	} else {
+		h.cancels[group] = cancel
+	}
+}
+func (h *roomHub) stop(group int64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if cancel := h.cancels[group]; cancel != nil {
+		cancel()
+	}
+}
+func (h *roomHub) activity(group int64) map[string]any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return map[string]any{"type": "activity", "running": h.cancels[group] != nil, "queued": len(h.queues[group])}
+}
 
 func (h *roomHub) add(c *roomClient) {
 	h.mu.Lock()
@@ -73,7 +125,8 @@ func (c *roomClient) sendJSON(payload interface{}) {
 	}
 	select {
 	case c.send <- data:
-	default: // slow client: drop rather than block
+	default: // Reconnect and replay persisted state instead of losing final events.
+		_ = c.conn.Close()
 	}
 }
 
@@ -91,7 +144,8 @@ func (h *roomHub) broadcast(groupID int64, payload interface{}) {
 		}
 		select {
 		case c.send <- data:
-		default: // slow client: drop rather than block the whole room
+		default: // A slow client reconnects and replays persisted state.
+			_ = c.conn.Close()
 		}
 	}
 }
@@ -179,6 +233,7 @@ func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
 			c.sendJSON(map[string]interface{}{"type": "room_config", "agentName": cfg.AgentName, "groupId": groupID})
 		}
 	}
+	c.sendJSON(s.rooms.activity(groupID))
 	c.sendJSON(map[string]interface{}{"type": "presence", "users": s.rooms.presence(groupID)})
 	s.pushPresence(groupID)
 
@@ -199,6 +254,8 @@ func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		switch in.Type {
+		case "stop":
+			s.rooms.stop(groupID)
 		case "typing":
 			// Relay to the room (clients ignore their own id).
 			s.rooms.broadcast(c.groupID, map[string]interface{}{"type": "typing", "userId": c.userID, "name": c.userName})
@@ -207,6 +264,10 @@ func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
 		case "unreact":
 			s.handleRoomReaction(c, in.MessageID, in.Emoji, false)
 		default:
+			if len(in.Content) > 16000 {
+				c.sendJSON(map[string]any{"type": "error", "content": "Message too long (maximum 16000 characters)."})
+				continue
+			}
 			if strings.TrimSpace(in.Content) == "" {
 				continue
 			}
@@ -262,7 +323,8 @@ func (s *Server) handleRoomMessage(ctx context.Context, c *roomClient, content s
 	if !mentionsAgent(content, cfg.AgentName) {
 		return
 	}
-	s.background(func() { s.runRoomAgent(c.groupID, cfg, c.userName, content) })
+	s.rooms.enqueue(c.groupID, func() { s.runRoomAgent(c.groupID, cfg, c.userName, content, msg.ID) })
+	s.rooms.broadcast(c.groupID, s.rooms.activity(c.groupID))
 }
 
 // notifyRoomMentions delivers a notification to each group member @mentioned by
@@ -297,80 +359,197 @@ func (s *Server) notifyRoomMentions(groupID, authorID int64, authorName, content
 }
 
 // runRoomAgent runs the shared agent for a mention and broadcasts its reply.
-func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, content string) {
+func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, content string, triggerID int64) {
 	ms := s.store()
 	if ms == nil {
 		return
 	}
-	// Signal "the agent is typing" to the room.
-	s.rooms.broadcast(groupID, map[string]interface{}{"type": "agent_typing"})
-
 	ctx, cancel := context.WithTimeout(s.runtimeContext(), 10*time.Minute)
 	defer cancel()
-
+	s.rooms.setCancel(groupID, cancel)
+	defer func() { s.rooms.setCancel(groupID, nil); s.rooms.broadcast(groupID, s.rooms.activity(groupID)) }()
+	s.rooms.broadcast(groupID, s.rooms.activity(groupID))
 	sessionID := fmt.Sprintf("room-g%d", groupID)
-	// The shared agent runs with the group-admin-defined rights: global policy +
-	// this group's restrictions, at member level (no admin-only tools by default).
 	cc := s.callerContextForGroup(ctx, groupID)
-
-	// Apply the group admin's configured system prompt for the shared agent.
-	if cfg.AgentPrompt != "" {
-		ms.SetConfig(ctx, memory.KeyPersonality+"_"+sessionID, cfg.AgentPrompt)
+	// Emptying the configured prompt must clear a previously saved override too.
+	_ = ms.SetConfig(ctx, memory.KeyPersonality+"_"+sessionID, cfg.AgentPrompt+fmt.Sprintf("\nRoom archive: use exec_command to GET $PRISM_URL/api/room/history?group=%d&before=<message_id> with Bearer $PRISM_TOKEN. Results are chronological pages; before=0 reads the latest. search_history finds your previous agent exchanges.", groupID))
+	message := fmt.Sprintf("[%s]: %s", fromName, stripMention(content, cfg.AgentName))
+	seenKey := fmt.Sprintf("room_seen_%d", groupID)
+	raw, _, _ := ms.GetConfig(ctx, seenKey)
+	seen, _ := strconv.ParseInt(raw, 10, 64)
+	if recent, err := ms.RoomMessagesBefore(ctx, groupID, triggerID, 40); err == nil {
+		message = roomPrompt(message, recent, seen, 6000)
 	}
-
-	// Label the speaker so the agent knows who addressed it.
-	prompt := stripMention(content, cfg.AgentName)
-	message := fmt.Sprintf("[%s]: %s", fromName, prompt)
-
-	// Give the agent the room chatter it missed: only the messages posted SINCE its
-	// last reply (members talking among themselves without @mentioning it). Its own
-	// session history already carries the exchanges it took part in, so we add just
-	// this delta — not the whole log — to keep the context tight, not giant.
-	if recent, err := ms.RecentRoomMessages(ctx, groupID, 80); err == nil {
-		start := 0
-		for i := len(recent) - 1; i >= 0; i-- {
-			if recent[i].IsAgent {
-				start = i + 1 // everything after the agent's last message
-				break
-			}
-		}
-		missed := recent[start:]
-		if len(missed) > 0 {
-			missed = missed[:len(missed)-1] // drop the triggering message (it's the prompt)
-		}
-		if len(missed) > 0 {
-			var sb strings.Builder
-			sb.WriteString("Messages posted in the room since your last reply (context — do not answer these directly):\n")
-			for _, m := range missed {
-				// Send time included so the agent can tell a minute-old reply
-				// from an hour-old aside (the triggering message is timestamped
-				// by Agent.Chat itself).
-				sb.WriteString(fmt.Sprintf("[%s] [%s]: %s\n", m.CreatedAt.In(time.Local).Format("2006-01-02 15:04"), m.AuthorName, m.Content))
-			}
-			sb.WriteString("\nNow reply to the message addressed to you:\n")
-			message = sb.String() + message
-		}
-	}
-
-	model := cfg.AgentModel // empty → server default
-	// Surface tool activity live: members see what the agent is doing ("using
-	// web_search…") instead of a silent pause; the tool list is attached to the
-	// reply client-side.
-	tap := func(ev agent.Event) {
-		if ev.Type == "tool_use" && ev.Tool != "" {
-			s.rooms.broadcast(groupID, map[string]interface{}{"type": "agent_tool", "tool": ev.Tool})
-		}
-	}
-	reply, err := s.runHeadlessChatTap(ctx, sessionID, message, model, cc, tap, roomLimits(cfg))
-	if err != nil || strings.TrimSpace(reply) == "" {
-		reply = "⚠️ Sorry, I couldn't produce a response."
-	}
-	agentMsg, err := ms.AddRoomMessage(ctx, groupID, nil, cfg.AgentName, reply, true, nil)
+	agentMsg, err := ms.AddRoomMessage(ctx, groupID, nil, cfg.AgentName, "", true, &triggerID)
 	if err != nil {
-		log.Printf("[room] add agent message: %v", err)
+		log.Printf("[room] start reply: %v", err)
 		return
 	}
+	agentMsg.Status = "running"
+	_ = ms.UpdateRoomResponse(ctx, agentMsg.ID, "", "running", nil)
 	s.rooms.broadcast(groupID, roomEvent(agentMsg))
+	traces := []agent.Event{}
+	var preview strings.Builder
+	inThink := false
+	persist := func(status, content string) {
+		raw, _ := json.Marshal(traces)
+		// Cancellation stops generation, not the final durable transcript write.
+		saveCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
+		defer done()
+		if err := ms.UpdateRoomResponse(saveCtx, agentMsg.ID, content, status, raw); err != nil {
+			log.Printf("[room] persist response: %v", err)
+		}
+		agentMsg.Content = content
+		agentMsg.Status = status
+		agentMsg.ToolEvents = raw
+	}
+	tap := func(ev agent.Event) {
+		switch ev.Type {
+		case "stream":
+			if ev.Content == "<think>" {
+				inThink = true
+				return
+			}
+			if ev.Content == "</think>" {
+				inThink = false
+				return
+			}
+			if inThink {
+				return
+			}
+			preview.WriteString(ev.Content)
+			s.rooms.broadcast(groupID, map[string]any{"type": "agent_stream", "messageId": agentMsg.ID, "content": ev.Content})
+		case "tool_use", "tool_result":
+			// Preserve the full bounded tool result emitted by the executor.
+			traces = append(traces, ev)
+			persist("running", preview.String())
+			s.rooms.broadcast(groupID, map[string]any{"type": "agent_event", "messageId": agentMsg.ID, "event": ev})
+		}
+	}
+	reply, runErr := s.runHeadlessChatTap(ctx, sessionID, message, cfg.AgentModel, cc, tap, roomLimits(cfg))
+	status := "complete"
+	if runErr != nil {
+		status = "error"
+		if ctx.Err() != nil {
+			status = "stopped"
+		}
+		if strings.TrimSpace(reply) == "" {
+			reply = preview.String()
+		}
+	}
+	persist(status, reply)
+	_ = ms.SetConfig(context.Background(), seenKey, strconv.FormatInt(triggerID, 10))
+	s.rooms.broadcast(groupID, roomEvent(agentMsg))
+}
+
+// Ambient chatter is optional context, so retain the most recent complete
+// messages that fit rather than letting an inactive room inflate the prefill.
+func roomPrompt(message string, recent []memory.RoomMessage, seen int64, budget int) string {
+	lines := []string{}
+	used := 0
+	for i := len(recent) - 1; i >= 0; i-- {
+		m := recent[i]
+		if m.ID <= seen || m.IsAgent {
+			continue
+		}
+		line := fmt.Sprintf("[%s] [%s]: %s", m.CreatedAt.Format("2006-01-02 15:04"), m.AuthorName, m.Content)
+		if len(line) > budget-used {
+			break
+		}
+		used += len(line)
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return message
+	}
+	var b strings.Builder
+	b.WriteString("Recent room messages (background context; answer the request below). Older messages remain in the room archive.\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		b.WriteString(lines[i])
+		b.WriteByte('\n')
+	}
+	b.WriteString("\nRequest:\n")
+	b.WriteString(message)
+	return b.String()
+}
+
+// Room reads and maintenance share one membership gate.
+func (s *Server) roomAccess(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	u := currentUser(r)
+	group, err := strconv.ParseInt(r.URL.Query().Get("group"), 10, 64)
+	if u == nil || err != nil || group <= 0 {
+		writeErr(w, 400, "group required")
+		return 0, false
+	}
+	if !(u.ID == -group && boundSession(r) == fmt.Sprintf("room-g%d", group) && r.Method == http.MethodGet) && !u.IsGlobalAdmin() && !s.userInGroup(r.Context(), u.ID, group) {
+		writeErr(w, 403, "not a member of this group")
+		return 0, false
+	}
+	if s.store() == nil {
+		writeErr(w, 503, "database unavailable")
+		return 0, false
+	}
+	return group, true
+}
+func (s *Server) handleRoomHistory(w http.ResponseWriter, r *http.Request) {
+	group, ok := s.roomAccess(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "GET required")
+		return
+	}
+	before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+	msgs, err := s.store().RoomMessagesBefore(r.Context(), group, before, 50)
+	if err != nil {
+		writeErr(w, 500, "could not load room history")
+		return
+	}
+	writeJSON(w, map[string]any{"messages": msgs, "hasMore": len(msgs) == 50})
+}
+func (s *Server) handleRoomContext(w http.ResponseWriter, r *http.Request) {
+	group, ok := s.roomAccess(w, r)
+	if !ok {
+		return
+	}
+	session := fmt.Sprintf("room-g%d", group)
+	if r.Method == http.MethodPost {
+		// Reject concurrent maintenance instead of holding an HTTP request in a queue.
+		s.rooms.mu.Lock()
+		_, busy := s.rooms.queues[group]
+		s.rooms.mu.Unlock()
+		if busy {
+			writeErr(w, 409, "wait for the current response to finish")
+			return
+		}
+		done := make(chan error, 1)
+		s.rooms.enqueue(group, func() {
+			cfg, _ := s.store().GetRoomConfig(r.Context(), group)
+			ctx := context.WithValue(r.Context(), compactContextKey{}, true)
+			_, err := s.runHeadlessChatTap(ctx, session, "", cfg.AgentModel, s.callerContextForGroup(ctx, group), nil, roomLimits(cfg))
+			done <- err
+		})
+		select {
+		case err := <-done:
+			if err != nil {
+				writeErr(w, 502, "context summary failed; archive retained")
+				return
+			}
+		case <-r.Context().Done():
+			return
+		}
+	} else if r.Method != http.MethodGet {
+		writeErr(w, 405, "GET or POST required")
+		return
+	}
+	state, err := s.store().SessionContext(r.Context(), session)
+	if err != nil {
+		writeErr(w, 500, "could not read context")
+		return
+	}
+	state["historyBudgetChars"] = roomLimits(memory.RoomConfig{}).HistoryBudgetChars
+	writeJSON(w, state)
 }
 
 func roomEvent(m memory.RoomMessage) map[string]interface{} {
@@ -536,7 +715,7 @@ var channelContextCharBudget = func() int {
 			return n
 		}
 	}
-	return 30_000
+	return 16_000
 }()
 
 // roomLimits maps a group's shared-agent budget onto the agent's turn limits.

@@ -38,7 +38,7 @@
   #log { flex: 1; overflow-y: auto; padding: 10px 16px 4px; display: flex; flex-direction: column; min-height: 0; }
   .daysep { text-align: center; color: var(--text3); font-size: 11px; margin: 12px 0 6px; position: relative; }
 
-  .row { display: flex; gap: 10px; padding: 2px 6px; border-radius: 8px; position: relative; }
+  .row { display: flex; align-items:flex-start; gap: 10px; padding: 2px 6px; border-radius: 8px; position: relative; }
   .row:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
   .row.cont { margin-top: 1px; }
   .row.first { margin-top: 10px; }
@@ -65,6 +65,17 @@
   .av img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .av.sm { width: 22px; height: 22px; font-size: 10px; }
 
+  .room-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:7px 16px; border-bottom:1px solid var(--border); }
+  .room-controls button, #context-panel button { font:inherit; font-size:12px; padding:5px 9px; border:1px solid var(--border2); border-radius:6px; color:var(--text); background:var(--bg2); cursor:pointer; }
+  .room-controls button:disabled, #context-panel button:disabled { opacity:.45; cursor:default; }
+  #context-panel { padding:10px 16px; border-bottom:1px solid var(--border); max-height:35%; overflow:auto; font-size:12px; flex-shrink:0; }
+  #context-brief { white-space:pre-wrap; overflow-wrap:anywhere; }
+  #room-status { font-size:11.5px; color:var(--text2); }
+  .tool-trace { margin-top:6px; border-top:1px solid var(--border); padding-top:4px; font-size:12px; }
+  .tool-trace summary { cursor:pointer; color:var(--text2); }
+  .tool-trace pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:360px; overflow:auto; font-size:11.5px; }
+  .response-status { color:var(--text3); font-size:11px; margin-top:4px; }
+  [hidden] { display:none!important; }
   .quoted { border-left: 2px solid var(--accent); padding: 1px 8px; margin-bottom: 3px;
             color: var(--text2); font-size: 12px; opacity: .85; cursor: pointer; }
   .quoted .qn { font-weight: 600; color: var(--accent); }
@@ -130,13 +141,25 @@
     <select id="group"></select>
     <div class="presence" id="presence"></div>
   </div>
+  <div class="room-controls">
+    <button id="history-more" disabled>Earlier messages</button>
+    <button id="context-toggle">Agent context</button>
+    <button id="room-stop" disabled>Stop</button>
+    <span id="room-status" role="status"></span>
+  </div>
+  <section id="context-panel" hidden>
+    <p id="context-metrics"></p>
+    <details><summary id="context-summary-label">Retained summary</summary><p id="context-brief"></p></details>
+    <button id="context-compact">Lighten context</button>
+    <p id="context-help"></p>
+  </section>
   <div id="conn" style="display:none;padding:6px 10px;background:var(--danger,#e05252);color:#fff;font-size:12px"></div>
   <div id="log"></div>
   <div class="typing-row" id="typing"></div>
   <div class="composer">
     <div class="reply-bar" id="reply-bar"><span id="reply-txt"></span><span class="x" id="reply-x">✕</span></div>
     <form id="f"><div class="inputwrap">
-      <textarea id="box" rows="1" placeholder="Message the room…  @ to mention  ·  @agent to ask the shared agent" autocomplete="off"></textarea>
+      <textarea id="box" rows="1" maxlength="16000" placeholder="Message the room…  @ to mention  ·  @agent to ask the shared agent" autocomplete="off"></textarea>
       <button id="send-ic" type="submit" title="Send (Enter)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
     </div></form>
     <div id="mention-pop"></div>
@@ -155,7 +178,23 @@ const msgById = new Map()
 let replyTo = null
 const typingUsers = new Map() // userId -> timeout
 let agentTyping = false
-let agentTools = [] // tools used during the current agent turn (live indicator + chips)
+let agentTools = [] // live indicator; durable traces belong to their message
+let roomGeneration = 0, roomRunning = false, roomQueued = 0
+const FR = navigator.language.startsWith('fr')
+const ROOM_TEXT = FR ? {
+  more:'Messages précédents', context:'Contexte de l’agent', stop:'Arrêter', compact:'Alléger le contexte', summary:'Résumé conservé',
+  contextHelp:'L’allègement résume les anciens échanges. Les messages et les appels d’outils restent dans l’historique.',
+  noSummary:'Aucun résumé pour le moment.', archived:'messages archivés', active:'messages actifs', chars:'caractères actifs',
+  running:'Réponse en cours', queued:'en attente', stopped:'Réponse arrêtée', error:'Réponse interrompue',
+  args:'Paramètres', result:'Résultat', pending:'Résultat non reçu', failed:'Échec', returned:'Résultat reçu'
+} : {
+  more:'Earlier messages', context:'Agent context', stop:'Stop', compact:'Lighten context', summary:'Retained summary',
+  contextHelp:'Older exchanges are summarized. Messages and tool calls remain in the archive.',
+  noSummary:'No summary yet.', archived:'archived messages', active:'active messages', chars:'active characters',
+  running:'Responding', queued:'queued', stopped:'Response stopped', error:'Response interrupted',
+  args:'Arguments', result:'Result', pending:'Result not received', failed:'Failed', returned:'Result returned'
+}
+for (const [id,key] of [['history-more','more'],['context-toggle','context'],['room-stop','stop'],['context-compact','compact'],['context-summary-label','summary'],['context-help','contextHelp']]) $(id).textContent = ROOM_TEXT[key]
 
 function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])) }
 function initials(n){ return (n||'?').trim().split(/\s+/).map(w=>w[0]||'').slice(0,2).join('').toUpperCase() || '?' }
@@ -226,7 +265,7 @@ function rowHTML(m, prev){
                (new Date(m.createdAt) - new Date(prev.createdAt)) < 5*60*1000
   const mine = mentionsMe(m.content)
   let quoted = ''
-  if (m.replyTo){
+  if (m.replyTo && (!m.isAgent || !prev || prev.id !== m.replyTo)){
     const src = msgById.get(m.replyTo)
     const snip = src ? (src.content.replace(/\n/g,' ').slice(0,80)) : 'a message'
     quoted = `<div class="quoted" data-goto="${m.replyTo}"><span class="qn">${esc(src?src.authorName:'')}</span> ${esc(snip)}</div>`
@@ -234,12 +273,13 @@ function rowHTML(m, prev){
   const head = cont ? '' :
     `<div class="head"><span class="who${m.isAgent?' agent':''}">${esc(m.authorName)}</span><span class="time">${fmtTime(m.createdAt)}</span></div>`
   const gutter = cont ? `<span class="time" style="font-size:9px">${fmtTime(m.createdAt)}</span>` : avatar(scopeForAuthor(m), m.authorName)
-  const tools = (m._tools && m._tools.length)
-    ? `<div style="margin-top:3px;font-size:11px;color:var(--text3)" title="Tools the agent used for this reply">🛠 ${m._tools.map(esc).join(' · ')}</div>`
-    : ''
+  const tools = toolEventsHTML(m.toolEvents) || ((m._tools && m._tools.length)
+    ? `<div style="margin-top:3px;font-size:11px;color:var(--text3)">🛠 ${m._tools.map(esc).join(' · ')}</div>` : '')
+  const status = m.status && m.status !== 'complete'
+    ? `<div class="response-status">${esc(ROOM_TEXT[m.status] || m.status)}</div>` : ''
   return `<div class="row ${cont?'cont':'first'}${mine?' mention-me':''}" data-id="${m.id}">
     <div class="gutter">${gutter}</div>
-    <div class="body">${quoted}${head}<div class="content">${renderContent(m.content)}</div>${tools}${reactionsHTML(m)}</div>
+    <div class="body">${quoted}${head}<div class="content">${renderContent(m.content)}</div>${tools}${status}${reactionsHTML(m)}</div>
     <div class="row-actions">
       <button title="React" data-act="react">😊</button>
       <button title="Reply" data-act="reply">↩</button>
@@ -247,8 +287,29 @@ function rowHTML(m, prev){
   </div>`
 }
 
-function renderAll(){
-  const log = $('log'); log.innerHTML = ''
+function toolEventsHTML(events){
+  const calls = new Map()
+  for (const event of events || []) {
+    if (event.type === 'tool_use') calls.set(event.id, { ...event, done:false })
+    else if (event.type === 'tool_result') {
+      const call = calls.get(event.id) || { id:event.id, tool:event.tool }
+      Object.assign(call, { output:event.output, is_error:event.is_error, done:true })
+      calls.set(event.id,call)
+    }
+  }
+  return [...calls.values()].map(call => {
+    const outcome = !call.done ? ROOM_TEXT.pending : call.is_error ? ROOM_TEXT.failed : ROOM_TEXT.returned
+    return `<details class="tool-trace" data-tool-id="${esc(call.id)}"><summary>${esc(call.tool || 'tool')} · ${esc(outcome)}</summary><pre>${esc(ROOM_TEXT.args)}
+${esc(JSON.stringify(call.input || {},null,2))}
+
+${esc(ROOM_TEXT.result)}
+${esc(call.output || '')}</pre></details>`
+  }).join('')
+}
+function renderAll(stickToBottom = nearBottom()){
+  const log = $('log'), top = log.scrollTop
+  const opened = new Set([...log.querySelectorAll('.tool-trace[open]')].map(el => el.closest('.row').dataset.id + ':' + el.dataset.toolId))
+  log.innerHTML = ''
   let prev = null, lastDay = ''
   for (const m of msgs){
     const day = fmtDay(m.createdAt)
@@ -256,18 +317,72 @@ function renderAll(){
     const wrap = document.createElement('div'); wrap.innerHTML = rowHTML(m, prev); log.appendChild(wrap.firstElementChild)
     prev = m
   }
-  scrollDown()
+  for (const el of log.querySelectorAll('.tool-trace')) if (opened.has(el.closest('.row').dataset.id + ':' + el.dataset.toolId)) el.open = true
+  if (stickToBottom) scrollDown(); else log.scrollTop = top
 }
 function scrollDown(){ const l = $('log'); l.scrollTop = l.scrollHeight }
 function nearBottom(){ const l = $('log'); return l.scrollHeight - l.scrollTop - l.clientHeight < 120 }
 
+// A message id identifies one bubble for its whole lifetime: started, streamed,
+// tool progress, final response, and replay after reconnect.
+function upsertMessage(m){
+  const existing = msgById.get(m.id)
+  if (existing) Object.assign(existing,m)
+  else { msgs.push(m); msgById.set(m.id,m) }
+}
 function addMessage(m){
+  if (!m) return
   const wasBottom = nearBottom()
-  msgs.push(m); msgById.set(m.id, m)
-  // Re-render is cheap at room scale and keeps grouping/day-separators correct.
-  renderAll()
+  upsertMessage(m)
+  msgs.sort((a,b) => a.id-b.id)
+  renderAll(wasBottom)
+}
+function updateStream(messageId,content){
+  const m = msgById.get(messageId); if (!m) return
+  const wasBottom = nearBottom()
+  m.content += content || ''
+  const node = document.querySelector(`.row[data-id="${messageId}"] .content`)
+  if (node) node.innerHTML = renderContent(m.content)
   if (wasBottom) scrollDown()
 }
+function updateToolEvent(messageId,event){
+  const m = msgById.get(messageId); if (!m) return
+  const events = m.toolEvents || (m.toolEvents = [])
+  const found = events.findIndex(e => e.id === event.id && e.type === event.type)
+  if (found < 0) events.push(event); else events[found] = event
+  if (event.type === 'tool_use' && event.tool) agentTools.push(event.tool)
+  renderAll(); renderTyping()
+}
+
+async function loadEarlier(){
+  if (!msgs.length) return
+  const g = gid, generation = roomGeneration, log = $('log'), height = log.scrollHeight, top = log.scrollTop
+  $('history-more').disabled = true
+  try {
+    const data = await PrismAPI.api('/api/room/history?group=' + encodeURIComponent(g) + '&before=' + msgs[0].id)
+    if (generation !== roomGeneration) return
+    for (const m of data.messages || []) upsertMessage(m)
+    msgs.sort((a,b) => a.id-b.id); renderAll(false)
+    log.scrollTop = top + log.scrollHeight - height
+    $('history-more').disabled = !data.hasMore
+  } catch(error){ if (generation === roomGeneration) { $('history-more').disabled = false; PrismAPI.toast(error.message) } }
+}
+async function loadContext(compact = false){
+  const generation = roomGeneration
+  $('context-compact').disabled = true
+  try {
+    const data = await PrismAPI.api('/api/room/context?group=' + encodeURIComponent(gid),compact ? {method:'POST'} : undefined)
+    if (generation !== roomGeneration) return
+    $('context-metrics').textContent = data.archivedMessages + ' ' + ROOM_TEXT.archived + ' · ' + data.activeMessages + ' ' + ROOM_TEXT.active + ' · ' + data.activeChars + ' ' + ROOM_TEXT.chars
+    $('context-brief').textContent = data.summary || ROOM_TEXT.noSummary
+  } catch(error){ if (generation === roomGeneration) PrismAPI.toast(error.message) }
+  finally { if (generation === roomGeneration) $('context-compact').disabled = roomRunning || roomQueued > 0 }
+}
+$('history-more').onclick = loadEarlier
+$('context-toggle').onclick = () => { $('context-panel').hidden = !$('context-panel').hidden; if (!$('context-panel').hidden) loadContext() }
+$('context-compact').onclick = () => loadContext(true)
+$('room-stop').onclick = () => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:'stop'})) }
+
 function patchReactions(mid, reactions){
   const m = msgById.get(mid); if (!m) return
   m.reactions = reactions
@@ -314,43 +429,64 @@ function setLive(v){
 }
 function scheduleReconnect(g){
   if (retry) return
-  retry = setTimeout(() => { retry = null; retryDelay = Math.min(retryDelay * 2, 15000); if (gid === g) connect(g) }, retryDelay)
+  retry = setTimeout(() => { retry = null; retryDelay = Math.min(retryDelay * 2, 15000); if (gid === g) connect(g,true) }, retryDelay)
 }
-function connect(g){
+function handleRoomEvent(d){
+  if (d.type === 'history') {
+    for (const m of d.messages || []) upsertMessage(m)
+    msgs.sort((a,b) => a.id-b.id); renderAll()
+    $('history-more').disabled = (d.messages || []).length < 50
+  } else if (d.type === 'message') {
+    if (d.message?.isAgent && d.message.status !== 'running') {
+      agentTools = []; agentTyping = false; renderTyping()
+    }
+    addMessage(d.message)
+    if (!$('context-panel').hidden && d.message?.isAgent && d.message.status !== 'running') loadContext()
+  } else if (d.type === 'agent_stream') updateStream(d.messageId,d.content)
+  else if (d.type === 'agent_event') updateToolEvent(d.messageId,d.event)
+  else if (d.type === 'activity') {
+    roomRunning = !!d.running; roomQueued = d.queued || 0
+    agentTyping = roomRunning; if (!roomRunning) agentTools = []
+    $('room-stop').disabled = !roomRunning
+    $('context-compact').disabled = roomRunning || roomQueued > 0
+    $('room-status').textContent = (roomRunning ? ROOM_TEXT.running : '') + (roomQueued ? ' · ' + roomQueued + ' ' + ROOM_TEXT.queued : '')
+    renderTyping()
+  } else if (d.type === 'agent_typing'){ agentTyping = true; agentTools = []; renderTyping() }
+  else if (d.type === 'agent_tool'){ if (d.tool && agentTools[agentTools.length-1] !== d.tool) agentTools.push(d.tool); agentTyping = true; renderTyping() }
+  else if (d.type === 'typing') noteTyping(d.userId)
+  else if (d.type === 'presence') renderPresence(d.users || [])
+  else if (d.type === 'reaction') patchReactions(d.messageId,d.reactions || [])
+  else if (d.type === 'room_config') agentName = d.agentName || 'Assistant'
+  else if (d.type === 'error') PrismAPI.toast(d.content)
+}
+function connect(g,reconnecting = false){
+  const generation = ++roomGeneration
+  if (retry){ clearTimeout(retry); retry = null }
   gid = g
   if (ws){ ws.onclose = null; ws.close() }
-  msgs = []; msgById.clear(); typingUsers.clear(); agentTyping = false
-  $('log').innerHTML = ''; $('typing').textContent = ''
+  if (!reconnecting){
+    msgs = []; msgById.clear(); clearReply(); $('log').innerHTML = ''
+    $('context-panel').hidden = true; $('history-more').disabled = true
+  }
+  typingUsers.forEach(clearTimeout); typingUsers.clear(); agentTyping = false; agentTools = []
+  roomRunning = false; roomQueued = 0; $('room-stop').disabled = true; $('room-status').textContent = ''; renderTyping()
   loadMembers(g)
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  ws = new WebSocket(proto + '://' + location.host + '/wsroom?group=' + g)
-  ws.onopen = () => { setLive(true); retryDelay = 1000 }
-  // The socket dying changed nothing on screen: the room looked quiet, and
-  // send() returned without a word, leaving the typed message in the box.
-  ws.onclose = () => { setLive(false); scheduleReconnect(g) }
-  ws.onerror = () => setLive(false)
-  ws.onmessage = e => {
-    const d = JSON.parse(e.data)
-    if (d.type === 'history'){ msgs = d.messages || []; msgById.clear(); msgs.forEach(m => msgById.set(m.id, m)); renderAll() }
-    else if (d.type === 'message'){
-      if (d.message && d.message.isAgent && agentTools.length){ d.message._tools = [...new Set(agentTools)]; agentTools = [] }
-      agentTyping = false; renderTyping(); addMessage(d.message)
-    }
-    else if (d.type === 'agent_typing'){ agentTyping = true; agentTools = []; renderTyping() }
-    else if (d.type === 'agent_tool'){ if (d.tool && agentTools[agentTools.length-1] !== d.tool) agentTools.push(d.tool); agentTyping = true; renderTyping() }
-    else if (d.type === 'typing'){ noteTyping(d.userId) }
-    else if (d.type === 'presence'){ renderPresence(d.users || []) }
-    else if (d.type === 'reaction'){ patchReactions(d.messageId, d.reactions || []) }
-    else if (d.type === 'room_config'){ agentName = d.agentName || 'Assistant' }
-  }
+  ws = new WebSocket(proto + '://' + location.host + '/wsroom?group=' + encodeURIComponent(g))
+  ws.onopen = () => { if (generation === roomGeneration){ setLive(true); retryDelay = 1000 } }
+  ws.onclose = () => { if (generation === roomGeneration){ setLive(false); scheduleReconnect(g) } }
+  ws.onerror = () => { if (generation === roomGeneration) setLive(false) }
+  ws.onmessage = e => { if (generation === roomGeneration) handleRoomEvent(JSON.parse(e.data)) }
 }
 async function loadMembers(g){
   try {
     const d = await PrismAPI.api('/api/group/members?group=' + g)
+    if (gid !== g) return
     members = d.members || []; if (d.agentName) agentName = d.agentName
   } catch(e) {
     // Without members, @mentions and "someone mentioned me" quietly stop
     // working, so say so rather than degrade in silence.
+    if (gid !== g) return
     members = []
     PrismAPI.toast('Could not load the room members: ' + e.message)
   }

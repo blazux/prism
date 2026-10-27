@@ -54,9 +54,15 @@ and its preview, while copies already added to workspaces are kept.
 Members of a group get a **Room** app in the left rail: a chat where the group
 talks together and to the group's **shared agent**. Pick the group at the top;
 the agent answers only when **@mentioned** — `@agent`, or `@Name` with the
-name set by the group admin (spaces removed). While it works, *"Name is
-thinking…"* appears. On each mention it also receives the messages posted since
-its last reply, so it has the context of the conversation it wasn't part of.
+name set by the group admin (spaces removed). Responses stream into the Room. Expand a tool call to inspect its arguments,
+result or error; these traces remain visible after reloading. Requests to the
+shared agent are processed in order, and **Stop** interrupts the current response.
+
+**Earlier messages** pages through the room archive. The active model context is
+a short recent window with a retained summary. Recent room chatter is also
+bounded before being handed to the agent. **Agent context → Lighten context**
+summarizes older exchanges without deleting messages or tool results. The agent
+can search its earlier exchanges and read older room messages when needed.
 
 The shared agent runs with the rights the group admin gives it (the global tool
 policy tightened by the group's restrictions, at member level), uses the group's
@@ -117,3 +123,13 @@ remain shared infrastructure for a trusted team.
 Turning `MULTI_USER` on is a one-way door: at the first start in shared mode,
 Prism moves the existing configuration and secrets into the scope of the first
 admin — so the person who set Prism up must be the first to sign up.
+
+## The PrismVox workspace
+
+When PrismVox is connected, a global administrator can authorize existing groups
+from **PrismVox → Access**. Members then see **PrismVox** in the workspace list.
+Use it to ask about the standard's work and consult call history. Its supervision
+conversation belongs to the selected group. Personal recognized calls are not
+shared with that group; older calls with no recorded audience stay in the private
+**Administrator archive**. SIP, speech and model settings remain in **Telephony
+settings**. PrismVox also works in personal Prism deployments; see [Telephony](telephony.md).

@@ -73,5 +73,5 @@ func groupCapabilityPath(r *http.Request) bool {
 	if strings.HasPrefix(p, "/api/user/secrets/") {
 		return r.Method == http.MethodGet
 	}
-	return r.Method == http.MethodGet && (strings.HasPrefix(p, "/plugins/") || strings.HasPrefix(p, "/data/") || strings.HasPrefix(p, "/screenshots/") || p == "/widget-base.css" || p == "/prism-widget.js" || p == "/api/tools")
+	return r.Method == http.MethodGet && (strings.HasPrefix(p, "/plugins/") || strings.HasPrefix(p, "/data/") || strings.HasPrefix(p, "/screenshots/") || p == "/widget-base.css" || p == "/prism-widget.js" || p == "/api/tools" || p == "/api/vox/history" || p == "/api/room/history")
 }

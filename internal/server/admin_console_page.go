@@ -573,13 +573,6 @@ async function loadUsage(){const days=$('us-days').value;const d=await jget('/ap
  $('us-errors').innerHTML=(d.errors&&d.errors.length)?d.errors.map(fmt).join(''):'<div class="hint">No errors recorded. 🎉</div>';
    loadTelephonyUsage();}
 // Telephony activity (from the docked Vox stack) shown alongside the rest of usage.
-function telToolTraceHTML(t){
- const labels={started:'Result not received',returned:'Result returned',failed:'Failed',queued:'Requested',recorded_in_call_log_not_delivered:'Recorded in call log; not sent'};
- const label=esc(t.tool||'?')+(t.args&&t.args.action?' · '+esc(t.args.action):'')+(t.outcome?' — '+esc(labels[t.outcome]||t.outcome):'');
- return '<details style="margin-top:6px"><summary style="cursor:pointer">'+label+'</summary>'+
-  (t.args?'<b>Arguments</b><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(JSON.stringify(t.args,null,2))+'</pre>':'')+
-  (t.result!==undefined?'<b>Result'+(t.result_truncated?' (truncated)':'')+'</b><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(String(t.result))+'</pre>':'')+'</details>';
-}
 async function loadTelephonyUsage(){
  const box=$('us-tel');if(!box)return;
  const s=await jget('/api/vox/runtime-status');if(!s){box.style.display='none';return;}
@@ -591,20 +584,7 @@ async function loadTelephonyUsage(){
   '<div class="row" style="flex-wrap:wrap;gap:10px;margin-bottom:10px">'+
   usCard('SIP',s.sip_ok?'online':'offline')+usCard('calls today',s.calls_today||0)+usCard('total',s.total_calls||0)+
   usCard('avg duration',dur(s.avg_duration_secs))+usCard('% transferred',(s.transfer_pct||0)+'%')+usCard('active',s.active_calls||0)+'</div>';
- const cl=await jget('/api/vox/call-logs?limit=25');const items=(cl&&cl.items)||[];
- html+='<div style="font-size:12px">';
- if(!items.length)html+='<div class="hint">No calls recorded yet.</div>';
- else{html+='<table style="width:100%;border-collapse:collapse"><thead><tr style="color:var(--text3);text-align:left">'+
-   '<th style="padding:5px 8px">When</th><th style="padding:5px 8px">Caller</th><th style="padding:5px 8px">Duration</th><th style="padding:5px 8px">Ended</th><th style="padding:5px 8px">Summary</th></tr></thead><tbody>';
-  html+=items.map((c,i)=>{const traces=(c.tools_used||[]).map(telToolTraceHTML).join('');const det=(c.turns||[]).map(t=>'<div><b style="color:var(--text3)">'+(t.role==='caller'?'Caller':'Agent')+':</b> '+esc(t.text)+'</div>').join('')+(traces?'<div style="margin-top:10px"><b>Tools</b>'+traces+'</div>':'');
-   return '<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="var e=document.getElementById(\'ut'+i+'\');e.style.display=e.style.display?\'\':\'none\'">'+
-    '<td style="padding:6px 8px">'+when(c.started_at)+'</td><td style="padding:6px 8px">'+esc(c.caller_number)+'</td>'+
-    '<td style="padding:6px 8px">'+dur(c.duration_secs)+'</td><td style="padding:6px 8px">'+esc(REASONS[c.end_reason]||c.end_reason||'—')+'</td>'+
-    '<td style="padding:6px 8px">'+esc(c.summary||'—')+'</td></tr>'+
-    '<tr id="ut'+i+'" style="display:none"><td colspan="5" style="padding:6px 12px;color:var(--text2);background:var(--bg2)">'+(c.message?'<div style="margin-bottom:6px"><b>Message:</b> '+esc(c.message)+'</div>':'')+(det||'<span class="hint">No transcript.</span>')+'</td></tr>';
-  }).join('');
-  html+='</tbody></table>';}
- html+='</div>';
+ html+='<p><a href="/apps/prismvox.html?group=admin&tab=logs" target="_top">Open call history in the PrismVox workspace →</a></p>';
  box.innerHTML=html;
 }
 async function loadLogs(){const f=$('lg-filter').value.trim();const d=await jget('/api/admin/logs?limit=500&filter='+encodeURIComponent(f));if(!d)return;
@@ -641,7 +621,7 @@ async function init(){
  if(!ME||!ME.authenticated){location.href='/login';return;}
  // Single-user (legacy) /api/me has no user object: fall through to the
  // "no admin access" message instead of crashing on ME.user.role.
- const isGA=ME.user?.role==='global_admin'; MY.isGlobalAdmin=isGA;
+ const isGA=ME.user?.role==='global_admin'||ME.multiUser===false; MY.isGlobalAdmin=isGA;
  $('who').textContent=(ME.user?.displayName||'')+(ME.user?' · ':'')+(isGA?'global admin':ME.user?'group admin':'single-user mode — no admin console');
  try{const m=await fetch('/api/models').then(r=>r.json());MODELS=m.models||[];}catch(e){}
  // Global admin: load every group so the shared-agent / tool-access tabs and
@@ -654,7 +634,7 @@ async function init(){
  // it were a deployment-wide setting sitting next to "Platform".
  // A heading is an entry with no pane; only real entries are clickable.
  const nav=$('adm-nav');const items=[];const head=t=>['',t];
- if(isGA){items.push(head('Deployment'),['users','Users'],['groups','Groups'],['tools','Tools'],['ai','AI provider'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
+ if(isGA&&ME.multiUser!==false){items.push(head('Deployment'),['users','Users'],['groups','Groups'],['tools','Tools'],['ai','AI provider'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
  // Telephony admin (switchboard persona + SIP trunk) — only when docked with Vox.
  let DOCKED=false;try{DOCKED=!!(await fetch('/api/platform').then(r=>r.json())).voxDocked;}catch(e){}
  if(isGA&&DOCKED){items.push(['telephony','Telephony']);}
@@ -667,9 +647,10 @@ async function init(){
  $('ag-group').onchange=()=>{loadAgent();loadWebex();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
  $('ag-model').innerHTML='<option value="">(server default)</option>'+MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');
  fillGroupPickers();
- show(panes[0][0]);
- const first=panes[0][0];
- if(first==='users')loadUsers();else if(first==='agent'){loadAgent();loadWebex();}
+ const requested=location.hash.slice(1);
+ const first=panes.some(([p])=>p===requested)?requested:panes[0][0];
+ show(first);
+ if(first==='telephony')loadTelephony();else if(first==='users')loadUsers();else if(first==='agent'){loadAgent();loadWebex();}
 }
 init();
 </script></body></html>

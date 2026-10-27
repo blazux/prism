@@ -22,7 +22,7 @@ func TestVoicePhoneFormatsAndAmbiguousProfiles(t *testing.T) {
 		return u
 	}
 	owner := create("owner@example.test", "+596 596 12 34 56", memory.StatusApproved)
-	s := &Server{memStore: ms}
+	s := &Server{memStore: ms, cfg: Config{MultiUser: true}}
 	for _, phone := range []string{"0596123456", "+596596123456", "00596596123456", "596123456"} {
 		if u := s.resolveVoiceCaller(ctx, phone); u == nil || u.ID != owner.ID {
 			t.Fatalf("equivalent format %q did not identify the owner", phone)

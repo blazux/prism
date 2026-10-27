@@ -5,19 +5,22 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
 type RoomMessage struct {
-	ID         int64          `json:"id"`
-	GroupID    int64          `json:"groupId"`
-	AuthorID   *int64         `json:"authorId,omitempty"`
-	AuthorName string         `json:"authorName"`
-	Content    string         `json:"content"`
-	IsAgent    bool           `json:"isAgent"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	ReplyTo    *int64         `json:"replyTo,omitempty"`
-	Reactions  []RoomReaction `json:"reactions,omitempty"`
+	ID         int64           `json:"id"`
+	GroupID    int64           `json:"groupId"`
+	AuthorID   *int64          `json:"authorId,omitempty"`
+	AuthorName string          `json:"authorName"`
+	Content    string          `json:"content"`
+	IsAgent    bool            `json:"isAgent"`
+	CreatedAt  time.Time       `json:"createdAt"`
+	ReplyTo    *int64          `json:"replyTo,omitempty"`
+	ToolEvents json.RawMessage `json:"toolEvents,omitempty"`
+	Status     string          `json:"status"`
+	Reactions  []RoomReaction  `json:"reactions,omitempty"`
 }
 
 // RoomReaction is one user's emoji on a message. The client aggregates by emoji
@@ -65,15 +68,19 @@ func (s *Store) AddRoomMessage(ctx context.Context, groupID int64, authorID *int
 // RecentRoomMessages returns the last `limit` messages for a group's room, oldest
 // first, each with its reactions attached.
 func (s *Store) RecentRoomMessages(ctx context.Context, groupID int64, limit int) ([]RoomMessage, error) {
+	return s.RoomMessagesBefore(ctx, groupID, 0, limit)
+}
+
+func (s *Store) RoomMessagesBefore(ctx context.Context, groupID, before int64, limit int) ([]RoomMessage, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, group_id, author_id, author_name, content, is_agent, created_at, reply_to
+		SELECT id, group_id, author_id, author_name, content, is_agent, created_at, reply_to, tool_events, status
 		FROM (
-			SELECT * FROM room_messages WHERE group_id = $1 ORDER BY id DESC LIMIT $2
+			SELECT * FROM room_messages WHERE group_id = $1 AND ($3::bigint=0 OR id<$3) ORDER BY id DESC LIMIT $2
 		) t ORDER BY id ASC
-	`, groupID, limit)
+	`, groupID, limit, before)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +89,7 @@ func (s *Store) RecentRoomMessages(ctx context.Context, groupID int64, limit int
 	byID := map[int64]int{}
 	for rows.Next() {
 		var m RoomMessage
-		if err := rows.Scan(&m.ID, &m.GroupID, &m.AuthorID, &m.AuthorName, &m.Content, &m.IsAgent, &m.CreatedAt, &m.ReplyTo); err != nil {
+		if err := rows.Scan(&m.ID, &m.GroupID, &m.AuthorID, &m.AuthorName, &m.Content, &m.IsAgent, &m.CreatedAt, &m.ReplyTo, &m.ToolEvents, &m.Status); err != nil {
 			return nil, err
 		}
 		byID[m.ID] = len(out)
@@ -96,8 +103,8 @@ func (s *Store) RecentRoomMessages(ctx context.Context, groupID int64, limit int
 		rr, err := s.pool.Query(ctx, `
 			SELECT rr.message_id, rr.user_id, rr.emoji
 			FROM room_reactions rr JOIN room_messages m ON m.id = rr.message_id
-			WHERE m.group_id = $1
-		`, groupID)
+			WHERE m.group_id = $1 AND rr.message_id = ANY($2::bigint[])
+		`, groupID, roomMessageIDs(out))
 		if err == nil {
 			defer rr.Close()
 			for rr.Next() {
@@ -186,4 +193,38 @@ func (s *Store) SetRoomConfig(ctx context.Context, c RoomConfig) error {
 			agent_voice_prompt = EXCLUDED.agent_voice_prompt, agent_prompt_profile = EXCLUDED.agent_prompt_profile
 	`, c.GroupID, c.AgentName, c.AgentPrompt, c.AgentModel, c.AgentMaxIter, c.AgentThinking, c.AgentLean, c.AgentReasoning, c.AgentVoicePrompt, c.AgentPromptProfile)
 	return err
+}
+
+func roomMessageIDs(messages []RoomMessage) []int64 {
+	ids := make([]int64, len(messages))
+	for i, m := range messages {
+		ids[i] = m.ID
+	}
+	return ids
+}
+
+// UpdateRoomResponse persists progress as well as the final reply. A reload can
+// recover tool results even if the client missed their WebSocket frames.
+func (s *Store) UpdateRoomResponse(ctx context.Context, id int64, content, status string, events json.RawMessage) error {
+	if len(events) == 0 {
+		events = json.RawMessage("[]")
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE room_messages SET content=$2,status=$3,tool_events=$4 WHERE id=$1`, id, content, status, events)
+	return err
+}
+
+// SessionContext reports archived and active spans without loading the archive.
+func (s *Store) SessionContext(ctx context.Context, session string) (map[string]any, error) {
+	lc := s.GetLiveCompaction(ctx, session)
+	before := int64(0)
+	summary := ""
+	if lc != nil {
+		before = lc.BeforeID
+		summary = lc.Summary
+	}
+	var total, active, chars int64
+	err := s.pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE id >= $2),
+ COALESCE(sum(length(content)+length(COALESCE(tool_calls::text,''))) FILTER(WHERE id >= $2),0)
+ FROM conversation_history WHERE session_id=$1`, session, before).Scan(&total, &active, &chars)
+	return map[string]any{"archivedMessages": total, "activeMessages": active, "activeChars": chars + int64(len(summary)), "summary": summary, "beforeId": before}, err
 }

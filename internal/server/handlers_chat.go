@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"prism/internal/agent"
+	"prism/internal/resources"
 )
 
 // handleChatFileUpload parses an uploaded file and returns its text content so
@@ -52,12 +54,20 @@ func (s *Server) handleChatFileUpload(w http.ResponseWriter, r *http.Request) {
 // saveChatUpload copies a chat upload into the workspace uploads/ dir and returns
 // its workspace-relative path (empty on failure — extraction-only still works).
 func (s *Server) saveChatUpload(srcPath, origName string) string {
-	uploadsDir := filepath.Join(s.cfg.WorkspaceDir, "uploads")
-	if err := s.mkdirManaged(uploadsDir); err != nil {
-		return ""
-	}
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
+		return ""
+	}
+	return s.saveChatUploadBytes(data, origName)
+}
+
+func (s *Server) saveChatUploadBytes(data []byte, origName string) string {
+	// Serialize filename selection with the write so simultaneous uploads with
+	// the same name cannot overwrite one another.
+	unlock := resources.Lock(s.cfg.WorkspaceDir)
+	defer unlock()
+	uploadsDir := filepath.Join(s.cfg.WorkspaceDir, "uploads")
+	if err := s.mkdirManaged(uploadsDir); err != nil {
 		return ""
 	}
 	dest := uniqueUploadPath(uploadsDir, sanitizeUploadName(origName))
@@ -220,6 +230,8 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 // (the group room) can surface tool activity live while the turn runs, and
 // explicit turn limits for agents whose budget isn't in a user's config scope
 // (the group's shared agent — see agent.Limits; zero = config/default).
+type compactContextKey struct{}
+
 func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, cc CallerContext, tap func(agent.Event), limits agent.Limits) (string, error) {
 	ctx, finish, err := s.beginSessionJob(ctx, sessionID)
 	if err != nil {
@@ -256,6 +268,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
 	executor.SetLLM(ollamaClient, model)
 	executor.SetChatBlind(!ai.cfg.ChatVision)
+	executor.SetVoxScope(s.voxScopeHeader(context.Background(), sessionID))
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 
 	executor.SetRAGProvider(s.acquireRAG)
@@ -297,6 +310,12 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	})
 
 	personality := loadPersonality(ctx, ms, sessionID)
+	if scope := groupScopeFromSessionID(sessionID); scope != "" {
+		groupID, _ := strconv.ParseInt(strings.TrimPrefix(scope, "g"), 10, 64)
+		if facts := s.voxGroupArchiveContext(ctx, groupID); facts != "" {
+			personality += "\n\n## Current PrismVox access\n" + facts
+		}
+	}
 	agentStore := ms
 	options, _ := ctx.Value(childOptionsKey{}).(*childOptions)
 	if options != nil {
@@ -326,6 +345,9 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 		return executor.SearchLearnings(ctx, query)
 	})
 
+	if compact, _ := ctx.Value(compactContextKey{}).(bool); compact {
+		return "", ag.CompactContext(ctx)
+	}
 	events := make(chan agent.Event, 200)
 	go func() {
 		ag.Chat(ctx, message, nil, events)

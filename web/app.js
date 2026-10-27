@@ -11,7 +11,7 @@ let chatOpen = false
 let currentAssistantEl = null
 let currentAssistantContent = ''
 const widgets = new Map()
-let pendingImages = []      // base64 strings (without data-URL prefix) waiting to be sent
+let pendingImages = []      // {data: raw base64, name: original filename} waiting to be sent
 let pendingAttachments = [] // images queued by add_attachment, injected into next assistant bubble
 let pendingFiles  = [] // {name, text} parsed file attachments waiting to be sent
 // The workspace whose dashboard we return to. The live chat session
@@ -586,18 +586,19 @@ function sendChat() {
   const text = input.value.trim()
   if ((!text && pendingImages.length === 0 && pendingFiles.length === 0) || isStreaming) return
 
-  appendUserMessage(text, pendingImages, pendingFiles)
+  appendUserMessage(text, pendingImages.map(image => image.data), pendingFiles)
   input.value = ''
   autoResizeTextarea(input)
 
-  const images = pendingImages.slice()
+  const images = pendingImages.map(image => image.data)
+  const imageNames = pendingImages.map(image => image.name)
   const files  = pendingFiles.slice()
   pendingImages = []
   pendingFiles  = []
   renderPreviews()
 
   setStreaming(true)
-  send({ type: 'chat', content: text, images: images.length ? images : undefined, files: files.length ? files : undefined, disabledTools: getDisabledTools() })
+  send({ type: 'chat', content: text, images: images.length ? images : undefined, imageNames: images.length ? imageNames : undefined, files: files.length ? files : undefined, disabledTools: getDisabledTools() })
 }
 
 window.sendChat = sendChat
@@ -1165,6 +1166,7 @@ const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: '
 const ASSISTANT = 'assistant'            // reserved session: the global super-agent
 let currentView = { type: 'board' }      // { type:'board', workspace } | { type:'app', name }
 let allSessions = []
+let voxWorkspaceAvailable = false
 
 // gotoSession reconnects the chat/WS to a different session (workspace or the
 // global assistant). It does NOT change the view — setView decides the session.
@@ -1209,6 +1211,16 @@ function setView(view) {
   const dock  = document.getElementById('widget-dock')
   const frame = document.getElementById('app-frame')
   const title = document.getElementById('view-title')
+  const serviceView=view.type==='service'&&view.name==='prismvox'
+  document.getElementById('chat-drawer').style.display=serviceView?'none':''
+  document.getElementById('chat-fab').style.display=serviceView?'none':''
+  if(serviceView){
+    document.querySelectorAll('.rail-item').forEach(el=>el.classList.remove('active'))
+    frame.src='/apps/prismvox.html';frame.style.display='';dash.style.display='none';dock.style.display='none'
+    if(title)title.textContent='PrismVox'
+    document.querySelector('[data-service="prismvox"]')?.classList.add('active')
+    setContext('Viewing the PrismVox reception workspace');setSuggestions([]);return
+  }
 
   document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'))
 
@@ -1298,6 +1310,7 @@ async function loadSessions() {
     const res = await fetch('/api/sessions')
     const data = await res.json()
     allSessions = data.sessions || []
+    try{voxWorkspaceAvailable=!!(await fetch('/api/vox-workspace').then(r=>r.json())).available}catch{voxWorkspaceAvailable=false}
     renderBoardList(allSessions)
     // Names arrive async — refresh the title/agent label if on a workspace.
     if (currentView.type === 'board') {
@@ -1589,6 +1602,13 @@ function renderBoardList(sessions) {
   const host = document.getElementById('rail-boards')
   if (!host) return
   host.innerHTML = ''
+  if(voxWorkspaceAvailable){
+    const item=document.createElement('button');item.className='rail-item';item.dataset.service='prismvox';item.title='PrismVox'
+    const icon=document.createElement('span');icon.className='rail-icon';icon.textContent='☎'
+    const label=document.createElement('span');label.className='rail-label';label.textContent='PrismVox'
+    item.append(icon,label);item.onclick=()=>setView({type:'service',name:'prismvox'})
+    if(currentView.type==='service')item.classList.add('active');host.append(item)
+  }
   for (const sess of sessions) {
     if (sess.id === ASSISTANT) continue   // shown as the dedicated top item
     const item = document.createElement('button')
@@ -1717,7 +1737,7 @@ window.promptNewSession = promptNewSession
 
 // ─── File / Image upload ──────────────────────────────────────────────────────
 
-// Router: images go into pendingImages, text/doc files are uploaded for parsing.
+// Images are saved by the chat handler and also sent to vision; documents are parsed on upload.
 function addAttachment(file) {
   if (!file) return
   if (file.type.startsWith('image/')) {
@@ -1733,7 +1753,7 @@ function addImageFromFile(file) {
   const reader = new FileReader()
   reader.onload = e => {
     const b64 = e.target.result.split(',')[1]
-    pendingImages.push(b64)
+    pendingImages.push({ data: b64, name: file.name })
     renderPreviews()
   }
   reader.readAsDataURL(file)
@@ -1766,7 +1786,7 @@ function renderPreviews() {
     return
   }
   container.style.display = 'flex'
-  pendingImages.forEach((b64, i) => {
+  pendingImages.forEach(({ data: b64 }, i) => {
     const wrap = document.createElement('div')
     wrap.className = 'img-preview-wrap'
     const img = document.createElement('img')

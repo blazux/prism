@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
@@ -77,6 +78,46 @@ type attachment struct {
 	Name string
 	Text string
 	Path string
+}
+
+// Vision receives pixels, but tools need the original file. Persist both for
+// browser uploads, keeping the path in the message so it survives history reloads.
+// Names are optional for older clients, which only send raw base64 images.
+func (s *Server) saveChatImages(images, names []string) ([]attachment, error) {
+	atts := make([]attachment, 0, len(images))
+	for i, encoded := range images {
+		if len(encoded) > base64.StdEncoding.EncodedLen(attachmentMaxBytes) {
+			return nil, fmt.Errorf("image %d exceeds 10 MB", i+1)
+		}
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil || len(data) == 0 {
+			return nil, fmt.Errorf("image %d is not valid base64 image data", i+1)
+		}
+		if len(data) > attachmentMaxBytes {
+			return nil, fmt.Errorf("image %d exceeds 10 MB", i+1)
+		}
+		name := ""
+		if i < len(names) {
+			name = names[i]
+		}
+		if strings.TrimSpace(name) == "" {
+			ext := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp", "image/bmp": ".bmp", "image/tiff": ".tiff"}[http.DetectContentType(data)]
+			if ext == "" {
+				ext = ".img"
+			}
+			name = fmt.Sprintf("image-%d%s", i+1, ext)
+		}
+		name = sanitizeUploadName(name)
+		path := s.saveChatUploadBytes(data, name)
+		if path == "" {
+			return nil, fmt.Errorf("could not save image %d in the workspace", i+1)
+		}
+		atts = append(atts, attachment{
+			Name: name, Path: path,
+			Text: "[The original image is saved at /workspace/" + path + ". Use this local file with your tools; no download is needed.]",
+		})
+	}
+	return atts, nil
 }
 
 // ingestAttachment turns raw bytes into an attachment: parse for inlineable

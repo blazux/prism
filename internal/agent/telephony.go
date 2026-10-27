@@ -54,7 +54,7 @@ var ListCallsTool = ollama.Tool{
 	Type: "function",
 	Function: ollama.ToolFunction{
 		Name: "list_calls",
-		Description: "List the outbound phone calls: those still queued, the one being dialled, and recently finished ones with their outcome. " +
+		Description: "List outbound call tasks: those still queued, the one being dialled, and recently finished missions with their outcome. This is not the incoming-call or transcript archive; consult prism_help(topic=call-history) for call archives. " +
 			"A status of done means the call finished, not that its mission succeeded. Read the summary before claiming the goal was accomplished; if it does not establish success, say the result is unconfirmed. " +
 			"Use it when the user asks what calls are planned or how a call went, and to find the id of a call to cancel.",
 		Parameters: ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{}},

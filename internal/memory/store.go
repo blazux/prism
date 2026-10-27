@@ -360,6 +360,8 @@ func (s *Store) initSchema(ctx context.Context) error {
 			is_agent    BOOLEAN NOT NULL DEFAULT FALSE,
 			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		`ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS tool_events JSONB NOT NULL DEFAULT '[]'::jsonb`,
+		`ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'complete'`,
 		`CREATE INDEX IF NOT EXISTS room_messages_group_idx ON room_messages(group_id, id)`,
 		// Per-group tool restrictions (Phase 5). A group admin may only *tighten*
 		// within the global ceiling, so rows here always mean 'admin_only' for that
@@ -811,6 +813,19 @@ func (s *Store) SetLiveCompaction(ctx context.Context, sessionID string, lc Live
 	return err
 }
 
+// AdvanceLiveCompaction prevents a slow background pass from replacing a newer
+// boundary written by another headless agent on the same shared session.
+func (s *Store) AdvanceLiveCompaction(ctx context.Context, sessionID string, lc LiveCompaction) error {
+	raw, err := json.Marshal(lc)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `INSERT INTO agent_config(key,value,updated_at) VALUES($1,$2,NOW())
+ ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()
+ WHERE COALESCE((agent_config.value::jsonb->>'before_id')::bigint,0)<=$3`, liveCompactionKey(sessionID), string(raw), lc.BeforeID)
+	return err
+}
+
 // GetSummary returns the accumulated conversation summary for a session.
 func (s *Store) GetSummary(ctx context.Context, sessionID string) string {
 	var value string
@@ -1205,4 +1220,12 @@ func (s *Store) MCPRefreshTools(ctx context.Context, previous MCPServerRow, tool
 		  AND url = $5 AND auth_secret = $6 AND name = $7
 	`, toolsJSON, previous.SessionID, previous.ID, previous.CreatedAt, previous.URL, previous.AuthSecret, previous.Name)
 	return result.RowsAffected() == 1, err
+}
+
+// ConfigDefault atomically initializes a deployment identity or other stable key.
+func (s *Store) ConfigDefault(ctx context.Context, key, value string) (string, error) {
+	var out string
+	err := s.pool.QueryRow(ctx, `INSERT INTO agent_config(key,value,updated_at) VALUES($1,$2,NOW())
+ ON CONFLICT(key) DO UPDATE SET value=agent_config.value RETURNING value`, key, value).Scan(&out)
+	return out, err
 }

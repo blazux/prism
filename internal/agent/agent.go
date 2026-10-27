@@ -743,7 +743,7 @@ func (a *Agent) forceCompactLiveContext(ctx context.Context, events chan<- Event
 // compactLiveContextTo replaces the oldest completed turns with a summary until
 // the kept tail is under `target` chars, cutting only at a "user" boundary.
 // events may be nil (background pass): then nothing is announced to the UI.
-func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, target int) {
+func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, target int) error {
 	a.compactMu.Lock()
 	defer a.compactMu.Unlock()
 
@@ -764,7 +764,7 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 	}
 	if cut == 0 || cut >= len(a.history) {
 		a.histMu.Unlock()
-		return // nothing safe to drop (e.g. a single huge in-progress turn)
+		return nil // nothing safe to drop (e.g. a single huge in-progress turn)
 	}
 	dropped := append([]ollama.Message(nil), a.history[:cut]...)
 	genBefore := a.historyGen
@@ -776,7 +776,7 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 		if events != nil {
 			events <- Event{Type: "progress", Content: "Context summary failed; conversation retained. Retry when the provider is available."}
 		}
-		return
+		return err
 	}
 
 	a.histMu.Lock()
@@ -790,7 +790,7 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 		// state.
 		a.histMu.Unlock()
 		log.Printf("[agent] session=%s compaction aborted: history changed concurrently (gen %d -> %d)", a.sessionID, genBefore, a.historyGen)
-		return
+		return errors.New("context changed while summarizing; retry")
 	}
 	note := "[Context compacted automatically — summary of the earlier exchanges: " + summary + "]"
 	// Splice against the CURRENT history, not a tail captured before the
@@ -817,6 +817,14 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 		events <- Event{Type: "progress", Content: fmt.Sprintf("Context compacted (%d older messages summarized) to stay within the model's limits.", len(dropped))}
 	}
 
+	return nil
+}
+
+// CompactContext lightens a dormant session without deleting its transcript.
+// Callers must serialize it with turns on this session.
+func (a *Agent) CompactContext(ctx context.Context) error {
+	a.loadHistoryFromDB(ctx)
+	return a.compactLiveContextTo(ctx, nil, a.liveHistoryChars()/2)
 }
 
 // firstDBID returns the row id of the first persisted message in msgs (0 if none).
@@ -849,7 +857,7 @@ func (a *Agent) persistLiveCompaction(note string, beforeID int64) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := a.memStore.SetLiveCompaction(ctx, a.sessionID, memory.LiveCompaction{Summary: note, BeforeID: beforeID}); err != nil {
+	if err := a.memStore.AdvanceLiveCompaction(ctx, a.sessionID, memory.LiveCompaction{Summary: note, BeforeID: beforeID}); err != nil {
 		log.Printf("[agent] session=%s persist live compaction: %v", a.sessionID, err)
 	}
 }

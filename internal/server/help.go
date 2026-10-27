@@ -125,6 +125,9 @@ func (s *Server) integrationsStatusFor(u *memory.User) func(ctx context.Context)
 		val := func(key string) string { v, _, _ := us.GetConfig(ctx, key); return strings.TrimSpace(v) }
 		secret := func(st *memory.Store, name string) bool { v, ok, _ := st.GetSecret(ctx, name); return ok && v != "" }
 		var sb strings.Builder
+		if s.cfg.VoxURL != "" {
+			sb.WriteString("- PrismVox call archive: use exec_command with GET $PRISM_URL/api/vox/history and Bearer $PRISM_TOKEN. Query: since/until (ISO8601 with timezone), number, direction (inbound/outbound), query, offset, limit (max50). Matching total is exact; follow next_offset for more. id reads a call's turns; section=tools reads its tool results. Access is scoped to this identity. Read prism_help(topic=call-history) for parameters, pagination and empty-result handling.\n")
+		}
 		row := func(what, state string) { fmt.Fprintf(&sb, "- %s: %s\n", what, state) }
 		if s.cfg.HostedPersonal {
 			row("Deployment", "hosted personal environment: database Notes; no local vault or bundled Proton Bridge. Docker services run inside the personal workspace. Use the exact webhook URL returned by the webhook tool.")
@@ -218,6 +221,9 @@ func (s *Server) groupStatusFor(groupID int64) func(ctx context.Context) string 
 			return ""
 		}
 		var sb strings.Builder
+		if facts := s.voxGroupArchiveContext(ctx, groupID); facts != "" {
+			sb.WriteString("- " + facts + "\n")
+		}
 		fmt.Fprintf(&sb, "- This is a group's shared agent (group %d): its knowledge base, MCP servers and group secrets are managed by a group admin in the admin console (Shared agent / knowledge base / MCP servers / Group secrets panes)\n", groupID)
 		if v, ok, _ := ms.GetSecret(ctx, webexKey(webexTokenSecret, groupID)); ok && v != "" {
 			sb.WriteString("- Webex: bot connected for this group\n")
