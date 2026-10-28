@@ -25,7 +25,7 @@ test('run replay restores baseline, current user message and partial output in o
 });
 test('ending an assistant text segment keeps Stop available while tools run',()=>{
  const button={classList:{add(){},remove(){}}};
- const c={activeRunStatus:'running',document:{getElementById:()=>button},cancelChat(){},sendChat(){},currentAssistantEl:null,chatWasAtBottom:()=>false};
+ const c={activeRunStatus:'running',document:{getElementById:()=>button},cancelChat(){},sendChat(){},currentAssistantEl:null,pendingAttachments:[],chatWasAtBottom:()=>false};
  vm.createContext(c);vm.runInContext(fn('setStreaming','fmtTime')+fn('finalizeStream','appendProgress'),c);
  c.finalizeStream();assert.equal(c.isStreaming,true);assert.equal(button.onclick,c.cancelChat);
  c.activeRunStatus='completed';c.finalizeStream();assert.equal(c.isStreaming,false);assert.equal(button.onclick,c.sendChat);
