@@ -165,7 +165,7 @@ func (s *Server) voxGroupArchiveContext(ctx context.Context, groupID int64) stri
 		return ""
 	}
 	if !s.voxGroupAllowed(ctx, groupID) {
-		return fmt.Sprintf("PrismVox is connected. Reception call archive access is NOT ENABLED for this shared group (id %d). A global administrator can enable the group in Telephony → Access. Do not claim access or send the user to a personal chat as a workaround. list_calls is an outbound-task queue, not the call archive. Older unclassified calls are only available in the private Administrator archive.", groupID)
+		return fmt.Sprintf("PrismVox is connected. Reception call archive access is NOT ENABLED for this shared group (id %d). A global administrator can enable the group in Admin → Telephony → App access. Do not claim access or send the user to a personal chat as a workaround. list_calls is an outbound-task queue, not the call archive. Older unclassified calls are only available in the private Administrator archive.", groupID)
 	}
 	if s.buildGroupAgentGuard(ctx, groupID)("exec_command", nil) != nil {
 		return "PrismVox reception archive access is enabled for this group, but exec_command is restricted by its tool policy. An administrator must permit that existing tool under the applicable tool policy for the archive recipe. list_calls reads outbound tasks, not call archives."
@@ -188,6 +188,10 @@ func (s *Server) handleVoxWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	part := strings.TrimPrefix(r.URL.Path, "/api/vox-workspace/")
+	if part == "calls" || strings.HasPrefix(part, "calls/") {
+		s.handleTelephonyCalls(w, r, u, part)
+		return
+	}
 	target := ""
 	method := r.Method
 	switch part {
@@ -277,7 +281,7 @@ func (s *Server) handleVoxHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if u.ID < 0 && !s.voxGroupAllowed(r.Context(), -u.ID) {
-		writeErr(w, http.StatusForbidden, "Reception archive access is not enabled for this group. A global administrator can enable it in Telephony → Access.")
+		writeErr(w, http.StatusForbidden, "Reception archive access is not enabled for this group. A global administrator can enable it in Admin → Telephony → App access.")
 		return
 	}
 	scope, err := s.voxReadScope(r.Context(), u, u.ID < 0)

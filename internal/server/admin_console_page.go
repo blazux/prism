@@ -12,9 +12,9 @@ func (s *Server) handleAdminConsolePage(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte(adminConsolePage))
 }
 
-// Telephony settings are served by the Telephony app; this page contains
-// deployment and group administration.
-const adminConsolePage = adminConsoleHead + adminConsoleMid + adminConsoleTail
+// Deployment telephony configuration stays in administration. The app only
+// exposes call activity, archives and outbound operations.
+const adminConsolePage = adminConsoleHead + adminTelephonyPane + adminConsoleMid + adminTelephonyJS + adminConsoleTail
 
 // adminConsoleHead: document head, styles, top bar, nav shell, and the
 // global-admin panes up to Apps.
@@ -88,7 +88,7 @@ const adminConsoleMid = `
       <h2 style="margin-top:26px;font-size:15px">On the phone — members of this group</h2>
       <div class="hint">When someone in this group phones in and is recognised by their number, this is who answers. It <b>replaces</b> their own agent personality for the call — their memory, profile and knowledge are untouched, and that is where the continuity lives. A phone agent has to call its tools to transfer, take a message or hang up, and a dense personality is measurably bad at that, which is why this is one text for the whole group rather than everyone's own. Blank = the built-in text.</div>
       <textarea id="ag-voice" placeholder="Blank = built-in" style="min-height:110px"></textarea>
-      <div class="hint">Strangers never see this — they get the switchboard, configured in Telephony.</div>
+      <div class="hint">Strangers never see this — they get the switchboard, configured in Admin → Telephony.</div>
       <div class="row"><button class="primary" onclick="saveAgent()">Save agent</button><span id="status"></span></div>
       <h2 style="margin-top:26px">Webex integration</h2><div class="hint">Connect a Webex bot so members can talk to this shared agent in Webex spaces — it answers when @mentioned (group spaces) or on every message (1:1). Create a bot at developer.webex.com and paste its access token.</div>
       <label>Bot access token</label><input id="wx-token" type="password" placeholder="paste token to connect / change" style="width:100%" autocomplete="new-password">
@@ -557,25 +557,23 @@ async function init(){
  // A heading is an entry with no pane; only real entries are clickable.
  const nav=$('adm-nav');const items=[];const head=t=>['',t];
  if(isGA&&ME.multiUser!==false){items.push(head('Deployment'),['users','Users'],['groups','Groups'],['tools','Tools'],['ai','AI provider'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
- // Keep existing bookmarks pointing to the Telephony app.
  let DOCKED=false;try{DOCKED=!!(await fetch('/api/platform').then(r=>r.json())).voxDocked;}catch(e){}
- const openTelephony=()=>{if(DOCKED&&location.hash.slice(1)==='telephony'){location.replace('/?app=telephony&tab=settings');return true;}return false;};
- window.addEventListener('hashchange',openTelephony);
- if(openTelephony())return;
+ if(isGA&&DOCKED&&ME.multiUser!==false)items.push(['telephony','Telephony']);
+ if(DOCKED&&ME.multiUser===false&&location.hash.slice(1)==='telephony'){location.replace('/settings.html#telephony');return;}
 
  if(adminGroups().length){items.push(head('Your groups'),['agent','Shared agent'],['rag','RAG'],['mcp','MCP'],['secrets','Secrets'],['access','Tool access']);}
  const panes=items.filter(([p])=>p);
  if(!panes.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
  nav.innerHTML=items.map(([p,l])=>p?'<div class="nav-item" data-pane="'+p+'">'+l+'</div>':'<div class="nav-head">'+l+'</div>').join('');
  nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=()=>{const p=el.dataset.pane;show(p);
-  if(p==='ai')renderAITab($('admin-ai-settings'),{admin:true});if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
+  if(p==='ai')renderAITab($('admin-ai-settings'),{admin:true});if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
  $('ag-group').onchange=()=>{loadAgent();loadWebex();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
  $('ag-model').innerHTML='<option value="">(server default)</option>'+MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');
  fillGroupPickers();
  const requested=location.hash.slice(1);
  const first=panes.some(([p])=>p===requested)?requested:panes[0][0];
  show(first);
- if(first==='users')loadUsers();else if(first==='agent'){loadAgent();loadWebex();}
+ if(first==='telephony')loadTelephony();else if(first==='users')loadUsers();else if(first==='agent'){loadAgent();loadWebex();}
 }
 init();
 </script></body></html>

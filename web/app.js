@@ -1288,7 +1288,7 @@ function setView(view) {
     gotoSession(ASSISTANT)
     const params = new URLSearchParams({ session: ASSISTANT })
     if (view.name === 'telephony') {
-      if (['chat', 'logs', 'settings'].includes(view.tab)) params.set('tab', view.tab)
+      if (['chat', 'logs', 'outbound', 'settings'].includes(view.tab)) params.set('tab', view.tab)
       if (view.group) params.set('group', view.group)
     }
     frame.src = `/apps/${view.name}.html?${params}`

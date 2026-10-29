@@ -19,6 +19,7 @@ const root=path.resolve(__dirname,'..');
    else if(u.pathname==='/api/vox-workspace')data={available:true,admin:true,groups:[]};
    else if(u.pathname==='/api/me')data={isAdmin:true,authenticated:true};
    else if(u.pathname==='/api/sessions')data={sessions:[{id:'default',name:'Default'}]};
+   else if(u.pathname==='/api/vox-workspace/history')data={total:0,items:[],next_offset:null};
    else if(u.pathname==='/api/models')data={models:[]};
    else if(u.pathname==='/api/my/groups')data={groups:[]};
    if(u.pathname.startsWith('/api/'))return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});

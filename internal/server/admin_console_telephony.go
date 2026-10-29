@@ -14,6 +14,9 @@ package server
 const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Telephony</h2><span class="pane-scope">Deployment</span>
 <style>.tel-section{margin:16px 0;border:1px solid var(--border);border-radius:8px}.tel-section>summary{padding:14px;cursor:pointer;font-weight:600}.tel-section-body{padding:0 14px 16px}.tel-section-body h3{font-size:15px;margin:20px 0 8px}</style>
 <div class="hint">Connected to PrismVox. Recognised callers use their Prism agent; unknown callers use the Vox switchboard. Outbound calls use the Vox outbound agent. Saved agent settings apply to new calls.</div>
+<details id="tel-access" class="tel-section" hidden><summary>App access</summary><div class="tel-section-body">
+<p class="hint">Members of the selected groups can consult the reception archive and use the Telephony app. Personal calls remain private.</p>
+<div id="tel-access-choices"></div><div class="row"><button onclick="saveTelephonyAccess()">Save access</button><span id="tel-access-status" class="hint" role="status"></span></div></div></details>
 <details class="tel-section" open><summary>Agents &amp; models</summary><div class="tel-section-body">
       <h2 style="margin-top:26px;font-size:15px">Conversation model — recognised callers</h2>
       <div class="row" style="gap:8px;align-items:center">
@@ -185,6 +188,7 @@ window.addEventListener('message',event=>{
  if(event.data?.type==='prismconnect-voice-saved')loadTelVoiceGreeting();
 });
 async function loadTelephony(){
+ loadTelephonyAccess();
  const v=await jget('/api/voice');
  if(v){$('tel-persona').value=v.personality||'';loadVoiceModel(v.model||'');}
  loadVoiceKB();
@@ -196,6 +200,16 @@ async function loadTelephony(){
  if(s){SIP_FIELDS.forEach(f=>{if($('sip-'+f))$('sip-'+f).value=s['sip_'+f]||'';});}
  const st=await jget('/api/vox/sip/status');
  $('tel-sipstatus').innerHTML=(st&&st.endpoint_state==='online')?'✅ Trunk <b>online</b> — the number rings.':(st?'⚠️ Trunk <b>'+esc(st.endpoint_state||'?')+'</b> — check the config.':'Status unavailable.');
+}
+async function loadTelephonyAccess(){
+ const me=await jget('/api/me');if(!me?.multiUser)return;
+ const data=await jget('/api/vox-workspace/access');if(!data)return;
+ $('tel-access').hidden=false;const choices=$('tel-access-choices');choices.replaceChildren();
+ for(const group of data.availableGroups||[]){const label=document.createElement('label'),box=document.createElement('input');box.type='checkbox';box.value=group.id;box.checked=(data.groups||[]).includes(group.id);label.append(box,document.createTextNode(' '+group.name));choices.append(label);}
+}
+async function saveTelephonyAccess(){
+ const status=$('tel-access-status');status.textContent='Saving…';
+ try{const groups=[...$('tel-access-choices').querySelectorAll('input:checked')].map(box=>Number(box.value));const r=await fetch('/api/vox-workspace/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({groups})});status.textContent=r.ok?'Saved':'Failed ('+r.status+')';}catch(e){status.textContent='Could not save access.';}
 }
 async function loadVoiceModel(selected){
  const sel=$('tel-model'), button=$('tel-model-save');

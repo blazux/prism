@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// The editor shares the existing telephony fields and API calls, with its own
-// app page. Group access to supervision never grants configuration privileges.
+// The personal Settings page embeds this editor. Multi-user deployments use
+// the same form in Admin. App access never grants configuration privileges.
 func (s *Server) handleTelephonySettingsPage(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	if u == nil || (s.cfg.MultiUser && !u.IsGlobalAdmin()) {
@@ -17,6 +17,10 @@ func (s *Server) handleTelephonySettingsPage(w http.ResponseWriter, r *http.Requ
 		writeErr(w, http.StatusServiceUnavailable, "PrismVox is disconnected")
 		return
 	}
+	if s.cfg.MultiUser {
+		http.Redirect(w, r, "/admin#telephony", http.StatusSeeOther)
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "GET required")
 		return
@@ -25,6 +29,14 @@ func (s *Server) handleTelephonySettingsPage(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Cache-Control", "no-store")
 	pane := strings.Replace(adminTelephonyPane, `class="pane"`, `class="pane active"`, 1)
 	_, _ = w.Write([]byte(telephonySettingsHead + pane + telephonySettingsScript + adminTelephonyJS + "\nloadTelephony().catch(e=>{$('page-error').textContent=e.message;});</script></body></html>"))
+}
+
+func (s *Server) handleLegacyTelephonySettingsPage(w http.ResponseWriter, r *http.Request) {
+	target := "/settings.html#telephony"
+	if s.cfg.MultiUser {
+		target = "/admin#telephony"
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (s *Server) handleLegacyTelephonyPage(w http.ResponseWriter, r *http.Request) {

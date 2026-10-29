@@ -127,8 +127,8 @@ admin — so the person who set Prism up must be the first to sign up.
 ## The Telephony app
 
 When PrismVox is connected, a global administrator can authorize existing groups
-from **Telephony → Access**. Members then see **Telephony** in the app list.
+from **Admin → Telephony → App access**. Members then see **Telephony** in the app list.
 Use it to ask about the standard's work and consult call history. Its supervision
 conversation belongs to the selected group. Personal recognized calls are not
 shared with that group; older calls with no recorded audience stay in the private
-**Administrator archive**. SIP, speech and model settings are available in **Telephony → Settings**. PrismVox also works in personal Prism deployments; see [Telephony](telephony.md).
+**Administrator archive**. SIP, speech and model settings are available in **Admin → Telephony**. PrismVox also works in personal Prism deployments; see [Telephony](telephony.md).

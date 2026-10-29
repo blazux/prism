@@ -54,7 +54,7 @@ func TestVoxArchiveAccessFactsAndSignedGroupRead(t *testing.T) {
 	defer upstream.Close()
 	s := &Server{memStore: ms, cfg: Config{MultiUser: true, VoxURL: upstream.URL, AuthToken: "fixture-deployment-key"}}
 	facts := s.voxGroupArchiveContext(ctx, group.ID)
-	if !strings.Contains(facts, "NOT ENABLED") || !strings.Contains(facts, "Telephony → Access") {
+	if !strings.Contains(facts, "NOT ENABLED") || !strings.Contains(facts, "Admin → Telephony → App access") {
 		t.Fatal("missing current access facts")
 	}
 	request := func(gid int64) *httptest.ResponseRecorder {

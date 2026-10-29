@@ -1,9 +1,11 @@
 # Telephony with PrismVox
 
 PrismVox connects to both personal and multi-user Prism deployments. Open the
-**Telephony** app from the app list. **Supervision** lets you talk to the reception
-agent; **Calls** contains call history and tool results. The owner or global
-administrator configures the line, agents and speech in **Telephony → Settings**.
+**Telephony** app from the app list. **Calls** shows call traffic, history and tool results, with automatic refresh.
+**Outbound calls** lets you schedule calls and track, cancel or retry your own
+missions. **Supervision** lets you ask the reception agent about its work.
+The owner configures the line, agents and speech in **Settings → Telephony**
+in personal mode; global administrators use **Admin → Telephony** in shared mode.
 The PrismVox console points to this app in Prism. PrismVox continues to handle
 SIP, audio, call control and call archives.
 
@@ -33,7 +35,7 @@ queue; it is not the incoming-call or transcript archive. The shared agent uses
 the scoped archive API through its existing execution tool. That tool must also
 be allowed by the applicable tool policy.
 
-In multi-user mode a global administrator opens **Access** in the app and
+In multi-user mode a global administrator opens **Admin → Telephony → App access** and
 selects the existing groups whose members may use it. Each group has its own
 supervision conversation and can consult the standard's calls. Recognized
 callers' personal conversations are excluded. Personal and outbound calls retain
@@ -47,6 +49,15 @@ calling from that number reaches the personal assistant. It uses the owner's
 existing notes, calendar, tasks and configured mailbox; no additional user account
 or shared deployment is required. Other callers use the standard. Caller-number
 recognition is not strong authentication.
+
+## Outbound calls
+
+Open **Telephony → Outbound calls**, enter the phone number and the agent’s mission,
+then choose a future date and time. The displayed timezone is the browser’s timezone.
+Check **Call as soon as possible** for an immediate mission. **Schedule call** adds
+the mission to your account’s queue. You can cancel pending calls or retry a finished
+mission immediately. Selecting another reception archive group does not change the
+owner of your outbound calls.
 
 ## Agents & models
 

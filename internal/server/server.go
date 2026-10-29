@@ -295,7 +295,8 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/vox-workspace/", s.resourceRoute((*Server).handleVoxWorkspaceAPI))
 	mux.HandleFunc("/prismvox", s.resourceRoute((*Server).handleVoxWorkspacePage))
 	mux.HandleFunc("/apps/prismvox.html", s.resourceRoute((*Server).handleLegacyTelephonyPage))
-	mux.HandleFunc("/apps/telephony/settings", s.resourceRoute((*Server).handleTelephonySettingsPage))
+	mux.HandleFunc("/settings/telephony", s.resourceRoute((*Server).handleTelephonySettingsPage))
+	mux.HandleFunc("/apps/telephony/settings", s.resourceRoute((*Server).handleLegacyTelephonySettingsPage))
 	mux.HandleFunc(voxProxyPrefix, s.resourceRoute((*Server).handleVoxProxy)) // /api/vox/* → Vox's API
 	mux.HandleFunc("/api/platform", s.resourceRoute((*Server).handlePlatform))
 	mux.HandleFunc("/api/admin/platform", s.resourceRoute((*Server).handleAdminPlatform))

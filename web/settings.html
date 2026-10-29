@@ -13,6 +13,8 @@
 <script src="/ai-settings.js"></script>
 <link rel="stylesheet" href="/ai-settings.css">
 <style>
+#settings-content.telephony-settings{padding:0;overflow:hidden}
+
 html, body { height: 100%; overflow: hidden; margin: 0; }
 #settings-app { display: flex; flex-direction: column; zoom: var(--ui-scale, 1); height: calc(100vh / var(--ui-scale, 1)); }
 .brain-sub { background: var(--bg2); border: 1px solid var(--border2); color: var(--text2); font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 8px; cursor: pointer; }
@@ -424,6 +426,7 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Profile
       </div>
       <div class="nav-item" data-tab="ai" style="display:none"><span class="nav-icon">✦</span> AI provider</div>
+      <div class="nav-item" data-tab="telephony" style="display:none"><span class="nav-icon">☎</span> Telephony</div>
       <div class="nav-item" data-tab="agent">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></span> Agent
       </div>
@@ -528,14 +531,25 @@ PLATFORM.then(d => {
 // Slack is still a deployment-wide single bot, so its card is admin-only —
 // see renderChannelsTab.
 let IS_GLOBAL_ADMIN = false
-settingsFetch('/api/me').then(r => r.json()).then(me => {
+const IDENTITY = settingsFetch('/api/me').then(r => r.json()).then(me => {
   // Multi-user: the role lives on me.user. Single-user (legacy) has no user
   // object — the sole user IS the deployment admin, so isAdmin decides.
   const aiNav=document.querySelector('.nav-item[data-tab="ai"]')
   if(aiNav) aiNav.style.display=me.multiUser ? 'none' : ''
   if(me.multiUser && currentTab==='ai') switchTab('profile')
   IS_GLOBAL_ADMIN = !!(me.authenticated && (me.user ? me.user.role === 'global_admin' : me.isAdmin))
-}).catch(() => {})
+  return me
+}).catch(() => ({}))
+Promise.all([PLATFORM, IDENTITY]).then(([platform, me]) => {
+  const available = platform.voxDocked === true && me.multiUser === false && IS_GLOBAL_ADMIN
+  document.querySelector('.nav-item[data-tab="telephony"]').style.display = available ? '' : 'none'
+})
+window.addEventListener('message', e => {
+  if (e.source !== parent || e.data?.type !== 'prism-theme' || !e.data.vars) return
+  for (const [key, value] of Object.entries(e.data.vars)) document.documentElement.style.setProperty(key, value)
+  document.getElementById('telephony-settings-frame')?.contentWindow?.postMessage(e.data, location.origin)
+})
+window.addEventListener('prism-theme-change', e => document.getElementById('telephony-settings-frame')?.contentWindow?.postMessage({type:'prism-theme', vars:e.detail.vars}, location.origin))
 
 requestAnimationFrame(() => renderTab(currentTab))
 
@@ -553,11 +567,13 @@ function switchTab(tab) {
 function renderTab(tab) {
   const content = document.getElementById('settings-content')
   content.innerHTML = ''
+  content.classList.toggle('telephony-settings', tab === 'telephony')
   if (tab === 'profile') renderProfileTab(content)
   else if (tab === 'tools')   renderToolsTab(content)
   else if (tab === 'resources') renderResourcesTab(content)
   else if (tab === 'agent') renderAgentTab(content)
   else if (tab === 'ai') renderAITab(content)
+  else if (tab === 'telephony') renderTelephonyTab(content)
   else if (tab === 'channels') renderChannelsTab(content)
   else if (tab === 'mcp')     renderMCPTab(content)
   else if (tab === 'webhooks') renderWebhooksTab(content)
@@ -567,6 +583,17 @@ function renderTab(tab) {
   else if (tab === 'calendar') renderCalendarTab(content)
   else if (tab === 'knowledge') renderBrainTab(content)
   else if (tab === 'appearance') renderAppearanceTab(content)
+}
+
+async function renderTelephonyTab(container) {
+  const [platform, me] = await Promise.all([PLATFORM, IDENTITY])
+  if (currentTab !== 'telephony') return
+  if (me.multiUser) {
+    const link=document.createElement('a');link.href='/admin#telephony';link.target='_top';link.textContent='Open Admin → Telephony';container.append(link);return
+  }
+  if (!IS_GLOBAL_ADMIN || !platform.voxDocked) { container.textContent='PrismVox is not connected.';return }
+  const frame=document.createElement('iframe');frame.id='telephony-settings-frame';frame.title='Telephony settings';frame.src='/settings/telephony';
+  frame.style.cssText='display:block;width:100%;height:100%;border:0';container.append(frame)
 }
 
 // ── Appearance: theme studio (accent → palette), UI scale, density, bg ──────────
