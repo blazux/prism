@@ -1089,7 +1089,7 @@ func (a *Agent) timeLocation() *time.Location {
 // new user turn preserves Anthropic's cached prefix from previous turns.
 func (a *Agent) timestampedUserContent(content string, at time.Time) string {
 	return fmt.Sprintf("[%s (%s)] %s",
-		at.In(a.timeLocation()).Format("2006-01-02 15:04 MST -07:00"),
+		at.In(a.timeLocation()).Format("2006-01-02 Monday 15:04:05 MST -07:00"),
 		a.timeLocation().String(), content)
 }
 
@@ -1479,6 +1479,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		}
 
 		// Execute tools; each result becomes a "tool" message in history
+		endVoiceTurn := false
 		for _, tc := range toolCalls {
 			// Some backends leak template markers into the function name (measured:
 			// gpt-oss harmony via vLLM's openai parser emits "widget<|channel|>commentary").
@@ -1557,6 +1558,10 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				a.emitToolSideEffects(tc.Function.Name, tc.Function.Arguments, events)
 			}
 
+			if a.channel == voiceChannel && tc.Function.Name == "end_call" && !toolFailed {
+				endVoiceTurn = true
+			}
+
 			events <- Event{
 				Type:    "tool_result",
 				ID:      toolID,
@@ -1603,6 +1608,12 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			a.histMu.Lock()
 			a.history = append(a.history, toolMsg)
 			a.histMu.Unlock()
+		}
+		if endVoiceTurn {
+			// Vox drains the spoken farewell before hanging up. Finish the whole
+			// tool batch, but do not ask the model for another post-hangup reply.
+			events <- Event{Type: "stream_end"}
+			return
 		}
 	}
 
@@ -1747,11 +1758,15 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 		Tools:                  tools,
 		CacheSystemPrefixBytes: cachePrefixBytes,
 		CacheToolPrefixCount:   cacheToolPrefixCount,
-		// On the phone the caller waits in silence while the model reasons, so the
-		// thinking budget is pure dead air. Turn it off for voice turns — and
-		// whenever the user switched reasoning off in Settings.
-		NoThinking:      a.channel == voiceChannel || !a.turnThinking,
-		ReasoningEffort: a.turnReasoningEffort,
+		NoThinking:             !a.turnThinking,
+		ReasoningEffort:        a.turnReasoningEffort,
+	}
+	if a.channel == voiceChannel {
+		// Keep a small private reasoning effort for spoken answers too: disabling
+		// it entirely caused incorrect dates and time calculations on live calls.
+		req.NoThinking = false
+		req.ReasoningEffort = "low"
+		req.NoThinkingIfUnsupported = true
 	}
 	if contextTokens > 0 {
 		req.Options.NumPredict = modelOutputReserve(contextTokens)

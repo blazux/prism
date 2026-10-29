@@ -12,11 +12,11 @@ const head=constant(fs.readFileSync(base+'/internal/server/admin_console_page.go
  const page=await browser.newPage({viewport:{width:1100,height:900}}),writes=[],errors=[];
  page.on('pageerror',e=>errors.push(e.message));
  const init=`const $=id=>document.getElementById(id); const esc=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'); const jget=async url=>(await fetch(url)).json();`;
- const html='<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css">'+head.match(/<style>[\s\S]*?<\/style>/)[0]+'</head><body><main id="adm-main">'+pane.replace('class="pane"','class="pane active"')+'</main><script>'+init+script+'\nloadPhoneCfg();</script></body></html>';
+ const html='<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css">'+'<link rel="stylesheet" href="/admin-console.css">'+'</head><body><main id="adm-main">'+pane.replace('class="pane"','class="pane active"')+'</main><script>'+init+script+'\nloadPhoneCfg();</script></body></html>';
  await page.route('**/*',route=>{
   const r=route.request(),u=new URL(r.url());assert.equal(u.hostname,'fixture.invalid');
   if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
-  if(u.pathname==='/style.css')return route.fulfill({path:base+'/web/style.css'});
+  if(['/style.css','/admin-console.css'].includes(u.pathname))return route.fulfill({path:base+'/web'+u.pathname});
   if(r.method()==='PUT')writes.push(r.postDataJSON());
   return route.fulfill({contentType:'application/json',body:JSON.stringify(u.pathname==='/api/vox/config'?{llm_model_standard:'fast',llm_model_oncall:'capable',outbound_system_prompt:'Outbound fixture',transfer_dialog_turns:'3'}:{})});
  });

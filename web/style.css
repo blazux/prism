@@ -1395,6 +1395,42 @@ body {
   cursor: zoom-in;
 }
 
+/* Download cards share the active theme with the surrounding conversation. */
+.chat-response-attachments { flex-direction: column; align-items: flex-start; }
+.chat-response-attachments img { max-width: 100%; }
+.chat-attachment-card {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: min(100%, 340px);
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  background: var(--bg2);
+  color: var(--text);
+  text-decoration: none;
+}
+.chat-attachment-card:hover { background: var(--bg3); border-color: var(--accent); }
+.chat-attachment-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.chat-attachment-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--bg3);
+  color: var(--accent);
+}
+.chat-attachment-icon svg { width: 21px; height: 21px; }
+.chat-attachment-details { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.chat-attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; }
+.chat-attachment-meta { color: var(--text2); font-size: 11px; }
+.chat-attachment-download { display: flex; flex-shrink: 0; color: var(--text2); }
+.chat-attachment-download svg { width: 18px; height: 18px; }
+.chat-attachment-card:hover .chat-attachment-download { color: var(--accent); }
+
 /* ── Thinking blocks ─────────────────────────────────────────────────────── */
 
 .thinking-block {

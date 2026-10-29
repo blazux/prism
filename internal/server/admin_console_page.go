@@ -12,13 +12,9 @@ func (s *Server) handleAdminConsolePage(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte(adminConsolePage))
 }
 
-// The page is one HTML document assembled from five constants, in source order.
-// Telephony lives in admin_console_telephony.go: it is the largest pane by far and
-// the one the phone work keeps reopening, so it is kept out of the way here.
-//
-// The split is purely mechanical — concatenating the five reproduces the original
-// document byte for byte.
-const adminConsolePage = adminConsoleHead + adminTelephonyPane + adminConsoleMid + adminTelephonyJS + adminConsoleTail
+// Telephony settings are served by the Telephony app; this page contains
+// deployment and group administration.
+const adminConsolePage = adminConsoleHead + adminConsoleMid + adminConsoleTail
 
 // adminConsoleHead: document head, styles, top bar, nav shell, and the
 // global-admin panes up to Apps.
@@ -30,81 +26,7 @@ const adminConsoleHead = `<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <script src="/ai-settings.js"></script>
 <script src="/theme.js"></script>
 <script src="/modal.js"></script>
-<style>
-html,body{height:100%;overflow:hidden;margin:0}
-#adm{display:flex;flex-direction:column;height:100vh}
-#adm-top{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)}
-#adm-top b{font-size:14px}
-#adm-top .sp{margin-left:auto;color:var(--text3);font-size:12px}
-#adm-top a{color:var(--text3);font-size:12px;text-decoration:none;border:1px solid var(--border2);padding:4px 10px;border-radius:var(--radius)}
-#adm-top a:hover{color:var(--text);border-color:var(--accent)}
-#adm-main{display:flex;flex:1;min-height:0}
-#adm-nav{width:200px;flex-shrink:0;border-right:1px solid var(--border);background:var(--bg1);padding:12px 0;display:flex;flex-direction:column;gap:2px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;color:var(--text3);font-size:13px;font-weight:500;transition:color .15s,background .15s;user-select:none}
-.nav-item:hover{color:var(--text);background:var(--bg2)}
-.nav-item.active{color:var(--text);background:var(--bg3)}
-.nav-head{margin:16px 14px 6px;padding:0 4px 5px;border-bottom:1px solid var(--border);color:var(--text3);font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;user-select:none}
-.nav-head:first-child{margin-top:4px}
-#adm-content{flex:1;overflow-y:auto;padding:20px 24px 40px;min-width:0}
-.pane{display:none;max-width:760px}
-.pane.active{display:block}
-h2{font-size:15px;margin:0 0 4px}
-.pane>h2:first-child{display:inline-block;margin-right:8px}
-.pane-scope{display:inline-block;margin:0 0 8px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;color:var(--text3);font-size:10.5px;line-height:1.2}
-.hint{color:var(--text3);font-size:12px;margin-bottom:14px}
-table{width:100%;border-collapse:collapse;margin-top:8px}
-th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--border);font-size:12.5px;vertical-align:top}
-th{color:var(--text3);font-weight:600}
-.badge{padding:1px 7px;border-radius:99px;font-size:11px;font-weight:600}
-.pending{background:#f59e0b33;color:#e5c07b}.approved{background:#4dba8733;color:#4dba87}.disabled{background:#e06c7533;color:#e06c75}
-.open{background:#4dba8733;color:#4dba87}.admin_only,.restricted{background:#e06c7533;color:#e06c75}.locked{background:var(--bg3);color:var(--text3)}
-input,select,textarea{background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 9px;font:inherit;font-size:13px;box-sizing:border-box}
-textarea{width:100%;min-height:90px;resize:vertical;line-height:1.5}
-label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text2);margin:12px 0 4px}
-button{background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
-button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-button.mini{padding:3px 8px;font-size:11.5px;margin:0 3px 3px 0}
-.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
-/* Le <input type=file> natif est laid et non thématisable : on le masque et on
-   pilote le clic depuis un vrai bouton, qui affiche ensuite le nom du fichier. */
-.filebtn>input[type=file]{display:none}
-.filebtn{display:inline-flex;align-items:center;gap:8px}
-.filename{color:var(--text3);font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.coldesc{color:var(--text3);font-size:12px;margin-top:2px}
-.list>div.docrow{padding-left:28px;font-size:12px;background:var(--bg2)}
-.docrow .docmeta{color:var(--text3);margin-left:8px}
-.coldesc.missing{color:var(--yellow)}
-.grp{border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg1)}
-.tag{display:inline-block;background:var(--bg3);border-radius:6px;padding:2px 8px;margin:2px;font-size:12px}
-.tag button{all:unset;cursor:pointer;color:var(--red);margin-left:5px;font-weight:700}
-.list{max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:10px;margin-top:8px}
-.list>div{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid var(--border);font-size:12.5px}
-.tool-box{border:1px solid var(--border);border-radius:10px;margin-top:12px;overflow:hidden}
-.tool-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)}
-.tool-row:last-child{border-bottom:none}
-.tool-row:hover{background:var(--bg1)}
-.tool-row code{font-size:12.5px;color:var(--text)}
-.tool-ctrl{display:flex;align-items:center;gap:10px}
-.tool-ctrl .st{font-size:11px;color:var(--text3);min-width:80px;text-align:right}
-.tgl{position:relative;display:inline-block;width:38px;height:21px;flex-shrink:0}
-.tgl input{opacity:0;width:0;height:0;margin:0;position:absolute}
-.tgl .sl{position:absolute;inset:0;background:var(--bg3);border:1px solid var(--border2);border-radius:99px;cursor:pointer;transition:background .15s,border-color .15s}
-.tgl .sl:before{content:"";position:absolute;height:15px;width:15px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:transform .15s,background .15s}
-.tgl input:checked + .sl{background:color-mix(in srgb,var(--accent) 60%,var(--bg3));border-color:var(--accent)}
-.tgl input:checked + .sl:before{transform:translateX(17px);background:#fff}
-.tgl input:disabled + .sl{opacity:.4;cursor:not-allowed}
-code{font-size:12px}
-#status{margin-left:8px;color:var(--accent);font-size:12px}
-@media(max-width:760px){
- #adm-main{flex-direction:column}
- #adm-nav{width:auto;flex-direction:row;overflow-x:auto;padding:0 6px;border-right:0;border-bottom:1px solid var(--border);scrollbar-width:thin}
- #adm-nav .nav-head{display:none}
- #adm-nav .nav-item{flex:0 0 auto;padding:9px 11px;white-space:nowrap}
- #adm-content{padding:16px;overflow-x:auto}
- .pane{max-width:100%}
- .pane table{min-width:520px}
-}
-</style></head><body><div id="adm">
+<link rel="stylesheet" href="/admin-console.css"></head><body><div id="adm">
 <div id="adm-top">
 <a id="adm-back" href="/" target="_top" style="display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--text3);font-size:12.5px;transition:color .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>PRISM</a>
 <span style="color:var(--text3);font-size:12px">›</span>
@@ -584,7 +506,7 @@ async function loadTelephonyUsage(){
   '<div class="row" style="flex-wrap:wrap;gap:10px;margin-bottom:10px">'+
   usCard('SIP',s.sip_ok?'online':'offline')+usCard('calls today',s.calls_today||0)+usCard('total',s.total_calls||0)+
   usCard('avg duration',dur(s.avg_duration_secs))+usCard('% transferred',(s.transfer_pct||0)+'%')+usCard('active',s.active_calls||0)+'</div>';
- html+='<p><a href="/apps/prismvox.html?group=admin&tab=logs" target="_top">Open call history in the PrismVox workspace →</a></p>';
+ html+='<p><a href="/?app=telephony&group=admin&tab=logs" target="_top">Open call history in Telephony →</a></p>';
  box.innerHTML=html;
 }
 async function loadLogs(){const f=$('lg-filter').value.trim();const d=await jget('/api/admin/logs?limit=500&filter='+encodeURIComponent(f));if(!d)return;
@@ -635,22 +557,25 @@ async function init(){
  // A heading is an entry with no pane; only real entries are clickable.
  const nav=$('adm-nav');const items=[];const head=t=>['',t];
  if(isGA&&ME.multiUser!==false){items.push(head('Deployment'),['users','Users'],['groups','Groups'],['tools','Tools'],['ai','AI provider'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
- // Telephony admin (switchboard persona + SIP trunk) — only when docked with Vox.
+ // Keep existing bookmarks pointing to the Telephony app.
  let DOCKED=false;try{DOCKED=!!(await fetch('/api/platform').then(r=>r.json())).voxDocked;}catch(e){}
- if(isGA&&DOCKED){items.push(['telephony','Telephony']);}
+ const openTelephony=()=>{if(DOCKED&&location.hash.slice(1)==='telephony'){location.replace('/?app=telephony&tab=settings');return true;}return false;};
+ window.addEventListener('hashchange',openTelephony);
+ if(openTelephony())return;
+
  if(adminGroups().length){items.push(head('Your groups'),['agent','Shared agent'],['rag','RAG'],['mcp','MCP'],['secrets','Secrets'],['access','Tool access']);}
  const panes=items.filter(([p])=>p);
  if(!panes.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
  nav.innerHTML=items.map(([p,l])=>p?'<div class="nav-item" data-pane="'+p+'">'+l+'</div>':'<div class="nav-head">'+l+'</div>').join('');
  nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=()=>{const p=el.dataset.pane;show(p);
-  if(p==='ai')renderAITab($('admin-ai-settings'),{admin:true});if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
+  if(p==='ai')renderAITab($('admin-ai-settings'),{admin:true});if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
  $('ag-group').onchange=()=>{loadAgent();loadWebex();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
  $('ag-model').innerHTML='<option value="">(server default)</option>'+MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');
  fillGroupPickers();
  const requested=location.hash.slice(1);
  const first=panes.some(([p])=>p===requested)?requested:panes[0][0];
  show(first);
- if(first==='telephony')loadTelephony();else if(first==='users')loadUsers();else if(first==='agent'){loadAgent();loadWebex();}
+ if(first==='users')loadUsers();else if(first==='agent'){loadAgent();loadWebex();}
 }
 init();
 </script></body></html>

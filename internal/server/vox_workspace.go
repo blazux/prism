@@ -155,7 +155,7 @@ func (s *Server) handleVoxWorkspace(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, map[string]any{"available": s.cfg.VoxURL != "" && allowed, "groups": groups, "multiUser": s.cfg.MultiUser, "admin": u != nil && u.IsGlobalAdmin()})
+	writeJSON(w, map[string]any{"available": s.cfg.VoxURL != "" && allowed, "groups": groups, "multiUser": s.cfg.MultiUser, "admin": u != nil && (!s.cfg.MultiUser || u.IsGlobalAdmin())})
 }
 
 // The shared agent receives current access facts on every turn, independently
@@ -165,7 +165,7 @@ func (s *Server) voxGroupArchiveContext(ctx context.Context, groupID int64) stri
 		return ""
 	}
 	if !s.voxGroupAllowed(ctx, groupID) {
-		return fmt.Sprintf("PrismVox is connected. Reception call archive access is NOT ENABLED for this shared group (id %d). A global administrator can enable the group in PrismVox → Access. Do not claim access or send the user to a personal chat as a workaround. list_calls is an outbound-task queue, not the call archive. Older unclassified calls are only available in the private Administrator archive.", groupID)
+		return fmt.Sprintf("PrismVox is connected. Reception call archive access is NOT ENABLED for this shared group (id %d). A global administrator can enable the group in Telephony → Access. Do not claim access or send the user to a personal chat as a workaround. list_calls is an outbound-task queue, not the call archive. Older unclassified calls are only available in the private Administrator archive.", groupID)
 	}
 	if s.buildGroupAgentGuard(ctx, groupID)("exec_command", nil) != nil {
 		return "PrismVox reception archive access is enabled for this group, but exec_command is restricted by its tool policy. An administrator must permit that existing tool under the applicable tool policy for the archive recipe. list_calls reads outbound tasks, not call archives."
@@ -277,7 +277,7 @@ func (s *Server) handleVoxHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if u.ID < 0 && !s.voxGroupAllowed(r.Context(), -u.ID) {
-		writeErr(w, http.StatusForbidden, "Reception archive access is not enabled for this group. A global administrator can enable it in PrismVox → Access.")
+		writeErr(w, http.StatusForbidden, "Reception archive access is not enabled for this group. A global administrator can enable it in Telephony → Access.")
 		return
 	}
 	scope, err := s.voxReadScope(r.Context(), u, u.ID < 0)
@@ -321,5 +321,5 @@ func (s *Server) forwardVoxScoped(w http.ResponseWriter, r *http.Request, method
 }
 
 func (s *Server) handleVoxWorkspacePage(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/apps/prismvox.html", http.StatusSeeOther)
+	s.handleLegacyTelephonyPage(w, r)
 }

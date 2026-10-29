@@ -43,9 +43,23 @@ func TestRequestClockDoesNotChangeSystemPrompt(t *testing.T) {
 	if strings.Contains(firstPrompt, "Current date and time:") || !strings.Contains(firstPrompt, "User messages begin with their local request timestamp") {
 		t.Fatal("system prompt should describe user timestamps without embedding a live clock")
 	}
-	if firstMessage != "[2026-09-29 15:04 UTC +00:00 (UTC)] Create a widget" ||
-		secondMessage != "[2026-09-29 15:06 UTC +00:00 (UTC)] Update the widget" {
+	if firstMessage != "[2026-09-29 Tuesday 15:04:00 UTC +00:00 (UTC)] Create a widget" ||
+		secondMessage != "[2026-09-29 Tuesday 15:06:00 UTC +00:00 (UTC)] Update the widget" {
 		t.Fatalf("request timestamps lost or incorrectly formatted: %q, %q", firstMessage, secondMessage)
+	}
+}
+
+func TestRequestWeekdayUsesCallerTimezone(t *testing.T) {
+	loc, err := time.LoadLocation("America/Martinique")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{location: loc}
+	// Already Thursday in UTC, still Wednesday for the caller.
+	at := time.Date(2026, time.October, 29, 1, 59, 47, 0, time.UTC)
+	got := a.timestampedUserContent("demain ?", at)
+	if !strings.Contains(got, "2026-10-28 Wednesday 21:59:47") || !strings.Contains(got, "America/Martinique") {
+		t.Fatalf("caller received the wrong calendar day or time: %s", got)
 	}
 }
 

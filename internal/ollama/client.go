@@ -218,16 +218,20 @@ type ChatRequest struct {
 	// CacheToolPrefixCount is the number of stable native tools at the start
 	// of Tools. Anthropic can retain that prefix when dynamic tools change.
 	CacheToolPrefixCount int `json:"-"`
-	// NoThinking asks the model to skip extended reasoning for this turn. Set on
-	// the voice channel and on short compaction calls. Wire-neutral: each
+	// NoThinking asks the model to skip extended reasoning for this turn. Used on
+	// short compaction calls and when disabled in chat settings. Wire-neutral: each
 	// backend translates it. Ollama's Think field is set only when the model
 	// reports support for the thinking capability.
 	NoThinking bool `json:"-"`
 	// ReasoningEffort bounds how much a reasoning model thinks this turn
 	// ("low"/"medium"/"high"/"xhigh" — the accepted set is model-specific).
-	// Wire-neutral: the OpenAI backend sends it as reasoning_effort, Ollama has
-	// no equivalent and ignores it. Empty = the backend's own default.
+	// Wire-neutral: OpenAI receives reasoning_effort; Ollama receives a named
+	// think level only when its model metadata advertises that exact level.
+	// Empty or unsupported = the backend's own default.
 	ReasoningEffort string `json:"-"`
+	// Voice turns prefer silence to an unbounded reasoning default when the
+	// requested effort is unavailable. Other callers retain the model default.
+	NoThinkingIfUnsupported bool `json:"-"`
 	// Think is Ollama's own switch (/api/chat "think": false) for models with a
 	// thinking mode (Qwen3, DeepSeek-R1, gpt-oss…). Omitted → the model's
 	// default; never sent true so models without the mode don't reject it.
@@ -282,21 +286,22 @@ func (c *Client) ContextBudgetChars() int {
 	return int(float64(usable) * charsPerToken)
 }
 
-// thinkCap caches, per baseURL+model, whether Ollama reports the "thinking"
-// capability. It is package-level on purpose: callers build a fresh Client per
+// thinkCap caches, per baseURL+model, the supported thinking modes.
+// It is package-level on purpose: callers build a fresh Client per
 // turn (see server.newChatBackend), so a per-client cache would never hit.
 var thinkCap sync.Map
 
-// supportsThinking reports whether this model can be told to skip reasoning.
-//
-// Asking costs a round trip, so it is only ever asked when a caller actually
-// wants silence — an ordinary chat turn never reaches here. Anything unknown or
-// unreachable answers false, which sends no `think` field at all: the behaviour
-// Prism had before, rather than a 400 on the very turns that asked for silence.
-func (c *Client) supportsThinking(ctx context.Context, model string) bool {
+type thinkingSupport struct {
+	supported bool
+	levels    []string
+}
+
+// Probe only for an explicit reasoning choice. Unknown modes are never sent to
+// the provider, and temporary discovery failures are not cached.
+func (c *Client) modelThinking(ctx context.Context, model string) thinkingSupport {
 	key := c.baseURL + "|" + model
 	if v, ok := thinkCap.Load(key); ok {
-		return v.(bool)
+		return v.(thinkingSupport)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -304,26 +309,34 @@ func (c *Client) supportsThinking(ctx context.Context, model string) bool {
 	body, _ := json.Marshal(map[string]string{"model": model})
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/show", bytes.NewReader(body))
 	if err != nil {
-		return false // not cached: a transient failure should not stick
+		return thinkingSupport{}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return false
+		return thinkingSupport{}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return false
+		return thinkingSupport{}
 	}
 	var show struct {
 		Capabilities []string `json:"capabilities"`
+		Thinking     struct {
+			Values []any `json:"values"`
+		} `json:"thinking"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&show); err != nil {
-		return false
+		return thinkingSupport{}
 	}
-	ok := slices.Contains(show.Capabilities, "thinking")
-	thinkCap.Store(key, ok)
-	return ok
+	info := thinkingSupport{supported: slices.Contains(show.Capabilities, "thinking")}
+	for _, value := range show.Thinking.Values {
+		if level, ok := value.(string); ok {
+			info.levels = append(info.levels, level)
+		}
+	}
+	thinkCap.Store(key, info)
+	return info
 }
 
 func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEvent) {
@@ -334,16 +347,28 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 	if req.Options.NumCtx == 0 {
 		req.Options.NumCtx = NumCtx
 	}
-	// Unsupported models reject the think field; probe only when disabling
-	// reasoning, preserving the context and token budgets already set above.
-	if req.NoThinking {
-		req.Think = nil
-		if c.supportsThinking(ctx, req.Model) {
+	var payload any = req
+	if req.NoThinking || req.ReasoningEffort != "" {
+		info := c.modelThinking(ctx, req.Model)
+		if req.NoThinking {
+			req.Think = nil
+			if info.supported {
+				off := false
+				req.Think = &off
+			}
+			payload = req
+		} else if slices.Contains(info.levels, req.ReasoningEffort) {
+			payload = struct {
+				ChatRequest
+				Think string `json:"think"`
+			}{req, req.ReasoningEffort}
+		} else if req.NoThinkingIfUnsupported && info.supported {
 			off := false
 			req.Think = &off
+			payload = req
 		}
 	}
-	body, err := json.Marshal(req)
+	body, err := json.Marshal(payload)
 	if err != nil {
 		out <- StreamEvent{Err: fmt.Errorf("marshal: %w", err)}
 		return

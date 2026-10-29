@@ -238,3 +238,43 @@ func TestThinkingCapabilityIsCachedAcrossClients(t *testing.T) {
 		t.Errorf("expected the capability to be asked once, got %d", p.showCalls)
 	}
 }
+
+func TestChatUsesOnlyAdvertisedReasoningLevels(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		levels     []any
+		noThinking bool
+		fallback   bool
+		want       any
+	}{
+		{"named low", []any{false, "low", "medium"}, false, true, "low"},
+		{"explicit off wins", []any{false, "low"}, true, true, false},
+		{"unsupported level omitted", []any{false, "high"}, false, false, nil},
+		{"boolean-only default retained", nil, false, false, nil},
+		{"voice boolean-only reasoning disabled", nil, false, true, false},
+		{"voice unsupported effort disabled", []any{false, "high"}, false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var received map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/show" {
+					json.NewEncoder(w).Encode(map[string]any{"capabilities": []string{"thinking"}, "thinking": map[string]any{"values": tc.levels}})
+					return
+				}
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Error(err)
+				}
+				json.NewEncoder(w).Encode(map[string]any{"message": map[string]any{"content": "OK"}, "done": true})
+			}))
+			defer srv.Close()
+			drain(NewClient(srv.URL), ChatRequest{Model: "fixture", ReasoningEffort: "low", NoThinking: tc.noThinking, NoThinkingIfUnsupported: tc.fallback, Options: Options{NumCtx: 16384, NumPredict: 512}})
+			if received["think"] != tc.want {
+				t.Fatalf("think = %#v, want %#v", received["think"], tc.want)
+			}
+			opts := received["options"].(map[string]any)
+			if opts["num_ctx"] != float64(16384) || opts["num_predict"] != float64(512) {
+				t.Fatalf("reasoning changed context or generation limits: %v", opts)
+			}
+		})
+	}
+}

@@ -56,6 +56,12 @@ function applyDisabledApps() {
     const el = document.querySelector(`.rail-item[data-app="${a}"]`)
     if (el) el.style.display = 'none'
   }
+  const phone = document.querySelector('.rail-item[data-app="telephony"]')
+  if (phone) {
+    phone.style.display = voxWorkspaceAvailable && !DISABLED_APPS.has('telephony') ? '' : 'none'
+    phone.title = APP_TITLES.telephony
+    phone.querySelector('.rail-label').textContent = APP_TITLES.telephony
+  }
 }
 
 // Dock label for global pages: the agent's configured name (Settings → Agent),
@@ -707,10 +713,33 @@ function appendResponseAttachment(parent, attachment) {
     box.appendChild(image)
   }
   if (attachment.path && attachment.path.startsWith('/api/chat/attachment?')) {
+    const name = attachment.title || 'attachment'
+    const downloadLabel = navigator.language?.startsWith('fr') ? 'Télécharger' : 'Download'
+    const extension = name.match(/\.([a-z0-9]{1,10})$/i)?.[1].toUpperCase()
     const link = document.createElement('a')
+    link.className = 'chat-attachment-card'
     link.href = attachment.path
-    link.download = attachment.title || 'attachment'
-    link.textContent = '↓ ' + (attachment.title || 'Download attachment')
+    link.download = name
+    link.title = name
+    link.setAttribute('aria-label', downloadLabel + ' ' + name)
+    const icon = document.createElement('span')
+    icon.className = 'chat-attachment-icon'
+    icon.setAttribute('aria-hidden', 'true')
+    icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>'
+    const details = document.createElement('span')
+    details.className = 'chat-attachment-details'
+    const filename = document.createElement('span')
+    filename.className = 'chat-attachment-name'
+    filename.textContent = name
+    const meta = document.createElement('span')
+    meta.className = 'chat-attachment-meta'
+    meta.textContent = (extension ? extension + ' · ' : '') + downloadLabel
+    details.append(filename, meta)
+    const action = document.createElement('span')
+    action.className = 'chat-attachment-download'
+    action.setAttribute('aria-hidden', 'true')
+    action.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>'
+    link.append(icon, details, action)
     box.appendChild(link)
   }
   if (box.childNodes.length) parent.appendChild(box)
@@ -1162,7 +1191,7 @@ window.handleSecretKey = function(e) {
 
 // ─── View router (rail: apps + boards) ─────────────────────────────────────────
 
-const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar', activity: 'Activity', room: 'Room' }
+const APP_TITLES = { email: 'Email', notes: 'Notes', tasks: 'Tasks', calendar: 'Calendar', activity: 'Activity', room: 'Room', telephony: navigator.language?.startsWith('fr') ? 'Téléphonie' : 'Telephony' }
 const ASSISTANT = 'assistant'            // reserved session: the global super-agent
 let currentView = { type: 'board' }      // { type:'board', workspace } | { type:'app', name }
 let allSessions = []
@@ -1211,16 +1240,9 @@ function setView(view) {
   const dock  = document.getElementById('widget-dock')
   const frame = document.getElementById('app-frame')
   const title = document.getElementById('view-title')
-  const serviceView=view.type==='service'&&view.name==='prismvox'
-  document.getElementById('chat-drawer').style.display=serviceView?'none':''
-  document.getElementById('chat-fab').style.display=serviceView?'none':''
-  if(serviceView){
-    document.querySelectorAll('.rail-item').forEach(el=>el.classList.remove('active'))
-    frame.src='/apps/prismvox.html';frame.style.display='';dash.style.display='none';dock.style.display='none'
-    if(title)title.textContent='PrismVox'
-    document.querySelector('[data-service="prismvox"]')?.classList.add('active')
-    setContext('Viewing the PrismVox reception workspace');setSuggestions([]);return
-  }
+  const telephonyView = view.type === 'app' && view.name === 'telephony'
+  document.getElementById('chat-drawer').style.display = telephonyView ? 'none' : ''
+  document.getElementById('chat-fab').style.display = telephonyView ? 'none' : ''
 
   document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'))
 
@@ -1261,10 +1283,15 @@ function setView(view) {
     return
   }
   if (view.type === 'app') {
-    if (DISABLED_APPS.has(view.name)) { setView({ type: 'board', workspace: lastWorkspace }); return }
+    if (DISABLED_APPS.has(view.name) || (view.name === 'telephony' && !voxWorkspaceAvailable)) { setView({ type: 'board', workspace: lastWorkspace }); return }
     // Global apps → chat is the global assistant.
     gotoSession(ASSISTANT)
-    frame.src = `/apps/${view.name}.html?session=${encodeURIComponent(ASSISTANT)}`
+    const params = new URLSearchParams({ session: ASSISTANT })
+    if (view.name === 'telephony') {
+      if (['chat', 'logs', 'settings'].includes(view.tab)) params.set('tab', view.tab)
+      if (view.group) params.set('group', view.group)
+    }
+    frame.src = `/apps/${view.name}.html?${params}`
     frame.style.display = ''
     dash.style.display = 'none'
     dock.style.display = 'none'
@@ -1311,6 +1338,7 @@ async function loadSessions() {
     const data = await res.json()
     allSessions = data.sessions || []
     try{voxWorkspaceAvailable=!!(await fetch('/api/vox-workspace').then(r=>r.json())).available}catch{voxWorkspaceAvailable=false}
+    applyDisabledApps()
     renderBoardList(allSessions)
     // Names arrive async — refresh the title/agent label if on a workspace.
     if (currentView.type === 'board') {
@@ -1481,7 +1509,7 @@ function openCmdK() {
     { kind: 'action', label: 'Chat (Ctrl+J)', icon: '❞', run: () => toggleChat() },
     ...(ME.isAdmin && ME.terminalAvailable ? [{ kind: 'action', label: 'Terminal (Ctrl+Enter)', icon: '▸', run: () => toggleTerm(true) }] : []),
     ...(currentView.type === 'board' ? [{ kind: 'action', label: 'Tidy up windows', icon: '▦', run: tidyWindows }] : []),
-    ...Object.keys(APP_TITLES).filter(n => !DISABLED_APPS.has(n)).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
+    ...Object.keys(APP_TITLES).filter(n => !DISABLED_APPS.has(n) && (n !== 'telephony' || voxWorkspaceAvailable)).map(n => ({ kind: 'app', name: n, label: APP_TITLES[n], icon: '✦' })),
     ...allSessions.filter(s => s.id !== ASSISTANT).map(s => {
       const ic = getWorkspaceIcon(s.id)
       const icon = (ic && WS_ICONS[ic]) ? wsIconSvg(ic).replace('viewBox', 'width="16" height="16" viewBox') : (ic || '▣')
@@ -1602,13 +1630,6 @@ function renderBoardList(sessions) {
   const host = document.getElementById('rail-boards')
   if (!host) return
   host.innerHTML = ''
-  if(voxWorkspaceAvailable){
-    const item=document.createElement('button');item.className='rail-item';item.dataset.service='prismvox';item.title='PrismVox'
-    const icon=document.createElement('span');icon.className='rail-icon';icon.textContent='☎'
-    const label=document.createElement('span');label.className='rail-label';label.textContent='PrismVox'
-    item.append(icon,label);item.onclick=()=>setView({type:'service',name:'prismvox'})
-    if(currentView.type==='service')item.classList.add('active');host.append(item)
-  }
   for (const sess of sessions) {
     if (sess.id === ASSISTANT) continue   // shown as the dedicated top item
     const item = document.createElement('button')
@@ -2345,9 +2366,12 @@ async function initApp() {
   renderDock()
   updateSettingsLink()
   updateAdminLink()
-  loadSessions()
-  setView({ type: 'board', workspace: lastWorkspace })
-  connect()
+  await loadSessions()
+  const requestedApp = new URLSearchParams(location.search)
+  if (requestedApp.get('app') === 'telephony' && voxWorkspaceAvailable) {
+    setView({ type: 'app', name: 'telephony', tab: requestedApp.get('tab'), group: requestedApp.get('group') })
+  } else setView({ type: 'board', workspace: lastWorkspace })
+  if (!ws) connect()
   loadModels()
   setInterval(loadModels, 30000)
   setInterval(() => { if (!document.hidden) loadSessions() }, 10000)

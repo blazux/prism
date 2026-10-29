@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(require('node:path').join(__dirname,'../apps/prismvox.html'), 'utf8');
+const source = fs.readFileSync(require('node:path').join(__dirname,'../apps/telephony.html'), 'utf8');
 class Element {
   constructor(tag) { this.tag=tag; this.children=[]; this.textContent=''; }
   append(...children) { this.children.push(...children); }

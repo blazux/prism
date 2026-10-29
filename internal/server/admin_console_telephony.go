@@ -1,10 +1,9 @@
 package server
 
-// Telephony pane of the admin console — the switchboard persona and greeting, the
+// Shared settings form for the Telephony app — the switchboard persona and greeting, the
 // reserved "voice" knowledge base, the spoken phrases and dictionary, and the SIP
 // trunk. It only appears when this Prism is docked with a Prism Vox stack
-// (/api/platform → voxDocked); see admin_console_page.go for how the page is
-// assembled.
+// (/api/platform → voxDocked). The app serves configuration to administrators.
 //
 // Note where each field is stored: the persona lives in Prism (/api/voice), while
 // the greeting, phrases, dictionary, handling parameters, voices and trunk are

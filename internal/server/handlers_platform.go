@@ -24,7 +24,7 @@ const (
 )
 
 // knownApps is the set of rail apps a global admin can toggle.
-var knownApps = []string{"email", "notes", "tasks", "calendar", "room"}
+var knownApps = []string{"email", "notes", "tasks", "calendar", "room", "telephony"}
 
 func (s *Server) platformList(ctx context.Context, key string) []string {
 	ms := s.store()
@@ -119,8 +119,14 @@ func (s *Server) handleAdminPlatform(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		all, _ := ai.chatModels(ctx)
+		apps := make([]string, 0, len(knownApps))
+		for _, app := range knownApps {
+			if app != "telephony" || s.cfg.VoxURL != "" {
+				apps = append(apps, app)
+			}
+		}
 		writeJSON(w, map[string]interface{}{
-			"apps": knownApps, "disabledApps": disabled,
+			"apps": apps, "disabledApps": disabled,
 			"allModels": all, "allowedModels": allowed,
 		})
 	case "POST":

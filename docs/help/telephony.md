@@ -1,10 +1,11 @@
 # Telephony with PrismVox
 
 PrismVox connects to both personal and multi-user Prism deployments. Open the
-**PrismVox** workspace for supervision and call history. Technical settings are
-available through **Telephony settings** in that workspace (**Admin → Telephony**).
-The PrismVox console points to Prism; PrismVox continues to handle SIP, audio,
-call control and call archives.
+**Telephony** app from the app list. **Supervision** lets you talk to the reception
+agent; **Calls** contains call history and tool results. The owner or global
+administrator configures the line, agents and speech in **Telephony → Settings**.
+The PrismVox console points to this app in Prism. PrismVox continues to handle
+SIP, audio, call control and call archives.
 
 ## Supervision and call history
 
@@ -32,7 +33,7 @@ queue; it is not the incoming-call or transcript archive. The shared agent uses
 the scoped archive API through its existing execution tool. That tool must also
 be allowed by the applicable tool policy.
 
-In multi-user mode a global administrator opens **Access** in the workspace and
+In multi-user mode a global administrator opens **Access** in the app and
 selects the existing groups whose members may use it. Each group has its own
 supervision conversation and can consult the standard's calls. Recognized
 callers' personal conversations are excluded. Personal and outbound calls retain
@@ -40,7 +41,7 @@ their owner and installation identity. **Administrator archive** is a separate
 private conversation for global administrators, including older calls whose
 audience is unknown. Such older records are not automatically exposed to groups.
 
-In personal mode the workspace belongs to the owner and includes the standard's
+In personal mode the app belongs to the owner and includes the standard's
 calls and their own recognized calls. Fill **Settings → Profile → Phone** so that
 calling from that number reaches the personal assistant. It uses the owner's
 existing notes, calendar, tasks and configured mailbox; no additional user account
