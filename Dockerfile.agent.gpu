@@ -3,13 +3,21 @@ FROM nvcr.io/nvidia/pytorch:26.03-py3
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+COPY workspace-security-constraints.txt /etc/prism/python-constraints.txt
+# Retain the NVIDIA image's Python/CUDA constraints alongside the security floor.
+RUN for constraints in ${PIP_CONSTRAINT:-}; do \
+        if [ "$constraints" != /etc/prism/python-constraints.txt ]; then \
+            printf '\n-c %s\n' "$constraints" >> /etc/prism/python-constraints.txt; \
+        fi; \
+    done
+ENV PIP_CONSTRAINT=/etc/prism/python-constraints.txt
 
 # Tools not included in the NVIDIA base
 RUN apt-get update && apt-get install -y \
     nodejs npm \
     golang-go \
     rustc cargo \
-    vim nano \
+    vim nano libbrotli1 \
     jq \
     sqlite3 \
     ffmpeg \
@@ -19,7 +27,7 @@ RUN apt-get update && apt-get install -y \
 
 # Extra Python packages (PyTorch, numpy, CUDA already in base)
 RUN pip install --no-cache-dir \
-    httpx \
+    httpx "Brotli>=1.2.1" \
     pandas \
     matplotlib seaborn plotly \
     flask fastapi uvicorn \
@@ -27,10 +35,13 @@ RUN pip install --no-cache-dir \
     pytest black ruff
 
 # Playwright for browser automation
-RUN pip install --no-cache-dir playwright && \
+RUN pip install --no-cache-dir "playwright>=1.64.1" && \
     python -m playwright install chromium && \
     python -m playwright install-deps chromium && \
     mkdir -p /workspace/.screenshots
+
+COPY scripts/check-workspace-security.py /usr/local/bin/check-workspace-security.py
+RUN python /usr/local/bin/check-workspace-security.py
 
 # Widget data lives at /workspace/data, served verbatim to the browser at /data/ —
 # see Dockerfile.agent for the rationale. Two compatibility symlinks: the literal

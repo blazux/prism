@@ -139,7 +139,7 @@ func (m *Manager) create(ctx context.Context) error {
 	setupCmd := `apt-get update -qq && apt-get install -y -qq \
 		python3 python3-pip python3-venv \
 		nodejs npm \
-		curl wget git vim \
+		curl wget git vim libbrotli1 \
 		build-essential \
 		jq \
 		2>&1 | tail -5`
