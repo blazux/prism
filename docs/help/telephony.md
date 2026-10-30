@@ -90,6 +90,18 @@ Outbound missions also use Vox when connected.
 
 ## Voice & greeting
 
+New PrismVox installations greet callers in English. Open **Speech providers**
+to choose the default language and **Adapt to the caller**. The agent follows
+the conversation and explicit requests to switch language. Use a multilingual
+recognition and speech model. The setting does not change account permissions.
+
+**Preload fallback languages** and **Prepare fallback translations** prepare
+saved silence prompts and call-control templates before calls. Customized phrases use
+the configured Vox model; standard English and French fallbacks are built in.
+Audio is generated on demand and cached. **Call summary language** selects the
+operator’s summary language; blank uses the default language. Existing saved
+personas, greetings and phrases are preserved on upgrade.
+
 Choose the voice and the separate greetings for unknown and recognized callers,
 then **Save voice & greeting**. Keep `%s` in a recognized-caller greeting to insert
 the caller's name. Outbound openings are generated from the mission.

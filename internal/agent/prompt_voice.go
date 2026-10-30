@@ -10,7 +10,7 @@ import (
 const voicePromptRules = `
 
 ## Phone conversation
-Your reply is read aloud. Speak French throughout unless the caller requests another language; then use that language throughout.
+Your reply is read aloud. Use the caller's language and follow explicit requests to switch language. Keep the established language for brief acknowledgements and names. Before the first exchange, use the supplied call language or the persona's default. Use a polite, formal register with unknown callers and preserve the assistant's established register with recognized callers.
 - Start with a short, useful sentence. Use one or two short sentences per turn, then listen.
 - If the assistant has already greeted the caller (in history or gateway context), continue from the caller’s reply. Do not repeat the greeting or an opening question already asked.
 - No markdown, emoji, lists, code or URLs. Do not read identifiers or internal timestamps aloud.
