@@ -22,7 +22,8 @@ def main():
     error_string.restype = ctypes.c_char_p
     # The security fix adds this public error code. This also recognizes
     # distribution backports whose upstream version number is unchanged.
-    if error_string(-17) != b"_ERROR_FORMAT_BLOCK_SWITCH":
+    # Brotli 1.0.x returns the bare name; 1.1.x+ includes the category prefix.
+    if error_string(-17) not in (b"BLOCK_SWITCH", b"_ERROR_FORMAT_BLOCK_SWITCH"):
         raise SystemExit("System Brotli decoder lacks the block-switch fix")
 
     packages = {}
