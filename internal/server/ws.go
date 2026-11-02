@@ -980,11 +980,8 @@ func (s *Server) handleChat(ctx context.Context, client *Client, content string,
 			client.sendJSONReliable(ev)
 		}
 
-		// After file changes, refresh tree
-		if ev.Type == "file_changed" {
-			tree := s.buildFileTree(s.cfg.WorkspaceDir)
-			client.sendJSONReliable(map[string]interface{}{"type": "file_tree", "files": tree})
-		}
+		// Successful file mutations refresh the tree through the executor's
+		// onFileChange callback. Do not rebuild/send it again for file_changed.
 	}
 
 	// Deterministic end-of-turn marker for non-browser clients (the voice

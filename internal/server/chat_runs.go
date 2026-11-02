@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type chatRun struct {
 	bytes       int
 	cancel      context.CancelFunc
 	failed      bool
+	overflowed  bool
 	status      string
 	secret      json.RawMessage
 	approvals   map[string]json.RawMessage
@@ -86,6 +88,18 @@ func (c *Client) publishRun(v any) bool {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// File listings are replaceable UI state, not conversation history. A new
+	// connection already receives a fresh tree before attachRun. Caching large
+	// source trees here used to cancel the agent after otherwise successful edits.
+	if kind.Type == "file_tree" {
+		for peer := range r.subscribers {
+			peer.sendRaw(b)
+		}
+		return true
+	}
+	if r.overflowed {
+		return true
+	}
 	switch kind.Type {
 	case "secret_request":
 		r.secret = b
@@ -102,6 +116,13 @@ func (c *Client) publishRun(v any) bool {
 	if kind.Type != "secret_request" && kind.Type != "approval_request" {
 		if r.bytes+len(b) > 16<<20 {
 			r.failed = true
+			r.overflowed = true
+			failure := map[string]any{"type": "error", "content": "The task exceeded the conversation replay limit and was stopped. Review the results before continuing."}
+			diagnostic, _ := json.Marshal(failure)
+			r.events = append(r.events, diagnostic)
+			r.bytes += len(diagnostic)
+			r.broadcastLocked(failure)
+			log.Printf("[chat-run] replay limit reached: session=%q retained_bytes=%d event_type=%q event_bytes=%d", c.sessionID, r.bytes, kind.Type, len(b))
 			r.cancel()
 			return true
 		}
@@ -249,7 +270,7 @@ func (s *Server) finishRun(r *chatRun, ctx context.Context) {
 	if r.failed {
 		status = "failed"
 	}
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && !r.failed {
 		status = "stopped"
 		if ctx.Err() == context.DeadlineExceeded {
 			status = "timed_out"

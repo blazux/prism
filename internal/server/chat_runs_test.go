@@ -159,6 +159,150 @@ func TestRunIsolationAndDetachedApprovals(t *testing.T) {
 	s.finishRun(run, ctx)
 }
 
+func TestLargeFileTreeRefreshDoesNotCancelRunOrEnterReplay(t *testing.T) {
+	s := &Server{}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	owner := &Client{sessionID: "large-files", send: make(chan []byte, 8)}
+	run, err := s.beginRun(owner, cancel, "Edit a file", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialBytes, initialEvents := run.bytes, len(run.events)
+	// A workspace containing a source tree can produce a 10+ MB file listing.
+	// Two refreshes previously consumed the chat's 16 MB replay budget and
+	// cancelled execution immediately after a successful write_file.
+	listing := map[string]any{"type": "file_tree", "files": []FileNode{{Name: "source", Path: strings.Repeat("x", 10<<20)}}}
+	for i := 0; i < 2; i++ {
+		owner.sendJSON(listing)
+	}
+	if ctx.Err() != nil || run.failed {
+		t.Fatal("a file browser refresh cancelled the agent")
+	}
+	if run.bytes != initialBytes || len(run.events) != initialEvents {
+		t.Fatal("replaceable file tree was cached in the conversation replay")
+	}
+	listings := 0
+	for len(owner.send) > 0 {
+		var m struct{ Type string }
+		json.Unmarshal(<-owner.send, &m)
+		if m.Type == "file_tree" {
+			listings++
+		}
+	}
+	if listings != 2 {
+		t.Fatal("live file browser updates were lost")
+	}
+	owner.sendJSON(map[string]any{"type": "stream", "content": "Continuing after the write."})
+	s.finishRun(run, ctx)
+	var status string
+	for len(owner.send) > 0 {
+		var event struct{ Type, Status string }
+		json.Unmarshal(<-owner.send, &event)
+		if event.Type == "run_status" {
+			status = event.Status
+		}
+	}
+	if status != "completed" {
+		t.Fatal("task did not complete after the file refresh")
+	}
+}
+
+func TestRunReplayOverflowReportsFailure(t *testing.T) {
+	s := &Server{}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	owner := &Client{sessionID: "replay-limit", send: make(chan []byte, 8)}
+	run, err := s.beginRun(owner, cancel, "Fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.sendJSON(map[string]any{"type": "stream", "content": strings.Repeat("x", 16<<20)})
+	if ctx.Err() == nil {
+		t.Fatal("conversation replay is no longer bounded")
+	}
+	owner.sendJSON(map[string]any{"type": "stream_end"})
+	s.finishRun(run, ctx)
+	var status string
+	for len(owner.send) > 0 {
+		var event struct{ Type, Status string }
+		json.Unmarshal(<-owner.send, &event)
+		if event.Type == "run_status" {
+			status = event.Status
+		}
+	}
+	if status != "failed" {
+		t.Fatalf("overflow was reported as %s instead of failed", status)
+	}
+	errors := 0
+	for _, raw := range run.events {
+		var ev struct{ Type, Content string }
+		json.Unmarshal(raw, &ev)
+		if ev.Type == "error" && strings.Contains(ev.Content, "replay limit") {
+			errors++
+		}
+	}
+	if errors != 1 {
+		t.Fatalf("expected one replayable overflow diagnostic, got %d", errors)
+	}
+}
+
+func TestDashboardFileWriteRefreshesOnceAndContinues(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	var calls atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls.Add(1) == 1 {
+			args, _ := json.Marshal(map[string]string{"path": "report.txt", "content": "fixture report"})
+			chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{
+				"delta":         map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "fixture", "type": "function", "function": map[string]string{"name": "write_file", "arguments": string(args)}}}},
+				"finish_reason": "tool_calls",
+			}}})
+			fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", chunk)
+			return
+		}
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Report saved.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer backend.Close()
+	s := New(Config{WorkspaceDir: t.TempDir(), PluginDir: t.TempDir(), Model: "fixture", LLMBackend: "openai", OpenAIBaseURL: backend.URL})
+	s.docker = docker.WithExecution(nil)
+	host := httptest.NewServer(http.HandlerFunc(s.handleWS))
+	defer host.Close()
+	c, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(host.URL, "http")+"?session=file-write", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	readRunEvent(t, c, "run_status") // initial file tree has already been sent
+	if err := c.WriteJSON(map[string]any{"type": "chat", "content": "Write the report"}); err != nil {
+		t.Fatal(err)
+	}
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	refreshes := 0
+	for {
+		var event struct{ Type, Content, Status string }
+		if err := c.ReadJSON(&event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Type == "error" {
+			t.Fatal(event.Content)
+		}
+		if event.Type == "file_tree" {
+			refreshes++
+		}
+		if event.Type == "run_status" && event.Status == "completed" {
+			break
+		}
+	}
+	if calls.Load() != 2 || refreshes != 1 {
+		t.Fatalf("model calls=%d file tree refreshes=%d; want 2 and 1", calls.Load(), refreshes)
+	}
+}
+
 func TestVoiceDisconnectStillCancels(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	entered, cancelled := make(chan struct{}), make(chan struct{})
