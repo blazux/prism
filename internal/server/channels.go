@@ -88,3 +88,16 @@ func (s *Server) deliverToChannelSession(name, sessionID, text string) error {
 	}
 	return s.deliverToChannel(name, text)
 }
+
+// Telegram can upload the snapshots emitted by add_attachment, including in
+// scheduled /api/chat and webhook turns. Other channels retain text delivery.
+func (s *Server) deliverResponseToChannel(ctx context.Context, name, sessionID, text string, files responseAttachments) error {
+	if m, ok := s.channels[name].(*telegramManager); ok {
+		api, chatID, err := m.destination(userIDFromSession(sessionID))
+		if err != nil {
+			return err
+		}
+		return s.tgSendResponse(ctx, api, chatID, sessionID, text, files)
+	}
+	return s.deliverToChannelSession(name, sessionID, text)
+}

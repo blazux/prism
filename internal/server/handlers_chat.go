@@ -157,14 +157,18 @@ func (s *Server) handleChatHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats := newTurnStats()
-	resp, err := s.runHeadlessChatTap(ctx, sessionID, body.Message, body.Model, s.callerContextForUser(ctx, user, sessionID), stats.tap, agent.Limits{})
+	var files responseAttachments
+	resp, err := s.runHeadlessChatTap(ctx, sessionID, body.Message, body.Model, s.callerContextForUser(ctx, user, sessionID), func(ev agent.Event) {
+		stats.tap(ev)
+		files.tap(ev)
+	}, agent.Limits{})
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 	delivered := false
-	if body.Deliver != "" && strings.TrimSpace(resp) != "" {
-		if err := s.deliverToChannelSession(body.Deliver, sessionID, resp); err != nil {
+	if body.Deliver != "" && (strings.TrimSpace(resp) != "" || len(files) > 0) {
+		if err := s.deliverResponseToChannel(ctx, body.Deliver, sessionID, resp, files); err != nil {
 			log.Printf("[chat-http] deliver to %s: %v", body.Deliver, err)
 		} else {
 			delivered = true
@@ -233,6 +237,11 @@ func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model 
 type compactContextKey struct{}
 
 func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, model string, cc CallerContext, tap func(agent.Event), limits agent.Limits) (string, error) {
+	return s.runHeadlessChatImagesTap(ctx, sessionID, message, model, nil, cc, tap, limits)
+}
+
+// Channel images use the same capability checks and text-only fallback as web uploads.
+func (s *Server) runHeadlessChatImagesTap(ctx context.Context, sessionID, message, model string, images []string, cc CallerContext, tap func(agent.Event), limits agent.Limits) (string, error) {
 	ctx, finish, err := s.beginSessionJob(ctx, sessionID)
 	if err != nil {
 		return "", err
@@ -350,7 +359,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 	}
 	events := make(chan agent.Event, 200)
 	go func() {
-		ag.Chat(ctx, message, nil, events)
+		ag.Chat(ctx, message, images, events)
 		close(events)
 	}()
 

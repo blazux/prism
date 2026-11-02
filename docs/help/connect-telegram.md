@@ -31,12 +31,23 @@ yours alone.
 Send messages as you would in the dashboard chat. A typing indicator shows
 while the agent works, and long answers are split into several messages. You
 can also send a **document or a photo** (with an optional caption): it is
-attached to the message and the agent can read it.
+saved in the workspace so the agent can use it with its tools. Prism extracts
+document text when possible and sends supported images to the chat model's
+vision input, including images sent as documents. A text-only model receives
+the file path and a notice that it cannot inspect the image. Incoming files
+are limited to **10 MiB each**.
+
+The agent can also **send files back to you**: ask for a report, spreadsheet,
+image or another file. The files arrive directly in
+your Telegram chat. JPEG and PNG images appear as photos when Telegram accepts
+them; other files arrive as downloadable documents. Outgoing files are limited
+to **50 MB each**. If a file cannot be delivered, Prism reports the failure.
 
 ## Scheduled delivery
 Once linked, ask in chat: *"every morning at 8, summarize my unread emails and
 send it to me on Telegram"*. The agent schedules a cron job whose result is
 pushed to your Telegram chat — no need to be at the dashboard.
+Files attached by the agent are delivered too.
 
 ## Unlinking and changing the bot
 - **Unlink chat** (Settings → Channels) forgets the linked chat; the next

@@ -13,6 +13,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"prism/internal/agent"
 	"prism/internal/memory"
 )
 
@@ -117,32 +119,50 @@ func (m *telegramManager) Run(ctx context.Context) {
 // SendToOwner is the legacy single-owner delivery: the global token if set,
 // else the only configured user. Ambiguous with several users — use SendToUser.
 func (m *telegramManager) SendToOwner(text string) error {
+	api, chatID, err := m.destination(0)
+	if err != nil {
+		return err
+	}
+	return m.s.tgSend(api, chatID, text)
+}
+
+// destination uses the same owner resolution for text and file deliveries.
+func (m *telegramManager) destination(userID int64) (string, int64, error) {
+	if userID > 0 {
+		return m.userDestination(userID)
+	}
 	if tok := tgToken(m.s.store()); tok != "" {
 		if chatID, ok := tgAllowedChat(m.s.store()); ok {
-			m.s.tgSend("https://api.telegram.org/bot"+tok, chatID, text)
-			return nil
+			return "https://api.telegram.org/bot" + tok, chatID, nil
 		}
 	}
 	uids := m.usersWithToken()
 	if len(uids) == 1 {
-		return m.SendToUser(uids[0], text)
+		return m.userDestination(uids[0])
 	}
-	return fmt.Errorf("telegram delivery needs a user context (several bots configured)")
+	return "", 0, fmt.Errorf("telegram delivery needs a user context (several bots configured)")
 }
 
 // SendToUser delivers to one user's linked chat.
 func (m *telegramManager) SendToUser(userID int64, text string) error {
+	api, chatID, err := m.userDestination(userID)
+	if err != nil {
+		return err
+	}
+	return m.s.tgSend(api, chatID, text)
+}
+
+func (m *telegramManager) userDestination(userID int64) (string, int64, error) {
 	ms := m.s.tgScope(userID)
 	tok := tgToken(ms)
 	if tok == "" {
-		return fmt.Errorf("telegram not configured for this user")
+		return "", 0, fmt.Errorf("telegram not configured for this user")
 	}
 	chatID, ok := tgAllowedChat(ms)
 	if !ok {
-		return fmt.Errorf("no linked telegram chat — send /start to your bot first")
+		return "", 0, fmt.Errorf("no linked telegram chat — send /start to your bot first")
 	}
-	m.s.tgSend("https://api.telegram.org/bot"+tok, chatID, text)
-	return nil
+	return "https://api.telegram.org/bot" + tok, chatID, nil
 }
 
 // ─── receive loop ─────────────────────────────────────────────────────────────
@@ -222,18 +242,15 @@ func (s *Server) telegramLoop(ctx context.Context, token string, userID int64) {
 				fileIDs = append(fileIDs, m.Photo[n-1].FileID)
 				names = append(names, "photo.jpg")
 			}
-			if len(fileIDs) > 0 {
-				text = s.attachTelegramFiles(ctx, token, fileIDs, names, text)
-			}
-			if text == "" {
+			if text == "" && len(fileIDs) == 0 {
 				continue
 			}
-			s.handleTelegramMessage(ctx, api, userID, m.Chat.ID, text)
+			s.handleTelegramMessage(ctx, api, token, userID, m.Chat.ID, text, fileIDs, names)
 		}
 	}
 }
 
-func (s *Server) handleTelegramMessage(ctx context.Context, api string, userID, chatID int64, text string) {
+func (s *Server) handleTelegramMessage(ctx context.Context, api, token string, userID, chatID int64, text string, fileIDs, names []string) {
 	var ms *memory.Store
 	if userID > 0 {
 		ms = s.tgScope(userID)
@@ -263,6 +280,13 @@ func (s *Server) handleTelegramMessage(ctx context.Context, api string, userID, 
 		s.tgSend(api, chatID, "Already linked — just send me a message.")
 		return
 	}
+	// Do not download or persist files from an unlinked/unauthorized chat.
+	text, images, err := s.attachTelegramFiles(ctx, token, fileIDs, names, text)
+	if err != nil {
+		log.Printf("[telegram] incoming attachment: %v", err)
+		s.tgSend(api, chatID, "⚠️ An attachment could not be read. Please resend it (maximum 10 MiB per file).")
+		return
+	}
 
 	// Per-user: run on the user's own telegram session with their permissions and
 	// scopes — same identity as their browser chat, so their agent, their RAG,
@@ -278,20 +302,28 @@ func (s *Server) handleTelegramMessage(ctx context.Context, api string, userID, 
 	s.store().AddUsage(ctx, userID, session, "channel_msg", "telegram", 1, nil)
 	runCtx, cancel := context.WithTimeout(ctx, channelTurnTimeout)
 	defer cancel()
-	resp, err := s.runHeadlessChat(runCtx, session, text, "", s.callerContextForUser(ctx, u, session))
+	var files responseAttachments
+	resp, err := s.runHeadlessChatImagesTap(runCtx, session, text, "", images, s.callerContextForUser(ctx, u, session), files.tap, agent.Limits{})
 	if err != nil {
 		log.Printf("[telegram] chat: %v", err)
 		s.tgSend(api, chatID, channelFailureMessage(err))
 		return
 	}
-	if strings.TrimSpace(resp) == "" {
+	if strings.TrimSpace(resp) == "" && len(files) == 0 {
 		resp = "(no response)"
 	}
-	s.tgSend(api, chatID, resp)
+	if err := s.tgSendResponse(runCtx, api, chatID, session, resp, files); err != nil {
+		log.Printf("[telegram] reply delivery: %v", err)
+		s.tgSend(api, chatID, "⚠️ Part of the reply could not be delivered. Please ask the agent to resend it.")
+	}
 }
 
 // tgSend posts a message, splitting on Telegram's ~4096-char limit (by rune).
-func (s *Server) tgSend(api string, chatID int64, text string) {
+func (s *Server) tgSend(api string, chatID int64, text string) error {
+	return s.tgSendText(context.Background(), api, chatID, text)
+}
+
+func (s *Server) tgSendText(ctx context.Context, api string, chatID int64, text string) error {
 	runes := []rune(text)
 	const max = 3500
 	for len(runes) > 0 {
@@ -303,10 +335,12 @@ func (s *Server) tgSend(api string, chatID int64, text string) {
 		form.Set("chat_id", strconv.FormatInt(chatID, 10))
 		form.Set("text", string(runes[:n]))
 		runes = runes[n:]
-		if resp, err := http.PostForm(api+"/sendMessage", form); err == nil {
-			resp.Body.Close()
+		body := form.Encode()
+		if err := tgPost(ctx, api+"/sendMessage", "application/x-www-form-urlencoded", strings.NewReader(body), int64(len(body))); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 func (s *Server) tgAction(api string, chatID int64, action string) {
@@ -414,15 +448,20 @@ func (s *Server) handleTelegramConfig(w http.ResponseWriter, r *http.Request) {
 // attachTelegramFiles resolves each file_id to a download URL (getFile →
 // file_path), fetches it, ingests it into the workspace, and prepends its
 // preamble to the message text.
-func (s *Server) attachTelegramFiles(ctx context.Context, token string, fileIDs, names []string, text string) string {
+func (s *Server) attachTelegramFiles(ctx context.Context, token string, fileIDs, names []string, text string) (string, []string, error) {
 	api := "https://api.telegram.org/bot" + token
 	var atts []attachment
+	var images []string
 	for i, id := range fileIDs {
 		// getFile returns a file_path valid for the file/ download endpoint.
-		resp, err := http.PostForm(api+"/getFile", url.Values{"file_id": {id}})
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, api+"/getFile", strings.NewReader(url.Values{"file_id": {id}}.Encode()))
 		if err != nil {
-			log.Printf("[telegram] getFile: %v", err)
-			continue
+			return "", nil, fmt.Errorf("invalid Telegram file request")
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := (&http.Client{Timeout: time.Minute}).Do(req)
+		if err != nil {
+			return "", nil, fmt.Errorf("Telegram file lookup failed")
 		}
 		var gf struct {
 			OK     bool `json:"ok"`
@@ -430,23 +469,35 @@ func (s *Server) attachTelegramFiles(ctx context.Context, token string, fileIDs,
 				FilePath string `json:"file_path"`
 			} `json:"result"`
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
 		if json.Unmarshal(body, &gf) != nil || !gf.OK || gf.Result.FilePath == "" {
-			log.Printf("[telegram] getFile: bad response for %s", id)
-			continue
+			return "", nil, fmt.Errorf("Telegram file lookup rejected")
 		}
-		name := names[i]
+		name := ""
+		if i < len(names) {
+			name = names[i]
+		}
 		if name == "" {
 			name = filepath.Base(gf.Result.FilePath)
 		}
 		dlURL := "https://api.telegram.org/file/bot" + token + "/" + gf.Result.FilePath
 		data, fname, err := downloadAttachment(ctx, dlURL, "", name)
 		if err != nil {
-			log.Printf("[telegram] download %s: %v", name, err)
+			// Download errors can contain the bot token in their URL.
+			return "", nil, fmt.Errorf("Telegram attachment download failed (maximum 10 MiB)")
+		}
+		if telegramVisionImage(data) {
+			encoded := base64.StdEncoding.EncodeToString(data)
+			saved, err := s.saveChatImages([]string{encoded}, []string{fname})
+			if err != nil {
+				return "", nil, err
+			}
+			atts = append(atts, saved...)
+			images = append(images, encoded)
 			continue
 		}
 		atts = append(atts, s.ingestAttachment(data, fname))
 	}
-	return prependAttachments(text, atts)
+	return prependAttachments(text, atts), images, nil
 }

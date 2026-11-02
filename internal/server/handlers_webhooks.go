@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/agent"
 	"prism/internal/memory"
 )
 
@@ -405,7 +406,8 @@ func prettyJSON(s string) string {
 // unrestricted, as before.
 func (s *Server) runWebhook(ctx context.Context, hook memory.WebhookRow, message string) (string, error) {
 	session := webhookSession(hook)
-	resp, err := s.runHeadlessChat(ctx, session, message, hook.Model, s.webhookCallerContext(ctx, hook, session))
+	var files responseAttachments
+	resp, err := s.runHeadlessChatTap(ctx, session, message, hook.Model, s.webhookCallerContext(ctx, hook, session), files.tap, agent.Limits{})
 	if ms := s.store(); ms != nil {
 		status := "ok"
 		if err != nil {
@@ -420,8 +422,8 @@ func (s *Server) runWebhook(ctx context.Context, hook memory.WebhookRow, message
 	if err != nil {
 		return "", fmt.Errorf("webhook %s: %w", hook.ID, err)
 	}
-	if hook.Deliver != "" && strings.TrimSpace(resp) != "" {
-		if derr := s.deliverToChannelSession(hook.Deliver, session, resp); derr != nil {
+	if hook.Deliver != "" && (strings.TrimSpace(resp) != "" || len(files) > 0) {
+		if derr := s.deliverResponseToChannel(ctx, hook.Deliver, session, resp, files); derr != nil {
 			log.Printf("[webhook %s] deliver to %s: %v", hook.ID, hook.Deliver, derr)
 		}
 	}
