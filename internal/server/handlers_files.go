@@ -23,7 +23,19 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	tree := s.buildFileTree(s.cfg.WorkspaceDir)
+	var tree []FileNode
+	if path, supplied := r.URL.Query()["path"]; supplied {
+		// Optional shallow listing for file browsers. Legacy callers without
+		// path retain the recursive response used by existing tools.
+		var err error
+		tree, err = s.listFileDirectory(path[0])
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid or unavailable workspace directory")
+			return
+		}
+	} else {
+		tree = s.buildFileTree(s.cfg.WorkspaceDir)
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"files": tree})
 }
 
@@ -158,6 +170,30 @@ type FileNode struct {
 	IsDir    bool       `json:"isDir"`
 	Children []FileNode `json:"children,omitempty"`
 	Size     int64      `json:"size,omitempty"`
+}
+
+func (s *Server) listFileDirectory(path string) ([]FileNode, error) {
+	name, err := workspace.Name(path)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := s.readManagedDir(filepath.Join(s.cfg.WorkspaceDir, name))
+	if err != nil {
+		return nil, err
+	}
+	nodes := make([]FileNode, 0, len(entries))
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		rel := filepath.Join(name, entry.Name())
+		node := FileNode{Name: entry.Name(), Path: filepath.ToSlash(rel), IsDir: entry.IsDir()}
+		if info, err := entry.Info(); err == nil && !entry.IsDir() {
+			node.Size = info.Size()
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, nil
 }
 
 func (s *Server) buildFileTree(root string) []FileNode {

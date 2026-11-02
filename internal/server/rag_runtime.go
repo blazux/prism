@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -75,12 +76,15 @@ func (s *Server) scheduleRAGApply() {
 			return
 		}
 		err := s.applyRAGProfile(ctx)
+		s.ragMu.RLock()
+		retained := s.ragStore != nil
+		s.ragMu.RUnlock()
 		s.mu.Lock()
 		current := generation == s.ragGeneration
 		if current {
 			s.ragUpdating.Store(false)
 			if err != nil {
-				s.ragInitStatus.Store("configuration failed; previous document index retained. Check the provider and save again.")
+				s.ragInitStatus.Store(ragApplyFailureStatus(err, retained))
 				log.Printf("[rag] apply failed: %v", err)
 			}
 		}
@@ -93,6 +97,17 @@ func (s *Server) scheduleRAGApply() {
 	}) {
 		cancel()
 	}
+}
+
+func ragApplyFailureStatus(err error, retained bool) string {
+	status := "Embedding configuration failed. Document search is unavailable."
+	if retained {
+		status = "Embedding configuration failed; previous document search remains active."
+	}
+	if errors.Is(err, rag.ErrEmbeddingIndexMismatch) {
+		return status + " The configured embedding connection does not match the saved index. Restore the previous connection or confirm rebuilding the index in AI provider settings."
+	}
+	return status + " Check the embedding provider and save again."
 }
 func (s *Server) applyRAGProfile(ctx context.Context) error {
 	p, err := loadAIProfile(ctx, s.store())

@@ -29,6 +29,16 @@ all your tools, not a search box.
 - Want to check each step before it runs? Switch the **Approval** dropdown in
   the chat header to **manual** — see the tools help.
 
+## Interrupted replies
+
+If the model connection breaks or a response reaches its generation limit,
+Prism keeps any partial reply and displays an error. Tool calls from that
+incomplete generation are not executed. Earlier completed actions remain in
+place: review their results before asking the agent to continue.
+
+Chat errors remain visible when you reopen the conversation. They are kept
+alongside the transcript, including after a server restart.
+
 ## Ask the agent to configure things
 Much of Prism can be set up from chat rather than from Settings. The agent can
 itself:

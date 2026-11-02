@@ -583,6 +583,9 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 	}
 	for _, e := range entries {
 		content := e.Content
+		if e.Role == "error" {
+			continue // UI diagnostics belong in the transcript, not the model prompt.
+		}
 		// Inject timestamp prefix on user messages only so the model can reason about time
 		// (not on assistant messages, to avoid the model mimicking the pattern in its responses)
 		if e.Role == "user" {
@@ -1392,6 +1395,25 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			return
 		}
 
+		// Keep partial text, but never execute an incomplete tool batch or report
+		// a truncated generation as a completed task.
+		if doneReason == "interrupted" || (isTruncation(doneReason) && (strings.TrimSpace(fullContent) != "" || len(toolCalls) > 0)) {
+			if strings.TrimSpace(fullContent) != "" {
+				partial := ollama.Message{Role: "assistant", Content: fullContent}
+				partial.DBID = a.saveMessageToDB(ctx, ollama.Message{Role: "assistant", Content: stripThinkingBlocks(fullContent)})
+				a.histMu.Lock()
+				a.history = append(a.history, partial)
+				a.histMu.Unlock()
+			}
+			message := "The model connection ended before the response was complete. The partial reply was kept. Review it before asking to continue."
+			if isTruncation(doneReason) {
+				message = "The model reached its generation limit before finishing the response. The partial reply was kept. Review it before asking to continue."
+			}
+			events <- Event{Type: "error", Content: message}
+			events <- Event{Type: "stream_end"}
+			return
+		}
+
 		// Empty response: nothing usable came back. WHY it's empty decides the fix.
 		if strings.TrimSpace(fullContent) == "" && len(toolCalls) == 0 {
 			// Truncation (done_reason=length/max_tokens): the model was cut off at
@@ -1421,11 +1443,11 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 					continue
 				}
 				log.Printf("[agent] truncated empty response again — stopping (context-bound=%v)", contextBound)
-				msg := "\n\n_(Réponse interrompue : le modèle a épuisé son budget de génération en raisonnement sans produire de réponse. Reformule plus simplement, ou découpe la demande.)_"
+				msg := "The model exhausted its generation budget without producing a response. Try a shorter request or a lower reasoning effort."
 				if contextBound {
-					msg = "\n\n_(Réponse interrompue : le contexte de cette session est trop long pour le modèle. Démarre un nouveau chat pour repartir sur une base propre.)_"
+					msg = "The model exhausted its generation budget without producing a response. The conversation context may be too large; compact it before continuing."
 				}
-				events <- Event{Type: "stream", Content: msg}
+				events <- Event{Type: "error", Content: msg}
 				events <- Event{Type: "stream_end"}
 				return
 			}
@@ -1440,6 +1462,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				continue
 			}
 			log.Printf("[agent] empty response from model again after retry — stopping")
+			events <- Event{Type: "error", Content: "The model returned an empty response twice. Please retry or check the model settings."}
 			events <- Event{Type: "stream_end"}
 			return
 		}

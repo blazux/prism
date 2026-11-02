@@ -277,7 +277,7 @@ func TestDashboardFileWriteRefreshesOnceAndContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	readRunEvent(t, c, "run_status") // initial file tree has already been sent
+	readRunEvent(t, c, "run_status") // initial file invalidation has already been sent
 	if err := c.WriteJSON(map[string]any{"type": "chat", "content": "Write the report"}); err != nil {
 		t.Fatal(err)
 	}
@@ -292,6 +292,9 @@ func TestDashboardFileWriteRefreshesOnceAndContinues(t *testing.T) {
 			t.Fatal(event.Content)
 		}
 		if event.Type == "file_tree" {
+			t.Fatal("file write rebuilt the complete workspace tree")
+		}
+		if event.Type == "file_changed" {
 			refreshes++
 		}
 		if event.Type == "run_status" && event.Status == "completed" {

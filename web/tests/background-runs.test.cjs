@@ -30,3 +30,10 @@ test('ending an assistant text segment keeps Stop available while tools run',()=
  c.finalizeStream();assert.equal(c.isStreaming,true);assert.equal(button.onclick,c.cancelChat);
  c.activeRunStatus='completed';c.finalizeStream();assert.equal(c.isStreaming,false);assert.equal(button.onclick,c.sendChat);
 });
+test('restored chat diagnostics stay visible as errors',()=>{
+ const seen=[];
+ const c={document:{getElementById:()=>({appendChild:n=>seen.push(n.className)}),createElement:()=>({})},appendError:m=>seen.push({error:m}),scrollChat:()=>{}};
+ vm.createContext(c);vm.runInContext(fn('restoreChatHistory','chatAtBottom'),c);
+ c.restoreChatHistory([{role:'error',content:'The model connection ended before completion.'}]);
+ assert.deepEqual(seen,['chat-history-sep',{error:'The model connection ended before completion.'},'chat-history-sep']);
+});

@@ -89,7 +89,7 @@ func (c *Client) publishRun(v any) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// File listings are replaceable UI state, not conversation history. A new
-	// connection already receives a fresh tree before attachRun. Caching large
+	// connection already receives a file invalidation before attachRun. Caching large
 	// source trees here used to cancel the agent after otherwise successful edits.
 	if kind.Type == "file_tree" {
 		for peer := range r.subscribers {
@@ -284,6 +284,12 @@ func (s *Server) finishRun(r *chatRun, ctx context.Context) {
 	defer cancel()
 	if ms != nil {
 		_ = ms.SetConfig(save, runStateKey(r.owner), status)
+		for _, raw := range r.events {
+			var ev struct{ Type, Content string }
+			if json.Unmarshal(raw, &ev) == nil && ev.Type == "error" {
+				s.recordChatError(save, r.owner.sessionID, ev.Content)
+			}
+		}
 	}
 	r.broadcastLocked(map[string]any{"type": "run_status", "status": status})
 	for c := range r.subscribers {

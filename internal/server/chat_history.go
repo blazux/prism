@@ -3,9 +3,24 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"strings"
 	"time"
 )
+
+func (s *Server) recordChatError(ctx context.Context, sessionID, message string) {
+	if ms := s.store(); ms != nil && message != "" {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		message = strings.ToValidUTF8(strings.ReplaceAll(message, "\x00", ""), "�")
+		if len(message) > 8000 {
+			message = strings.ToValidUTF8(message[:8000], "�") + "…"
+		}
+		if _, err := ms.AppendMessage(ctx, sessionID, "error", message, nil); err != nil {
+			log.Printf("[chat] could not persist error diagnostic: session=%q", sessionID)
+		}
+	}
+}
 
 func (s *Server) sendHistory(ctx context.Context, client *Client, sessionID string) {
 	ms := s.store()
@@ -29,6 +44,8 @@ func (s *Server) sendHistory(ctx context.Context, client *Client, sessionID stri
 			var callIdx int
 			for _, e := range entries {
 				switch e.Role {
+				case "error":
+					msgs = append(msgs, histMsg{Role: "error", Content: e.Content, CreatedAt: e.CreatedAt.Local().Format(time.RFC3339)})
 				case "user":
 					msgs = append(msgs, histMsg{
 						Role:      "user",

@@ -878,6 +878,8 @@ function restoreChatHistory(messages) {
       div.className = 'chat-msg assistant'
       div.innerHTML = `<div class="chat-msg-role">${agentChip()} ${escHtml(AGENT_NAME)}${timeBadge}</div><div class="chat-msg-content">${renderMarkdown(m.content)}</div>`
       msgs.appendChild(div)
+    } else if (m.role === 'error') {
+      appendError(m.content)
     } else if (m.role === 'tool') {
       let inputStr = ''
       try {

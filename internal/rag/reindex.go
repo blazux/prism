@@ -11,6 +11,8 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
+var ErrEmbeddingIndexMismatch = errors.New("embedding model differs from the document index; confirm rebuilding in AI provider settings, then save again")
+
 // PrepareEmbeddingIndex runs before serving RAG. Stored chunk text is retained;
 // vectors and their identity change in one transaction, or not at all. Operators
 // must stop other Prism processes using this database before a model migration.
@@ -64,7 +66,7 @@ func PrepareEmbeddingIndex(ctx context.Context, dsn string, embedder *Embedder, 
 		}
 		changed := old != identity || oldDim != dim
 		if changed && count > 0 && !confirmed {
-			return errors.New("embedding model differs from the document index; confirm rebuilding in AI provider settings, then save again")
+			return ErrEmbeddingIndexMismatch
 		}
 		if changed {
 			if oldDim != dim {

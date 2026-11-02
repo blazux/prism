@@ -461,6 +461,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	tools := newToolAccumulator()
 	finish := ""
+	ended := false
 	var usage *ollama.Usage
 	streamed := false // set once any chunk arrives, so a later read error is a mid-stream cut, not a failure to start
 
@@ -478,6 +479,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		}
 		data := bytes.TrimSpace(line[len("data:"):])
 		if string(data) == "[DONE]" {
+			ended = true
 			break
 		}
 
@@ -522,6 +524,11 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 			return
 		}
 		log.Printf("[openai] stream cut mid-response (%v) — finalizing partial turn, model %q", err, req.Model)
+		out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: "interrupted", Usage: usage}
+		return
+	}
+	// An HTTP EOF without a protocol terminator is an interrupted generation.
+	if finish == "" && !ended {
 		out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: "interrupted", Usage: usage}
 		return
 	}

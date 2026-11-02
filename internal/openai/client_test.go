@@ -113,6 +113,32 @@ func TestChat_MidStreamCut_KeepsPartialNoError(t *testing.T) {
 	}
 }
 
+func TestChatEOFWithoutTerminatorIsInterrupted(t *testing.T) {
+	for _, suffix := range []string{"", "data: [DONE]\n\n", "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Partial\"}}]}\n\n"+suffix)
+		}))
+		c := NewClient(srv.URL, "")
+		ch := make(chan ollama.StreamEvent, 10)
+		c.Chat(t.Context(), ollama.ChatRequest{Model: "fixture"}, ch)
+		close(ch)
+		reason := ""
+		for ev := range ch {
+			if ev.Err != nil {
+				t.Fatal(ev.Err)
+			}
+			if ev.Done {
+				reason = ev.DoneReason
+			}
+		}
+		if (reason == "interrupted") != (suffix == "") {
+			t.Fatalf("terminator=%q finish reason=%q", suffix, reason)
+		}
+		srv.Close()
+	}
+}
+
 // Some vLLM builds (e.g. Qwen3.5 + DFlash on the DGX Spark) stream the thinking
 // tokens in a "reasoning" field rather than "reasoning_content".
 func TestChat_ReasoningFieldVariant(t *testing.T) {

@@ -363,7 +363,14 @@ func (s *Server) runHeadlessChatImagesTap(ctx context.Context, sessionID, messag
 		close(events)
 	}()
 
-	response, runErr := collectHeadlessResponse(ctx, events, tap, sessionID)
+	response, runErr := collectHeadlessResponse(ctx, events, func(ev agent.Event) {
+		if ev.Type == "error" && options == nil {
+			s.recordChatError(context.Background(), sessionID, ev.Content)
+		}
+		if tap != nil {
+			tap(ev)
+		}
+	}, sessionID)
 
 	log.Printf("[chat-headless] session=%q response=%d chars", sessionID, len(response))
 	// Usage: one chat turn, tokens estimated (chars/4 in+out) until backend

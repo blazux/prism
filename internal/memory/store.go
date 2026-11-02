@@ -901,7 +901,7 @@ func (s *Store) MaybeSummarize(ctx context.Context, sessionID string, ollamaClie
 	}
 	sb.WriteString("=== New messages to integrate ===\n")
 	for _, m := range toSummarize {
-		if m.role == "tool" {
+		if m.role == "tool" || m.role == "error" {
 			continue
 		}
 		sb.WriteString(m.role)

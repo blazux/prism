@@ -495,9 +495,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		},
 		func() {
-			// File changed — refresh tree
-			tree := s.buildFileTree(s.cfg.WorkspaceDir)
-			client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
+			// Notify browsers without walking/transmitting the whole workspace.
+			client.sendJSON(map[string]interface{}{"type": "file_changed"})
 		},
 	)
 
@@ -527,8 +526,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			"model":     model,
 			"sessionID": sessionID,
 		})
-		tree := s.buildFileTree(s.cfg.WorkspaceDir)
-		client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
+		client.sendJSON(map[string]interface{}{"type": "file_changed"})
 
 		mcpServers, _ := s.mcpMgr.List(r.Context(), sessionID)
 		client.sendJSON(map[string]interface{}{
@@ -760,8 +758,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(map[string]interface{}{"type": "error", "content": err.Error()})
 			} else {
 				client.sendJSON(map[string]interface{}{"type": "saved", "path": msg.Path})
-				tree := s.buildFileTree(s.cfg.WorkspaceDir)
-				client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
+				client.sendJSON(map[string]interface{}{"type": "file_changed", "path": msg.Path})
 			}
 
 		case "file_delete":
@@ -774,8 +771,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			workspace.Remove(s.cfg.WorkspaceDir, msg.Path)
-			tree := s.buildFileTree(s.cfg.WorkspaceDir)
-			client.sendJSON(map[string]interface{}{"type": "file_tree", "files": tree})
+			client.sendJSON(map[string]interface{}{"type": "file_changed", "path": msg.Path})
 
 		case "refresh_files":
 			tree := s.buildFileTree(s.cfg.WorkspaceDir)
@@ -967,6 +963,9 @@ func (s *Server) handleChat(ctx context.Context, client *Client, content string,
 
 	outChars := 0
 	for ev := range events {
+		if ev.Type == "file_changed" {
+			continue // the executor already sent the successful mutation notice
+		}
 		// "stream" deltas are high-frequency and individually disposable — a
 		// dropped one loses a few characters. Everything else carries UI STATE
 		// (tool_use/tool_result, plugin add/remove, attachment, stream_end,

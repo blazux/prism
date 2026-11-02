@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,21 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"prism/internal/memory"
+	"prism/internal/rag"
 )
+
+func TestRAGFailureStatusDistinguishesStartupAndRetainedIndex(t *testing.T) {
+	for _, err := range []error{rag.ErrEmbeddingIndexMismatch, errors.New("fixture failure")} {
+		cold := ragApplyFailureStatus(err, false)
+		warm := ragApplyFailureStatus(err, true)
+		if !strings.Contains(cold, "unavailable") || strings.Contains(cold, "remains active") || !strings.Contains(warm, "remains active") {
+			t.Fatal("RAG status misrepresents index availability", cold, warm)
+		}
+		if err == rag.ErrEmbeddingIndexMismatch && !strings.Contains(cold, "Restore the previous connection") {
+			t.Fatal("embedding identity mismatch lost its recovery instructions")
+		}
+	}
+}
 
 func TestEmbeddingHotReload(t *testing.T) {
 	dsn := os.Getenv("PRISM_TEST_SECRETS_URL")
