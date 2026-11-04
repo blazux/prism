@@ -2100,8 +2100,10 @@ async function renderMultiUserSecretsTab(container) {
             <span class="config-secret-name">${escHtml(name)}</span>
             <span class="config-secret-env">$${escHtml(name.toUpperCase().replace(/[^A-Z0-9]/g,'_'))}</span>
           </div>
-          ${myGroups.length > 0 ? `<button class="config-secret-del" style="margin-right:4px" title="Share with group (moves it — every member's agent can then use it)" data-name="${escHtml(name)}">⇧</button>` : ''}
-          <button class="config-secret-del" title="Delete" data-name="${escHtml(name)}">✕</button>`
+          <div class="config-secret-actions">
+            ${myGroups.length > 0 ? `<button class="config-secret-del" title="Share with group (moves it — every member's agent can then use it)" data-name="${escHtml(name)}">⇧</button>` : ''}
+            <button class="config-secret-del" title="Delete" data-name="${escHtml(name)}">✕</button>
+          </div>`
         row.querySelector('button[title^="Delete"]').addEventListener('click', async function() {
           const n = this.dataset.name
           if (!await PrismModal.confirm(`Delete secret "${n}"?`, { danger: true })) return

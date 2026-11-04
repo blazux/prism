@@ -1916,6 +1916,18 @@ body {
   align-items: center;
   gap: 10px;
 }
+#user-secrets-list .config-secret-info {
+  min-width: 0;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.config-secret-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: 10px;
+}
 .config-secret-name {
   font-size: 13px;
   color: var(--text);
