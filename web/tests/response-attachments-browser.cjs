@@ -6,16 +6,24 @@ function fn(name){const start=source.indexOf('function '+name+'(');const end=sou
  const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{})});
  try {
  const page=await browser.newPage({viewport:{width:420,height:500}});
+ let savedImageBytes;
  await page.route('http://fixture.invalid/**',route=>{
-  if(new URL(route.request().url()).pathname==='/api/chat/attachment')return route.fulfill({headers:{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename=report.pdf'},body:'fixture download'});
+  const url=new URL(route.request().url());
+  if(url.pathname==='/api/chat/attachment'){
+   if(url.searchParams.get('preview')==='1')return route.fulfill({contentType:'image/jpeg',body:Buffer.from(savedImageBytes,'base64')});
+   return route.fulfill({headers:{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename=report.pdf'},body:'fixture download'});
+  }
   return route.fulfill({contentType:'text/html',body:'<div id="chat-messages" style="max-width:380px"></div>'});
  });
  await page.goto('http://fixture.invalid/');
+ const install=async()=>{
  await page.addStyleTag({path:require('path').join(__dirname,'../style.css')});
  await page.addScriptTag({path:require('path').join(__dirname,'../theme.js')});
  await page.addScriptTag({content:`let pendingAttachments=[],currentAssistantEl=null,currentAssistantContent='';
  const chatWasAtBottom=()=>true,scrollChat=()=>{},setStreaming=()=>{},renderMarkdown=s=>s,fmtTime=()=>'',userChip=()=>'',agentChip=()=>'',AGENT_NAME='Agent',escHtml=s=>String(s),formatToolInput=()=>'';
  `+['showChatImagePreview','prepareChatImages','appendUserMessage','appendStream','appendResponseAttachment','appendToolUse','appendToolResult','finalizeStream','restoreChatHistory'].map(fn).join('\n')});
+ };
+ await install();
  await page.evaluate(()=>{pendingAttachments.push({path:'/api/chat/attachment?session=default&id=abc&name=a.txt',title:'a <b>.txt'});finalizeStream()});
  assert.equal(await page.locator('.assistant a .chat-attachment-name').textContent(),'a <b>.txt');
  assert.equal(await page.locator('.chat-attachment-meta').textContent(),'TXT · Download');assert.equal(await page.locator('b').count(),0);
@@ -29,6 +37,7 @@ function fn(name){const start=source.indexOf('function '+name+'(');const end=sou
   const ctx=canvas.getContext('2d');ctx.fillStyle='#9372c4';ctx.fillRect(0,0,canvas.width,canvas.height);
   return canvas.toDataURL('image/jpeg').split(',')[1];
  });
+ savedImageBytes=imageBytes;
  await page.evaluate(bytes=>{document.getElementById('chat-messages').innerHTML='';pendingAttachments.push({images:[bytes],path:'/api/chat/attachment?id=abc',title:'image.png'});finalizeStream()},imageBytes);
  assert.equal(await page.locator('img').count(),1);assert.equal(await page.locator('a').count(),1);
  const thumbnail=page.locator('.chat-response-attachments img');
@@ -68,6 +77,31 @@ function fn(name){const start=source.indexOf('function '+name+'(');const end=sou
   assert(await page.locator('dialog').isVisible());
   await page.keyboard.press('Escape');
   await page.locator('dialog').waitFor({state:'detached'});
+ }
+ await page.evaluate(()=>{
+  localStorage.setItem('history',JSON.stringify([
+   {role:'user',content:'Draw a landscape'},
+   {role:'tool',toolName:'add_attachment',content:JSON.stringify({attachment:{name:'landscape.png',url:'/api/chat/attachment?session=default&id=snapshot&name=landscape.png'}})},
+   {role:'assistant',content:'Here is the landscape.'}
+  ]));
+ });
+ for(let reload=0;reload<2;reload++){
+  await page.reload();
+  await install();
+  await page.evaluate(()=>restoreChatHistory(JSON.parse(localStorage.getItem('history'))));
+  const restored=page.locator('.assistant .chat-response-attachments img');
+  await restored.evaluate(image=>{image.loading='eager';return image.decode()});
+  assert.equal(await restored.count(),1,'one image restored under the assistant reply');
+  assert((await restored.getAttribute('src')).endsWith('&preview=1'));
+  assert.equal(await page.locator('.tool .chat-response-attachments').count(),0);
+  await restored.click();
+  await page.locator('dialog img').evaluate(image=>image.decode());
+  assert(await page.locator('dialog img').evaluate(image=>image.complete&&image.naturalWidth>0));
+  await page.keyboard.press('Escape');
+  await page.locator('dialog').waitFor({state:'detached'});
+  const restoredDownload=page.waitForEvent('download');
+  await page.locator('.assistant .chat-attachment-card').click();
+  await restoredDownload;
  }
  await page.evaluate(()=>{
   document.getElementById('chat-messages').innerHTML='';

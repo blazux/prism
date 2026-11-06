@@ -765,6 +765,13 @@ function appendResponseAttachment(parent, attachment) {
     const name = attachment.title || 'attachment'
     const downloadLabel = navigator.language?.startsWith('fr') ? 'Télécharger' : 'Download'
     const extension = name.match(/\.([a-z0-9]{1,10})$/i)?.[1].toUpperCase()
+    if (!attachment.images?.length && /^(JPE?G|PNG|GIF|WEBP)$/.test(extension || '')) {
+      const image = document.createElement('img')
+      image.src = attachment.path + '&preview=1'
+      image.alt = name
+      image.loading = 'lazy'
+      box.appendChild(image)
+    }
     const link = document.createElement('a')
     link.className = 'chat-attachment-card'
     link.href = attachment.path
@@ -794,6 +801,7 @@ function appendResponseAttachment(parent, attachment) {
   if (box.childNodes.length) {
     parent.appendChild(box)
     prepareChatImages(box)
+    return box
   }
 }
 
@@ -919,10 +927,12 @@ function restoreChatHistory(messages) {
   sep.className = 'chat-history-sep'
   sep.textContent = '— previous conversation —'
   msgs.appendChild(sep)
+  let responseAttachments = []
   for (const m of messages) {
     const timeStr = m.createdAt ? fmtTime(new Date(m.createdAt)) : ''
     const timeBadge = timeStr ? ` <span class="chat-msg-time">${timeStr}</span>` : ''
     if (m.role === 'user') {
+      responseAttachments = []
       const div = document.createElement('div')
       div.className = 'chat-msg user'
       div.innerHTML = `<div class="chat-msg-role">${userChip()} You${timeBadge}</div><div class="chat-msg-content">${escHtml(m.content)}</div>`
@@ -932,6 +942,8 @@ function restoreChatHistory(messages) {
       div.className = 'chat-msg assistant'
       div.innerHTML = `<div class="chat-msg-role">${agentChip()} ${escHtml(AGENT_NAME)}${timeBadge}</div><div class="chat-msg-content">${renderMarkdown(m.content)}</div>`
       msgs.appendChild(div)
+      for (const attachment of responseAttachments) div.appendChild(attachment)
+      responseAttachments = []
       prepareChatImages(div)
     } else if (m.role === 'error') {
       appendError(m.content)
@@ -956,7 +968,10 @@ function restoreChatHistory(messages) {
       if (m.toolName === 'add_attachment') {
         try {
           const result = JSON.parse(m.content)
-          if (result.attachment) appendResponseAttachment(div, {path: result.attachment.url, title: result.attachment.name})
+          if (result.attachment) {
+            const box = appendResponseAttachment(div, {path: result.attachment.url, title: result.attachment.name})
+            if (box) responseAttachments.push(box)
+          }
         } catch {}
       }
     }

@@ -34,8 +34,19 @@ func (s *Server) handleChatAttachment(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(name)}))
+	contentType, disposition := "application/octet-stream", "attachment"
+	if r.URL.Query().Get("preview") == "1" {
+		contentType = http.DetectContentType(data)
+		switch contentType {
+		case "image/jpeg", "image/png", "image/gif", "image/webp":
+			disposition = "inline"
+		default:
+			http.Error(w, "image preview unavailable", http.StatusUnsupportedMediaType)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filepath.Base(name)}))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
