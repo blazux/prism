@@ -15,8 +15,7 @@ function fn(name){const start=source.indexOf('function '+name+'(');const end=sou
  await page.addScriptTag({path:require('path').join(__dirname,'../theme.js')});
  await page.addScriptTag({content:`let pendingAttachments=[],currentAssistantEl=null,currentAssistantContent='';
  const chatWasAtBottom=()=>true,scrollChat=()=>{},setStreaming=()=>{},renderMarkdown=s=>s,fmtTime=()=>'',userChip=()=>'',agentChip=()=>'',AGENT_NAME='Agent',escHtml=s=>String(s),formatToolInput=()=>'';
- function appendStream(){const box=document.createElement('div');box.className='chat-msg assistant';const body=document.createElement('div');box.appendChild(body);document.getElementById('chat-messages').appendChild(box);currentAssistantEl=body;}
- `+['appendResponseAttachment','finalizeStream','restoreChatHistory'].map(fn).join('\n')});
+ `+['showChatImagePreview','prepareChatImages','appendUserMessage','appendStream','appendResponseAttachment','appendToolUse','appendToolResult','finalizeStream','restoreChatHistory'].map(fn).join('\n')});
  await page.evaluate(()=>{pendingAttachments.push({path:'/api/chat/attachment?session=default&id=abc&name=a.txt',title:'a <b>.txt'});finalizeStream()});
  assert.equal(await page.locator('.assistant a .chat-attachment-name').textContent(),'a <b>.txt');
  assert.equal(await page.locator('.chat-attachment-meta').textContent(),'TXT · Download');assert.equal(await page.locator('b').count(),0);
@@ -25,8 +24,51 @@ function fn(name){const start=source.indexOf('function '+name+'(');const end=sou
  assert.equal(await page.locator('a').count(),1);assert.equal(await page.locator('a').getAttribute('download'),'report.pdf');
  const downloadEvent=page.waitForEvent('download');await page.locator('.chat-attachment-card').click();
  assert.equal((await downloadEvent).suggestedFilename(),'report.pdf');
- await page.evaluate(()=>{document.getElementById('chat-messages').innerHTML='';pendingAttachments.push({images:['YWJj'],path:'/api/chat/attachment?id=abc',title:'image.png'});finalizeStream()});
+ const imageBytes = await page.evaluate(()=>{
+  const canvas=document.createElement('canvas');canvas.width=2400;canvas.height=1600;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#9372c4';ctx.fillRect(0,0,canvas.width,canvas.height);
+  return canvas.toDataURL('image/jpeg').split(',')[1];
+ });
+ await page.evaluate(bytes=>{document.getElementById('chat-messages').innerHTML='';pendingAttachments.push({images:[bytes],path:'/api/chat/attachment?id=abc',title:'image.png'});finalizeStream()},imageBytes);
  assert.equal(await page.locator('img').count(),1);assert.equal(await page.locator('a').count(),1);
+ const thumbnail=page.locator('.chat-response-attachments img');
+ await thumbnail.evaluate(image=>image.decode());
+ const thumbWidth=(await thumbnail.boundingBox()).width;
+ await thumbnail.click();
+ assert(await page.locator('dialog.chat-image-preview').isVisible(),'attachment image opens on click');
+ assert.equal(await page.locator('dialog img').getAttribute('src'),await thumbnail.getAttribute('src'));
+ assert((await page.locator('dialog img').boundingBox()).width>thumbWidth,'preview enlarges the thumbnail');
+ assert(await page.locator('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth),'preview fits narrow screens');
+ await page.evaluate(()=>{window.chatEscapeCount=0;document.addEventListener('keydown',e=>{if(e.key==='Escape')window.chatEscapeCount++})});
+ await page.keyboard.press('Escape');
+ await page.locator('dialog').waitFor({state:'detached'});
+ assert.equal(await page.evaluate(()=>window.chatEscapeCount),0,'Escape must leave the chat dock open');
+ assert(await thumbnail.evaluate(image=>document.activeElement===image),'focus returns to the image');
+ await thumbnail.press('Enter');
+ assert(await page.locator('dialog').isVisible(),'image opens with keyboard');
+ await page.mouse.click(2,2);
+ await page.locator('dialog').waitFor({state:'detached'});
+ await thumbnail.press('Space');
+ await page.getByRole('button',{name:'Close',exact:true}).click();
+ await page.locator('dialog').waitFor({state:'detached'});
+ await page.evaluate(bytes=>{
+  restoreChatHistory([{role:'assistant',content:'<p><a href="/must-not-navigate"><img src="data:image/jpeg;base64,'+bytes+'" alt="Restored image"></a></p>'}]);
+ },imageBytes);
+ await page.getByRole('button',{name:'Enlarge Restored image',exact:true}).click();
+ assert.equal(new URL(page.url()).pathname,'/','preview prevents an enclosing link from navigating');
+ await page.keyboard.press('Escape');
+ await page.locator('dialog').waitFor({state:'detached'});
+ await page.evaluate(bytes=>{
+  appendUserMessage('Photo',[bytes],[]);
+  appendToolUse({id:'screenshot',tool:'browser',input:{}});
+  appendToolResult({id:'screenshot',output:'Done',images:[bytes]});
+ },imageBytes);
+ for(const selector of ['.chat-msg-images img','#tool-screenshot img']){
+  await page.locator(selector).click();
+  assert(await page.locator('dialog').isVisible());
+  await page.keyboard.press('Escape');
+  await page.locator('dialog').waitFor({state:'detached'});
+ }
  await page.evaluate(()=>{
   document.getElementById('chat-messages').innerHTML='';
   const reply=document.createElement('div');reply.className='chat-msg assistant';
@@ -45,6 +87,6 @@ function fn(name){const start=source.indexOf('function '+name+'(');const end=sou
  await page.setViewportSize({width:320,height:500});
  await page.evaluate(()=>appendResponseAttachment(document.getElementById('chat-messages'),{path:'/api/chat/attachment?id=long',title:'very-long-file-name-'.repeat(15)+'.pdf'}));
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'long filename overflows narrow chat');
- console.log('Attachments: file-only reply, escaping, history restoration, URL validation inline images, native downloads, theme changes, keyboard focus and narrow layouts passed');
+ console.log('Attachments: image preview, keyboard/backdrop/Escape, focus restoration, history, uploads, tool images, native downloads, themes and narrow layouts passed');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exit(1)});

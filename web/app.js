@@ -682,6 +682,7 @@ function appendUserMessage(text, images, files) {
   const timeStr = fmtTime(new Date())
   div.innerHTML = `<div class="chat-msg-role">${userChip()} You <span class="chat-msg-time">${timeStr}</span></div>${imagesHtml}${filesHtml}<div class="chat-msg-content">${escHtml(text)}</div>`
   msgs.appendChild(div)
+  prepareChatImages(div)
   scrollChat(true) // the user just sent this — always jump to it
 }
 
@@ -699,8 +700,56 @@ function appendStream(content) {
   }
   currentAssistantContent += content
   currentAssistantEl.innerHTML = renderMarkdown(currentAssistantContent)
+  prepareChatImages(currentAssistantEl)
   currentAssistantEl.classList.add('cursor')
   if (wasAtBottom) scrollChat(true)
+}
+
+function showChatImagePreview(image) {
+  const dialog = document.createElement('dialog')
+  dialog.className = 'chat-image-preview'
+  dialog.setAttribute('aria-label', image.alt || 'Image preview')
+  const close = document.createElement('button')
+  close.type = 'button'
+  close.className = 'chat-image-preview-close'
+  close.textContent = '×'
+  close.setAttribute('aria-label', navigator.language?.startsWith('fr') ? 'Fermer' : 'Close')
+  close.onclick = () => dialog.close()
+  const preview = document.createElement('img')
+  preview.src = image.currentSrc || image.src
+  preview.alt = image.alt
+  dialog.append(close, preview)
+  dialog.addEventListener('click', event => {
+    if (event.target === dialog) dialog.close()
+  })
+  // Let the native dialog handle Escape without also closing the chat dock.
+  dialog.addEventListener('keydown', event => {
+    if (event.key === 'Escape') event.stopPropagation()
+  })
+  dialog.addEventListener('close', () => {
+    dialog.remove()
+    if (image.isConnected) image.focus()
+  }, { once: true })
+  document.body.appendChild(dialog)
+  dialog.showModal()
+}
+
+function prepareChatImages(container) {
+  for (const image of container.querySelectorAll('.chat-msg-images img, .tool-block-images img, .chat-msg-content img')) {
+    image.tabIndex = 0
+    image.setAttribute('role', 'button')
+    image.setAttribute('aria-label', (navigator.language?.startsWith('fr') ? 'Agrandir' : 'Enlarge') + ' ' + (image.alt || 'image'))
+    image.onclick = event => {
+      event.preventDefault()
+      showChatImagePreview(image)
+    }
+    image.onkeydown = event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        image.click()
+      }
+    }
+  }
 }
 
 function appendResponseAttachment(parent, attachment) {
@@ -742,7 +791,10 @@ function appendResponseAttachment(parent, attachment) {
     link.append(icon, details, action)
     box.appendChild(link)
   }
-  if (box.childNodes.length) parent.appendChild(box)
+  if (box.childNodes.length) {
+    parent.appendChild(box)
+    prepareChatImages(box)
+  }
 }
 
 function finalizeStream() {
@@ -751,6 +803,7 @@ function finalizeStream() {
   if (currentAssistantEl) {
     currentAssistantEl.classList.remove('cursor')
     currentAssistantEl.innerHTML = renderMarkdown(currentAssistantContent)
+    prepareChatImages(currentAssistantEl)
     if (pendingAttachments.length > 0) {
       const assistantDiv = currentAssistantEl.closest('.chat-msg.assistant')
       if (assistantDiv) {
@@ -832,6 +885,7 @@ function appendToolResult(msg) {
           imgContainer.appendChild(img)
         })
         toolBlock.appendChild(imgContainer)
+        prepareChatImages(imgContainer)
       }
     }
   }
@@ -878,6 +932,7 @@ function restoreChatHistory(messages) {
       div.className = 'chat-msg assistant'
       div.innerHTML = `<div class="chat-msg-role">${agentChip()} ${escHtml(AGENT_NAME)}${timeBadge}</div><div class="chat-msg-content">${renderMarkdown(m.content)}</div>`
       msgs.appendChild(div)
+      prepareChatImages(div)
     } else if (m.role === 'error') {
       appendError(m.content)
     } else if (m.role === 'tool') {
