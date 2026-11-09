@@ -95,7 +95,7 @@ func authPublicPath(p string) bool {
 	case "/login", "/signup", "/api/login", "/api/signup", "/api/me":
 		return true
 	}
-	return webhookPublicPath(p)
+	return webhookPublicPath(p) || teamsPublicPath(p)
 }
 
 // webhookPublicPath exempts inbound webhook calls from the dashboard's
@@ -527,3 +527,6 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
+
+// Only the activity receiver uses Microsoft authentication. Configuration stays private.
+func teamsPublicPath(p string) bool { return strings.HasPrefix(p, teamsIncomingPrefix) }

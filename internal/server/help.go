@@ -230,6 +230,11 @@ func (s *Server) groupStatusFor(groupID int64) func(ctx context.Context) string 
 		} else {
 			sb.WriteString("- Webex: no bot for this group — admin console → Shared agent → Webex integration\n")
 		}
+		if cfg, secret, err := s.teamsConfig(ctx, groupID); err == nil && cfg.configured(secret) {
+			sb.WriteString("- Teams: bot configured for this group; conversation history is separate from the Room\n")
+		} else {
+			sb.WriteString("- Teams: not configured — admin console → Shared agent → Microsoft Teams integration\n")
+		}
 		return sb.String()
 	}
 }

@@ -48,9 +48,11 @@ func TestRAGReadOnly_GroupWritesRefused(t *testing.T) {
 }
 
 func TestAgentSettings_ContextAndStore(t *testing.T) {
-	room := &ToolExecutor{sessionID: "room-g3"}
-	if out, _ := room.agentSettings(context.Background(), "get", nil); !strings.Contains(out, "admin console") {
-		t.Errorf("group agent must redirect to the admin console: %q", out)
+	for _, session := range []string{"room-g3", "webex-g3-space", "teams-g3-thread"} {
+		room := &ToolExecutor{sessionID: session}
+		if out, _ := room.agentSettings(context.Background(), "get", nil); !strings.Contains(out, "admin console") {
+			t.Errorf("group agent must redirect to the admin console: %q", out)
+		}
 	}
 	e := &ToolExecutor{sessionID: "u1-main"}
 	if out, _ := e.agentSettings(context.Background(), "get", nil); !strings.Contains(out, "not available") {

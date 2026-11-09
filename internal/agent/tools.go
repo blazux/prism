@@ -249,7 +249,7 @@ var ToolDefinitions = []ollama.Tool{
 					"action":  {Type: "string", Description: "One of: list, add, update, remove — update edits an existing webhook in place (URL and token unchanged)", Enum: []string{"list", "add", "update", "remove"}},
 					"name":    {Type: "string", Description: "add/update: a short label, e.g. 'github-ci'"},
 					"prompt":  {Type: "string", Description: "add/update: instructions wrapping the payload, e.g. 'Summarize this CI event in one line: {{content}}'"},
-					"deliver": {Type: "string", Description: "add/update: One of: telegram, slack, webex — push the answer there too (empty = none)", Enum: []string{"telegram", "slack", "webex"}},
+					"deliver": {Type: "string", Description: "add/update: One of: telegram, slack, webex, teams — push the answer there too (empty = none)", Enum: []string{"telegram", "slack", "webex", "teams"}},
 					"respond": {Type: "boolean", Description: "add/update: reply synchronously with your answer in the HTTP response (off by default)"},
 					"session": {Type: "string", Description: "add/update: chat session (workspace) the turn runs in — empty = a dedicated webhook-<id> session so the feed never lands in a human chat"},
 					"model":   {Type: "string", Description: "add/update: model for this webhook's turns — empty = deployment default"},
@@ -383,7 +383,7 @@ var ToolDefinitions = []ollama.Tool{
 		Function: ollama.ToolFunction{
 			Name: "cron",
 			Description: "Manage scheduled cron jobs running inside the workspace container. Actions: list, add (name+schedule+command, plus a description), remove (name). Jobs also appear read-only in the user's Tasks list.\n" +
-				"To deliver a result to the user on a messaging channel on a schedule, make the command POST a prompt to yourself with delivery enabled. Set \"deliver\" to \"telegram\", \"slack\" or \"webex\" (Webex posts to the announcement room the group admin picked in the Webex config), e.g.:\n" +
+				"To deliver a result to the user on a messaging channel on a schedule, make the command POST a prompt to yourself with delivery enabled. Set \"deliver\" to \"telegram\", \"slack\", \"webex\" or \"teams\" (Webex/Teams post to the announcement conversation configured for this group in Admin → Shared agent), e.g.:\n" +
 				"curl -s -X POST $PRISM_URL/api/chat -H \"Authorization: Bearer $PRISM_TOKEN\" -H 'Content-Type: application/json' -d '{\"message\":\"Summarize my unread emails in 5 bullet points\",\"session\":\"'$PRISM_SESSION'\",\"deliver\":\"telegram\"}'\n" +
 				"ALWAYS use $PRISM_SESSION for \"session\" (never a hardcoded channel name like \"telegram\"/\"webex\") — it's the session you're in right now, and it carries THIS chat's knowledge base/MCP servers along to the scheduled run. A hardcoded literal creates a different, empty session with no tools.\n" +
 				"Use \"deliver\" only when you want the model's ANSWER delivered. To post an exact text, push a raw line instead:\n" +

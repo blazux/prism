@@ -24,7 +24,7 @@ var canonicalSessionRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 var userPrefixRe = regexp.MustCompile(`^u\d+-`)
 var userIDPrefixRe = regexp.MustCompile(`^u\d+`)
-var groupScopeInSessionRe = regexp.MustCompile(`^(?:room-|webex-)(g\d+)(?:-|$)`)
+var groupScopeInSessionRe = regexp.MustCompile(`^(?:room-|webex-|teams-)(g\d+)(?:-|$)`)
 
 // groupScopeFromSessionID extracts the group scope ("g<id>") embedded in a
 // shared-agent session id — "room-g<id>" (rooms.go) or "webex-g<id>-<roomID>"

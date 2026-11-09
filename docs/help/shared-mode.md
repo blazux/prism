@@ -67,8 +67,11 @@ can search its earlier exchanges and read older room messages when needed.
 The shared agent runs with the rights the group admin gives it (the global tool
 policy tightened by the group's restrictions, at member level), uses the group's
 knowledge base, MCP servers and secrets, and is the same agent that answers on
-the group's Webex bot. Its name, avatar, model, system prompt and turn budget
+the group's Webex and Teams bots. Its name, avatar, model, system prompt and turn budget
 are set in **Admin console → Shared agent**.
+
+Teams setup is described in [Connecting Microsoft Teams](connect-teams.md).
+Webex uses an outbound connection; Teams requires a public HTTPS callback.
 
 ## What is group-scoped
 Group administrators manage the knowledge base, MCP servers and tool access in
@@ -82,7 +85,7 @@ form. Group secrets can also be managed by members, as shown below.
 | Group secrets | Settings → Secrets (any member) or Admin → Secrets | Settings → Secrets |
 | Tool access | Admin → Tool access | badges in Settings → Tools |
 | Shared widgets gallery | **Shared widgets** button in the header, share button on each widget | same gallery |
-| Webex bot | Admin → Shared agent | — |
+| Webex and Teams bots | Admin → Shared agent | — |
 
 There are **no personal** MCP servers or knowledge collections in shared mode:
 a member with no group has neither, and Settings says so (*"You're not part of

@@ -14,7 +14,7 @@ func (s *Server) handleAdminConsolePage(w http.ResponseWriter, r *http.Request) 
 
 // Deployment telephony configuration stays in administration. The app only
 // exposes call activity, archives and outbound operations.
-const adminConsolePage = adminConsoleHead + adminTelephonyPane + adminConsoleMid + adminTelephonyJS + adminConsoleTail
+const adminConsolePage = adminConsoleHead + adminTelephonyPane + adminConsoleMid + adminTeamsJS + adminTelephonyJS + adminConsoleTail
 
 // adminConsoleHead: document head, styles, top bar, nav shell, and the
 // global-admin panes up to Apps.
@@ -100,7 +100,25 @@ const adminConsoleMid = `
       <label style="margin-top:12px">Announcement room</label>
       <div class="hint" style="margin-bottom:6px">Where scheduled jobs post (cron with deliver:"webex"). Only group spaces the bot was added to are listed — add the bot to a space, then refresh.</div>
       <div class="row"><select id="wx-room" style="min-width:260px"></select><button onclick="loadWebexRooms()">Refresh list</button><span id="wx-room-status" class="hint" style="margin:0"></span></div>
-      <div class="row"><button class="primary" onclick="saveWebex()">Save Webex</button><button onclick="disconnectWebex()">Disconnect</button><span id="wx-status"></span></div></div>
+      <div class="row"><button class="primary" onclick="saveWebex()">Save Webex</button><button onclick="disconnectWebex()">Disconnect</button><span id="wx-status"></span></div>
+      <h2 style="margin-top:26px">Microsoft Teams integration</h2>
+      <div class="hint">Connect this group's shared agent to Teams. It answers direct messages and @mentions in group chats and channels. <a href="https://microsoft.github.io/teams-sdk/teams/azure-configuration/" target="_blank" rel="noopener noreferrer">Register a bot</a> with a single-tenant Microsoft Entra application, then enable its Microsoft Teams channel.</div>
+      <label for="tm-app">Application (client) ID</label><input id="tm-app" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" style="width:100%">
+      <label for="tm-tenant">Directory (tenant) ID</label><input id="tm-tenant" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" style="width:100%">
+      <label for="tm-secret">Client secret value</label><input id="tm-secret" type="password" placeholder="Paste the secret value; leave blank to keep the saved secret" autocomplete="new-password" style="width:100%">
+      <label for="tm-endpoint">Messaging endpoint</label><input id="tm-endpoint" readonly style="width:100%" aria-describedby="tm-endpoint-help">
+      <div class="hint" id="tm-endpoint-help">Set this endpoint in the bot's Microsoft configuration. Microsoft must be able to reach it over public HTTPS.</div>
+      <div id="tm-state" role="status" style="font-size:12px;margin:6px 0;color:var(--text3)"></div>
+      <div class="hint">Per-sender permissions: Microsoft Entra user object IDs, separated by commas or spaces. Use <code>*</code> for everyone who can talk to this bot in the configured tenant. Blank denies access. Group tool restrictions still apply.</div>
+      <label for="tm-read">Query knowledge base</label><input id="tm-read" placeholder="* or Entra user object IDs" style="width:100%">
+      <label for="tm-write">Modify knowledge base</label><input id="tm-write" placeholder="Entra user object IDs" style="width:100%">
+      <label for="tm-tools">Trigger tools (web, MCP, docker…)</label><input id="tm-tools" placeholder="Entra user object IDs" style="width:100%">
+      <label for="tm-room">Announcement conversation</label>
+      <div class="hint">Scheduled answers with deliver:&quot;teams&quot; go here. Mention the bot in a group chat or channel thread, then refresh. Private chats are excluded.</div>
+      <div class="row"><select id="tm-room" style="min-width:0;max-width:100%;flex:1"></select><button type="button" onclick="loadTeamsConversations()">Refresh list</button></div>
+      <div class="row"><button id="tm-save" class="primary" type="button" onclick="saveTeams()">Save Teams</button><button id="tm-disconnect" type="button" onclick="disconnectTeams()">Disconnect</button><button id="tm-package" type="button" onclick="downloadTeamsPackage()">Download Teams app</button><span id="tm-status" role="status"></span></div>
+      <div class="hint">After saving, download the app package and upload it in Teams → Apps → Manage your apps → Upload an app. Your Microsoft administrator may need to allow custom apps. Configuration saved here does not verify Microsoft credentials or endpoint reachability.</div>
+</div>
     <div class="pane" data-pane="rag"><h2>Knowledge base (RAG)</h2><span class="pane-scope">Group</span><div class="hint">Collections shared with the whole group: the shared agent and every member's agent search them. Members see them read-only in their settings — you curate them here. Uploading to a new name creates the collection; uploading a file with the same name as an existing document replaces it.</div>
       <label>Group</label><select id="rg-group"></select>
       <div id="grag" class="list" style="max-height:none"></div>
@@ -160,7 +178,7 @@ async function uact(id,action){
 // ── Groups ──
 async function createGroup(){const n=$('gname').value.trim();if(!n)return;await jpost('/api/admin/groups',{action:'create',name:n});$('gname').value='';loadGroups();fillGroupPickers();}
 async function gact(b){
- if(b.action==='delete'){if(!await PrismModal.confirm('Delete this group? Its shared knowledge base, MCP servers, Webex bot, room history and shared notes are removed. Members keep their personal data.',{danger:true}))return;}
+ if(b.action==='delete'){if(!await PrismModal.confirm('Delete this group? Its shared knowledge base, MCP servers, Webex and Teams bots, shared-agent conversation histories and shared notes are removed. Members keep their personal data.',{danger:true}))return;}
  const r=await jpost('/api/admin/groups',b);
  if(!r.ok){try{const d=await r.json();PrismModal.alert(d.error||'Action failed.');}catch(e){PrismModal.alert('Action failed.');}}
  loadGroups();if(b.action==='delete')fillGroupPickers();}
@@ -566,14 +584,14 @@ async function init(){
  if(!panes.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
  nav.innerHTML=items.map(([p,l])=>p?'<div class="nav-item" data-pane="'+p+'">'+l+'</div>':'<div class="nav-head">'+l+'</div>').join('');
  nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=()=>{const p=el.dataset.pane;show(p);
-  if(p==='ai')renderAITab($('admin-ai-settings'),{admin:true});if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
- $('ag-group').onchange=()=>{loadAgent();loadWebex();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
+  if(p==='ai')renderAITab($('admin-ai-settings'),{admin:true});if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();loadTeams();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
+ $('ag-group').onchange=()=>{loadAgent();loadWebex();loadTeams();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
  $('ag-model').innerHTML='<option value="">(server default)</option>'+MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');
  fillGroupPickers();
  const requested=location.hash.slice(1);
  const first=panes.some(([p])=>p===requested)?requested:panes[0][0];
  show(first);
- if(first==='telephony')loadTelephony();else if(first==='users')loadUsers();else if(first==='agent'){loadAgent();loadWebex();}
+ if(first==='telephony')loadTelephony();else if(first==='users')loadUsers();else if(first==='agent'){loadAgent();loadWebex();loadTeams();}
 }
 init();
 </script></body></html>

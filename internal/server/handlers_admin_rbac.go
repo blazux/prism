@@ -54,7 +54,10 @@ func (s *Server) purgeGroupResidue(groupID int64) {
 	if ms := s.store(); ms != nil {
 		ms.PurgeGroupResidue(ctx, groupID)
 	}
-	// Stop a Webex bot that was running for this group.
+	// Stop channel workers belonging to the deleted group.
+	if teams := s.teamsManager(); teams != nil {
+		teams.cancelGroup(groupID)
+	}
 	s.startChannels()
 	log.Printf("[admin] purged residue of deleted group g%d", groupID)
 }

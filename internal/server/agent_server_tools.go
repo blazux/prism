@@ -158,9 +158,9 @@ func (s *Server) webhookTool(ms *memory.Store, scope string) agent.ServerTool {
 			}
 			deliver := argStr(args, "deliver")
 			switch deliver {
-			case "", "telegram", "slack", "webex":
+			case "", "telegram", "slack", "webex", "teams":
 			default:
-				return "", fmt.Errorf("deliver must be empty, telegram, slack or webex (got %q)", deliver)
+				return "", fmt.Errorf("deliver must be empty, telegram, slack, webex or teams (got %q)", deliver)
 			}
 			session, err := namespaceSession(argStr(args, "session"))
 			if err != nil {
@@ -194,9 +194,9 @@ func (s *Server) webhookTool(ms *memory.Store, scope string) agent.ServerTool {
 			if _, ok := args["deliver"]; ok {
 				d := argStr(args, "deliver")
 				switch d {
-				case "", "telegram", "slack", "webex":
+				case "", "telegram", "slack", "webex", "teams":
 				default:
-					return "", fmt.Errorf("deliver must be empty, telegram, slack or webex (got %q)", d)
+					return "", fmt.Errorf("deliver must be empty, telegram, slack, webex or teams (got %q)", d)
 				}
 				row.Deliver, changed = d, changed+1
 			}
@@ -390,7 +390,7 @@ func (s *Server) channelTool(ms, us *memory.Store) agent.ServerTool {
 		if v, ok, _ := ms.GetSecret(ctx, slackBotTokenSecret); ok && v != "" {
 			slack = "deployment bot connected"
 		}
-		return fmt.Sprintf("Channels:\n- Telegram: %s\n- Slack: %s\n- Webex: per group, configured by a group admin in the admin console → Shared agent", tg, slack)
+		return fmt.Sprintf("Channels:\n- Telegram: %s\n- Slack: %s\n- Webex: per group, configured by a group admin in the admin console → Shared agent\n- Teams: per group, configured in the admin console → Shared agent", tg, slack)
 	}
 	return func(ctx context.Context, args map[string]any) (string, error) {
 		switch action := argStr(args, "action"); action {

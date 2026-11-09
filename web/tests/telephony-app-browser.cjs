@@ -4,7 +4,7 @@ const root=path.resolve(__dirname,'../..'),read=p=>fs.readFileSync(path.join(roo
 const constant=(s,n)=>s.split('const '+n+' = `')[1].split('`')[0];
 const settingsSource=read('internal/server/telephony_app.go'),formSource=read('internal/server/admin_console_telephony.go'),adminSource=read('internal/server/admin_console_page.go');
 const pane=constant(formSource,'adminTelephonyPane'),script=constant(formSource,'adminTelephonyJS');
-const adminPage=constant(adminSource,'adminConsoleHead')+pane+constant(adminSource,'adminConsoleMid')+script+constant(adminSource,'adminConsoleTail');
+const adminPage=constant(adminSource,'adminConsoleHead')+pane+constant(adminSource,'adminConsoleMid')+constant(read('internal/server/admin_console_teams.go'),'adminTeamsJS')+script+constant(adminSource,'adminConsoleTail');
 const settings=constant(settingsSource,'telephonySettingsHead')+pane.replace('class="pane"','class="pane active"')+constant(settingsSource,'telephonySettingsScript')+script+'\nloadTelephony();</script></body></html>';
 (async()=>{
  const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{})});

@@ -19,7 +19,7 @@ import (
 // group admin in the admin console, so it is refused here rather than silently
 // writing to the wrong place.
 func (e *ToolExecutor) agentSettings(ctx context.Context, action string, args map[string]any) (string, error) {
-	if strings.HasPrefix(e.sessionID, "room-") || strings.HasPrefix(e.sessionID, "webex-") {
+	if strings.HasPrefix(e.sessionID, "room-") || strings.HasPrefix(e.sessionID, "webex-") || strings.HasPrefix(e.sessionID, "teams-") {
 		return "This is a group's shared agent: its name, turn budget, reasoning and prompt profile are set by a group admin in the admin console → Shared agent, not here.", nil
 	}
 	if action != "get" && action != "" && action != "set" {

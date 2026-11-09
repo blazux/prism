@@ -99,10 +99,10 @@ func (s *Store) PurgeGroupResidue(ctx context.Context, groupID int64) {
 	s.pool.Exec(ctx, `DELETE FROM avatars WHERE scope = $1`, "agent-"+scope)
 	s.pool.Exec(ctx, `DELETE FROM agent_config WHERE key LIKE $1`, "%:"+scope)
 	s.pool.Exec(ctx, `DELETE FROM secrets WHERE name LIKE $1`, "%:"+scope)
-	s.pool.Exec(ctx, `DELETE FROM conversation_history WHERE session_id = $1 OR session_id LIKE $2`,
-		"room-"+scope, "webex-"+scope+"-%")
-	s.pool.Exec(ctx, `DELETE FROM agent_config WHERE key = $1 OR key LIKE $2`,
-		"system_prompt_personality_room-"+scope, "system_prompt_personality_webex-"+scope+"-%")
+	s.pool.Exec(ctx, `DELETE FROM conversation_history WHERE session_id = $1 OR session_id LIKE $2 OR session_id LIKE $3`,
+		"room-"+scope, "webex-"+scope+"-%", "teams-"+scope+"-%")
+	s.pool.Exec(ctx, `DELETE FROM agent_config WHERE key = $1 OR key LIKE $2 OR key LIKE $3`,
+		"system_prompt_personality_room-"+scope, "system_prompt_personality_webex-"+scope+"-%", "system_prompt_personality_teams-"+scope+"-%")
 }
 
 // ─── tool policy ──────────────────────────────────────────────────────────────

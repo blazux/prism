@@ -11,7 +11,7 @@ func TestScriptSecretNames(t *testing.T) {
 			t.Errorf("valid name %q: %v", name, err)
 		}
 	}
-	for _, name := range []string{"", "___", "123", " api_key ", "u1:key", "prism_token", "Prism-Session", "PRISM_URL", "email_password", "EMAIL-PASSWORD", "caldav_password", "todoist_token", "webex_bot_token:g1", "mcp_oauth_access"} {
+	for _, name := range []string{"", "___", "123", " api_key ", "u1:key", "prism_token", "Prism-Session", "PRISM_URL", "email_password", "EMAIL-PASSWORD", "caldav_password", "todoist_token", "webex_bot_token:g1", "teams_client_secret:g1", "TEAMS_CLIENT_SECRET_G1", "mcp_oauth_access"} {
 		if err := ValidateScriptSecretName(name); !errors.Is(err, ErrSecretName) {
 			t.Errorf("invalid name %q: %v", name, err)
 		}

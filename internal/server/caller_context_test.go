@@ -22,6 +22,7 @@ func TestCallerContextForUser_GroupSessionFallback(t *testing.T) {
 	}{
 		{"webex space session", "webex-g3-Y2lzY29zcGFyazovL3Vz", "g3"},
 		{"room session", "room-g3", "g3"},
+		{"Teams conversation", "teams-g3-abc123", "g3"},
 		{"bare literal (the bug)", "webex", ""},
 		{"generic default board", "default", ""},
 	}
