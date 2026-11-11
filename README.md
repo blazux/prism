@@ -4,7 +4,7 @@
 
 *Also known as: Probably Runs Interesting Stuff Magically*
 
-**[Documentation](https://www.thelastserver.com/docs/installation/)** · [1.0 release notes (draft)](docs/releases/v1.0.0.md)
+**[Documentation](https://www.thelastserver.com/docs/installation/)** · [1.0 release notes](docs/releases/v1.0.0.md)
 
 Yes, another AI dashboard. Except this one runs on your own hardware, with local models or the AI providers you choose, and has the slightly unsettling property of being able to modify its own environment.
 
