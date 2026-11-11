@@ -116,6 +116,7 @@ func (c *Client) postMessages(ctx context.Context, body []byte) (*http.Response,
 
 		resp, err := c.httpClient.Do(req)
 		if err == nil {
+			ollama.ObserveHTTPStatus(ctx, resp.StatusCode)
 			switch resp.StatusCode {
 			// 529 is Anthropic's "overloaded", the one status that genuinely
 			// clears on its own within seconds.

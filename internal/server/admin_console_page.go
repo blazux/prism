@@ -26,12 +26,13 @@ const adminConsoleHead = `<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <script src="/ai-settings.js"></script>
 <script src="/theme.js"></script>
 <script src="/modal.js"></script>
+<script src="/settings-state.js"></script>
 <link rel="stylesheet" href="/admin-console.css"></head><body><div id="adm">
 <div id="adm-top">
 <a id="adm-back" href="/" target="_top" style="display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--text3);font-size:12.5px;transition:color .15s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text3)'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>PRISM</a>
 <span style="color:var(--text3);font-size:12px">›</span>
 <span style="color:var(--text2);font-size:13px;font-weight:600">Administration</span>
-<span class="sp"></span><span id="who"></span></div>
+<span class="sp"></span><span id="settings-save-status" role="status" style="font-size:12px;color:var(--text2)"></span><span id="who"></span></div>
 <div id="adm-main">
   <div id="adm-nav"></div>
   <div id="adm-content">
@@ -81,7 +82,7 @@ const adminConsoleMid = `
       <div class="row"><span id="ag-avatar"></span><input type="file" id="ag-avfile" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" onchange="if(this.files[0])uploadAgentAvatar(this.files[0])"><button onclick="document.getElementById('ag-avfile').click()">Upload</button><button onclick="rmAgentAvatar()">Remove</button><span class="hint" style="margin:0">Shown next to the shared agent in the room.</span></div>
       <label>Model</label><select id="ag-model" style="width:100%"></select>
       <label>System prompt</label><textarea id="ag-prompt" placeholder="You are the team's assistant…"></textarea>
-      <label>Max iterations per turn</label><input id="ag-maxiter" type="number" min="10" max="500" step="5" placeholder="75 (default)" style="width:160px"><span class="hint">Model calls allowed for one message (each tool use is one). 10–500, blank = default. Raise it if the shared agent stops with "iteration limit reached" on long tasks.</span>
+      <label>Max iterations per turn</label><input id="ag-maxiter" type="number" min="10" max="500" step="5" placeholder="75 (default)" style="width:160px"><span class="hint">Each model call counts as one iteration; one response can request several tools. 10–500, blank = default. Raise it if the shared agent stops with "iteration limit reached" on long tasks.</span>
       <div class="row" style="gap:10px;align-items:center"><label class="toggle-switch" title="Extended reasoning"><input id="ag-thinking" type="checkbox" checked><span class="toggle-track"></span></label><span>Extended reasoning</span></div><span class="hint">Thinking mode for models that have one (Qwen3, DeepSeek-R1, gpt-oss…). Off = faster, cheaper replies. No effect on Claude models.</span>
       <label>Prompt profile <select id="ag-profile"><option value="guided">Guided</option><option value="standard">Standard</option><option value="minimal">Minimal</option></select></label><span class="hint">Guided: detailed. Standard: compact (formerly Lean). Minimal: essential contracts and documentation on demand. Permissions stay the same.</span>
       <label>Reasoning effort</label><select id="ag-effort" style="width:200px"><option value="">Server default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select><span class="hint">How much a thinking model reasons (when extended reasoning is on). Accepted values depend on the model — gpt-oss: low/medium/high, Qwen3.8-Flash-Next: low/medium/xhigh; an unsupported one is refused by the server, pick another.</span>
@@ -151,10 +152,14 @@ const adminConsoleMid = `
 </div></div>
 <script>
 const $=i=>document.getElementById(i);
-let USERS=[],MODELS=[],ME=null,MY=null,ALLGROUPS=[];
+let USERS=[],MODELS=[],ME=null,MY=null,ALLGROUPS=[],ACTIVE_GROUP='',WEBEX_GROUP='';
+const GROUP_PICKERS=['ag-group','ac-group','rg-group','mc-group','gs-group'];
+function groupKey(){return 'prism-admin-group-'+(ME?.user?.id||'owner');}
+function markGroupLoaded(picker,g){const pane=$(picker)?.closest('.pane');if(pane&&$(picker).value===g){pane.dataset.loadedGroup=g;pane.removeAttribute('aria-busy');}}
+function selectAdminGroup(id){if(!adminGroups().some(g=>String(g.groupId||g.id)===String(id)))return;if(ACTIVE_GROUP!==String(id))GROUP_PICKERS.forEach(i=>{const pane=$(i)?.closest('.pane');if(pane){pane.dataset.loadedGroup='';pane.setAttribute('aria-busy','true');}});ACTIVE_GROUP=String(id);GROUP_PICKERS.forEach(i=>{if($(i))$(i).value=ACTIVE_GROUP;});try{localStorage.setItem(groupKey(),ACTIVE_GROUP);}catch(_){}}
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-async function jget(u){const r=await fetch(u);if(!r.ok)return null;return r.json();}
-async function jpost(u,b){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});}
+async function jget(u){const r=await fetch(u);if(!r.ok){PrismSettingsState.status('Could not load: '+(await r.text()).slice(0,180));return null;}return r.json();}
+async function jpost(u,b,controls=[]){const options={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)};const snapshot=PrismSettingsState.begin(controls);try{const r=await fetch(u,options);if(r.ok)PrismSettingsState.saved(snapshot);else PrismSettingsState.status('Could not save: '+(await r.clone().text()).slice(0,200));return r;}catch(e){PrismSettingsState.status('Could not save · your edits are kept');throw e;}}
 function show(p){document.querySelectorAll('.pane').forEach(x=>x.classList.toggle('active',x.dataset.pane===p));
  document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.pane===p));}
 
@@ -176,7 +181,7 @@ async function uact(id,action){
  loadUsers();}
 
 // ── Groups ──
-async function createGroup(){const n=$('gname').value.trim();if(!n)return;await jpost('/api/admin/groups',{action:'create',name:n});$('gname').value='';loadGroups();fillGroupPickers();}
+async function createGroup(){const n=$('gname').value.trim();if(!n)return;await jpost('/api/admin/groups',{action:'create',name:n},[$('gname')]);$('gname').value='';loadGroups();fillGroupPickers();}
 async function gact(b){
  if(b.action==='delete'){if(!await PrismModal.confirm('Delete this group? Its shared knowledge base, MCP servers, Webex and Teams bots, shared-agent conversation histories and shared notes are removed. Members keep their personal data.',{danger:true}))return;}
  const r=await jpost('/api/admin/groups',b);
@@ -213,9 +218,11 @@ async function setPol(t,a){await jpost('/api/admin/tool-policy',{tool:t,access:a
 // Global admins administer every group (even ones they're not a member of);
 // group admins only the groups where they hold the admin role.
 function adminGroups(){return MY.isGlobalAdmin?ALLGROUPS:(MY.groups||[]).filter(g=>g.role==='admin');}
-function fillGroupPickers(){const opts=adminGroups().map(g=>'<option value="'+(g.groupId||g.id)+'">'+esc(g.groupName||g.name)+'</option>').join('');
- ['ag-group','ac-group','rg-group','mc-group','gs-group'].forEach(i=>{if($(i))$(i).innerHTML=opts;});}
-async function loadAgent(){const g=$('ag-group').value;if(!g)return;const c=await jget('/api/room/config?group='+g);if(!c)return;
+function fillGroupPickers(){const groups=adminGroups();const opts=groups.map(g=>'<option value="'+(g.groupId||g.id)+'">'+esc(g.groupName||g.name)+'</option>').join('');
+ let keep=ACTIVE_GROUP;try{keep=keep||localStorage.getItem(groupKey());}catch(_){}
+ GROUP_PICKERS.forEach(i=>{if($(i))$(i).innerHTML=opts;});
+ selectAdminGroup(groups.some(g=>String(g.groupId||g.id)===keep)?keep:(groups[0]?.groupId||groups[0]?.id||''));}
+async function loadAgent(){const g=$('ag-group').value;if(!g)return;const c=await jget('/api/room/config?group='+g);if(!c||g!==$('ag-group').value)return;markGroupLoaded('ag-group',g);
  $('ag-name').value=c.agentName||'';$('ag-prompt').value=c.agentPrompt||'';$('ag-model').value=c.agentModel||'';
  $('ag-maxiter').value=c.agentMaxIter||'';$('ag-thinking').checked=c.agentThinking!==false;$('ag-profile').value=c.agentPromptProfile||(c.agentLean?'standard':'guided');$('ag-effort').value=c.agentReasoning||'';
  $('ag-voice').value=c.agentVoicePrompt||'';renderAgentAvatar();}
@@ -229,7 +236,8 @@ async function uploadAgentAvatar(file){const g=$('ag-group').value;if(!g)return;
 async function rmAgentAvatar(){const g=$('ag-group').value;if(!g)return;await fetch('/api/avatar?scope=agent-g'+g,{method:'DELETE'});renderAgentAvatar(Date.now());}
 async function saveAgent(){const g=$('ag-group').value;const r=await jpost('/api/room/config?group='+g,{agentName:$('ag-name').value,agentPrompt:$('ag-prompt').value,agentModel:$('ag-model').value,
  agentMaxIter:parseInt($('ag-maxiter').value,10)||0,agentThinking:$('ag-thinking').checked,agentPromptProfile:$('ag-profile').value,agentReasoning:$('ag-effort').value,
- agentVoicePrompt:$('ag-voice').value});
+ agentVoicePrompt:$('ag-voice').value},['ag-name','ag-prompt','ag-model','ag-maxiter','ag-thinking','ag-profile','ag-effort','ag-voice'].map($));
+ if(g!==$('ag-group').value)return;
  $('status').textContent=r.ok?'saved ✓':'error';setTimeout(()=>$('status').textContent='',2000);}
 // ── Webex (per-group bot for the shared agent) ──
 // Les salles viennent de l'API Webex (GET /v1/rooms via le token du bot) : on ne
@@ -246,20 +254,20 @@ async function loadWebexRooms(){const g=$('ag-group').value;if(!g)return;
  if(keep&&d.rooms.some(r=>r.id===keep))sel.value=keep;
  st.textContent=d.rooms.length+' space'+(d.rooms.length>1?'s':'');}
 
-async function loadWebex(){const g=$('ag-group').value;if(!g)return;const d=await jget('/api/webex/config?group='+g);if(!d)return;
+async function loadWebex(){const g=$('ag-group').value;WEBEX_GROUP='';if(!g)return;const d=await jget('/api/webex/config?group='+g);if(!d||g!==$('ag-group').value)return;WEBEX_GROUP=g;
  $('wx-read').value=d.ragRead||'';$('wx-write').value=d.ragWrite||'';$('wx-tools').value=d.tools||'';$('wx-token').value='';
  window._wxRoom=d.ownerRoom||'';
  const sel=$('wx-room');
  sel.innerHTML=window._wxRoom?'<option value="'+esc(window._wxRoom)+'">(saved room — refresh to see its name)</option>':'<option value="">— none —</option>';
  if(d.configured)loadWebexRooms();
- $('wx-state').textContent=d.configured?'● Connected — a bot token is set for this group.':'○ Not connected — paste a bot token to connect.';}
-async function saveWebex(){const g=$('ag-group').value;if(!g)return;const b={ragRead:$('wx-read').value,ragWrite:$('wx-write').value,tools:$('wx-tools').value,ownerRoom:$('wx-room').value};
- const t=$('wx-token').value.trim();if(t)b.token=t;const r=await jpost('/api/webex/config?group='+g,b);
+ $('wx-state').textContent=d.configured?'Configured — bot token saved. Send a message in Webex to test the connection.':'○ Not connected — paste a bot token to connect.';}
+async function saveWebex(){const g=$('ag-group').value;if(!g||WEBEX_GROUP!==g)return;const b={ragRead:$('wx-read').value,ragWrite:$('wx-write').value,tools:$('wx-tools').value,ownerRoom:$('wx-room').value};
+ const t=$('wx-token').value.trim();if(t)b.token=t;const r=await jpost('/api/webex/config?group='+g,b,['wx-read','wx-write','wx-tools','wx-room','wx-token'].map($));if(g!==$('ag-group').value)return;
  $('wx-status').textContent=r.ok?'saved ✓':'error';setTimeout(()=>$('wx-status').textContent='',2000);loadWebex();}
-async function disconnectWebex(){const g=$('ag-group').value;if(!g)return;await jpost('/api/webex/config?group='+g,{disconnect:true});loadWebex();}
+async function disconnectWebex(){const g=$('ag-group').value;if(!g||WEBEX_GROUP!==g)return;await jpost('/api/webex/config?group='+g,{disconnect:true});if(g===$('ag-group').value)loadWebex();}
 // ── Group secrets (scoped to this group only — used by its MCP servers/tools) ──
 async function loadGroupSecrets(){const g=$('gs-group').value;if(!g)return;
- const d=await jget('/api/group/secrets?group='+g);const box=$('gsecrets');box.innerHTML='';
+ const d=await jget('/api/group/secrets?group='+g);if(!d||g!==$('gs-group').value)return;markGroupLoaded('gs-group',g);const box=$('gsecrets');box.innerHTML='';
  const names=(d&&d.secrets)||[];
  if(!names.length){box.innerHTML='<div style="color:var(--text3)">No secrets for this group.</div>';return;}
  names.forEach(n=>{const el=document.createElement('div');
@@ -267,7 +275,7 @@ async function loadGroupSecrets(){const g=$('gs-group').value;if(!g)return;
   box.appendChild(el);});}
 async function addGroupSecret(){const g=$('gs-group').value;if(!g)return;const n=$('gs-name').value.trim(),v=$('gs-value').value;if(!n||!v)return;
  $('gs-status').textContent='saving…';
- const r=await jpost('/api/group/secrets?group='+g,{name:n,value:v});
+ const r=await jpost('/api/group/secrets?group='+g,{name:n,value:v},[$('gs-name'),$('gs-value')]);if(g!==$('gs-group').value)return;
  $('gs-status').textContent=r.ok?'saved ✓':'error';setTimeout(()=>$('gs-status').textContent='',2000);
  if(r.ok){$('gs-name').value='';$('gs-value').value='';}loadGroupSecrets();}
 async function removeGroupSecret(name){const g=$('gs-group').value;if(!g)return;
@@ -288,7 +296,7 @@ async function loadGroupMCP(){const g=$('mc-group').value;if(!g)return;
    if(r&&r.ok){const o=document.createElement('option');o.value=n;o.textContent='🔑 '+n;
     this.insertBefore(o,this.querySelector('option[value="__new__"]'));this.value=n;}
    else{PrismModal.alert('Could not save the secret.');}};}catch(e){}
- const d=await jget('/api/group/mcp?group='+g);const box=$('gmcp');box.innerHTML='';
+ const d=await jget('/api/group/mcp?group='+g);if(!d||g!==$('mc-group').value)return;markGroupLoaded('mc-group',g);const box=$('gmcp');box.innerHTML='';
  const list=(d&&d.servers)||[];const pol=(d&&d.policy)||{};
  if(!list.length){box.innerHTML='<div style="color:var(--text3)">No MCP servers connected for this group.</div>';return;}
  const accessSel=t=>{const a=pol[t]||'open';
@@ -305,11 +313,12 @@ async function loadGroupMCP(){const g=$('mc-group').value;if(!g)return;
     '<code style="'+(a==='disabled'?'opacity:.45;text-decoration:line-through':'')+'">'+esc(t.name)+'</code>'+accessSel(t.name)+'</div>';});
   box.appendChild(el);el.innerHTML=html;});}
 async function setToolAccess(tool,access){const g=$('mc-group').value;if(!g)return;
- await jpost('/api/group/tool-policy?group='+g,{tool:tool,access:access});loadGroupMCP();}
+ await jpost('/api/group/tool-policy?group='+g,{tool:tool,access:access});if(g===$('mc-group').value)loadGroupMCP();}
 async function addGroupMCP(){const g=$('mc-group').value;if(!g)return;const n=$('gmcp-name').value.trim(),u=$('gmcp-url').value.trim();if(!n||!u)return;
  $('gmcp-status').textContent='connecting…';
- const r=await jpost('/api/group/mcp?group='+g,{name:n,url:u,authSecret:$('gmcp-secret').value});
+ const r=await jpost('/api/group/mcp?group='+g,{name:n,url:u,authSecret:$('gmcp-secret').value},['gmcp-name','gmcp-url','gmcp-secret'].map($));
  let d=null;try{d=await r.json();}catch(e){}
+ if(g!==$('mc-group').value)return;
  if(r.ok&&d&&d.needs_oauth){
   // The server wants OAuth: open the consent popup and wait for the callback
   // page to signal completion (it posts 'mcp-oauth-done' to this window) —
@@ -344,7 +353,7 @@ async function refreshGroupMCP(id,btn){const g=$('mc-group').value;if(!g)return;
 // elle est injectée telle quelle dans son prompt système (bloc « ## Knowledge Base
 // (RAG) », cf. internal/server/ws.go). Sans elle il ne voit qu'un nom et un nombre
 // de documents — d'où l'avertissement en jaune.
-async function loadGroupRAG(){const g=$('rg-group').value;if(!g)return;const d=await jget('/api/rag/collections?group='+g);const box=$('grag');box.innerHTML='';
+async function loadGroupRAG(){const g=$('rg-group').value;if(!g)return;const d=await jget('/api/rag/collections?group='+g);if(!d||g!==$('rg-group').value)return;markGroupLoaded('rg-group',g);const box=$('grag');box.innerHTML='';
  const list=Array.isArray(d)?d:[];
  const sel=$('grag-col');const keep=sel.value;
  sel.innerHTML=list.map(c=>'<option value=\"'+esc(c.name)+'\">'+esc(c.name)+'</option>').join('')||'<option value=\"\">no collection yet</option>';
@@ -453,7 +462,7 @@ async function uploadGroupDoc(){const g=$('rg-group').value;const col=$('grag-co
   ragProgUI(true,100,'Failed: '+msg);$('grag-status').textContent='error';}
  setTimeout(()=>{$('grag-status').textContent='';ragProgUI(false);},4000);
  loadGroupRAG();}
-async function loadAccess(){const g=$('ac-group').value;if(!g)return;const d=await jget('/api/group/tool-policy?group='+g);if(!d)return;const box=$('ac-tools');box.innerHTML='';
+async function loadAccess(){const g=$('ac-group').value;if(!g)return;const d=await jget('/api/group/tool-policy?group='+g);if(!d||g!==$('ac-group').value)return;markGroupLoaded('ac-group',g);const box=$('ac-tools');box.innerHTML='';
  (d.tools||[]).forEach(t=>{const row=document.createElement('div');row.className='tool-row';
   const locked=t.hardFloor||t.globalAdminOnly;
   const open=!locked&&!t.groupRestricted;
@@ -579,15 +588,17 @@ async function init(){
  if(isGA&&DOCKED&&ME.multiUser!==false)items.push(['telephony','Telephony']);
  if(DOCKED&&ME.multiUser===false&&location.hash.slice(1)==='telephony'){location.replace('/settings.html#telephony');return;}
 
- if(adminGroups().length){items.push(head('Your groups'),['agent','Shared agent'],['rag','RAG'],['mcp','MCP'],['secrets','Secrets'],['access','Tool access']);}
+ if(adminGroups().length){items.push(head('Your groups'),['agent','Shared agent'],['rag','Knowledge'],['mcp','External tools (MCP)'],['secrets','Secrets'],['access','Tool access']);}
  const panes=items.filter(([p])=>p);
  if(!panes.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
  nav.innerHTML=items.map(([p,l])=>p?'<div class="nav-item" data-pane="'+p+'">'+l+'</div>':'<div class="nav-head">'+l+'</div>').join('');
- nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=()=>{const p=el.dataset.pane;show(p);
+ nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=async()=>{const p=el.dataset.pane;if(PrismSettingsState.dirty()){if(!await PrismModal.confirm('Leave this section without saving your edits?'))return;PrismSettingsState.clear();}show(p);
   if(p==='ai')renderAITab($('admin-ai-settings'),{admin:true});if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();loadTeams();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
  $('ag-group').onchange=()=>{loadAgent();loadWebex();loadTeams();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
  $('ag-model').innerHTML='<option value="">(server default)</option>'+MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');
  fillGroupPickers();
+ document.addEventListener('click',e=>{const pane=e.target.closest('.pane'),picker=pane?.querySelector('select[id$="-group"]');if(picker&&pane.dataset.loadedGroup!==picker.value&&e.target.closest('button')){e.preventDefault();e.stopImmediatePropagation();PrismSettingsState.status('Loading the selected group…');}},true);
+ document.addEventListener('change',async e=>{if(!GROUP_PICKERS.includes(e.target.id))return;if(!e.prismConfirmed&&PrismSettingsState.dirty()){e.stopImmediatePropagation();const target=e.target,next=target.value;selectAdminGroup(ACTIVE_GROUP);if(!await PrismModal.confirm('Change group without saving your edits?'))return;PrismSettingsState.clear();selectAdminGroup(next);const retry=new Event('change',{bubbles:true});retry.prismConfirmed=true;target.dispatchEvent(retry);return;}selectAdminGroup(e.target.value);},true);
  const requested=location.hash.slice(1);
  const first=panes.some(([p])=>p===requested)?requested:panes[0][0];
  show(first);

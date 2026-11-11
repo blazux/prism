@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
 test('sending selected images preserves filenames and raw vision payloads', () => {
   const sent = [], displayed = [];
   const input = {value:'Process this image'};
-  const context = {
+  const context = {currentSessionID:'fixture',chatDrafts:new Map(),pendingChats:new Map(),crypto:require('node:crypto').webcrypto,renderChatStatus:()=>{},
     document:{getElementById:()=>input},
     FileReader:class {
       readAsDataURL(file) { this.onload({target:{result:`data:${file.type};base64,${file.bytes}`}}); }
@@ -19,7 +19,7 @@ test('sending selected images preserves filenames and raw vision payloads', () =
   };
   vm.createContext(context);
   vm.runInContext('let pendingImages = [], pendingFiles = [], isStreaming = false;', context);
-  for (const name of ['addImageFromFile', 'sendChat']) {
+  for (const name of ['attachmentDraft', 'addImageFromFile', 'sendChat', 'receiveChatReceipt']) {
     vm.runInContext(source.match(new RegExp(`function ${name}\\([^]*?^}`, 'm'))[0], context);
   }
   context.addImageFromFile({type:'image/png',name:'discard.png',bytes:'REMOVED'});
@@ -29,9 +29,12 @@ test('sending selected images preserves filenames and raw vision payloads', () =
   vm.runInContext('pendingImages.splice(0, 1)', context);
   context.sendChat();
   assert.deepEqual(JSON.parse(JSON.stringify(sent[0])), {
+    requestId:sent[0].requestId,
     type:'chat', content:'Process this image', images:['ORIGINAL'],
     imageNames:['photo.jpg'], disabledTools:[],
   });
+  assert.equal(displayed.length,0);
+  context.receiveChatReceipt({requestId:sent[0].requestId,status:'accepted',replayed:false});
   assert.deepEqual(Array.from(displayed[0][1]), ['ORIGINAL']);
   assert.equal(vm.runInContext('pendingImages.length', context), 0);
   assert.equal(input.value, '');
@@ -39,4 +42,11 @@ test('sending selected images preserves filenames and raw vision payloads', () =
   context.sendChat();
   assert.equal(sent[1].images, undefined);
   assert.equal(sent[1].imageNames, undefined);
+});
+
+test('an image finishing after a workspace switch stays in its original draft',()=>{
+ let finish;const c={currentSessionID:'original',chatDrafts:new Map(),pendingImages:[],pendingFiles:[],renderPreviews(){},FileReader:class{readAsDataURL(){finish=()=>this.onload({target:{result:'data:image/png;base64,KEPT'}})}}};
+ vm.createContext(c);for(const name of ['attachmentDraft','addImageFromFile'])vm.runInContext(source.match(new RegExp(`function ${name}\\([^]*?^}`,'m'))[0],c);
+ c.addImageFromFile({type:'image/png',name:'own.png'});c.chatDrafts.set('original',{images:c.pendingImages,files:[],text:'draft'});c.currentSessionID='other';c.pendingImages=[];finish();
+ assert.equal(c.pendingImages.length,0);assert.equal(c.chatDrafts.get('original').images[0].data,'KEPT');
 });

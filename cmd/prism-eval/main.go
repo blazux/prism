@@ -198,13 +198,16 @@ func main() {
 }
 
 func (c *client) runTask(t Task, run int, keep bool) Result {
-	session := fmt.Sprintf("eval-%s", t.Name)
 	res := Result{Name: t.Name, Tags: t.Tags, Tools: map[string]int{}}
 	fail := func(f string, a ...interface{}) { res.Failures = append(res.Failures, fmt.Sprintf(f, a...)) }
 
 	// Fresh conversation every run: an eval must not benefit from a previous
 	// attempt's history.
-	c.deleteSession(session)
+	session, err := c.createSession("eval-" + t.Name)
+	if err != nil {
+		fail("create evaluation workspace: %v", err)
+		return res
+	}
 	for _, sc := range t.Setup {
 		if _, err := c.builtin(session, sc); err != nil {
 			fail("setup %s: %v", sc.Tool, err)
@@ -466,6 +469,31 @@ func (c *client) deleteSession(session string) {
 	if resp, err := c.http.Do(req); err == nil {
 		resp.Body.Close()
 	}
+}
+
+func (c *client) createSession(name string) (string, error) {
+	body, _ := json.Marshal(map[string]string{"name": name})
+	req, _ := http.NewRequest(http.MethodPost, c.base+"/api/sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	c.auth(req)
+	response, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", response.StatusCode)
+	}
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err = json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.ID == "" {
+		return "", fmt.Errorf("server returned no workspace ID")
+	}
+	return result.ID, nil
 }
 
 func (c *client) ping() error {

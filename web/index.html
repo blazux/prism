@@ -148,11 +148,16 @@
         <div id="chat-header">
           <span class="chat-title" id="chat-agent">Agent</span>
           <div class="chat-header-actions">
+            <button id="chat-summary-button" onclick="toggleChatSummary()" aria-expanded="false" aria-controls="chat-summary">Summary</button>
             <button onclick="resetChat()" title="Permanently clear this workspace’s conversation">Clear chat</button>
             <button class="drawer-close" onclick="toggleChat()" title="Close">✕</button>
           </div>
         </div>
+        <section id="chat-summary" aria-label="Conversation summary" hidden></section>
         <div id="chat-context-bar" style="display:none"></div>
+        <div id="chat-scope" class="chat-context-bar"></div>
+        <div id="chat-delivery-status" role="status" aria-live="polite"></div>
+        <button id="chat-history-more" class="btn" hidden onclick="loadOlderChat()">Load older messages</button>
         <div id="chat-messages"></div>
         <div id="chat-input-area">
           <div id="chat-suggestions" style="display:none"></div>
@@ -256,6 +261,8 @@
   <script src="/theme.js"></script>
 <script src="/modal.js"></script>
 <script src="/resources.js"></script>
+<script src="/tool-preferences.js"></script>
+<script src="/chat-summary.js"></script>
   <script src="/windows.js"></script>
   <script src="/bgfx.js"></script>
   <!-- Interactive terminal (self-hosted) -->

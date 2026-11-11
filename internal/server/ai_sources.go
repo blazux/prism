@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"net/url"
 	"prism/internal/memory"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"prism/internal/anthropic"
 	"prism/internal/ollama"
 )
 
@@ -202,17 +206,87 @@ func (b *sourcesBackend) resolve(ctx context.Context, model string) (aiSource, s
 	}
 	return aiSource{}, "", errors.New("model unavailable; select a model from an AI source")
 }
+
+var sourceRequestSequence atomic.Uint64
+
+// aiTraceDestination identifies only the configured hop (which may be a gateway),
+// never a presumed inference server behind it. URL credentials are not diagnostics.
+func aiTraceDestination(src aiSource) string {
+	raw := src.BaseURL
+	if raw == "" && src.Provider == "anthropic" {
+		raw = anthropic.DefaultBaseURL
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "unavailable"
+	}
+	u.User, u.RawQuery, u.Fragment, u.RawFragment, u.ForceQuery = nil, "", "", "", false
+	return u.String()
+}
+
 func (b *sourcesBackend) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
+	started := time.Now()
+	requestID := fmt.Sprintf("%x-%x", started.UnixNano(), sourceRequestSequence.Add(1))
+	outcome, finish := "route_error", ""
+	var httpStatus atomic.Int64 // 0 means no chat HTTP response was observed.
 	src, model, err := b.resolve(ctx, req.Model)
 	if err != nil {
-		out <- ollama.StreamEvent{Err: err}
+		model = req.Model // Preserve the requested selector when no source resolves.
+	}
+	log.Printf("[model-request] phase=start request_id=%q task_id=%q source_id=%q model=%q provider=%q destination=%q", requestID, req.TaskID, src.ID, model, src.Provider, aiTraceDestination(src))
+	defer func() {
+		if ctx.Err() != nil {
+			outcome = "cancelled"
+		}
+		log.Printf("[model-request] phase=end request_id=%q task_id=%q source_id=%q model=%q provider=%q destination=%q http_status=%d outcome=%q finish_reason=%q duration_ms=%d", requestID, req.TaskID, src.ID, model, src.Provider, aiTraceDestination(src), httpStatus.Load(), outcome, finish, time.Since(started).Milliseconds())
+	}()
+	if err != nil {
+		select {
+		case out <- ollama.StreamEvent{Err: err}:
+		case <-ctx.Done():
+		}
 		return
 	}
 	req.Model = model
 	if src.Provider == "ollama" && src.ModelSettings[model].ContextWindow > 0 {
 		req.Options.NumCtx = src.ModelSettings[model].ContextWindow
 	}
-	src.profile().backendConfig().newChatBackend().Chat(ctx, req, out)
+	requestCtx := ollama.WithHTTPStatusObserver(ctx, func(status int) { httpStatus.Store(int64(status)) })
+	events := make(chan ollama.StreamEvent, 16)
+	go func() {
+		defer close(events)
+		src.profile().backendConfig().newChatBackend().Chat(requestCtx, req, events)
+	}()
+	outcome = "interrupted"
+	failed := false
+	// Drain until the context-bound provider exits, including after cancellation.
+	// Returning before it exits could strand it on a send to the relay channel.
+	for event := range events {
+		if event.Err != nil {
+			failed = true
+			outcome = "error"
+		}
+		if event.Done {
+			switch event.DoneReason {
+			case "stop", "end_turn", "tool_calls", "tool_use", "stop_sequence", "":
+				finish = event.DoneReason
+				if !failed {
+					outcome = "complete"
+				}
+			case "length", "max_tokens", "interrupted", "refusal", "pause_turn":
+				finish = event.DoneReason
+				if !failed {
+					outcome = event.DoneReason
+				}
+			default:
+				finish = "other"
+			}
+		}
+		select {
+		case out <- event:
+		case <-ctx.Done():
+		}
+	}
 }
 func (b *sourcesBackend) Ping(ctx context.Context) error {
 	src, _ := b.source(b.primary)

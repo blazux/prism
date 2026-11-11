@@ -301,10 +301,9 @@ func (m *webexManager) Run(ctx context.Context) {
 	wg.Wait()
 }
 
-// SendToOwner backs `deliver:"webex"` (cron jobs, POST /api/chat). Webex is
-// per-group, so the destination is the announcement room of the single group
-// that has one configured. With several such groups the target is ambiguous and
-// we refuse rather than broadcast into the wrong space — name the group instead.
+// SendToOwner is the legacy unscoped path, reserved for the deployment admin.
+// Session-bound tasks use SendToGroup. With several configured destinations,
+// even the unscoped path must refuse to pick one implicitly.
 func (m *webexManager) SendToOwner(text string) error {
 	var targets []*webexChannel
 	for _, gid := range m.groupsWithToken() {
@@ -325,6 +324,38 @@ func (m *webexManager) SendToOwner(text string) error {
 		}
 		return fmt.Errorf("several groups have an announcement room (%s) — ambiguous target", strings.Join(ids, ", "))
 	}
+}
+
+func (m *webexManager) SendToGroup(groupID int64, text string) error {
+	ctx, cancel := context.WithTimeout(m.s.runtimeContext(), 30*time.Second)
+	defer cancel()
+	ms := m.s.store()
+	if ms == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	groups, err := ms.ListGroups(ctx)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, group := range groups {
+		if group.ID == groupID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("Webex group no longer exists")
+	}
+	c := &webexChannel{s: m.s, groupID: groupID}
+	if !c.Configured() {
+		return fmt.Errorf("Webex is not configured for group %d", groupID)
+	}
+	room := strings.TrimSpace(c.conf(webexOwnerRoomKey))
+	if room == "" {
+		return fmt.Errorf("choose this group's announcement room in Admin → Shared agent → Webex")
+	}
+	return c.postMarkdown(ctx, room, text)
 }
 
 // ─── receive loop ─────────────────────────────────────────────────────────────
@@ -1042,9 +1073,57 @@ func (s *Server) handleWebexSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "webex unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	// Same routing as deliver:"webex": the group that has an announcement room.
-	if err := m.SendToOwner(b.Text); err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+	// Agent capabilities bind the destination to their signed session. Browser
+	// callers name a group explicitly and must belong to it; only the deployment
+	// administrator retains the legacy unambiguous, unscoped delivery path.
+	session, ok := s.sessionFor(r, r.URL.Query().Get("session"))
+	if !ok {
+		writeErr(w, 403, "session access denied")
+		return
+	}
+	var groupID int64
+	if scope := groupScopeFromSessionID(session); scope != "" {
+		groupID, _ = strconv.ParseInt(strings.TrimPrefix(scope, "g"), 10, 64)
+	}
+	if raw := r.URL.Query().Get("group"); raw != "" {
+		requested, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || requested <= 0 {
+			writeErr(w, 400, "invalid group")
+			return
+		}
+		if groupID > 0 && groupID != requested {
+			writeErr(w, 403, "group access denied")
+			return
+		}
+		groupID = requested
+	}
+	u := currentUser(r)
+	if groupID > 0 && !(u != nil && (u.IsGlobalAdmin() || u.ID == -groupID || s.userInGroup(r.Context(), u.ID, groupID))) {
+		writeErr(w, 403, "group access denied")
+		return
+	}
+	if guard := s.buildUserGuard(r.Context(), u); guard != nil {
+		if err := guard("channel", nil); err != nil {
+			writeErr(w, 403, err.Error())
+			return
+		}
+	}
+	if groupID == 0 {
+		if ownGroup, err := s.webexGroupForSession(r.Context(), session); err == nil {
+			groupID = ownGroup
+		}
+	}
+	var sendErr error
+	if groupID > 0 {
+		sendErr = m.SendToGroup(groupID, b.Text)
+	} else if u != nil && u.IsGlobalAdmin() {
+		sendErr = m.SendToOwner(b.Text)
+	} else {
+		writeErr(w, 400, "group required")
+		return
+	}
+	if sendErr != nil {
+		http.Error(w, sendErr.Error(), http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, map[string]interface{}{"ok": true})

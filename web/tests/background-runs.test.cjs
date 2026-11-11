@@ -6,7 +6,7 @@ const source=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'u
 function fn(name,next){return source.slice(source.indexOf(`function ${name}(`),source.indexOf(`function ${next}(`));}
 test('late events from an old workspace socket cannot overwrite the current conversation',()=>{
  const sockets=[],timers=[],seen=[];
- const c={ws:null,currentSessionID:'first',location:{protocol:'https:',host:'fixture'},WebSocket:class {constructor(){sockets.push(this)}},setTimeout:f=>timers.push(f),setContainerBadge:()=>{},handleServerMsg:m=>seen.push(m),console};
+ const c={ws:null,currentSessionID:'first',location:{protocol:'https:',host:'fixture'},WebSocket:class {constructor(){sockets.push(this)}},setTimeout:f=>timers.push(f),setContainerBadge:()=>{},handleServerMsg:m=>seen.push(m),console,renderChatStatus:()=>{}};
  vm.createContext(c);vm.runInContext(fn('connect','send'),c);
  c.connect();const old=sockets[0];old.onclose();c.currentSessionID='second';c.connect();
  old.onmessage({data:'{"type":"stream","content":"old"}'});timers[0]();
@@ -16,7 +16,7 @@ test('late events from an old workspace socket cannot overwrite the current conv
 test('run replay restores baseline, current user message and partial output in order',()=>{
  const seen=[];
  const start=source.indexOf('function handleServerMsg('),end=source.indexOf("    case 'editor_request':",start);
- const c={clearChat:()=>seen.push('clear'),restoreChatHistory:m=>seen.push(m),appendUserMessage:m=>seen.push(m),appendStream:m=>seen.push(m),setStreaming:v=>seen.push(v)};
+ const c={clearChat:()=>seen.push('clear'),restoreChatHistory:m=>seen.push(m),appendUserMessage:m=>seen.push(m),appendStream:m=>seen.push(m),setStreaming:v=>seen.push(v),renderChatStatus:()=>{}};
  vm.createContext(c);
  // Use the actual replay branches, with minimal history/stream renderers.
  vm.runInContext(source.slice(start,end)+"case 'chat_history': restoreChatHistory(msg.messages); break; case 'stream': appendStream(msg.content); break; }}",c);

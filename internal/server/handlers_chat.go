@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"prism/internal/agent"
+	"prism/internal/memory"
 	"prism/internal/resources"
 )
 
@@ -223,9 +225,8 @@ func (t *turnStats) finish() *turnStats {
 // sanitized. Returns the assistant's final text (thinking blocks stripped).
 //
 // cc's guard, if non-nil, authorizes each tool call before it runs — the
-// Webex channel passes a per-sender guard so untrusted space members can only
-// reach the tools they've been granted. Trusted callers (browser, Telegram,
-// /api/chat) get a nil guard (see callerContextForUser) to allow every tool.
+// Webex channel also applies a per-sender guard. Other callers use the policy
+// of their Prism identity; globally disabled tools remain unavailable.
 func (s *Server) runHeadlessChat(ctx context.Context, sessionID, message, model string, cc CallerContext) (string, error) {
 	return s.runHeadlessChatTap(ctx, sessionID, message, model, cc, nil, agent.Limits{})
 }
@@ -260,13 +261,30 @@ func (s *Server) runHeadlessChatImagesTap(ctx context.Context, sessionID, messag
 	if model == "" {
 		model = ai.cfg.Model
 	}
+	var modelOwner *memory.User
 	if cc.ActingUserID > 0 && ms != nil {
-		u, err := ms.GetUserByID(ctx, cc.ActingUserID)
-		if err != nil || u == nil {
+		modelOwner, err = ms.GetUserByID(ctx, cc.ActingUserID)
+		if err != nil || modelOwner == nil {
 			return "", fmt.Errorf("cannot resolve AI owner")
 		}
-		if !s.userCanUseModel(ctx, u, model) {
-			return "", fmt.Errorf("model not allowed")
+	} else if scope := groupScopeFromSessionID(sessionID); scope != "" {
+		gid, parseErr := strconv.ParseInt(strings.TrimPrefix(scope, "g"), 10, 64)
+		if parseErr != nil || gid <= 0 {
+			return "", fmt.Errorf("cannot resolve AI group")
+		}
+		modelOwner = &memory.User{ID: -gid, Role: memory.RoleMember}
+	}
+	if modelOwner != nil && !s.userCanUseModel(ctx, modelOwner, model) {
+		return "", fmt.Errorf("model not allowed")
+	}
+	// All headless surfaces, including legacy Slack, honor global tool disables.
+	cc.HiddenTools = maps.Clone(cc.HiddenTools)
+	if cc.HiddenTools == nil {
+		cc.HiddenTools = map[string]bool{}
+	}
+	for name, access := range s.toolPolicies(ctx) {
+		if access == "disabled" {
+			cc.HiddenTools[name] = true
 		}
 	}
 
@@ -319,6 +337,12 @@ func (s *Server) runHeadlessChatImagesTap(ctx context.Context, sessionID, messag
 	})
 
 	personality := loadPersonality(ctx, ms, sessionID)
+	if sessionID == "telegram" || (personalScopeFromSessionID(sessionID) != "" && strings.TrimPrefix(sessionID, personalScopeFromSessionID(sessionID)+"-") == "telegram") {
+		personality += "\n\n## Workspace follow-up\n" + workspaceActivityHelp
+		if s.cfg.MultiUser && cc.ActingUserID > 0 {
+			personality += "\n" + roomActivityHelp
+		}
+	}
 	if scope := groupScopeFromSessionID(sessionID); scope != "" {
 		groupID, _ := strconv.ParseInt(strings.TrimPrefix(scope, "g"), 10, 64)
 		if facts := s.voxGroupArchiveContext(ctx, groupID); facts != "" {

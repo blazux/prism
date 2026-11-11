@@ -67,11 +67,11 @@ func (s *Server) capabilityRequest(r *http.Request, uid int64, session string) (
 }
 func groupCapabilityPath(r *http.Request) bool {
 	p := r.URL.Path
-	if strings.HasPrefix(p, "/api/builtin/") || strings.HasPrefix(p, "/api/tool/") || p == "/api/chat" || p == "/api/notify" {
+	if strings.HasPrefix(p, "/api/builtin/") || strings.HasPrefix(p, "/api/tool/") || p == "/api/chat" || p == "/api/notify" || p == "/api/webex/send" {
 		return r.Method == http.MethodPost
 	}
 	if strings.HasPrefix(p, "/api/user/secrets/") {
 		return r.Method == http.MethodGet
 	}
-	return r.Method == http.MethodGet && (strings.HasPrefix(p, "/plugins/") || strings.HasPrefix(p, "/data/") || strings.HasPrefix(p, "/screenshots/") || p == "/widget-base.css" || p == "/prism-widget.js" || p == "/api/tools" || p == "/api/vox/history" || p == "/api/room/history")
+	return r.Method == http.MethodGet && (strings.HasPrefix(p, "/plugins/") || strings.HasPrefix(p, "/data/") || strings.HasPrefix(p, "/screenshots/") || p == "/widget-base.css" || p == "/prism-widget.js" || p == "/api/tools" || p == "/api/vox/history" || p == "/api/room/history" || p == "/api/room/activity")
 }

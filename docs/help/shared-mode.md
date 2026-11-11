@@ -98,6 +98,15 @@ mailbox, notes vault, calendar and task accounts. Personal secrets and Telegram
 bots also remain individual. Group membership adds access to the group’s
 knowledge base and MCP tools without replacing these personal settings.
 
+Your Telegram agent can report progress in your personal workspaces and in
+Rooms your account can access. It reads recent messages, the shared agent's
+current tool activity and its queue without posting to the Room or starting
+a new turn. It keeps your personal identity and permissions. Administrators
+do not gain access to other members' personal workspaces through this feature.
+Removing a group membership blocks new consultations; replies already delivered
+in Telegram remain there. See [Following work](workspace-activity.md) for the
+agent's read-only API recipe.
+
 ### Existing skill files when upgrading
 
 Personal skills are stored in `skills/u<user-id>/` under the execution

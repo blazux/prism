@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"prism/internal/workspace"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"prism/internal/customtools"
 	"prism/internal/resources"
+	"prism/workspaceexec"
 )
 
 // slugify reduces a free-text string to lowercase [a-z0-9_-] characters, for
@@ -46,18 +48,24 @@ func (e *ToolExecutor) registerTool(code string) (string, error) {
 	if e.customMgr == nil {
 		return "", fmt.Errorf("custom tools not configured")
 	}
-	name, hdrErr := extractToolName(code)
-	if name == "" {
-		if hdrErr != nil {
-			return "", fmt.Errorf("# TOOL: header found but unusable — %v. The header must be ONE line of valid JSON with a \"name\" field; fix it and try again", hdrErr)
-		}
-		return "", fmt.Errorf("no # TOOL: {...} header found (must be one line, valid JSON, with a \"name\" field) — fix the header and try again")
+	meta, hdrErr := customtools.ParseHeader(strings.NewReader(code))
+	if hdrErr != nil {
+		return "", fmt.Errorf("invalid tool header: %w; fix it and try again", hdrErr)
 	}
+	name := meta.Name
 	base := toolFilename(name)
 	if base == ".py" {
 		return "", fmt.Errorf("tool name %q has no usable characters for a filename", name)
 	}
 
+	if existing := e.customMgr.Get(name); existing != nil {
+		base = existing.Filename // update an existing manually named script in place
+	}
+	for _, existing := range e.customMgr.All() {
+		if existing.Name != name && existing.Filename == base {
+			return "", fmt.Errorf("tool name %q maps to the existing tool %q's script; pick a different name", name, existing.Name)
+		}
+	}
 	if e.customMgr.IsProtectedFilename(base) {
 		return "", fmt.Errorf("a tool named %q is shipped with Prism and cannot be overwritten — pick a different name", name)
 	}
@@ -96,6 +104,10 @@ func (e *ToolExecutor) registerTool(code string) (string, error) {
 	}
 	if err := workspace.WriteFile(e.workspaceDir, rel, []byte(code)); err != nil {
 		return "", fmt.Errorf("write script: %w", err)
+	}
+	e.customMgr.Reload()
+	if registered := e.customMgr.Get(name); registered == nil || registered.Filename != base {
+		return "", fmt.Errorf("tool %q was written but could not be loaded; inspect its script before retrying", name)
 	}
 
 	if e.onToolsReload != nil {
@@ -138,6 +150,31 @@ func (e *ToolExecutor) listTools() (string, error) {
 	return sb.String(), nil
 }
 
+// ExecuteCustomTool serves the legacy custom-only HTTP endpoint through the
+// same permission checks, execution context and secrets as agent/widget calls.
+// It deliberately needs no model/provider initialization.
+func (e *ToolExecutor) ExecuteCustomTool(ctx context.Context, name string, rawArgs json.RawMessage) (string, error) {
+	if e.customMgr == nil {
+		return "", fmt.Errorf("custom tools not configured")
+	}
+	tool := e.customMgr.Get(name)
+	if tool == nil {
+		return "", fmt.Errorf("custom tool %q not found", name)
+	}
+	if !json.Valid(rawArgs) {
+		return "", fmt.Errorf("invalid JSON arguments")
+	}
+	if err := e.Authorize(name, rawArgs); err != nil {
+		return "", err
+	}
+	if e.resourceMutationGuard != nil {
+		if err := e.resourceMutationGuard(); err != nil {
+			return "", err
+		}
+	}
+	return e.execCustomTool(workspaceexec.WithScope(ctx, e.sessionID), tool, rawArgs)
+}
+
 func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Tool, rawArgs json.RawMessage) (string, error) {
 	session := e.sessionID
 	if session == "" {
@@ -164,13 +201,13 @@ func (e *ToolExecutor) execCustomTool(ctx context.Context, tool *customtools.Too
 		shellEscape("/workspace/agent_tools/"+tool.Filename),
 	)
 	out, err := e.docker.ExecWithStdin(ctx, cmd, []byte(rawArgs), 2*time.Minute, env)
-	if err != nil {
-		return "", fmt.Errorf("custom tool %q failed: %w", tool.Name, err)
-	}
 	// Model-context cap only: a programmatic caller (prismTool / cron) gets the
 	// whole output, as /api/tool/ always did — see SetRawResults.
 	if !e.rawResults && len(out) > 8000 {
 		out = out[:4000] + "\n...[truncated]...\n" + out[len(out)-4000:]
+	}
+	if err != nil {
+		return out, fmt.Errorf("custom tool %q failed: %w", tool.Name, err)
 	}
 	return out, nil
 }
@@ -186,35 +223,11 @@ func shellEscape(s string) string {
 // the real defect was one missing closing brace (measured on xslog_sip:
 // two identical retries fixing red herrings).
 func extractToolName(code string) (string, error) {
-	var hdrErr error
-	for _, line := range strings.SplitN(code, "\n", 30) {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "# TOOL:") {
-			continue
-		}
-		raw := strings.TrimSpace(strings.TrimPrefix(line, "# TOOL:"))
-		var m struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal([]byte(raw), &m); err != nil {
-			// "unexpected end of JSON input" means the {...} never closes on
-			// this line: almost always an unbalanced brace (count them), since
-			// a header broken across lines wouldn't start with "# TOOL:" past
-			// the first. Spell that out — it's the actual failure mode seen.
-			if strings.Contains(err.Error(), "unexpected end of JSON input") {
-				hdrErr = fmt.Errorf("the header's JSON never closes — count your braces: every { needs its } on that same line (parse error: %v)", err)
-			} else {
-				hdrErr = fmt.Errorf("invalid JSON in header: %v", err)
-			}
-			continue // a later line may carry the real header
-		}
-		if m.Name == "" {
-			hdrErr = fmt.Errorf("header JSON parsed but has no \"name\" field")
-			continue
-		}
-		return m.Name, nil
+	tool, err := customtools.ParseHeader(strings.NewReader(code))
+	if errors.Is(err, customtools.ErrNoHeader) {
+		return "", nil
 	}
-	return "", hdrErr
+	return tool.Name, err
 }
 
 // ─── RAG tool ─────────────────────────────────────────────────────────────────

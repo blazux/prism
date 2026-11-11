@@ -85,10 +85,7 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 	if len(out) > 8000 {
 		out = out[:4000] + "\n...[truncated]...\n" + out[len(out)-4000:]
 	}
-	if err != nil {
-		return fmt.Sprintf("ERROR: %v\nOutput: %s", err, out), nil
-	}
-	return out, nil
+	return out, err
 }
 
 // NormalizeWorkspacePath strips the /workspace prefix that models often include

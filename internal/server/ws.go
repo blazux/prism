@@ -137,7 +137,9 @@ type ChatFile struct {
 }
 
 type WSMessage struct {
-	Type string `json:"type"`
+	Type      string `json:"type"`
+	RequestID string `json:"requestId,omitempty"`
+	Before    int64  `json:"before,omitempty"`
 	// Channel names the surface the message comes from. Empty = the browser
 	// dashboard; "voice" = a phone call docked from Prism Vox, which
 	// makes the agent answer in spoken form and skip extended reasoning.
@@ -267,9 +269,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		executor.SetMCPManager(s.mcpMgr, func() {
 			s.broadcastMCP(sessionID)
 		})
-		// RBAC: gate this personal agent's tool calls by the connected user's
-		// permissions (nil user / admin → unrestricted). Resolved once at connect;
-		// the guard closure captures the policy snapshot.
+		// Resolve the initial permissions and scopes. Browser turns refresh this
+		// snapshot so changes apply without reconnecting.
 		cc := s.callerContextForUser(r.Context(), wsUser, sessionID)
 		ragScope = cc.RAGScope
 		// Personal knowledge (profile, learnings) is per-user, not per-group: the
@@ -337,7 +338,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		defer client.mu.Unlock()
 		return client.viewContext
 	})
-	mcpMgr := s.mcpMgr
 
 	// An identified caller gets their own profile + past learnings (that IS the
 	// continuity), scoped to them by the personal scope set above. A guest gets
@@ -360,12 +360,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			client.ag.SetGlobalContextFn(s.workspacesOverview)
 		}
 		client.ag.SetMCPContextFn(func() string {
-			servers, err := mcpMgr.List(context.Background(), sessionID)
+			servers, err := executor.MCPServers(context.Background())
 			if err != nil || len(servers) == 0 {
 				return ""
 			}
 			var sb strings.Builder
-			sb.WriteString("## MCP Servers\n\nYou have access to external tools via MCP servers. Use mcp_list_servers to see current configuration.\n\n")
+			sb.WriteString("## MCP Servers\n\nYou have access to external tools via MCP servers. Use mcp action=list to see current configuration.\n\n")
 			for _, srv := range servers {
 				if !srv.Enabled || len(srv.Tools) == 0 {
 					continue
@@ -528,7 +528,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		})
 		client.sendJSON(map[string]interface{}{"type": "file_changed"})
 
-		mcpServers, _ := s.mcpMgr.List(r.Context(), sessionID)
+		mcpServers, _ := executor.MCPServers(r.Context())
 		client.sendJSON(map[string]interface{}{
 			"type":   "tools_list",
 			"custom": s.customMgr.All(),
@@ -621,7 +621,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		switch msg.Type {
+		case "chat_history_page":
+			if !voiceCall {
+				s.sendHistoryPage(r.Context(), client, sessionID, msg.Before)
+			}
+		case "chat_request_status":
+			if !voiceCall {
+				s.chatRequestStatus(client, msg.RequestID, "")
+			}
 		case "chat":
+			if !voiceCall && msg.RequestID != "" && s.chatRequestStatus(client, msg.RequestID, chatRequestDigest(msg)) {
+				continue
+			}
 			client.mu.Lock()
 			stale := client.historyStale
 			client.historyStale = false
@@ -630,13 +641,27 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				client.ag.ReloadStoredHistory()
 			}
 			if !voiceCall && s.runActive(client) {
-				client.sendJSON(map[string]any{"type": "error", "content": "This conversation already has a running task. Stop it before starting another."})
+				client.rejectChat(msg.RequestID, "This conversation already has a running task. Stop it before starting another.")
 				continue
 			}
 			client.cancelActive()
+			if !voiceCall {
+				// A long-lived browser connection must not keep obsolete policies
+				// or group scopes after settings change between turns.
+				cc := s.callerContextForUser(r.Context(), client.user, sessionID)
+				if client.user != nil && client.user.ID > 0 {
+					cc.PersonalScope = fmt.Sprintf("u%d", client.user.ID)
+				}
+				if cc.ServerTools == nil {
+					cc.ServerTools = make(map[string]agent.ServerTool)
+				}
+				cc.ServerTools["subagent"] = s.subagentTool(client, executor)
+				cc.apply(executor)
+				client.ag.SetRAGContextFn(s.ragContextFn(cc.RAGScope))
+			}
 			nextAI, err := s.aiConfigFor(context.Background(), requestUserID(r))
 			if err != nil {
-				client.sendJSON(map[string]any{"type": "error", "content": err.Error()})
+				client.rejectChat(msg.RequestID, err.Error())
 				continue
 			}
 			if !sameAIConfig(ai.cfg, nextAI.cfg) {
@@ -653,13 +678,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				client.sendJSON(map[string]any{"type": "model_set", "model": model})
 			}
 			if !s.userCanUseModel(context.Background(), client.user, model) {
-				client.sendJSON(map[string]any{"type": "error", "content": "model not allowed"})
+				client.rejectChat(msg.RequestID, "model not allowed")
 				continue
 			}
 
 			imageFiles, err := s.saveChatImages(msg.Images, msg.ImageNames)
 			if err != nil {
-				client.sendJSON(map[string]any{"type": "error", "content": err.Error()})
+				client.rejectChat(msg.RequestID, err.Error())
 				continue
 			}
 
@@ -695,12 +720,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					s.handleChat(ctx, client, content, msg.Images, msg.Model)
 				}()
 			} else {
-				run, err := s.beginRun(client, cancel, content, msg.Images)
+				run, err := s.beginRunRequest(client, cancel, content, msg.Images, msg.RequestID, chatRequestDigest(msg))
 				if err != nil {
 					cancel()
 					close(turnDone)
-					client.sendJSON(map[string]any{"type": "error", "content": err.Error()})
+					client.rejectChat(msg.RequestID, err.Error())
 					continue
+				}
+				if msg.RequestID != "" {
+					client.sendReceipt(msg.RequestID, "accepted", false)
 				}
 				if !s.background(func() {
 					defer close(turnDone)
@@ -932,14 +960,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if client.sessionID == assistantSession {
 				client.ag.SetGlobalContextFn(s.workspacesOverview)
 			}
-			curSessionID := client.sessionID
 			client.ag.SetMCPContextFn(func() string {
-				servers, err := mcpMgr.List(context.Background(), curSessionID)
+				servers, err := executor.MCPServers(context.Background())
 				if err != nil || len(servers) == 0 {
 					return ""
 				}
 				var sb strings.Builder
-				sb.WriteString("## MCP Servers\n\nYou have access to external tools via MCP servers. Use mcp_list_servers to see current configuration.\n\n")
+				sb.WriteString("## MCP Servers\n\nYou have access to external tools via MCP servers. Use mcp action=list to see current configuration.\n\n")
 				for _, srv := range servers {
 					if !srv.Enabled || len(srv.Tools) == 0 {
 						continue
@@ -954,6 +981,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChat(ctx context.Context, client *Client, content string, images []string, modelOverride string) {
+	if run := client.currentRun(); run != nil && run.messageID > 0 {
+		ctx = agent.WithReceivedMessage(ctx, run.messageID)
+	}
 	events := make(chan agent.Event, 100)
 
 	go func() {

@@ -21,14 +21,19 @@ the additional instructions and click **Save**. They are layered *on top of* the
 personality for that workspace only; leave it blank to use the default as-is.
 
 ## Turn budget
-One message can trigger many model calls (every tool use is one). **Max
-iterations per turn** caps that: enter a value from 10 to 500, or leave it blank to use the default of 75. If a long
-task stops with *"Iteration limit reached (N model calls this turn). Raise it in
-Settings › Agent, or send a follow-up to continue."*, either raise the cap or
-simply send a follow-up — the agent continues from where it stopped.
+One message can trigger several model calls. **Max iterations per turn** caps
+those calls: enter a value from 10 to 500, or leave it blank for the default of
+75. One model response can request several tools; it is not one iteration per
+tool. Parent and helper agents share the task's main-loop call budget.
 
-Independently of this cap, a call repeated with identical arguments and an
-identical result three times in a row is stopped early as a loop.
+If a task reaches its iteration limit, review the latest results before asking
+to continue. Increase the budget when the work needs more steps; repeated
+attempts may instead need a different approach.
+
+When tool calls repeatedly return identical results for identical arguments,
+Prism first warns the agent so it can conclude or change approach. A continuing
+cycle can then stop the turn. A new operation or changed result clears that
+warning; changing commands continually is still bounded by the turn budget.
 
 ## Extended reasoning
 Extended reasoning lets thinking models (Qwen3, DeepSeek-R1, gpt-oss…) reason before answering.

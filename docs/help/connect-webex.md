@@ -27,7 +27,8 @@ Still in **Admin → Shared agent**, in the **Webex integration** section:
    - **Query knowledge base** — who may search the group's RAG.
    - **Modify knowledge base** — who may add to / delete from it.
    - **Trigger tools** — who may run other tools (web, MCP, etc.).
-3. Click **Save Webex**. The state flips to **● Connected**.
+3. Click **Save Webex**. The state confirms that the configuration was saved.
+   Mention the bot in Webex to test the connection.
 
 ## 4. Talk to the bot
 1. In Webex, **add the bot to a space** (or start a 1:1 space with it).
@@ -41,6 +42,15 @@ Still in **Admin → Shared agent**, in the **Webex integration** section:
   call is reported to the sender; the agent still answers without that tool.
 - Multiple groups can each run their own bot at the same time — one bot token per
   group.
+- Scheduled answers with `deliver:"webex"` use the announcement room of the
+  group encoded in the task's `$PRISM_SESSION`. Keep that session in API calls;
+  a personal task uses its owner's group when that account belongs to exactly
+  one group. If the group, bot or announcement room is missing, delivery fails
+  without choosing another group's destination.
+- To send exact text from a script, POST `/api/webex/send` with `{ "text": "…" }`
+  and the same group session's bearer token. Browser/API clients can instead
+  select `?group=<id>`; membership is checked. A token bound to one group cannot
+  override its destination with another group's ID.
 - To disconnect, open the same section and click **Disconnect** (clears the token
   for that group).
 - Reaching the agent from Webex does **not** require Prism to be internet-facing.

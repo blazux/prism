@@ -358,6 +358,11 @@ func (a *Agent) buildToolListWithCachePrefix() ([]ollama.Tool, int) {
 	nativeKept := 0
 	seen := make(map[string]bool, len(all))
 	for i, tool := range all {
+		var allowed bool
+		tool, allowed = a.executor.availableTool(tool)
+		if !allowed {
+			continue
+		}
 		if a.executor.hiddenTools[tool.Function.Name] {
 			continue
 		}
@@ -583,8 +588,8 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 	}
 	for _, e := range entries {
 		content := e.Content
-		if e.Role == "error" {
-			continue // UI diagnostics belong in the transcript, not the model prompt.
+		if e.Role == "error" && !strings.HasPrefix(content, agentStopPrefix) {
+			continue // Other UI diagnostics do not belong in the model prompt.
 		}
 		// Inject timestamp prefix on user messages only so the model can reason about time
 		// (not on assistant messages, to avoid the model mimicking the pattern in its responses)
@@ -592,6 +597,9 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 			content = a.timestampedUserContent(e.Content, e.CreatedAt)
 		}
 		msg := ollama.Message{Role: e.Role, Content: content, DBID: e.ID}
+		if e.Role == "error" {
+			msg.Role = "user" // Replay the recorded execution status as context.
+		}
 		if len(e.ToolCalls) > 0 && string(e.ToolCalls) != "null" {
 			var tcs []ollama.ToolCall
 			if json.Unmarshal(e.ToolCalls, &tcs) == nil {
@@ -1307,7 +1315,20 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	if len(images) > 0 {
 		dbContent += fmt.Sprintf(" [%d image(s) attached]", len(images))
 	}
-	userMessage.DBID = a.saveMessageToDB(ctx, ollama.Message{Role: "user", Content: dbContent})
+	if id, _ := ctx.Value(receivedMessageKey{}).(int64); id > 0 {
+		userMessage.DBID = id
+		a.histMu.Lock()
+		kept := a.history[:0]
+		for _, previous := range a.history {
+			if previous.DBID != id {
+				kept = append(kept, previous)
+			}
+		}
+		a.history = kept
+		a.histMu.Unlock()
+	} else {
+		userMessage.DBID = a.saveMessageToDB(ctx, ollama.Message{Role: "user", Content: dbContent})
+	}
 	// The user-message row is a unique, content-free task ID. Child agents share
 	// it via context; tests without a DB still get a per-turn fallback.
 	taskID := fmt.Sprintf("%d", userMessage.DBID)
@@ -1329,15 +1350,9 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		lcancel()
 	}
 
-	log.Printf("[agent] session=%s calling ollama with %d history messages", a.sessionID, historyLen)
+	log.Printf("[agent] session=%s model=%q backend=%T calling model with %d history messages", a.sessionID, a.model, a.ollama, historyLen)
 
-	// Loop detection: track consecutive identical (tool, args, result) triples.
-	// If the same call produces the same result 3 times in a row, the agent is stuck.
-	var (
-		lastLoopKey    string
-		lastLoopResult string
-		loopCount      int
-	)
+	var toolLoops toolLoopDetector
 
 	// Resolved once per turn: a Settings change lands on the next message,
 	// never mid-turn.
@@ -1371,6 +1386,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		fullContent, toolCalls, providerBlocks, doneReason, err := a.callOllamaWithReminder(ctx, learningsCtx, events, intentNudgePending)
 		intentNudgePending = false
 		if ctx.Err() != nil {
+			a.keepPartialAssistant(ctx, fullContent)
 			events <- Event{Type: "stream_end"}
 			return
 		}
@@ -1385,26 +1401,20 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				log.Printf("[agent] chat backend rejected images; retrying without image parts: %v", err)
 				continue
 			}
-			// Intentional cancel (user clicked stop, sent new message, or closed tab):
-			// close the bubble cleanly without showing an error message.
-			if errors.Is(err, context.Canceled) {
-				events <- Event{Type: "stream_end"}
-			} else {
+			// Keep only the text already received. A failed stream never authorizes
+			// any tool calls accumulated before the failure.
+			a.keepPartialAssistant(ctx, fullContent)
+			if !errors.Is(err, context.Canceled) {
 				events <- Event{Type: "error", Content: err.Error()}
 			}
+			events <- Event{Type: "stream_end"}
 			return
 		}
 
 		// Keep partial text, but never execute an incomplete tool batch or report
 		// a truncated generation as a completed task.
 		if doneReason == "interrupted" || (isTruncation(doneReason) && (strings.TrimSpace(fullContent) != "" || len(toolCalls) > 0)) {
-			if strings.TrimSpace(fullContent) != "" {
-				partial := ollama.Message{Role: "assistant", Content: fullContent}
-				partial.DBID = a.saveMessageToDB(ctx, ollama.Message{Role: "assistant", Content: stripThinkingBlocks(fullContent)})
-				a.histMu.Lock()
-				a.history = append(a.history, partial)
-				a.histMu.Unlock()
-			}
+			a.keepPartialAssistant(ctx, fullContent)
 			message := "The model connection ended before the response was complete. The partial reply was kept. Review it before asking to continue."
 			if isTruncation(doneReason) {
 				message = "The model reached its generation limit before finishing the response. The partial reply was kept. Review it before asking to continue."
@@ -1503,6 +1513,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 
 		// Execute tools; each result becomes a "tool" message in history
 		endVoiceTurn := false
+		var loopError string
 		for _, tc := range toolCalls {
 			// Some backends leak template markers into the function name (measured:
 			// gpt-oss harmony via vLLM's openai parser emits "widget<|channel|>commentary").
@@ -1534,14 +1545,17 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			rejected := false
 			// Manual approval gate. Voice bypasses it — a caller can't click, and
 			// silence while the dashboard waits would read as a dead line.
-			if tc.Function.ArgumentError == "" && a.channel != voiceChannel && a.approvalNeededFn != nil && a.approvalNeededFn() && a.awaitApprovalFn != nil {
+			if loopError == "" && tc.Function.ArgumentError == "" && a.channel != voiceChannel && a.approvalNeededFn != nil && a.approvalNeededFn() && a.awaitApprovalFn != nil {
 				if a.prepareApprovalFn != nil {
 					a.prepareApprovalFn(toolID)
 				}
 				events <- Event{Type: "approval_request", ID: toolID, Tool: tc.Function.Name, Input: tc.Function.Arguments}
 				rejected = !a.awaitApprovalFn(ctx, toolID)
 			}
-			if tc.Function.ArgumentError != "" {
+			if loopError != "" {
+				result = "Tool call skipped because repeated calls returned unchanged results. Review the previous results before continuing."
+				toolFailed = true
+			} else if tc.Function.ArgumentError != "" {
 				result = "Error: " + tc.Function.ArgumentError
 				toolFailed = true
 			} else if rejected {
@@ -1575,7 +1589,11 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				var execErr error
 				result, toolImages, execErr = a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments)
 				if execErr != nil {
-					result = fmt.Sprintf("Error: %v", execErr)
+					if result == "" {
+						result = fmt.Sprintf("Error: %v", execErr)
+					} else {
+						result = fmt.Sprintf("Error: %v\nOutput: %s", execErr, result)
+					}
 					toolFailed = true
 				}
 				a.emitToolSideEffects(tc.Function.Name, tc.Function.Arguments, events)
@@ -1604,23 +1622,6 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				}
 			}
 
-			// Detect retry loops: same tool + same args + same result 3 times in a row.
-			loopKey := tc.Function.Name + "\x00" + string(tc.Function.Arguments)
-			if loopKey == lastLoopKey && result == lastLoopResult {
-				loopCount++
-			} else {
-				loopCount = 0
-				lastLoopKey = loopKey
-				lastLoopResult = result
-			}
-			if loopCount >= 2 {
-				events <- Event{Type: "error", Content: fmt.Sprintf(
-					"Loop detected: tool %q was called with identical arguments and returned the same result %d times in a row. Stopping to avoid an infinite loop.",
-					tc.Function.Name, loopCount+1,
-				)}
-				return
-			}
-
 			toolMsg := ollama.Message{Role: "tool", Content: result}
 			if tc.Function.Name == "browser_act" {
 				toolMsg.Images = extractScreenshotImages(result, a.executor.WorkspaceDir())
@@ -1631,6 +1632,25 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			a.histMu.Lock()
 			a.history = append(a.history, toolMsg)
 			a.histMu.Unlock()
+			if loopError == "" && toolLoops.observe(tc, result, toolMsg.Images) == toolLoopStop {
+				loopError = fmt.Sprintf(
+					"Loop detected: tool %q repeated unchanged results after a warning. Review the results or change the approach before continuing.",
+					tc.Function.Name,
+				)
+			}
+		}
+		if loopError != "" {
+			a.recordAgentStop(ctx, loopError)
+			log.Printf("[agent] session=%s model=%q stopped: %s", a.sessionID, a.model, loopError)
+			events <- Event{Type: "error", Content: loopError}
+			events <- Event{Type: "stream_end"}
+			return
+		}
+		if note := toolLoops.warning(); note != "" {
+			a.histMu.Lock()
+			a.history = append(a.history, ollama.Message{Role: "user", Content: note})
+			a.histMu.Unlock()
+			toolLoops.afterBatch()
 		}
 		if endVoiceTurn {
 			// Vox drains the spoken farewell before hanging up. Finish the whole
@@ -1640,9 +1660,27 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		}
 	}
 
-	// Reached the budget, not necessarily a loop (identical-call loops are
-	// caught above). Say where the knob is instead of blaming the chat.
-	events <- Event{Type: "error", Content: fmt.Sprintf("Iteration limit reached (%d model calls this turn). Raise it in Settings › Agent, or send a follow-up to continue.", maxIterations)}
+	// Record the execution limit for the next turn as well as the UI.
+	message := fmt.Sprintf("Iteration limit reached (%d model calls this turn). Review the last tool results or send a follow-up to continue.", maxIterations)
+	a.recordAgentStop(ctx, message)
+	events <- Event{Type: "error", Content: message}
+	events <- Event{Type: "stream_end"}
+}
+
+// keepPartialAssistant preserves text received before interruption without
+// replaying a tool batch that never completed. A cancelled request still needs
+// a short independent window to save what the user already saw.
+func (a *Agent) keepPartialAssistant(ctx context.Context, content string) {
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	partial := ollama.Message{Role: "assistant", Content: content}
+	partial.DBID = a.saveMessageToDB(saveCtx, ollama.Message{Role: "assistant", Content: stripThinkingBlocks(content)})
+	a.histMu.Lock()
+	a.history = append(a.history, partial)
+	a.histMu.Unlock()
 }
 
 // extractScreenshotImages parses a browser_act JSON result, reads any screenshot
@@ -1776,6 +1814,7 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 		return "", nil, nil, "", errors.New("the conversation does not fit this model's context window; its history was retained. Retry if summarization failed, choose a larger-context model or lighter prompt profile, or start a new conversation")
 	}
 	req := ollama.ChatRequest{
+		TaskID:                 taskIDFromContext(ctx),
 		Model:                  a.model,
 		Messages:               messages,
 		Tools:                  tools,
@@ -1797,7 +1836,7 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 	// The sources router forwards an explicit per-model num_ctx to Ollama;
 	// OpenAI/Anthropic receive only the generation ceiling.
 
-	log.Printf("[agent] → ollama: %d messages, %d tools, prompt_len=%d", len(messages), len(tools), len(prompt))
+	log.Printf("[agent] → model=%q backend=%T: %d messages, %d tools, system_prompt_bytes=%d", a.model, a.ollama, len(messages), len(tools), len(prompt))
 
 	historyContentBytes, toolResultBytes, toolArgumentBytes, imageBytes := historyFootprint(messages)
 	scope := a.usageScope
@@ -1862,7 +1901,18 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 			complete = ev.DoneReason != "interrupted"
 		}
 
+		if err := ctx.Err(); err != nil {
+			// Ignore late chunks after cancellation; they must not repopulate a
+			// cleared conversation. Text received earlier remains a partial reply.
+			if inThinking {
+				events <- Event{Type: "stream", Content: "</think>"}
+			}
+			return contentBuilder.String(), nil, nil, "", err
+		}
 		if ev.Err != nil {
+			if inThinking {
+				events <- Event{Type: "stream", Content: "</think>"}
+			}
 			return contentBuilder.String(), nil, nil, "", ev.Err
 		}
 		if ev.DoneReason != "" {
@@ -1895,7 +1945,7 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 	}
 
 	content := contentBuilder.String()
-	log.Printf("[agent] iter response: content=%q tool_calls=%d done_reason=%q", truncate(content, 120), len(toolCalls), doneReason)
+	log.Printf("[agent] iter response: session=%s model=%q backend=%T content=%q tool_calls=%d done_reason=%q", a.sessionID, a.model, a.ollama, truncate(content, 120), len(toolCalls), doneReason)
 	for i, tc := range toolCalls {
 		log.Printf("[agent]   tool[%d] %s %s", i, tc.Function.Name, truncate(string(redactToolArgs(tc.Function.Arguments)), 200))
 	}

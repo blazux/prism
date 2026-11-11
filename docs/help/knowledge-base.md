@@ -5,8 +5,10 @@ procedures, contracts, notes. Documents are split into passages, embedded, and
 searched by meaning. It needs Postgres; while the embedder warms up, the tab
 shows *RAG not ready: initializing…* and retries by itself.
 
-**Settings → Knowledge** has two sub-tabs: **Documents** (this page) and
-**Skills** (the reusable procedures the agent saves as it learns).
+**Settings → Knowledge & memory** contains **Memory** (profile facts, learned
+facts), **Documents** (this page), and
+**Skills** (reusable procedures). Open a skill to read or correct its steps.
+See `prism_help topic=conversation-memory` for memory scopes and corrections.
 
 ## Collections
 A **collection** is a named folder of documents the agent searches as one unit.

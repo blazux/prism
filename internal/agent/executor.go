@@ -322,31 +322,28 @@ func (e *ToolExecutor) cancelCall(args map[string]interface{}) (string, error) {
 	return fmt.Sprintf("Outbound call #%d has been cancelled — it will not be placed.", id), nil
 }
 
-// mcpFallbackScopes returns, in preference order, the extra MCP scopes to
-// consult beyond the session's own servers: the user's personal scope then
-// the group/rag scope, normally — or the group/rag scope alone under
-// MULTI_USER, which retires the personal fallback entirely. Shared by
-// AllDynamicTools and mcpSessionFor so the two never drift.
-func (e *ToolExecutor) mcpFallbackScopes() []string {
+// MCP connections belong to the installation (single-owner) or group (multi).
+// The workspace and personal-memory scope never select the registry.
+func (e *ToolExecutor) mcpScope() string {
 	if e.multiUser {
-		return []string{e.ragScope}
-	}
-	// PIMScope last: token-authenticated executors (Vox dock, /api/builtin) have
-	// no user prefix, so personalScope() is empty and their MCP servers land in
-	// the "global" scope (see mcpStorageScope) — without this tier those servers
-	// register successfully but never surface in any session's toolset.
-	return []string{e.personalScope(), e.ragScope, PIMScope}
-}
-
-// mcpStorageScope is where this executor's mcp add/remove persists servers:
-// the user's personal scope, or the "global" scope when there is none (token
-// auth). Mirrors pimSessionScope's fallback so the write side and the read
-// side (mcpFallbackScopes) can never miss each other.
-func (e *ToolExecutor) mcpStorageScope() string {
-	if s := e.personalScope(); s != "" {
-		return s
+		if groupScopeRe.MatchString(e.ragScope) {
+			return e.ragScope
+		}
+		return ""
 	}
 	return PIMScope
+}
+
+// MCPServers is the same registry used for discovery and execution.
+func (e *ToolExecutor) MCPServers(ctx context.Context) ([]mcp.ServerConfig, error) {
+	if e.mcpMgr == nil {
+		return nil, nil
+	}
+	scope := e.mcpScope()
+	if scope == "" {
+		return nil, nil
+	}
+	return e.mcpMgr.List(ctx, scope)
 }
 
 func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
@@ -358,28 +355,8 @@ func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
 	if e.HasVox() {
 		tools = append(tools, OutboundCallTools...)
 	}
-	if e.mcpMgr != nil {
-		own := e.mcpMgr.ToOllamaTools(e.sessionID)
-		tools = append(tools, own...)
-		seen := make(map[string]bool, len(own))
-		for _, t := range own {
-			seen[t.Function.Name] = true
-		}
-		// Personal MCP servers are connected once per user, not once per board —
-		// merge them in under the user's stable scope regardless of which
-		// session/board is currently active. Then the group's shared servers.
-		// MULTI_USER retires the personal tier entirely: group scope only.
-		for _, scope := range e.mcpFallbackScopes() {
-			if scope == "" || scope == e.sessionID {
-				continue
-			}
-			for _, t := range e.mcpMgr.ToOllamaTools(scope) {
-				if !seen[t.Function.Name] {
-					seen[t.Function.Name] = true
-					tools = append(tools, t)
-				}
-			}
-		}
+	if e.mcpMgr != nil && e.mcpScope() != "" {
+		tools = append(tools, e.mcpMgr.ToOllamaTools(e.mcpScope())...)
 	}
 	// Drop tools hidden from this session (group-disabled / admin-only /
 	// user opt-outs) so the model never sees them.
@@ -395,22 +372,13 @@ func (e *ToolExecutor) AllDynamicTools() []ollama.Tool {
 	return tools
 }
 
-// mcpSessionFor returns which MCP layer (this board's own session, the user's
-// personal scope, or the group scope) serves the named tool, preferring the
-// session's own servers. The personal-scope check is what lets a personal MCP
-// server connected from one board stay reachable from every other board the
-// same user opens — see personalScope's doc comment.
+// mcpSessionFor resolves tools in the installation or group registry.
 func (e *ToolExecutor) mcpSessionFor(name string) (string, bool) {
 	if e.mcpMgr == nil {
 		return "", false
 	}
-	if e.mcpMgr.HasTool(e.sessionID, name) {
-		return e.sessionID, true
-	}
-	for _, scope := range e.mcpFallbackScopes() {
-		if scope != "" && scope != e.sessionID && e.mcpMgr.HasTool(scope, name) {
-			return scope, true
-		}
+	if scope := e.mcpScope(); scope != "" && e.mcpMgr.HasTool(scope, name) {
+		return scope, true
 	}
 	return "", false
 }
@@ -568,15 +536,8 @@ func (e *ToolExecutor) knownToolNames() []string {
 	for _, t := range ToolDefinitions {
 		names = append(names, t.Function.Name)
 	}
-	if e.customMgr != nil {
-		for _, t := range e.customMgr.All() {
-			names = append(names, t.Name)
-		}
-	}
-	if e.mcpMgr != nil {
-		for _, t := range e.mcpMgr.ToOllamaTools(e.sessionID) {
-			names = append(names, t.Function.Name)
-		}
+	for _, t := range e.AllDynamicTools() {
+		names = append(names, t.Function.Name)
 	}
 	return names
 }
@@ -618,6 +579,8 @@ func (e *ToolExecutor) toolNameHint(name string) string {
 // name, or disabling "docker_manage" for a group would silently leave
 // "docker_exec" open (server-review finding: aliases bypass tool policies).
 var legacyToolAliases = map[string]string{
+	"add_widget": "widget", "remove_widget": "widget",
+	"update_widget": "widget", "list_widgets": "widget",
 	"docker_stop": "docker_manage", "docker_ps": "docker_manage",
 	"docker_logs": "docker_manage", "docker_list": "docker_manage",
 	"docker_exec": "docker_manage",
@@ -1133,6 +1096,12 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 		return wrap(e.saveLearning(ctx, str("title"), str("content")))
 	case "search_history":
 		limitFloat, _ := args["limit"].(float64)
+		if session := str("session"); session != "" {
+			before, _ := args["before"].(float64)
+			messageID, _ := args["message_id"].(float64)
+			offset, _ := args["offset"].(float64)
+			return wrap(e.readHistory(ctx, session, int64(before), int(limitFloat), int64(messageID), int(offset)))
+		}
 		return wrap(e.searchHistory(ctx, str("query"), int(limitFloat)))
 	case "notify":
 		delayFloat, _ := args["delay_seconds"].(float64)

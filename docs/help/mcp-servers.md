@@ -74,3 +74,15 @@ In multi-user mode MCP is **group-scoped**:
 A new OAuth sign-in needs browser consent from Settings → MCP or the admin
 console. Refresh reuses the existing credentials; it does not open a consent
 page. If access has been revoked, authorize the server again from the interface.
+
+## Connection scope
+
+In single-user mode, MCP connections belong to the installation. They are
+available across workspaces and channels, including connections added by the
+agent. Settings shows the same registry as the agent. Older workspace-bound
+connections are transferred to this registry with their credentials and enabled
+state preserved.
+
+In shared mode, connections belong to a group and are managed by its administrator.
+Personal and installation-wide legacy registries are not exposed to shared agents.
+Opening another workspace does not select another registry.

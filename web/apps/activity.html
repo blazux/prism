@@ -19,9 +19,14 @@
   html, body { height: 100%; }
   body { padding: 0; overflow: hidden; }
   .app { display: flex; flex-direction: column; height: 100%; }
-  .head { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .head { flex-wrap: wrap; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
   .head h1 { font-size: 16px; color: var(--text); margin: 0; }
-  .tabs { display: flex; gap: 4px; }
+  .tabs { display: flex; gap: 4px; min-width: 0; overflow-x: auto; }
+  .tab { flex: 0 0 auto; white-space: nowrap; }
+  @media (max-width: 760px) {
+    .tabs { order: 3; flex-basis: 100%; padding-bottom: 4px; }
+    .head { gap: 8px; padding: 10px 12px; }
+  }
   .tab { background: none; border: none; color: var(--text2); padding: 6px 12px; border-radius: 7px; cursor: pointer; font: inherit; font-size: 13px; }
   .tab:hover { color: var(--text); }
   .tab.active { background: var(--bg3); color: var(--accent); }
@@ -68,6 +73,7 @@
     <h1>Activity</h1>
     <div class="tabs" id="tabs">
       <button class="tab active" data-view="actions">Actions</button>
+      <button class="tab" data-view="running">In progress</button>
       <button class="tab" data-view="">Details</button>
       <button class="tab" data-view="errors">Errors</button>
       <button class="tab" data-view="tools">Tools</button>
@@ -91,10 +97,12 @@ const feed = document.getElementById('feed');
 const statusEl = document.getElementById('status');
 const moreBtn = document.getElementById('more');
 let view = 'actions', before = 0, loading = false;
+let canViewAll = false;
 
 fetch('/api/me').then(r => r.json()).then(me => {
   if (me && me.user && me.user.role === 'global_admin') {
-    document.getElementById('scopeWrap').style.display = 'inline-flex';
+    canViewAll=true;
+    document.getElementById('scopeWrap').style.display = view==='running'?'none':'inline-flex';
   }
 }).catch(() => {});
 
@@ -159,6 +167,31 @@ async function load(reset) {
   statusEl.style.display = 'flex';
   statusEl.innerHTML = 'Loading…';
   moreBtn.style.display = 'none';
+  if (view === 'running') {
+    try {
+      const [sessions, membership] = await Promise.all([PrismAPI.api('/api/sessions?includeSystem=1'),PrismAPI.api('/api/my/groups')]);
+      const jobs = [];
+      for (const session of sessions.sessions || []) {
+        if (!['running','waiting_for_input','waiting_for_approval'].includes(session.runStatus)) continue;
+        const task = await PrismAPI.api('/api/sessions/'+encodeURIComponent(session.id)+'/activity?limit=1');
+        jobs.push({name:session.name, ...task});
+      }
+      for (const group of membership.groups || []) {
+        const id = group.groupId || group.id;
+        try { const task = await PrismAPI.api('/api/room/activity?group='+encodeURIComponent(id)+'&limit=1');
+          if (task.runStatus==='running'||task.runStatus==='queued') jobs.push({name:'Room · '+(group.groupName||group.name),...task});
+        } catch (error) {if(![403,404].includes(error.status))throw error;} // Room access is checked independently of group membership.
+      }
+      for (const task of jobs) {
+        const el=document.createElement('div');el.className='row info';
+        el.innerHTML='<div class="time">now</div><div class="rail"><span class="dot"></span></div><div class="body"><div class="line"><span class="badge">'+esc(task.runStatus.replaceAll('_',' '))+'</span><strong>'+esc(task.name)+'</strong></div><div class="detail">'+esc(task.request||'Background task')+'</div><div class="detail">'+esc([...(task.recentTools||[]).map(t=>t.tool+' · '+t.status),...(task.subagents||[]).map(t=>'Subagent: '+(t.task||t.id)+' · '+t.status),...(task.backgroundJobs?[task.backgroundJobs+' background job(s)']:[])].join('\n'))+(task.queued?'\n'+esc(task.queued)+' queued':'')+'</div></div>';
+        feed.append(el);
+      }
+      statusEl.textContent=jobs.length?'':'No work in progress.';statusEl.style.display=jobs.length?'none':'';
+    } catch(e){ statusEl.textContent='Could not load work in progress: '+e.message; }
+    finally {loading=false;}
+    return;
+  }
   const p = new URLSearchParams();
   if (view) p.set('view', view);
   if (before) p.set('before', before);
@@ -181,14 +214,16 @@ async function load(reset) {
 
 document.getElementById('tabs').addEventListener('click', e => {
   const b = e.target.closest('.tab'); if (!b) return;
+  if(loading)return;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === b));
-  view = b.dataset.view; load(true);
+  view = b.dataset.view; document.getElementById('scopeWrap').style.display=view==='running'||!canViewAll?'none':'inline-flex'; load(true);
 });
 document.getElementById('scopeAll').addEventListener('change', () => load(true));
 document.getElementById('refresh').addEventListener('click', () => load(true));
 moreBtn.addEventListener('click', () => load(false));
 load(true);
-setInterval(()=>{if(!document.hidden && !before)load(true);},30000);
+let lastAutoRefresh=0;
+setInterval(()=>{const now=Date.now();if(!document.hidden && (view==='running'||!before) && now-lastAutoRefresh>=(view==='running'?5000:30000)){lastAutoRefresh=now;load(true)}},5000);
 </script>
 </body>
 </html>

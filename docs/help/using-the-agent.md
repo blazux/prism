@@ -71,7 +71,8 @@ pages and can walk you through them step by step.
 ## Channels
 - **Web** provides the main dashboard chat.
 - **Telegram**: link your own bot in Settings → Channels to chat with your
-  agent from your phone; cron jobs can push messages there too.
+  agent from your phone and ask how a task in one of your workspaces is
+  progressing; cron jobs can push messages there too.
 - **Slack**: a single Socket Mode app for the whole deployment, connected by a
   **global admin** in Settings → Channels (the Slack card is only shown to
   them); cron jobs can deliver there too (deliver="slack").

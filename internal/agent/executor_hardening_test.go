@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -60,5 +62,36 @@ func TestCapResult_RawCallerUntouched(t *testing.T) {
 	e.SetRawResults(true)
 	if got := e.capResult(big); got != big {
 		t.Errorf("raw caller: result must pass through untouched (got %d of %d bytes)", len(got), len(big))
+	}
+}
+
+// The canonical widget policy must also apply to calls replayed with an old
+// function name. Browser-local catalogue preferences remain a separate feature.
+func TestLegacyWidgetAliasesUseCanonicalPolicy(t *testing.T) {
+	for _, name := range []string{"add_widget", "remove_widget", "update_widget", "list_widgets"} {
+		t.Run(name, func(t *testing.T) {
+			e := &ToolExecutor{hiddenTools: map[string]bool{"widget": true}}
+			args := json.RawMessage(`{}`)
+			if err := e.Authorize(name, args); err == nil || !strings.Contains(err.Error(), `"widget"`) {
+				t.Fatalf("alias bypassed canonical hidden policy: %v", err)
+			}
+			if _, _, err := e.Execute(t.Context(), name, args); err == nil || !strings.Contains(err.Error(), `"widget"`) {
+				t.Fatalf("alias executed despite hidden canonical tool: %v", err)
+			}
+			denied := errors.New("fixture group policy")
+			e.hiddenTools = nil
+			e.toolGuard = func(tool string, _ map[string]interface{}) error {
+				if tool != "widget" {
+					t.Fatalf("guard received alias %q", tool)
+				}
+				return denied
+			}
+			if !errors.Is(e.Authorize(name, args), denied) {
+				t.Fatal("authorization did not consult canonical policy")
+			}
+			if _, _, err := e.Execute(t.Context(), name, args); !errors.Is(err, denied) {
+				t.Fatal("execution did not consult canonical policy")
+			}
+		})
 	}
 }

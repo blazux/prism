@@ -29,6 +29,10 @@ type chatRun struct {
 	failed      bool
 	overflowed  bool
 	status      string
+	request     string
+	requestID   string
+	messageID   int64
+	recentTools []activityTool // bounded progress metadata; no arguments or outputs
 	secret      json.RawMessage
 	approvals   map[string]json.RawMessage
 }
@@ -78,8 +82,10 @@ func (c *Client) publishRun(v any) bool {
 		return true
 	}
 	var kind struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
+		Type    string `json:"type"`
+		ID      string `json:"id"`
+		Tool    string `json:"tool"`
+		IsError bool   `json:"is_error"`
 	}
 	_ = json.Unmarshal(b, &kind)
 	// Browser editor RPCs belong strictly to the initiating tab, never a reattached one.
@@ -101,6 +107,20 @@ func (c *Client) publishRun(v any) bool {
 		return true
 	}
 	switch kind.Type {
+	case "tool_use":
+		r.recentTools = append(r.recentTools, activityTool{ID: kind.ID, Tool: kind.Tool, Status: "running"})
+		if len(r.recentTools) > 8 {
+			r.recentTools = r.recentTools[1:]
+		}
+	case "tool_result":
+		for i := range r.recentTools {
+			if r.recentTools[i].ID == kind.ID {
+				r.recentTools[i].Status = "completed"
+				if kind.IsError {
+					r.recentTools[i].Status = "failed"
+				}
+			}
+		}
 	case "secret_request":
 		r.secret = b
 		r.status = "waiting_for_input"
@@ -150,6 +170,10 @@ func (s *Server) runActive(c *Client) bool {
 	return s.runs[runKey(c)] != nil
 }
 func (s *Server) beginRun(c *Client, cancel context.CancelFunc, content string, images []string) (*chatRun, error) {
+	return s.beginRunRequest(c, cancel, content, images, "", "")
+}
+
+func (s *Server) beginRunRequest(c *Client, cancel context.CancelFunc, content string, images []string, requestID, digest string) (*chatRun, error) {
 	s.runsMu.Lock()
 	defer s.runsMu.Unlock()
 	if s.runs == nil {
@@ -175,11 +199,24 @@ func (s *Server) beginRun(c *Client, cancel context.CancelFunc, content string, 
 			return nil, fmt.Errorf("could not record task state")
 		}
 	}
+	history := s.historySnapshot(c)
+	var messageID int64
+	if requestID != "" {
+		saved := content
+		if len(images) > 0 {
+			saved += fmt.Sprintf(" [%d image(s) attached]", len(images))
+		}
+		var err error
+		messageID, err = s.claimChatRequest(c.sessionID, requestID, digest, saved)
+		if err != nil {
+			return nil, err
+		}
+	}
 	delete(s.completedRuns, runKey(c))
 	c.mu.Lock()
 	manual := c.approvalManual
 	c.mu.Unlock()
-	r := &chatRun{done: make(chan struct{}), approvalManual: manual, owner: c, subscribers: map[*Client]bool{c: true}, history: s.historySnapshot(c), cancel: cancel, status: "running"}
+	r := &chatRun{done: make(chan struct{}), approvalManual: manual, owner: c, subscribers: map[*Client]bool{c: true}, history: history, cancel: cancel, status: "running", request: activityText(content), requestID: requestID, messageID: messageID}
 	user, _ := json.Marshal(map[string]any{"type": "run_user", "content": content, "images": images})
 	r.events = append(r.events, user)
 	r.bytes = len(user)
@@ -278,6 +315,9 @@ func (s *Server) finishRun(r *chatRun, ctx context.Context) {
 	}
 	if shuttingDown {
 		status = "interrupted"
+	}
+	if r.requestID != "" {
+		s.finishChatRequest(r.owner.sessionID, r.requestID, status)
 	}
 	// Use a bounded persistence context even while shutdown cancels execution.
 	save, cancel := context.WithTimeout(context.Background(), 5*time.Second)

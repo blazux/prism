@@ -282,10 +282,10 @@ const mcpPersonalBlockedMsg = "Personal MCP servers are not available in multi-u
 // themselves.
 func (e *ToolExecutor) mcpWriteScope() (scope, denial string) {
 	if !e.multiUser {
-		return e.mcpStorageScope(), ""
+		return e.mcpScope(), ""
 	}
 	g := e.ragScope
-	if !strings.HasPrefix(g, "g") {
+	if !groupScopeRe.MatchString(g) {
 		return "", "MCP servers are group-scoped in multi-user mode and you are not in a group — ask an admin to add you to one."
 	}
 	groupName := g
@@ -467,30 +467,9 @@ func (e *ToolExecutor) mcpListServers(ctx context.Context) (string, error) {
 	if e.mcpMgr == nil {
 		return "MCP not available (Postgres required).", nil
 	}
-	// Personal servers (this user, any board) plus the group's shared servers
-	// (if any) — the same two layers AllDynamicTools exposes as callable tools,
-	// so this list matches what the agent can actually reach. MULTI_USER
-	// retires the personal tier entirely: group scope only.
-	var servers []mcp.ServerConfig
-	if !e.multiUser {
-		var err error
-		servers, err = e.mcpMgr.List(ctx, e.mcpStorageScope())
-		if err != nil {
-			return fmt.Sprintf("Error: %v", err), nil
-		}
-	}
-	if scope := e.ragScope; scope != "" && (e.multiUser || scope != e.personalScope()) {
-		if groupServers, err := e.mcpMgr.List(ctx, scope); err == nil {
-			seen := make(map[string]bool, len(servers))
-			for _, s := range servers {
-				seen[s.Name] = true
-			}
-			for _, s := range groupServers {
-				if !seen[s.Name] {
-					servers = append(servers, s)
-				}
-			}
-		}
+	servers, err := e.MCPServers(ctx)
+	if err != nil {
+		return "", err
 	}
 	if len(servers) == 0 {
 		if e.multiUser {

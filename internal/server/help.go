@@ -125,6 +125,12 @@ func (s *Server) integrationsStatusFor(u *memory.User) func(ctx context.Context)
 		val := func(key string) string { v, _, _ := us.GetConfig(ctx, key); return strings.TrimSpace(v) }
 		secret := func(st *memory.Store, name string) bool { v, ok, _ := st.GetSecret(ctx, name); return ok && v != "" }
 		var sb strings.Builder
+		if !s.cfg.MultiUser || (u != nil && u.ID > 0) {
+			sb.WriteString("- Workspace activity: " + workspaceActivityHelp + "\n")
+			if s.cfg.MultiUser {
+				sb.WriteString("- Room activity: " + roomActivityHelp + "\n")
+			}
+		}
 		if s.cfg.VoxURL != "" {
 			sb.WriteString("- PrismVox call archive: use exec_command with GET $PRISM_URL/api/vox/history and Bearer $PRISM_TOKEN. Query: since/until (ISO8601 with timezone), number, direction (inbound/outbound), query, offset, limit (max50). Matching total is exact; follow next_offset for more. id reads a call's turns; section=tools reads its tool results. Access is scoped to this identity. Read prism_help(topic=call-history) for parameters, pagination and empty-result handling.\n")
 		}

@@ -86,7 +86,7 @@ const agentChip = () => ME.uid !== '' ? avatarChip('agent-u' + ME.uid, AGENT_NAM
 function updateSettingsLink() {
   const link = document.getElementById('settings-link')
   if (!link) return
-  link.href = `/settings.html?session=${encodeURIComponent(currentSessionID)}#profile`
+  link.href = '/settings.html#profile'
   // Open Settings inside the shell (so the chat dock stays available) on a plain
   // click; let ctrl/cmd/middle-click open the full page in a new tab.
   link.onclick = (e) => {
@@ -144,8 +144,8 @@ function connect() {
   const socket = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(currentSessionID)}`)
   ws = socket
 
-  ws.onopen  = () => { if (ws !== socket) return; closeSecretDialog(); secretRequestID = null; clearChat(); batchLoading = true; send({ type: 'approval_mode', content: approvalMode }); if (currentContext) send({ type: 'set_context', content: currentContext }) }
-  ws.onclose = () => { if (ws !== socket) return; setContainerBadge('unknown'); setTimeout(() => { if (ws === socket) connect() }, 2000) }
+  ws.onopen  = () => { if (ws !== socket) return; closeSecretDialog(); secretRequestID = null; clearChat(); batchLoading = true; send({ type: 'approval_mode', content: approvalMode }); if (currentContext) send({ type: 'set_context', content: currentContext }); if (pendingChats.has(currentSessionID)) send({type:'chat_request_status',requestId:pendingChats.get(currentSessionID).payload.requestId}); renderChatStatus() }
+  ws.onclose = () => { if (ws !== socket) return; setContainerBadge('unknown'); renderChatStatus(); setTimeout(() => { if (ws === socket) connect() }, 2000) }
   ws.onerror = () => {}
   ws.onmessage = (e) => {
     if (ws !== socket) return
@@ -155,7 +155,8 @@ function connect() {
 }
 
 function send(obj) {
-  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
+  if (ws?.readyState !== WebSocket.OPEN) return false
+  try { ws.send(JSON.stringify(obj)); return true } catch (_) { return false }
 }
 
 // When the agent uses a PIM tool, refresh the matching app iframe if it's open
@@ -220,12 +221,15 @@ function requestActiveEditor(msg) {
 
 function handleServerMsg(msg) {
   switch (msg.type) {
+    case 'chat_receipt': receiveChatReceipt(msg); break
+    case 'history_error': historyLoading = false; renderHistoryButton(); appendError(msg.content); break
     case 'run_replay':
       clearChat()
       activeRunStatus = msg.status
       handleServerMsg(msg.history)
       for (const event of msg.events || []) handleServerMsg(event)
       setStreaming(['running','waiting_for_input','waiting_for_approval'].includes(msg.status))
+      renderChatStatus()
       break
     case 'run_user': appendUserMessage(msg.content, msg.images); break
     case 'run_status':
@@ -233,6 +237,7 @@ function handleServerMsg(msg) {
       if (!['running','waiting_for_input','waiting_for_approval'].includes(msg.status)) finalizeStream()
       loadSessions()
       setStreaming(['running','waiting_for_input','waiting_for_approval'].includes(msg.status))
+      renderChatStatus()
       if (msg.status === 'interrupted') appendError('The server restarted during this task. Review the results before asking to continue.')
       if (msg.status === 'failed') appendError('The task failed. Review the error above before continuing.')
       if (msg.status === 'timed_out') appendError('The task reached its time limit. Review the results before continuing.')
@@ -256,13 +261,15 @@ function handleServerMsg(msg) {
       if (msg.sessionID) { currentSessionID = msg.sessionID; loadSessions() }
       break
     case 'model_set':       setCurrentModel(msg.model); break
-    case 'chat_reset':             clearChat(); break
-    case 'chat_history':           restoreChatHistory(msg.messages); break
+    case 'chat_reset':             window.PrismChatContext?.forget(currentSessionID); clearChat(); break
+    case 'chat_history':           receiveChatHistory(msg); break
     case 'notification':           receiveNotification(msg); break
     case 'notifications_history':  loadNotificationsHistory(msg.notifications); break
     case 'notifications_read':     markNotificationsReadLocal(); break
     case 'notification_deleted':   removeNotificationLocal(msg.id); break
-    case 'error':           appendError(msg.content); break
+    case 'error':
+      if (pendingChats.has(currentSessionID)) { pendingChats.get(currentSessionID).uncertain = true; renderChatStatus() }
+      appendError(msg.content); break
     case 'tools_list':
     case 'tools_updated':
     case 'mcp_updated':
@@ -587,24 +594,95 @@ document.querySelectorAll('.empty-examples span').forEach(el => {
 
 // ─── Chat UI ─────────────────────────────────────────────────────────────────
 
+const pendingChats = new Map()
+const chatDrafts = new Map()
+let historyBefore = 0, historyLoading = false
+
+function renderChatStatus() {
+  const el = document.getElementById('chat-delivery-status')
+  if (!el) return
+  const pending = pendingChats.get(currentSessionID)
+  const connected = ws?.readyState === WebSocket.OPEN
+  const labels = {running:'Working…',waiting_for_input:'Waiting for your input',waiting_for_approval:'Waiting for approval',completed:'Completed',stopped:'Stopped',failed:'Failed',interrupted:'Interrupted',timed_out:'Time limit reached'}
+  el.textContent = !connected ? 'Reconnecting…' : pending ? (pending.uncertain ? 'Receipt unconfirmed. Retry send to check the request again.' : 'Waiting for server receipt…') : (labels[activeRunStatus] || '')
+  if (pending?.uncertain && connected) {
+    const retry = document.createElement('button'); retry.className = 'btn'; retry.textContent = 'Retry send'
+    retry.onclick = () => { if (send(pending.payload)) { pending.uncertain = false; renderChatStatus() } }
+    el.append(' ', retry)
+  }
+  const input = document.getElementById('chat-input')
+  if (input) input.readOnly = !!pending
+}
+
+function receiveChatReceipt(msg) {
+  const pending = pendingChats.get(currentSessionID)
+  if (!pending || pending.payload.requestId !== msg.requestId) return
+  if (['unknown','unavailable'].includes(msg.status)) { pending.uncertain = true; renderChatStatus(); return }
+  if (['invalid','conflict','rejected'].includes(msg.status)) {
+    pendingChats.delete(currentSessionID); renderChatStatus(); appendError('The message was not accepted. Your draft has been kept.'); return
+  }
+  pendingChats.delete(currentSessionID)
+  if (!msg.replayed) appendUserMessage(pending.payload.content, pending.payload.images, pending.payload.files)
+  const input = document.getElementById('chat-input')
+  if (input.value.trim() === pending.payload.content) input.value = ''
+  autoResizeTextarea(input)
+  // A previously started upload may have finished while waiting for the receipt.
+  // Clear only the attachments actually included in the accepted request.
+  pendingImages = pendingImages.filter(image=>!pending.images.includes(image))
+  pendingFiles = pendingFiles.filter(file=>!pending.files.includes(file))
+  renderPreviews(); renderChatStatus()
+}
+
+function renderHistoryButton() {
+  const button = document.getElementById('chat-history-more')
+  if (button) { button.hidden = !historyBefore; button.disabled = historyLoading; button.textContent = historyLoading ? 'Loading…' : 'Load older messages' }
+}
+function loadOlderChat() {
+  if (!historyBefore || historyLoading) return
+  historyLoading = send({type:'chat_history_page',before:historyBefore}); renderHistoryButton()
+}
+window.loadOlderChat = loadOlderChat
+
+function receiveChatHistory(msg) {
+  const host = document.getElementById('chat-messages')
+  const oldHeight = host.scrollHeight, oldTop = host.scrollTop
+  const existing = msg.prepend ? Array.from(host.childNodes) : []
+  if (msg.prepend) host.replaceChildren()
+  const streaming = isStreaming
+  restoreChatHistory(msg.messages)
+  if (msg.prepend) {
+    host.append(...existing)
+    // An attachment result and the following answer may straddle a page.
+    for (const tool of host.querySelectorAll('.chat-msg.tool')) {
+      let next = tool.nextElementSibling
+      while (next && !next.classList.contains('user')) {
+        if (next.classList.contains('assistant')) { for (const card of tool.querySelectorAll('.chat-response-attachments')) next.append(card); break }
+        next = next.nextElementSibling
+      }
+    }
+    host.scrollTop = oldTop + host.scrollHeight - oldHeight
+    setStreaming(streaming)
+  }
+  historyBefore = msg.hasMore ? msg.before : 0; historyLoading = false; renderHistoryButton()
+}
+
 function sendChat() {
   const input = document.getElementById('chat-input')
   const text = input.value.trim()
-  if ((!text && pendingImages.length === 0 && pendingFiles.length === 0) || isStreaming) return
-
-  appendUserMessage(text, pendingImages.map(image => image.data), pendingFiles)
-  input.value = ''
-  autoResizeTextarea(input)
+  if ((!text && pendingImages.length === 0 && pendingFiles.length === 0) || isStreaming || pendingChats.has(currentSessionID)) return
 
   const images = pendingImages.map(image => image.data)
   const imageNames = pendingImages.map(image => image.name)
   const files  = pendingFiles.slice()
-  pendingImages = []
-  pendingFiles  = []
-  renderPreviews()
+  const requestId = crypto.randomUUID?.() || Array.from(crypto.getRandomValues(new Uint8Array(16)), n=>n.toString(16).padStart(2,'0')).join('')
+  const request = { type: 'chat', requestId, content: text, images: images.length ? images : undefined, imageNames: images.length ? imageNames : undefined, files: files.length ? files : undefined, disabledTools: getDisabledTools() }
+  if (!send(request)) {
+    showToast({ title: 'Connection unavailable', message: 'Your message and attachments have been kept. Retry when the connection is restored.', level: 'warning' })
+    return
+  }
 
-  setStreaming(true)
-  send({ type: 'chat', content: text, images: images.length ? images : undefined, imageNames: images.length ? imageNames : undefined, files: files.length ? files : undefined, disabledTools: getDisabledTools() })
+  pendingChats.set(currentSessionID, {payload:request,images:pendingImages.slice(),files:pendingFiles.slice()})
+  renderChatStatus()
 }
 
 window.sendChat = sendChat
@@ -918,6 +996,7 @@ function clearChat() {
   currentAssistantEl = null
   currentAssistantContent = ''
   setStreaming(false)
+  historyBefore = 0; historyLoading = false; renderHistoryButton()
 }
 
 function restoreChatHistory(messages) {
@@ -1271,16 +1350,24 @@ let voxWorkspaceAvailable = false
 
 // gotoSession reconnects the chat/WS to a different session (workspace or the
 // global assistant). It does NOT change the view — setView decides the session.
+function personalSessionID(id) {
+  return ME.uid > 0 && !/^u\d+-/.test(id) ? `u${ME.uid}-${id}` : id
+}
 function gotoSession(id) {
+  id = personalSessionID(id)
   if (id === currentSessionID) return
+  window.PrismChatContext?.close()
+  chatDrafts.set(currentSessionID, {text:document.getElementById('chat-input').value,images:pendingImages,files:pendingFiles})
   batchLoading = true
   clearChat()
   cascadeN = 0
   for (const wid of [...widgets.keys()]) removeWidget(wid)
   currentSessionID = id
   updateSettingsLink()
-  pendingImages = []
-  pendingFiles  = []
+  const draft = chatDrafts.get(id)
+  document.getElementById('chat-input').value = draft?.text || ''
+  pendingImages = draft?.images || []
+  pendingFiles = draft?.files || []
   renderPreviews()
   notifications = []
   renderNotifPanel()
@@ -1293,6 +1380,8 @@ function gotoSession(id) {
 function setChatAgentLabel(text) {
   const el = document.getElementById('chat-agent')
   if (el) el.textContent = text
+  const scope = document.getElementById('chat-scope')
+  if (scope) scope.textContent = currentSessionID.replace(/^u\d+-/,'') === ASSISTANT ? 'General assistant · your personal conversations and apps' : 'Workspace · ' + boardName(currentSessionID)
 }
 
 function boardName(id) {
@@ -1322,10 +1411,8 @@ function setView(view) {
     // Settings in the app-frame so the chat dock stays — the agent helps with
     // configuration (connecting accounts, OAuth). Settings is a global page, so
     // the chat follows the same rule as the other global apps: the assistant.
-    // The page itself keeps the workspace session for its per-workspace panels.
-    const pageSession = currentSessionID
     gotoSession(ASSISTANT)
-    frame.src = `/settings.html?session=${encodeURIComponent(pageSession)}#${view.tab || 'profile'}`
+    frame.src = `/settings.html#${view.tab || 'profile'}`
     frame.style.display = ''
     dash.style.display = 'none'
     dock.style.display = 'none'
@@ -1374,7 +1461,8 @@ function setView(view) {
     setSuggestions([]) // the app posts its own context-specific suggestions
   } else {
     // Workspace dashboard → chat is that workspace's agent.
-    const ws_id = view.workspace || lastWorkspace
+    const ws_id = personalSessionID(view.workspace || lastWorkspace)
+    view.workspace = ws_id
     lastWorkspace = ws_id
     localStorage.setItem('active-workspace', ws_id)
     gotoSession(ws_id)
@@ -1513,6 +1601,7 @@ function editWorkspace(sess) {
     <label style="font-size:11px;color:var(--text2)">Workspace adaptation
       <textarea id="ws-personality" rows="4" placeholder="Extra instructions for this workspace, layered on top of the default personality. Leave blank to use the default as-is." style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;font:inherit;font-size:12px;resize:vertical;box-sizing:border-box"></textarea></label>
     <div style="font-size:10px;color:var(--text3);margin-top:-4px">Edit the default in Settings → Agent. Takes effect on this workspace's next message.</div>
+    <div id="ws-status" role="status" style="font-size:12px;color:var(--text2)"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
       <button id="ws-cancel" style="background:var(--bg2);border:1px solid var(--border2);color:var(--text2);border-radius:6px;padding:5px 12px;cursor:pointer">Cancel</button>
       <button id="ws-save" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 14px;cursor:pointer">Save</button>
@@ -1531,31 +1620,60 @@ function editWorkspace(sess) {
   }
   paint()
 
-  // Load the workspace's stored personality (async — empty = default).
   const persoEl = dlg.querySelector('#ws-personality')
-  let persoLoaded = ''
+  const save = dlg.querySelector('#ws-save'), cancel = dlg.querySelector('#ws-cancel')
+  const status = dlg.querySelector('#ws-status')
+  let persoLoaded = null, loading = true, saving = false
+  persoEl.disabled = true; save.disabled = true; status.textContent = 'Loading workspace instructions…'
+  async function readResponse(response) {
+    if (!response.ok) {
+      const text = await response.text()
+      let message = text
+      try { message = JSON.parse(text).error || text } catch {}
+      throw new Error(message || `Request failed (${response.status})`)
+    }
+    return response
+  }
   fetch(`/api/personality?session=${encodeURIComponent(sess.id)}`)
-    .then(r => r.json()).then(d => { persoLoaded = d.personality || ''; persoEl.value = persoLoaded })
-    .catch(() => {})
+    .then(readResponse).then(r => r.json()).then(d => {
+      persoLoaded = d.personality || ''; persoEl.value = persoLoaded
+      persoEl.disabled = false; status.textContent = ''
+    }).catch(error => { status.textContent = 'Instructions could not be loaded: ' + error.message + '. Reopen this dialog to edit them.' })
+    .finally(() => { loading = false; save.disabled = false })
 
-  const close = () => ov.remove()
+  const close = () => { if (!saving) ov.remove() }
   ov.addEventListener('click', e => { if (e.target === ov) close() })
-  dlg.querySelector('#ws-cancel').onclick = close
-  dlg.querySelector('#ws-save').onclick = async () => {
+  cancel.onclick = close
+  save.onclick = async () => {
+    if (loading || saving) return
     const name = dlg.querySelector('#ws-name').value.trim()
-    setWorkspaceIcon(sess.id, selected)
-    if (name && name !== sess.name) {
-      await fetch(`/api/sessions/${sess.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
-    }
-    const perso = persoEl.value.trim()
-    if (perso !== persoLoaded.trim()) {
-      await fetch(`/api/personality?session=${encodeURIComponent(sess.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: perso }) })
-    }
-    close()
-    loadSessions()
-    if (currentView.type === 'board' && currentSessionID === sess.id) {
-      const t = document.getElementById('view-title'); if (t && name) t.textContent = name
-      setChatAgentLabel(name || sess.name)
+    if (!name) { status.textContent = 'A workspace name is required.'; return }
+    saving = true
+    const controls = dlg.querySelectorAll('input,textarea,button')
+    controls.forEach(el => { el.disabled = true })
+    status.textContent = 'Saving…'
+    try {
+      if (name !== sess.name) {
+        await readResponse(await fetch(`/api/sessions/${encodeURIComponent(sess.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }))
+        sess.name = name
+        loadSessions()
+      }
+      const perso = persoEl.value.trim()
+      if (persoLoaded !== null && perso !== persoLoaded.trim()) {
+        await readResponse(await fetch(`/api/personality?session=${encodeURIComponent(sess.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: perso }) }))
+        persoLoaded = perso
+      }
+      setWorkspaceIcon(sess.id, selected)
+      loadSessions()
+      if (currentView.type === 'board' && currentSessionID === sess.id) {
+        const t = document.getElementById('view-title'); if (t) t.textContent = name
+        setChatAgentLabel(name)
+      }
+      ov.remove()
+    } catch (error) {
+      status.textContent = 'Could not save all changes: ' + error.message + '. Your edits are kept.'
+    } finally {
+      saving = false; controls.forEach(el => { el.disabled = false }); persoEl.disabled = persoLoaded === null
     }
   }
   setTimeout(() => dlg.querySelector('#ws-name').focus(), 50)
@@ -1841,30 +1959,38 @@ function addAttachment(file) {
 }
 window.addAttachment = addAttachment
 
+function attachmentDraft(session) {
+  if(session===currentSessionID)return {images:pendingImages,files:pendingFiles}
+  if(!chatDrafts.has(session))chatDrafts.set(session,{text:'',images:[],files:[]})
+  return chatDrafts.get(session)
+}
+
 function addImageFromFile(file) {
+  const session=currentSessionID
   if (!file || !file.type.startsWith('image/')) return
   const reader = new FileReader()
   reader.onload = e => {
     const b64 = e.target.result.split(',')[1]
-    pendingImages.push({ data: b64, name: file.name })
-    renderPreviews()
+    attachmentDraft(session).images.push({ data: b64, name: file.name })
+    if(session===currentSessionID)renderPreviews()
   }
   reader.readAsDataURL(file)
 }
 
 async function addFileAttachment(file) {
+  const session=currentSessionID
   const form = new FormData()
   form.append('file', file)
   try {
-    const res = await fetch('/api/chat/upload', { method: 'POST', body: form })
+    const res = await fetch('/api/chat/upload?session='+encodeURIComponent(session), { method: 'POST', body: form })
     if (!res.ok) {
       const msg = await res.text()
       PrismModal.alert(`Could not attach "${file.name}": ${msg}`, { title: "Attachment" })
       return
     }
     const { name, text, path } = await res.json()
-    pendingFiles.push({ name, text, path })
-    renderPreviews()
+    attachmentDraft(session).files.push({ name, text, path })
+    if(session===currentSessionID)renderPreviews()
   } catch (err) {
     PrismModal.alert(`Could not attach "${file.name}": ${err}`, { title: "Attachment" })
   }
@@ -1927,7 +2053,7 @@ const CONFIG_KEY = 'agent-config'
 function getConfig() {
   try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}') } catch { return {} }
 }
-function getDisabledTools() { return getConfig().disabled || [] }
+function getDisabledTools() { return PrismToolPreferences.read().disabled || [] }
 
 // ─── Model selector ───────────────────────────────────────────────────────────
 
@@ -2466,3 +2592,5 @@ async function initApp() {
 }
 
 initApp()
+
+window.toggleChatSummary = () => PrismChatContext.toggle(currentSessionID)

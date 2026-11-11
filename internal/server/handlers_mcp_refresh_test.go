@@ -40,7 +40,7 @@ func TestMCPRefreshRoutesRespectPersonalAndGroupScopes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	seed("u11")
+	seed("global")
 	u := &memory.User{ID: 11}
 	request := func(path string, user *memory.User, group bool, want int) {
 		t.Helper()
@@ -59,8 +59,8 @@ func TestMCPRefreshRoutesRespectPersonalAndGroupScopes(t *testing.T) {
 		}
 	}
 	request("/api/mcp/servers/fixture?session=board", u, false, 200)
-	request("/api/mcp/servers/fixture?session=board", &memory.User{ID: 12}, false, 404)
-	request("/api/mcp/servers/fixture?session=u12-board", u, false, 403)
+	request("/api/mcp/servers/fixture", &memory.User{ID: 12}, false, 200)
+	request("/api/mcp/servers/fixture?session=u12-board", u, false, 200)
 	s.cfg.MultiUser = true
 	request("/api/mcp/servers/fixture?session=board", u, false, 403)
 	admin, err := ms.CreateUser(ctx, "admin@example.test", "unused", "Admin", memory.RoleMember, memory.StatusApproved)

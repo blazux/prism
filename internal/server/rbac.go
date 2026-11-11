@@ -67,19 +67,30 @@ func (s *Server) isAdminUser(ctx context.Context, u *memory.User) bool {
 
 // buildUserGuard returns the tool authorization gate for a user. A nil user
 // (legacy/no-DB, or the internal service identity handled upstream) yields a nil
-// guard = unrestricted, preserving single-owner behaviour.
+// guard unless the operator explicitly disabled tools.
 func (s *Server) buildUserGuard(ctx context.Context, u *memory.User) agent.ToolGuard {
 	if u != nil && u.ID < 0 {
 		return s.buildGroupAgentGuard(ctx, -u.ID)
 	}
-	if u == nil {
-		return nil
-	}
-	// Admins are unrestricted — skip the per-call lookups entirely.
-	if s.isAdminUser(ctx, u) {
-		return nil
-	}
 	policies := s.toolPolicies(ctx)
+	// Administrators bypass member restrictions, never a deployment-wide disable.
+	if u == nil || s.isAdminUser(ctx, u) {
+		disabled := map[string]string{}
+		for name, access := range policies {
+			if access == "disabled" {
+				disabled[name] = access
+			}
+		}
+		if len(disabled) == 0 {
+			return nil
+		}
+		return func(name string, _ map[string]interface{}) error {
+			if disabled[name] == "disabled" {
+				return fmt.Errorf("tool %q has been disabled by the administrator on this platform", name)
+			}
+			return nil
+		}
+	}
 	// Group restrictions tighten (never loosen) the global policy for this member.
 	restricted := map[string]bool{}
 	if ms := s.store(); ms != nil && u.ID > 0 {

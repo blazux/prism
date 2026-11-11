@@ -10,7 +10,7 @@ import (
 
 func TestMCPWriteScope(t *testing.T) {
 	single := &ToolExecutor{}
-	if scope, denial := single.mcpWriteScope(); denial != "" || scope != single.mcpStorageScope() {
+	if scope, denial := single.mcpWriteScope(); denial != "" || scope != "global" {
 		t.Errorf("single-user: got (%q, %q)", scope, denial)
 	}
 	noGroup := &ToolExecutor{multiUser: true, ragScope: "u7"}

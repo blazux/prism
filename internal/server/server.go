@@ -85,6 +85,7 @@ type Server struct {
 	completedRuns map[string]*chatRun
 
 	runsMu           sync.Mutex
+	chatReceipts     sync.Map // no-database fallback; durable installations use chat_requests
 	runs             map[string]*chatRun
 	deletingSessions map[string]bool                 // protected by runsMu
 	sessionJobs      map[string]map[*sessionJob]bool // headless jobs; protected by runsMu
@@ -283,6 +284,8 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/chat/upload", s.resourceRoute((*Server).handleChatFileUpload))
 	mux.HandleFunc("/api/notify", s.resourceRoute((*Server).handleExternalNotify))
 	mux.HandleFunc("/api/profile", s.resourceRoute((*Server).handleProfile))
+	mux.HandleFunc("/api/memory", s.resourceRoute((*Server).handleMemory))
+	mux.HandleFunc("/api/chat/context", s.resourceRoute((*Server).handleConversationContext))
 	mux.HandleFunc("/api/avatar", s.resourceRoute((*Server).handleAvatar))
 	mux.HandleFunc("/api/voice", s.resourceRoute((*Server).handleVoiceConfig))
 	mux.HandleFunc("/api/voice/caller", s.resourceRoute((*Server).handleVoiceCaller))       // Vox: who is calling?
@@ -373,6 +376,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/my/tool-prefs", s.resourceRoute((*Server).handleMyToolPrefs))
 	mux.HandleFunc("/api/group/members", s.resourceRoute((*Server).handleGroupMembers))
 	mux.HandleFunc("/api/room/history", s.resourceRoute((*Server).handleRoomHistory))
+	mux.HandleFunc("/api/room/activity", s.resourceRoute((*Server).handleRoomActivity))
 	mux.HandleFunc("/api/room/context", s.resourceRoute((*Server).handleRoomContext))
 	mux.HandleFunc("/api/room/config", s.resourceRoute((*Server).handleRoomConfig))
 	mux.HandleFunc("/api/group/tool-policy", s.resourceRoute((*Server).handleGroupToolPolicy))

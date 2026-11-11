@@ -88,6 +88,9 @@ func NewStore(ctx context.Context, connStr string, encKey []byte, multiUser bool
 	s.migratePersonalityBase(ctx)
 	if multiUser {
 		s.migrateUserScopedConfig(ctx)
+	} else if err := s.migrateSingleOwnerMCP(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("single-owner MCP migration: %w", err)
 	}
 	return s, nil
 }
@@ -159,6 +162,7 @@ func (s *Store) migratePersonalityBase(ctx context.Context) {
 
 // HistoryHit is one match from a cross-session conversation search.
 type HistoryHit struct {
+	ID        int64     `json:"id"`
 	SessionID string    `json:"sessionId"`
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
@@ -173,14 +177,14 @@ func (s *Store) SearchHistory(ctx context.Context, query string, limit int, scop
 		limit = 15
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT session_id, role, content, created_at
+		SELECT id, session_id, role, content, created_at
 		FROM conversation_history
 		WHERE role IN ('user', 'assistant')
 		  AND content_tsv @@ websearch_to_tsquery('simple', $1)
 		  AND ($3 = ''
 		    OR (left($3, 1) = 'u' AND starts_with(session_id, $3 || '-'))
 		    OR (left($3, 1) = 'g' AND
-		      (session_id = 'room-' || $3 OR starts_with(session_id, 'webex-' || $3 || '-'))))
+		      (session_id = 'room-' || $3 OR starts_with(session_id, 'webex-' || $3 || '-') OR starts_with(session_id, 'teams-' || $3 || '-'))))
 		ORDER BY ts_rank(content_tsv, websearch_to_tsquery('simple', $1)) DESC, created_at DESC
 		LIMIT $2
 	`, query, limit, scope)
@@ -191,7 +195,7 @@ func (s *Store) SearchHistory(ctx context.Context, query string, limit int, scop
 	var out []HistoryHit
 	for rows.Next() {
 		var h HistoryHit
-		if err := rows.Scan(&h.SessionID, &h.Role, &h.Content, &h.CreatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.SessionID, &h.Role, &h.Content, &h.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -227,6 +231,14 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS conv_history_session_idx ON conversation_history(session_id, id)`,
+		`CREATE TABLE IF NOT EXISTS chat_requests (
+			session_id TEXT NOT NULL,
+			request_id TEXT NOT NULL,
+			digest TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'accepted',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY(session_id, request_id)
+		)`,
 		// Full-text search across all conversations (cross-session recall).
 		`ALTER TABLE conversation_history ADD COLUMN IF NOT EXISTS content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED`,
 		`CREATE INDEX IF NOT EXISTS conv_history_tsv_idx ON conversation_history USING GIN(content_tsv)`,
@@ -831,6 +843,11 @@ func (s *Store) GetSummary(ctx context.Context, sessionID string) string {
 	var value string
 	_ = s.pool.QueryRow(ctx, `SELECT value FROM agent_config WHERE key = $1`, summaryKey(sessionID)).Scan(&value)
 	return value
+}
+
+func (s *Store) CorrectSummary(ctx context.Context, session, original, summary string) (bool, error) {
+	r, err := s.pool.Exec(ctx, `UPDATE agent_config SET value=$3,updated_at=NOW() WHERE key=$1 AND value=$2`, summaryKey(session), original, summary)
+	return r.RowsAffected() == 1, err
 }
 
 // MaybeSummarize summarizes old history if user+assistant message count exceeds maxMessages.

@@ -695,14 +695,17 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "search_history",
-			Description: "Full-text search across your past conversations, including other workspaces, the assistant, and Telegram. Use it to recall what was said or decided earlier when the current context doesn't contain it. Returns matching messages with their date and session.",
+			Description: "Search or read archived conversations in your personal or shared group scope. query searches. session + message_id reads one exact message as serialized text; follow nextOffset with offset for the rest. session alone reads a chronological page; before continues older pages.",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
-					"query": {Type: "string", Description: "Keywords to search for (e.g. 'postgres password', 'lisbon offsite plan')"},
-					"limit": {Type: "integer", Description: "Max results (default 15)"},
+					"query":      {Type: "string", Description: "Keywords to search for (e.g. 'postgres password', 'lisbon offsite plan')"},
+					"session":    {Type: "string", Description: "Known conversation session ID to read, instead of searching"},
+					"before":     {Type: "integer", Description: "Read messages older than this ID; omit for the newest page"},
+					"message_id": {Type: "integer", Description: "Read this exact message ID from a search result; requires session"},
+					"offset":     {Type: "integer", Description: "Continue reading the same message_id at its returned nextOffset"},
+					"limit":      {Type: "integer", Description: "Max results (default 15)"},
 				},
-				Required: []string{"query"},
 			},
 		},
 	},

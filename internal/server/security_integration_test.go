@@ -18,6 +18,11 @@ import (
 )
 
 func securityStore(t *testing.T) *memory.Store {
+	ms, _ := securityStoreWithDSN(t)
+	return ms
+}
+
+func securityStoreWithDSN(t *testing.T) (*memory.Store, string) {
 	t.Helper()
 	dsn := os.Getenv("PRISM_TEST_SECRETS_URL")
 	if dsn == "" {
@@ -42,7 +47,7 @@ func securityStore(t *testing.T) *memory.Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ms.Close(); db.Exec(ctx, "DROP SCHEMA "+quoted+" CASCADE"); db.Close(ctx) })
-	return ms
+	return ms, parsed.String()
 }
 func TestSecurityOAuthKeepsInitiatingOwner(t *testing.T) {
 	ms := securityStore(t)

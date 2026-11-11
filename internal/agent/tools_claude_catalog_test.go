@@ -102,8 +102,8 @@ func TestClaudeCatalogPreservesExecutionGuard(t *testing.T) {
 	}
 	full, _ := a.buildToolListWithCachePrefix()
 	result, err := catalog.execute(json.RawMessage(`{"action":"load","names":["note"]}`), full)
-	if err != nil || !strings.Contains(result, "Loaded: note") {
-		t.Fatalf("guarded caller cannot load tool schema: %v %s", err, result)
+	if err != nil || !strings.Contains(result, "Unavailable: note") {
+		t.Fatalf("denied tool was exposed by the catalogue: %v %s", err, result)
 	}
 	if _, _, err := executor.Execute(ctx, "note", json.RawMessage(`{"action":"list"}`)); err != context.Canceled || !denied {
 		t.Fatalf("loaded tool bypassed its execution guard: %v", err)

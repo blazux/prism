@@ -5,6 +5,13 @@ errors, webhook executions and inbox rule results. A task update shows its actio
 available title/id; an email rule shows how many messages it processed or why
 it failed. Quiet reads and polling stay out of this view.
 
+**In progress** shows active tasks in your personal conversations, including
+your general assistant and Telegram, and work in Rooms you can access. It shows
+the current request, recent tools, subagents, background jobs and any queued
+Room messages. This view
+refreshes every five seconds while visible. It follows your own workspace and
+Room permissions; the **everyone** audit filter does not extend this view.
+
 **Details**, **Tools**, **Chat**, **Errors** and **Webhooks** expose the technical
 history when investigating a problem. Tool entries show whether the call completed or failed
 and how long it took. Refresh or load older entries as needed.

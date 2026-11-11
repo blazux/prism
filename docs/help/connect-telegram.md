@@ -49,6 +49,23 @@ send it to me on Telegram"*. The agent schedules a cron job whose result is
 pushed to your Telegram chat — no need to be at the dashboard.
 Files attached by the agent are delivered too.
 
+## Following a workspace task
+
+Start work in a Prism workspace, then ask your bot how it is progressing.
+The agent can consult that workspace's task state, recent saved messages,
+recent tool activity and active delegated workers. This does not interrupt
+the task or start another turn in that workspace. If the task is waiting
+for input or approval, return to the workspace in your browser.
+
+In shared mode, this covers your own personal workspaces and the Rooms your
+account can access in Prism. Ask, for example, "Is the Support group's agent
+finished?" The bot can consult its current task, recent tools and queue without
+posting a message to the shared agent. Other members' personal workspaces stay
+private. Group access is checked on every consultation; information already
+delivered to Telegram remains in that conversation after access is removed.
+The agent can read `prism_help topic=workspace-activity` for the API recipe
+and the available progress information.
+
 ## Unlinking and changing the bot
 - **Unlink chat** (Settings → Channels) forgets the linked chat; the next
   `/start` re-links, so you can move to another phone or account.

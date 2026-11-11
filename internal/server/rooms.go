@@ -41,14 +41,16 @@ type roomClient struct {
 }
 
 type roomHub struct {
-	mu      sync.Mutex
-	clients map[*roomClient]struct{}
-	queues  map[int64][]func()
-	cancels map[int64]context.CancelFunc
+	mu        sync.Mutex
+	clients   map[*roomClient]struct{}
+	queues    map[int64][]func()
+	cancels   map[int64]context.CancelFunc
+	executing map[int64]bool
+	progress  map[int64]*roomProgress
 }
 
 func newRoomHub() *roomHub {
-	return &roomHub{clients: make(map[*roomClient]struct{}), queues: make(map[int64][]func()), cancels: make(map[int64]context.CancelFunc)}
+	return &roomHub{clients: make(map[*roomClient]struct{}), queues: make(map[int64][]func()), cancels: make(map[int64]context.CancelFunc), executing: make(map[int64]bool), progress: make(map[int64]*roomProgress)}
 }
 
 // enqueue preserves arrival order and has one worker per group. This also
@@ -72,8 +74,12 @@ func (h *roomHub) enqueue(group int64, fn func()) {
 			}
 			work := q[0]
 			h.queues[group] = q[1:]
+			h.executing[group] = true
 			h.mu.Unlock()
 			work()
+			h.mu.Lock()
+			delete(h.executing, group)
+			h.mu.Unlock()
 		}
 	}()
 }
@@ -82,6 +88,7 @@ func (h *roomHub) setCancel(group int64, cancel context.CancelFunc) {
 	defer h.mu.Unlock()
 	if cancel == nil {
 		delete(h.cancels, group)
+		delete(h.progress, group)
 	} else {
 		h.cancels[group] = cancel
 	}
@@ -367,6 +374,7 @@ func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, co
 	ctx, cancel := context.WithTimeout(s.runtimeContext(), 10*time.Minute)
 	defer cancel()
 	s.rooms.setCancel(groupID, cancel)
+	s.rooms.startProgress(groupID, fromName+": "+stripMention(content, cfg.AgentName))
 	defer func() { s.rooms.setCancel(groupID, nil); s.rooms.broadcast(groupID, s.rooms.activity(groupID)) }()
 	s.rooms.broadcast(groupID, s.rooms.activity(groupID))
 	sessionID := fmt.Sprintf("room-g%d", groupID)
@@ -420,6 +428,7 @@ func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, co
 			preview.WriteString(ev.Content)
 			s.rooms.broadcast(groupID, map[string]any{"type": "agent_stream", "messageId": agentMsg.ID, "content": ev.Content})
 		case "tool_use", "tool_result":
+			s.rooms.trackTool(groupID, ev)
 			// Preserve the full bounded tool result emitted by the executor.
 			traces = append(traces, ev)
 			persist("running", preview.String())
@@ -669,6 +678,19 @@ func (s *Server) handleRoomConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			writeErr(w, http.StatusBadRequest, "bad body")
+			return
+		}
+		model := strings.TrimSpace(b.AgentModel)
+		if model == "" {
+			ai, err := s.aiConfigFor(r.Context(), 0)
+			if err != nil {
+				writeErr(w, 503, "AI configuration unavailable")
+				return
+			}
+			model = ai.cfg.Model
+		}
+		if !s.userCanUseModel(r.Context(), &memory.User{ID: -groupID, Role: memory.RoleMember}, model) {
+			writeErr(w, 403, "model not allowed for this group")
 			return
 		}
 		old, _ := ms.GetRoomConfig(r.Context(), groupID)

@@ -2,7 +2,8 @@
 // rechecked server-side; a preview never authorizes stale or shared deletions.
 ;(function () {
   async function request(session, args, query = {}) {
-    const params = new URLSearchParams({ session, ...query })
+    const params = new URLSearchParams(query)
+    if (session) params.set('session', session)
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 35000)
     try {

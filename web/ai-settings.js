@@ -226,11 +226,11 @@ async function renderAITab(container, options = {}) {
   }
   // Bound both the headers and response body; a proxy/provider stall must
   // never leave every settings control disabled forever.
-  async function fetchConfig(url='/api/ai/config', options={}) {
+  async function fetchConfig(url='/api/ai/config', options={}, controls=null) {
     const controller=new AbortController()
     const timer=setTimeout(()=>controller.abort(),40000)
     try {
-      const response=await fetch(url,{...options,signal:controller.signal})
+      const response=await (globalThis.PrismSettingsState?.request||fetch)(url,{...options,signal:controller.signal},controls)
       const text=await response.text()
       return {ok:response.ok,status:response.status,text:async()=>text,json:async()=>JSON.parse(text)}
     } catch(err) {
@@ -239,7 +239,7 @@ async function renderAITab(container, options = {}) {
     } finally {clearTimeout(timer)}
   }
   async function request(action) {
-    const r = await fetchConfig('/api/ai/config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload(action))})
+    const r = await fetchConfig('/api/ai/config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload(action))},action==='save'?form.querySelectorAll('input,select,textarea'):null)
     const text = await r.text();let data
     try { data=JSON.parse(text) } catch { data={} }
     if (!r.ok) throw new Error(data.error || text || 'Request failed')
@@ -322,7 +322,7 @@ async function renderAITab(container, options = {}) {
         if (!quiet) status.textContent='Connection ready. Choose a model to save it automatically.'
       } else if (action==='test') status.textContent='The model responded. This text test does not verify vision support.'
       else if(action==='embedding_test') status.textContent=`Embedding endpoint verified · ${result.dimension} dimensions.`
-      else {persisted=true;status.textContent='Saved. Refreshing…';await load();status.textContent='Changes saved. New conversations use the selected default model.'}
+      else {persisted=true;status.textContent='Saved. Refreshing…';await load();if(globalThis.PrismSettingsState)PrismSettingsState.saved(PrismSettingsState.begin(form.querySelectorAll('input,select,textarea')));status.textContent='Changes saved. New conversations use the selected default model.'}
       return true
     } catch(err) {if(persisted){dirty=false;saved.model=payload('save').model}status.textContent=(persisted?'Saved, but unable to refresh the page. ' : action==='save'&&err.name!=='TimeoutError'?'Not saved: ':'')+err.message;status.classList.add('error');if(localStatus)localStatus.textContent='Connection failed: '+err.message;return persisted}
     finally {busy=false;pane.classList.remove('is-busy');controls.forEach(el=>el.disabled=false);pane.querySelectorAll('[data-sources] button').forEach(el=>el.disabled=false);showSaveState();refresh()}
@@ -341,7 +341,7 @@ async function renderAITab(container, options = {}) {
     mf('contextWindow').required=manual
   }
   async function modelRequest(action, settings) {
-    const r=await fetchConfig('/api/ai/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,sourceID:modelSourceID,model:mf('settingsModel').value.trim(),settings})})
+    const r=await fetchConfig('/api/ai/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,sourceID:modelSourceID,model:mf('settingsModel').value.trim(),settings})},action==='model_settings'?modelForm.querySelectorAll('input,select'):null)
     const data=await r.json()
     if(!r.ok)throw new Error(data.error || 'Cannot update model settings')
     return data

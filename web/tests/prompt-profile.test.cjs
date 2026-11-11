@@ -12,7 +12,7 @@ test('profile UI migrates legacy choices, posts Minimal and rejects failed save'
  for(const [limits,selected] of [[{},'guided'],[{leanPrompt:true},'standard'],[{promptProfile:'minimal'},'minimal']]) {
   const fields=new Map(),nodes=[],posts=[];
   const field=id=>{if(!fields.has(id))fields.set(id,{value:'',checked:false,addEventListener(type,fn){this[type]=fn}});return fields.get(id)};
-  const context={document:{createElement(){const node={style:{},appendChild(){},querySelector:field};nodes.push(node);return node}},fetch:async(url,options)=>{
+  const context={document:{createElement(){const node={style:{},appendChild(){},querySelector:field,querySelectorAll:selector=>selector.split(',').map(field)};nodes.push(node);return node}},fetch:async(url,options)=>{
    if(options?.method==='POST'){posts.push(JSON.parse(options.body));return {ok:false,clone:()=>({text:async()=>JSON.stringify({error:'fixture save failed'})}),json:async()=>({error:'fixture save failed'})}}
    return {ok:true,json:async()=>url==='/api/agent/limits'?limits:{}};
   },showToast:()=>{},icon:()=>'',escHtml:x=>x,avatarMarkup:()=>'',settingsHeading:()=>'',setTimeout:()=>{}};

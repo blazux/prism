@@ -173,11 +173,27 @@ func (s *Store) initSchema(ctx context.Context, migration bool) error {
 // UpsertDocument inserts or replaces a document and all its chunks atomically.
 // pageNums[i] is the 1-based page number for chunks[i]; 0 means no associated page image.
 func (s *Store) UpsertDocument(ctx context.Context, collection, filename, fileHash string, sizeBytes int64, chunks []string, pageNums []int, embeddings [][]float32) error {
+	return s.upsertDocument(ctx, collection, filename, fileHash, sizeBytes, chunks, pageNums, embeddings, nil)
+}
+
+var ErrDocumentChanged = errors.New("document changed since it was opened")
+
+func (s *Store) CorrectDocument(ctx context.Context, previous Document, text string, chunks []string, embeddings [][]float32) error {
+	return s.upsertDocument(ctx, previous.Collection, previous.Filename, "", int64(len(text)), chunks, make([]int, len(chunks)), embeddings, &previous.UpdatedAt)
+}
+
+func (s *Store) upsertDocument(ctx context.Context, collection, filename, fileHash string, sizeBytes int64, chunks []string, pageNums []int, embeddings [][]float32, expected *time.Time) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if expected != nil {
+		var current time.Time
+		if err := tx.QueryRow(ctx, `SELECT updated_at FROM rag_documents WHERE collection=$1 AND filename=$2 FOR UPDATE`, collection, filename).Scan(&current); err != nil || !current.Equal(*expected) {
+			return ErrDocumentChanged
+		}
+	}
 
 	var docID int64
 	err = tx.QueryRow(ctx, `

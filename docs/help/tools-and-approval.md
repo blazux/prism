@@ -12,6 +12,10 @@ Tools** (scripts the agent registered), **MCP Tools** (single-user mode) and
 
 - Toggle a tool **off** and it is simply left out of the agent's toolset — it
   no longer sees it at all. Toggle it back on at any time.
+- A switch applies to the whole tool: **Widgets** includes creation, updates and
+  removal; **Scheduled jobs** includes listing, adding and removal. If an older
+  preference disabled one of those actions, the combined tool stays off. Review
+  its switch before enabling all its actions.
 - Built-in and custom-tool opt-outs are stored **in this browser** and sent
   with each message, so another browser or device starts from the defaults.
 - Group MCP opt-outs are stored on your account. A group MCP tool locked by an

@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -79,9 +81,20 @@ func (s *Server) deliverToChannel(name, text string) error {
 }
 
 // deliverToChannelSession routes a delivery to the owner of a namespaced
-// session ("u<id>-…") on channels that support per-user delivery (Telegram);
-// otherwise falls back to the channel's single-owner path.
+// session ("u<id>-…") on channels that support per-user delivery (Telegram).
+// Group channels resolve their destination from that session's identity.
 func (s *Server) deliverToChannelSession(name, sessionID, text string) error {
+	if name == "webex" {
+		m, ok := s.channels[name].(*webexManager)
+		if !ok {
+			return fmt.Errorf("Webex unavailable")
+		}
+		gid, err := s.webexGroupForSession(s.runtimeContext(), sessionID)
+		if err != nil {
+			return err
+		}
+		return m.SendToGroup(gid, text)
+	}
 	if name == "teams" {
 		ctx, cancel := context.WithTimeout(s.runtimeContext(), 30*time.Second)
 		defer cancel()
@@ -93,6 +106,32 @@ func (s *Server) deliverToChannelSession(name, sessionID, text string) error {
 		}
 	}
 	return s.deliverToChannel(name, text)
+}
+
+// Resolve the destination from the task's identity, never from the set of
+// configured bots. Personal users retain delivery to their own unique group.
+func (s *Server) webexGroupForSession(ctx context.Context, session string) (int64, error) {
+	if scope := groupScopeFromSessionID(session); scope != "" {
+		gid, err := strconv.ParseInt(strings.TrimPrefix(scope, "g"), 10, 64)
+		if err != nil || gid <= 0 {
+			return 0, fmt.Errorf("invalid Webex group")
+		}
+		return gid, nil
+	}
+	if uid := userIDFromSession(session); uid > 0 {
+		ms := s.store()
+		if ms == nil {
+			return 0, fmt.Errorf("database unavailable")
+		}
+		groups, err := ms.UserGroups(ctx, uid)
+		if err != nil {
+			return 0, err
+		}
+		if len(groups) == 1 {
+			return groups[0].GroupID, nil
+		}
+	}
+	return 0, fmt.Errorf("Webex delivery requires a group session or a personal account in exactly one group")
 }
 
 // Telegram can upload the snapshots emitted by add_attachment, including in

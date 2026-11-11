@@ -360,6 +360,7 @@ func (c *Client) postChatWithRetry(ctx context.Context, body []byte) (*http.Resp
 
 		resp, err := c.httpClient.Do(req)
 		if err == nil {
+			ollama.ObserveHTTPStatus(ctx, resp.StatusCode)
 			switch resp.StatusCode {
 			case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 				// Backend up but not ready — treat as transient.

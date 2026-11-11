@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"prism/internal/memory"
 	"prism/internal/ollama"
 )
 
@@ -45,7 +46,7 @@ func TestLeanToolSelectionPreservesDynamicAndDisabled(t *testing.T) {
 	// A provider-supplied tool with a distinct name retains its own contract.
 	// Name collisions are covered separately: Anthropic rejects duplicate names.
 	dynamic := ollama.Tool{Type: "function", Function: ollama.ToolFunction{Name: "provider_widget", Description: "Provider-owned contract"}}
-	a := &Agent{executor: &ToolExecutor{telephonyTools: []ollama.Tool{dynamic}}, limits: Limits{LeanPrompt: &on}, disabledTools: []string{"cron"}}
+	a := &Agent{executor: &ToolExecutor{telephonyTools: []ollama.Tool{dynamic}, sharingGroups: []memory.Membership{{GroupID: 1}}}, limits: Limits{LeanPrompt: &on}, disabledTools: []string{"cron"}}
 	for _, lean := range []bool{true, false, true} {
 		if lean {
 			a.limitsOverride.LeanPrompt = &on

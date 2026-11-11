@@ -23,9 +23,20 @@ func (s *Server) recordChatError(ctx context.Context, sessionID, message string)
 }
 
 func (s *Server) sendHistory(ctx context.Context, client *Client, sessionID string) {
+	s.sendHistoryPage(ctx, client, sessionID, 0)
+}
+
+func (s *Server) sendHistoryPage(ctx context.Context, client *Client, sessionID string, before int64) {
 	ms := s.store()
 	if ms != nil {
-		if entries, err := ms.LoadHistory(ctx, sessionID); err == nil && len(entries) > 0 {
+		page, err := ms.LoadHistoryPage(ctx, sessionID, before, 100)
+		if err != nil {
+			b, _ := json.Marshal(map[string]any{"type": "history_error", "content": "Could not load conversation history."})
+			client.sendRaw(b)
+			return
+		}
+		entries := page.Entries
+		{
 			type toolCallDef struct {
 				Function struct {
 					Name      string          `json:"name"`
@@ -41,7 +52,8 @@ func (s *Server) sendHistory(ctx context.Context, client *Client, sessionID stri
 			}
 			var msgs []histMsg
 			var pendingCalls []toolCallDef
-			var callIdx int
+			_ = json.Unmarshal(page.ToolCalls, &pendingCalls)
+			callIdx := page.ToolOffset
 			for _, e := range entries {
 				switch e.Role {
 				case "error":
@@ -77,11 +89,15 @@ func (s *Server) sendHistory(ctx context.Context, client *Client, sessionID stri
 					msgs = append(msgs, m)
 				}
 			}
-			if len(msgs) > 0 {
-				client.sendJSON(map[string]interface{}{
+			{
+				b, _ := json.Marshal(map[string]interface{}{
 					"type":     "chat_history",
 					"messages": msgs,
+					"before":   page.Before,
+					"hasMore":  page.HasMore,
+					"prepend":  before > 0,
 				})
+				client.sendRaw(b)
 			}
 		}
 	}

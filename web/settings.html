@@ -398,7 +398,17 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 }
 #toast.visible { opacity: 1; transform: translateY(0); }
 #toast.error { border-color: var(--red); color: var(--red); }
+
+#settings-save-status {font-size:12px;color:var(--text2);max-width:35vw;overflow-wrap:anywhere}
+.settings-advanced summary {padding:10px 12px;font-size:12px;color:var(--text2);cursor:pointer}
+.memory-card {border:1px solid var(--border);border-radius:8px;padding:12px;margin:12px 0;background:var(--bg2)}
+.memory-card textarea {display:block;width:100%;box-sizing:border-box;margin:10px 0;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px;resize:vertical}
+.memory-card .btn {margin-right:8px}
+@media(max-width:680px){#settings-nav .settings-advanced,#settings-nav .settings-advanced::details-content{display:contents}#settings-nav .settings-advanced summary{flex:0 0 auto;padding:9px 11px;white-space:nowrap}}
 </style>
+<script src="/settings-state.js"></script>
+<script src="/tool-preferences.js"></script>
+<script src="/memory-settings.js"></script>
 </head>
 <body>
 <div id="settings-app">
@@ -411,9 +421,8 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
       </a>
       <span style="color:var(--text3);font-size:12px">›</span>
       <span class="logo" style="color:var(--text2);font-size:13px;font-weight:600">Settings</span>
-      <span id="session-badge" style="font-size:10.5px;color:var(--text3);background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:2px 7px;margin-left:4px"></span>
     </div>
-    <div class="header-right">
+    <div class="header-right"><span id="settings-save-status" role="status" aria-live="polite"></span>
       <button id="logout-btn" onclick="logout()" style="display:none;background:transparent;border:1px solid var(--border2);color:var(--text3);font-size:11.5px;padding:4px 10px;border-radius:var(--radius);cursor:pointer;transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--text3)';this.style.borderColor='var(--border2)'">Sign out</button>
     </div>
   </header>
@@ -421,15 +430,15 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
   <div id="settings-main">
 
     <nav id="settings-nav" aria-label="Settings">
-      <div class="nav-head">Essentials</div>
+      <div class="nav-head">You and your agent</div>
       <div class="nav-item active" data-tab="profile">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Profile
       </div>
-      <div class="nav-item" data-tab="ai" style="display:none"><span class="nav-icon">✦</span> AI provider</div>
-      <div class="nav-item" data-tab="telephony" style="display:none"><span class="nav-icon">☎</span> Telephony</div>
       <div class="nav-item" data-tab="agent">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></span> Agent
       </div>
+      <div class="nav-item" data-tab="ai" style="display:none"><span class="nav-icon">✦</span> AI provider</div>
+      <div class="nav-head">Connections</div>
       <div class="nav-item" data-tab="email">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/></svg></span> Email
       </div>
@@ -439,26 +448,29 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
       <div class="nav-item" data-tab="calendar">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span> Calendar
       </div>
-      <div class="nav-head">Capabilities</div>
-      <div class="nav-item" data-tab="resources"><span class="nav-icon">▦</span> Resources</div>
-      <div class="nav-item" data-tab="tools">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span> Tools
-      </div>
-      <div class="nav-item" data-tab="knowledge">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span> Knowledge
-      </div>
       <div class="nav-item" data-tab="channels">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></span> Channels
       </div>
-      <div class="nav-item" data-tab="webhooks">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 16.98h-5.99c-1.66 0-3.01-1.34-3.01-3s1.34-3 3.01-3H18"/><path d="m7 8-4 4 4 4"/><circle cx="18" cy="17" r="3"/></svg></span> Webhooks
+      <div class="nav-item" data-tab="telephony" style="display:none"><span class="nav-icon">☎</span> Telephony</div>
+      <div class="nav-head">Tools and memory</div>
+      <div class="nav-item" data-tab="knowledge">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span> Knowledge &amp; memory
       </div>
+      <div class="nav-item" data-tab="tools">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span> Tools
+      </div>
+      <div class="nav-item" data-tab="resources"><span class="nav-icon">▦</span> Resources</div>
+      <details class="settings-advanced"><summary>Advanced connections</summary>
       <div class="nav-item" data-tab="mcp">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></span> MCP
       </div>
       <div class="nav-item" data-tab="secrets">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15 19 4"/><path d="m18 5 2 2"/><path d="m15 8 2 2"/></svg></span> Secrets
       </div>
+      <div class="nav-item" data-tab="webhooks">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 16.98h-5.99c-1.66 0-3.01-1.34-3.01-3s1.34-3 3.01-3H18"/><path d="m7 8-4 4 4 4"/><circle cx="18" cy="17" r="3"/></svg></span> Webhooks
+      </div>
+      </details>
       <div class="nav-head">Interface</div>
       <div class="nav-item" data-tab="appearance">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".6" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor" stroke="none"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.555C21.965 6.012 17.461 2 12 2z"/></svg></span> Appearance
@@ -498,7 +510,6 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
 <div id="toast"></div>
 
 <script>
-const SESSION = new URLSearchParams(window.location.search).get('session') || 'default'
 const CONFIG_KEY = 'agent-config'
 let currentTab = window.location.hash.replace('#', '') || 'profile'
 let customTools = []
@@ -506,11 +517,11 @@ let mcpServers = []
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
-document.getElementById('session-badge').textContent = SESSION
 document.getElementById('back-link').href = '/'
 
 document.querySelectorAll('.nav-item').forEach(el => {
   el.classList.toggle('active', el.dataset.tab === currentTab)
+  if(el.dataset.tab===currentTab && el.closest('details'))el.closest('details').open=true
   el.addEventListener('click', () => switchTab(el.dataset.tab))
 })
 
@@ -555,8 +566,12 @@ requestAnimationFrame(() => renderTab(currentTab))
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
-function switchTab(tab) {
+async function switchTab(tab) {
+  const previous=currentTab
+  if(tab!==currentTab && PrismSettingsState.dirty()){if(!await PrismModal.confirm('Leave this section without saving your edits?'))return;if(currentTab!==previous)return;PrismSettingsState.clear()}
   currentTab = tab
+  const navLink=document.querySelector(`.nav-item[data-tab="${tab}"]`)
+  if(navLink?.closest('details'))navLink.closest('details').open=true
   window.location.hash = tab
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.tab === tab)
@@ -792,23 +807,27 @@ function renderAppearanceTab(container) {
 
 // ── Brain tab: the agent's mind — Knowledge (RAG: documents, memories,
 // learnings) + Skills, in one place. ───────────────────────────────────────────
-let brainSubTab = 'knowledge'
+let brainSubTab = 'memory'
 function renderBrainTab(container) {
   const wrap = document.createElement('div')
   wrap.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0'
   wrap.innerHTML = `
-    <div class="brain-subnav" style="display:flex;gap:6px;padding:12px 16px 0">
+    <div class="brain-subnav" style="display:flex;flex-wrap:wrap;gap:6px;padding:12px 16px 0">
+      <button class="brain-sub ${brainSubTab==='memory'?'active':''}" data-sub="memory">Memory</button>
       <button class="brain-sub ${brainSubTab==='knowledge'?'active':''}" data-sub="knowledge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h6"/></svg> Documents</button>
       <button class="brain-sub ${brainSubTab==='skills'?'active':''}" data-sub="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Skills</button>
     </div>
     <div id="brain-sub-content" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>`
   container.appendChild(wrap)
-  wrap.querySelectorAll('.brain-sub').forEach(b => b.addEventListener('click', () => {
+  wrap.querySelectorAll('.brain-sub').forEach(b => b.addEventListener('click', async () => {
+    if(PrismSettingsState.dirty() && !await PrismModal.confirm('Leave this section without saving your edits?'))return
+    PrismSettingsState.clear()
     brainSubTab = b.dataset.sub
     renderTab('knowledge')
   }))
   const sub = wrap.querySelector('#brain-sub-content')
-  if (brainSubTab === 'skills') renderSkillsPanel(sub)
+  if (brainSubTab === 'memory') renderMemoryPanel(sub)
+  else if (brainSubTab === 'skills') renderSkillsPanel(sub)
   else renderRAGTab(sub)
 }
 
@@ -816,7 +835,7 @@ async function renderSkillsPanel(container) {
   const pane = document.createElement('div')
   pane.style.cssText = 'padding:16px;overflow-y:auto'
   pane.innerHTML = '<p class="settings-page-title">Saved skills</p>'
-    + '<div style="font-size:12px;color:var(--text2);margin:-4px 0 12px;line-height:1.5">Reusable procedures the agent learns. It now <b>self-improves</b>: after a non-trivial multi-step task it saves a skill, and refines an existing one when it finds a better way — so it gets better at recurring work over time.</div>'
+    + '<div style="font-size:12px;color:var(--text2);margin:-4px 0 12px;line-height:1.5">Procedures the agent can reuse in later conversations. Open a skill to review or correct its steps.</div>'
     + '<div id="skills-list" style="display:flex;flex-direction:column;gap:8px"></div>'
   container.appendChild(pane)
   const list = pane.querySelector('#skills-list')
@@ -837,16 +856,17 @@ async function renderSkillsPanel(container) {
         <button class="btn sk-del" style="color:var(--red)">Delete</button>
       </div>
       ${when ? `<div style="font-size:12px;color:var(--text2);margin-top:4px">${escHtml(when)}</div>` : ''}
-      <pre class="sk-body" style="display:none;white-space:pre-wrap;font-size:12px;color:var(--text2);margin-top:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px"></pre>`
+      <textarea class="sk-body" rows="8" style="width:100%;box-sizing:border-box;display:none;white-space:pre-wrap;font-size:12px;color:var(--text2);margin-top:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px"></textarea><button class="btn sk-save" hidden>Save correction</button>`
     card.querySelector('.sk-view').addEventListener('click', async () => {
       const body = card.querySelector('.sk-body')
       if (body.style.display === 'none') {
-        if (!body.textContent) {
-          try { const d = await (await settingsFetch('/api/skills?name=' + encodeURIComponent(sk.name))).json(); body.textContent = d.skill?.body || '(empty)' } catch { body.textContent = '(error)' }
+        if (!card._skill) {
+          try { const d = await (await settingsFetch('/api/skills?name=' + encodeURIComponent(sk.name))).json(); body.value = d.skill?.body || ''; card._skill=d.skill; card._original=d.skill?.body||'' } catch { body.textContent = '(error)' }
         }
-        body.style.display = ''
-      } else body.style.display = 'none'
+        body.style.display = '';card.querySelector('.sk-save').hidden=false
+      } else {body.style.display = 'none';card.querySelector('.sk-save').hidden=true}
     })
+    card.querySelector('.sk-save').onclick=async()=>{try{const text=card.querySelector('.sk-body').value;await settingsFetch('/api/skills',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({skill:{...card._skill,body:text},original:card._original})},[card.querySelector('.sk-body')]);card._original=text}catch(e){showToast(e.message,true)}}
     card.querySelector('.sk-del').addEventListener('click', async () => {
       if (!await PrismModal.confirm(`Delete skill "${sk.name}"?`, { danger: true })) return
       await settingsFetch('/api/skills?name=' + encodeURIComponent(sk.name), { method: 'DELETE' })
@@ -858,8 +878,9 @@ async function renderSkillsPanel(container) {
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
-async function settingsFetch(url, options = {}) {
+async function settingsFetch(url, options = {}, controls = []) {
   const mutation = !['GET', 'HEAD'].includes((options.method || 'GET').toUpperCase())
+  const snapshot=mutation ? globalThis.PrismSettingsState?.begin(controls) : null
   try {
     const response = await fetch(url, options)
     if (mutation && !response.ok) {
@@ -868,25 +889,18 @@ async function settingsFetch(url, options = {}) {
       try { const data = JSON.parse(raw); message = data.error || data.message || message } catch {}
       throw new Error(message || `Request failed (${response.status})`)
     }
+    if(mutation)globalThis.PrismSettingsState?.saved(snapshot || [])
     return response
   } catch (error) {
-    if (mutation) showToast(error.message || 'The change could not be saved.', true)
+    if (mutation) {globalThis.PrismSettingsState?.status('Could not save · your edits are kept');showToast(error.message || 'The change could not be saved.', true)}
     throw error
   }
 }
 
-function getConfig() {
-  try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}') } catch { return {} }
-}
+function getConfig() { return PrismToolPreferences.read() }
 function getDisabled() { return new Set(getConfig().disabled || []) }
 function isEnabled(id) { return !getDisabled().has(id) }
-function setEnabled(id, on) {
-  const cfg = getConfig()
-  const d = new Set(cfg.disabled || [])
-  on ? d.delete(id) : d.add(id)
-  cfg.disabled = [...d]
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg))
-}
+function setEnabled(id, on) { PrismToolPreferences.set(id, on) }
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
@@ -988,10 +1002,10 @@ async function renderAgentTab(container) {
     </div>
 
     <div class="config-cat-header" style="margin-top:26px"><span class="config-cat-icon" style="color:var(--accent)">${icon('agent')}</span><span class="config-cat-name">Turn budget</span></div>
-    <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.5">How far one message may go. Each model call (every tool use is one) counts as an iteration — raise the cap for long multi-step tasks that hit "iteration limit reached".</div>
+    <div style="font-size:12px;color:var(--text2);margin:6px 0 12px;line-height:1.5">How far one message may go. Each model call counts as one iteration; one response can request several tools. Raise the cap for long multi-step tasks that hit "iteration limit reached".</div>
     <label class="ag-label">Max iterations per turn
       <input id="ag-maxiter" type="number" min="${limits.min}" max="${limits.max}" step="5" placeholder="${limits.default} (default)" value="${limits.maxIterations || ''}" style="max-width:160px">
-      <span style="color:var(--text3);font-size:11.5px;display:block;margin-top:4px">${limits.min}–${limits.max}. Leave blank for the default (${limits.default}). Identical-call loops are still caught early regardless of this cap.</span></label>
+      <span style="color:var(--text3);font-size:11.5px;display:block;margin-top:4px">${limits.min}–${limits.max}. Leave blank for the default (${limits.default}). Repeated identical results trigger a warning before a persistent cycle is stopped.</span></label>
     <div class="ag-toggle-row">
       <div><div class="ag-toggle-title">Extended reasoning</div><div class="ag-toggle-hint">Lets thinking models (Qwen3, DeepSeek-R1, gpt-oss…) reason before answering. Off = faster, cheaper replies. Applies to Ollama and OpenAI-compatible backends; Claude models never use it here. Always off on phone calls.</div></div>
       <label class="toggle-switch" title="Extended reasoning"><input id="ag-thinking" type="checkbox" ${limits.thinking ? 'checked' : ''}><span class="toggle-track"></span></label>
@@ -1033,8 +1047,8 @@ async function renderAgentTab(container) {
   page.querySelector('#ag-save').addEventListener('click', async () => {
     const st = page.querySelector('#ag-status'); st.textContent = 'Saving…'
     try {
-      await settingsFetch('/api/agent/name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: page.querySelector('#ag-name').value }) })
-      await settingsFetch('/api/agent/personality', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: page.querySelector('#ag-base').value }) })
+      await settingsFetch('/api/agent/name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: page.querySelector('#ag-name').value }) }, [page.querySelector('#ag-name')])
+      await settingsFetch('/api/agent/personality', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: page.querySelector('#ag-base').value }) }, [page.querySelector('#ag-base')])
       st.textContent = '✓ Saved — takes effect on the next message'
     } catch (e) { st.textContent = 'Failed: ' + e.message }
     setTimeout(() => { st.textContent = '' }, 3000)
@@ -1045,7 +1059,7 @@ async function renderAgentTab(container) {
     try {
       const raw = page.querySelector('#ag-maxiter').value.trim()
       const r = await settingsFetch('/api/agent/limits', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxIterations: raw === '' ? 0 : parseInt(raw, 10) || 0, thinking: page.querySelector('#ag-thinking').checked, promptProfile: page.querySelector('#ag-profile').value, reasoningEffort: page.querySelector('#ag-effort').value }) }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Cannot save agent settings'); return result })
+        body: JSON.stringify({ maxIterations: raw === '' ? 0 : parseInt(raw, 10) || 0, thinking: page.querySelector('#ag-thinking').checked, promptProfile: page.querySelector('#ag-profile').value, reasoningEffort: page.querySelector('#ag-effort').value }) }, page.querySelectorAll('#ag-maxiter,#ag-thinking,#ag-profile,#ag-effort')).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Cannot save agent settings'); return result })
       // Echo the clamped value back so the field shows what was actually stored.
       page.querySelector('#ag-maxiter').value = r.maxIterations || ''
       st.textContent = '✓ Saved — takes effect on the next message'
@@ -1074,7 +1088,7 @@ async function renderAgentTab(container) {
     card.querySelector('.ag-ws-save').addEventListener('click', async () => {
       const st = card.querySelector('.ag-ws-status'); st.textContent = 'Saving…'
       try {
-        await settingsFetch(`/api/personality?session=${encodeURIComponent(s.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: ta.value }) })
+        await settingsFetch(`/api/personality?session=${encodeURIComponent(s.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personality: ta.value }) }, [ta])
         st.textContent = '✓ Saved'
       } catch (e) { st.textContent = 'Failed' }
       setTimeout(() => { st.textContent = '' }, 2500)
@@ -1145,7 +1159,7 @@ async function renderChannelsTab(container) {
   tgState.innerHTML = !tg.configured
     ? '<span style="color:var(--text3)">Not configured.</span>'
     : (tg.linked
-      ? '<span style="color:var(--green)">✓ Linked and active.</span>'
+      ? '<span style="color:var(--green)">✓ Chat linked.</span>'
       : '<span style="color:var(--yellow)">Token set — send /start to your bot to link this chat.</span>')
 
   page.querySelector('#tg-save').addEventListener('click', async () => {
@@ -1153,7 +1167,7 @@ async function renderChannelsTab(container) {
     if (!tok) { st.textContent = 'Enter a token.'; return }
     st.textContent = 'Saving…'
     try {
-      await settingsFetch('/api/telegram/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) })
+      await settingsFetch('/api/telegram/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) }, [page.querySelector('#tg-token')])
       st.textContent = '✓ Saved — now send /start to your bot'
       page.querySelector('#tg-token').value = ''
     } catch (e) { st.textContent = 'Failed: ' + e.message }
@@ -1170,14 +1184,14 @@ async function renderChannelsTab(container) {
   slState.innerHTML = !sl.configured
     ? '<span style="color:var(--text3)">Not configured.</span>'
     : (sl.linked
-      ? '<span style="color:var(--green)">✓ Linked and active.</span>'
+      ? '<span style="color:var(--green)">✓ Chat linked.</span>'
       : '<span style="color:var(--yellow)">Tokens set — DM your bot to link.</span>')
   page.querySelector('#sl-save').addEventListener('click', async () => {
     const st = page.querySelector('#sl-status'), bot = page.querySelector('#sl-bot').value.trim(), app = page.querySelector('#sl-app').value.trim()
     if (!bot || !app) { st.textContent = 'Enter both tokens.'; return }
     st.textContent = 'Connecting…'
     try {
-      const r = await settingsFetch('/api/slack/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botToken: bot, appToken: app }) })
+      const r = await settingsFetch('/api/slack/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botToken: bot, appToken: app }) }, page.querySelectorAll('#sl-bot,#sl-app'))
       if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
       st.textContent = '✓ Connected — now DM your bot to link'
       page.querySelector('#sl-bot').value = ''; page.querySelector('#sl-app').value = ''
@@ -1199,8 +1213,7 @@ const TOOL_CATEGORIES = [
   {
     name: 'Dashboard', icon: icon('dashboard'), color: 'var(--accent)',
     tools: [
-      { id: 'add_widget',    name: 'Create widget',  desc: 'Generate and add an HTML/JS panel to the dashboard' },
-      { id: 'remove_widget', name: 'Remove widget',  desc: 'Remove an existing widget from the dashboard' },
+      { id: 'widget', name: 'Widgets', desc: 'Create, update, remove and share dashboard widgets' },
       { id: 'resources', name: 'Resources', desc: 'Inspect dependencies, link dedicated backends and review cleanup' },
     ]
   },
@@ -1217,8 +1230,7 @@ const TOOL_CATEGORIES = [
     name: 'System', icon: icon('system'), color: 'var(--orange)',
     tools: [
       { id: 'exec_command', name: 'Run command',   desc: 'Run a shell command in the Docker container' },
-      { id: 'apt_install',  name: 'Install (apt)', desc: 'Install system packages with apt-get' },
-      { id: 'pip_install',  name: 'Install (pip)', desc: 'Install Python packages with pip' },
+      { id: 'install_packages', name: 'Install packages', desc: 'Install system and Python packages' },
     ]
   },
   {
@@ -1243,9 +1255,7 @@ const TOOL_CATEGORIES = [
   {
     name: 'Scheduling', icon: icon('scheduling'), color: 'var(--red)',
     tools: [
-      { id: 'cron_list',   name: 'List jobs',    desc: 'List all scheduled cron jobs' },
-      { id: 'cron_add',    name: 'Add job',       desc: 'Schedule a recurring command' },
-      { id: 'cron_remove', name: 'Remove job',    desc: 'Remove a scheduled job by name' },
+      { id: 'cron', name: 'Scheduled jobs', desc: 'List, add and remove scheduled jobs' },
       { id: 'notify',      name: 'Notification',  desc: 'Send or schedule a dashboard notification' },
     ]
   },
@@ -1254,7 +1264,7 @@ const TOOL_CATEGORIES = [
     tools: [
       { id: 'rag_ingest', name: 'Add document', desc: 'Index a document for semantic search' },
       { id: 'rag_search', name: 'Search',       desc: 'Search a RAG collection by meaning' },
-      { id: 'rag_list',   name: 'List',         desc: 'List collections or documents inside one' },
+      { id: 'rag_manage', name: 'Manage knowledge', desc: 'List, create and remove collections or documents' },
       { id: 'skill',      name: 'Skills',       desc: 'Save and recall reusable procedures the agent learns' },
       { id: 'search_history', name: 'Search history', desc: 'Full-text search across all past conversations (cross-session recall)' },
     ]
@@ -1290,7 +1300,7 @@ async function renderResourcesTab(container) {
   const clean = page.querySelector('#res-clean')
   const link = page.querySelector('#res-link')
   const selected = new Set()
-  let rows = [], sessions = [], session = 'default', busy = false
+  let rows = [], sessions = [], busy = false
   const setBusy = value => { busy = value; page.querySelector('#res-refresh').disabled = value; updateButtons() }
   const updateButtons = () => { clean.disabled = busy || !selected.size; link.disabled = busy || !selected.size || !widget.value }
   const render = () => {
@@ -1318,8 +1328,7 @@ async function renderResourcesTab(container) {
       const response = await settingsFetch('/api/sessions')
       if (!response.ok) throw new Error('Could not load workspaces.')
       sessions = (await response.json()).sessions || []
-      session = sessions.find(s => s.id === localStorage.getItem('active-workspace'))?.id || sessions[0]?.id || 'default'
-      rows = await PrismResources.request(session)
+      rows = await PrismResources.request(null)
       const oldFilter = filter.value
       filter.innerHTML = '<option value="all">All resources</option><option value="old">Old / unassigned workspaces</option>'
       for (const s of sessions) filter.add(new Option(s.name, s.id))
@@ -1337,11 +1346,11 @@ async function renderResourcesTab(container) {
     setBusy(true); status.textContent = ''
     try {
       const ids = [...selected]
-      const preview = await PrismResources.request(session, { action: 'cleanup', ids })
+      const preview = await PrismResources.request(null, { action: 'cleanup', ids })
       if (!preview.plan.remove.length) { status.textContent = 'Nothing can be removed: the selected resources are protected or still in use.'; return }
       const confirmed = await PrismResources.confirm('Clean up selected resources', preview, false, true)
       if (confirmed === null) return
-      const result = await PrismResources.request(session, { action: 'cleanup', ids: [...ids, ...confirmed], dry_run: false })
+      const result = await PrismResources.request(null, { action: 'cleanup', ids: [...ids, ...confirmed], dry_run: false })
       await refresh(); status.textContent = PrismResources.summary(result)
     } catch (error) { status.textContent = error.message }
     finally { setBusy(false) }
@@ -1366,6 +1375,17 @@ async function renderToolsTab(container) {
   container.appendChild(page)
 
   page.innerHTML = settingsHeading('Tools', MULTI_USER ? 'Built-in tool switches are saved in this browser and sent with each chat. Group MCP preferences are saved to your account.' : 'Tool switches are saved in this browser and sent with each chat.', 'Personal preferences')
+
+  const combined = getConfig().combinedToolNotices || []
+  if (combined.length) {
+    const names = TOOL_CATEGORIES.flatMap(cat => cat.tools).filter(tool => combined.includes(tool.id)).map(tool => tool.name)
+    const notice = document.createElement('p')
+    notice.setAttribute('role', 'status')
+    notice.textContent = 'These tools combine several actions and are kept off by your existing preferences: ' + names.join(', ') + '. Use their switches below to enable all their actions.'
+    const dismiss = document.createElement('button'); dismiss.className = 'btn'; dismiss.textContent = 'Dismiss'
+    dismiss.onclick = () => { PrismToolPreferences.dismiss(); notice.remove() }
+    notice.append(' ', dismiss); page.append(notice)
+  }
 
   // Built-in categories
   for (const cat of TOOL_CATEGORIES) {
@@ -1397,12 +1417,10 @@ async function renderToolsTab(container) {
     page.appendChild(section)
   }
 
-  // MCP tools (personal scope — retired server-side under MULTI_USER, see
-  // renderMCPTab's identical guard; don't even fetch it there, it's a
-  // guaranteed 403 today).
+  // Installation tools in single-user; group preferences in shared mode.
   if (!MULTI_USER) {
     try {
-      const res = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+      const res = await settingsFetch('/api/mcp/servers')
       const data = await res.json()
       mcpServers = data.servers || []
     } catch { mcpServers = [] }
@@ -1623,7 +1641,7 @@ async function renderWebhooksTab(container) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      })
+      }, document.querySelectorAll('#wh-name,#wh-session,#wh-model,#wh-deliver,#wh-prompt,#wh-respond,#wh-enabled'))
       if (!res.ok) { status.textContent = 'Error: ' + (await res.text()); return }
       const saved = await res.json()
       const i = hooks.findIndex(x => x.id === saved.id)
@@ -1640,6 +1658,12 @@ async function renderWebhooksTab(container) {
   renderList()
 }
 
+async function loadMCPServers() {
+  const response = await settingsFetch('/api/mcp/servers')
+  if (!response.ok) throw new Error('Could not load MCP servers. Your saved connections have not been removed.')
+  return response.json()
+}
+
 async function renderMCPTab(container) {
   await computeRagManage() // same predicate as RAG: group members get read-only
   const page = document.createElement('div')
@@ -1647,18 +1671,20 @@ async function renderMCPTab(container) {
   container.appendChild(page)
   page.innerHTML = MULTI_USER
     ? settingsHeading('MCP servers', 'Group servers are managed in Admin. You can see the tools available to your agent here.', 'Group · read-only')
-    : settingsHeading('MCP servers', 'Connect external tools for your agent. Refresh a server after updating its tools. Changes save immediately.', 'Personal')
+    : settingsHeading('MCP servers', 'Connect external tools for your agent. Refresh a server after updating its tools. Changes save immediately.', 'This installation')
 
-  // Personal MCP servers only exist in single-user mode — MULTI_USER retires
-  // the personal scope entirely (server-side too), so don't even fetch it there.
+  // The single-owner registry is installation-wide. Multi-user reads group registries below.
   const [serversRes, secretsRes] = await Promise.allSettled([
-    MULTI_USER ? Promise.resolve({ servers: [] }) : settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`).then(r => r.json()),
+    MULTI_USER ? Promise.resolve({ servers: [] }) : loadMCPServers(),
     settingsFetch('/api/secrets').then(r => r.json()),
   ])
   mcpServers = serversRes.status === 'fulfilled' ? (serversRes.value.servers || []) : []
   const secretNames = secretsRes.status === 'fulfilled' ? (secretsRes.value.secrets || []) : []
 
-  if (!MULTI_USER) renderMCPServerList(page)
+  if (!MULTI_USER) {
+    if (serversRes.status === 'fulfilled') renderMCPServerList(page)
+    else { const error=document.createElement('p');error.setAttribute('role','alert');error.textContent=serversRes.reason.message;page.append(error) }
+  }
 
   // Add server form — single-user mode only. In MULTI_USER mode MCP is always
   // group-managed (Admin console); members see the group servers read-only below.
@@ -1799,7 +1825,7 @@ async function refreshMCPServer(srv, card, page) {
   status.textContent = 'Refreshing…'
   status.className = 'mcp-add-status mcp-refresh-status'
   try {
-    const res = await settingsFetch(`/api/mcp/servers/${encodeURIComponent(srv.id)}?session=${encodeURIComponent(SESSION)}`, { method: 'POST', signal: AbortSignal.timeout(25000) })
+    const res = await settingsFetch(`/api/mcp/servers/${encodeURIComponent(srv.id)}`, { method: 'POST', signal: AbortSignal.timeout(25000) })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Could not refresh. Previous list kept.')
     srv.tools = data.tools || []
@@ -1829,11 +1855,11 @@ async function addMCPServer() {
   btn.disabled = true
   status.textContent = 'Connecting…'; status.className = 'mcp-add-status'
   try {
-    const res = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`, {
+    const res = await settingsFetch('/api/mcp/servers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, url, authSecret: secret || undefined }),
-    })
+    }, document.querySelectorAll('#mcp-add-name,#mcp-add-url,#mcp-add-secret'))
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     if (data.needs_oauth) {
@@ -1856,7 +1882,7 @@ async function addMCPServer() {
     document.getElementById('mcp-add-url').value = ''
     document.getElementById('mcp-add-secret').value = ''
     // Reload list
-    const r2 = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+    const r2 = await settingsFetch('/api/mcp/servers')
     mcpServers = (await r2.json()).servers || []
     renderMCPServerList(document.querySelector('.settings-page'))
   } catch(e) {
@@ -1865,19 +1891,19 @@ async function addMCPServer() {
 }
 
 async function patchMCPServer(id, enabled) {
-  await settingsFetch(`/api/mcp/servers/${encodeURIComponent(id)}?session=${encodeURIComponent(SESSION)}`, {
+  await settingsFetch(`/api/mcp/servers/${encodeURIComponent(id)}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
   }).catch(console.error)
-  const res = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+  const res = await settingsFetch('/api/mcp/servers')
   mcpServers = (await res.json()).servers || []
   renderMCPServerList(document.querySelector('.settings-page'))
 }
 
 async function deleteMCPServer(id) {
   if (!await PrismModal.confirm('Delete this MCP server?', { danger: true })) return
-  await settingsFetch(`/api/mcp/servers/${encodeURIComponent(id)}?session=${encodeURIComponent(SESSION)}`, { method: 'DELETE' }).catch(console.error)
-  const res = await settingsFetch(`/api/mcp/servers?session=${encodeURIComponent(SESSION)}`)
+  await settingsFetch(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(console.error)
+  const res = await settingsFetch('/api/mcp/servers')
   mcpServers = (await res.json()).servers || []
   renderMCPServerList(document.querySelector('.settings-page'))
 }
@@ -1933,7 +1959,7 @@ async function renderSecretsTab(container) {
       const res = await settingsFetch('/api/secrets', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, value }),
-      })
+      }, document.querySelectorAll('#secret-add-name,#secret-add-value'))
       if (!res.ok) throw new Error(await res.text())
       status.textContent = '✓ Saved'; status.className = 'mcp-add-status ok'
       document.getElementById('secret-add-name').value = ''
@@ -2050,7 +2076,7 @@ async function renderMultiUserSecretsTab(container) {
       const res = await settingsFetch('/api/user/secrets', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      })
+      }, document.querySelectorAll('#user-secret-add-name,#user-secret-add-value,#user-secret-add-shared,#user-secret-add-group'))
       if (!res.ok) throw new Error(await res.text())
       status.textContent = '✓ Saved'; status.className = 'mcp-add-status ok'
       document.getElementById('user-secret-add-name').value = ''
@@ -2285,7 +2311,7 @@ async function renderEmailTab(container) {
     if (pass) body.password = pass
     $('e-save').disabled = true; $('e-err').textContent = ''
     try {
-      const res = await settingsFetch('/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const res = await settingsFetch('/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, page.querySelectorAll('#e-user,#e-ih,#e-sh,#e-from,#e-ip,#e-sp,#e-limit,#e-sec,#e-insec,#e-pass'))
       if (!res.ok) throw new Error(await res.text())
       showToast('Mailbox saved')
     } catch (e) { $('e-err').textContent = 'Could not save: ' + e.message }
@@ -2340,7 +2366,7 @@ async function renderNotesTab(container) {
   wrap.querySelector('#notes-save').addEventListener('click', async () => {
     status.style.color = 'var(--text3)'; status.textContent = 'Saving…'
     try {
-      const r = await settingsFetch('/api/notes/source', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: prov.value, path: pathInput.value.trim() }) })
+      const r = await settingsFetch('/api/notes/source', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: prov.value, path: pathInput.value.trim() }) }, [prov,pathInput])
       if (!r.ok) { status.style.color = 'var(--red)'; status.textContent = (await r.text()).trim() || 'Failed'; return }
       status.style.color = 'var(--green)'; status.textContent = 'Saved ✓'
     } catch (e) { status.style.color = 'var(--red)'; status.textContent = e.message }
@@ -2463,8 +2489,10 @@ async function renderCalendarTab(container) {
     $('#src-task-hint').textContent = d.tasks === 'auto' ? `→ ${SRC_LABEL[d.resolved.tasks] || d.resolved.tasks}` : ''
   }
   const saveSources = async () => {
-    try { await settingsFetch('/api/pim/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ calendar: $('#src-cal').value, tasks: $('#src-task').value }) }) } catch {}
-    loadSources()
+    try {
+      await settingsFetch('/api/pim/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ calendar: $('#src-cal').value, tasks: $('#src-task').value }) }, [$('#src-cal'),$('#src-task')])
+      await loadSources()
+    } catch {} // Request feedback is shown by settingsFetch; preserve the selections.
   }
   $('#src-cal').addEventListener('change', saveSources)
   $('#src-task').addEventListener('change', saveSources)
@@ -2488,15 +2516,15 @@ async function renderCalendarTab(container) {
     $('#cd-url').value = d.url || ''; $('#cd-user').value = d.user || ''
     if (d.configured) { $('#cd-disconnect').style.display = ''; status.style.color = 'var(--green)'; status.textContent = 'Connected' }
   } catch {}
-  const post = async (payload) => {
-    const r = await settingsFetch('/api/caldav/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+  const post = async (payload, controls = []) => {
+    const r = await settingsFetch('/api/caldav/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, controls)
     if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
     return r.json()
   }
   $('#cd-connect').addEventListener('click', async () => {
     status.style.color = 'var(--text3)'; status.textContent = 'Connecting…'
     try {
-      const d = await post({ url: $('#cd-url').value.trim(), user: $('#cd-user').value.trim(), password: $('#cd-pass').value })
+      const d = await post({ url: $('#cd-url').value.trim(), user: $('#cd-user').value.trim(), password: $('#cd-pass').value }, [$('#cd-url'),$('#cd-user'),$('#cd-pass')])
       status.style.color = 'var(--green)'; status.textContent = 'Connected ✓'
       $('#cd-disconnect').style.display = ''
       fillCals(d.calendars); loadSources()
@@ -2505,7 +2533,7 @@ async function renderCalendarTab(container) {
   $('#cd-savepaths').addEventListener('click', async () => {
     const st = $('#cd-status2'); st.style.color = 'var(--text3)'; st.textContent = 'Saving…'
     try {
-      await post({ url: $('#cd-url').value.trim(), user: $('#cd-user').value.trim(), eventPath: $('#cd-evpath').value, taskPath: $('#cd-taskpath').value })
+      await post({ url: $('#cd-url').value.trim(), user: $('#cd-user').value.trim(), eventPath: $('#cd-evpath').value, taskPath: $('#cd-taskpath').value }, [$('#cd-url'),$('#cd-user'),$('#cd-evpath'),$('#cd-taskpath')])
       known.eventPath = $('#cd-evpath').value; known.taskPath = $('#cd-taskpath').value
       st.style.color = 'var(--green)'; st.textContent = 'Saved ✓'
     } catch (e) { st.style.color = 'var(--red)'; st.textContent = e.message }
@@ -2531,7 +2559,7 @@ async function renderCalendarTab(container) {
     } catch {}
   }
   const ggSaveCreds = async () => {
-    const r = await settingsFetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#gg-id').value.trim(), clientSecret: $('#gg-secret').value }) })
+    const r = await settingsFetch('/api/oauth/google/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#gg-id').value.trim(), clientSecret: $('#gg-secret').value }) }, [$('#gg-id'),$('#gg-secret')])
     if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
   }
   await ggLoad()
@@ -2587,7 +2615,7 @@ async function renderCalendarTab(container) {
     } catch {}
   }
   const msSaveCreds = async () => {
-    const r = await settingsFetch('/api/oauth/microsoft/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#ms-id').value.trim(), clientSecret: $('#ms-secret').value }) })
+    const r = await settingsFetch('/api/oauth/microsoft/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: $('#ms-id').value.trim(), clientSecret: $('#ms-secret').value }) }, [$('#ms-id'),$('#ms-secret')])
     if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
   }
   await msLoad()
@@ -2637,7 +2665,7 @@ async function renderCalendarTab(container) {
   $('#td-connect').addEventListener('click', async () => {
     const st = $('#td-status'); st.style.color = 'var(--text3)'; st.textContent = 'Connecting…'
     try {
-      const r = await settingsFetch('/api/todoist/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: $('#td-token').value.trim() }) })
+      const r = await settingsFetch('/api/todoist/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: $('#td-token').value.trim() }) }, [$('#td-token')])
       if (!r.ok) throw new Error((await r.text()).trim() || 'Failed')
       st.style.color = 'var(--green)'; st.textContent = 'Connected ✓'; $('#td-disconnect').style.display = ''; loadSources()
     } catch (e) { st.style.color = 'var(--red)'; st.textContent = e.message }
@@ -2772,7 +2800,7 @@ async function renderProfileTab(container) {
       // Only sent when the picker is on screen: omitting it leaves the choice
       // alone, which is what a single-group user wants.
       if ($('pf-group')) body.defaultGroupId = Number($('pf-group').value)
-      const r = await settingsFetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const r = await settingsFetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, page.querySelectorAll('#pf-timezone,#pf-email,#pf-display,#pf-first,#pf-last,#pf-phone,#pf-transfer,#pf-group'))
       if (!r.ok) throw new Error(await r.text())
       $('pf-status').textContent = '✓ Saved'
     } catch (err) { $('pf-status').textContent = 'Error: ' + err.message }
@@ -2863,7 +2891,7 @@ async function renderRAGTab(container) {
 
 async function loadCollections() {
   try {
-    const res = await settingsFetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`)
+    const res = await settingsFetch('/api/rag/collections')
     collections = await res.json()
     if (!Array.isArray(collections)) collections = []
     renderCollections()
@@ -2902,7 +2930,7 @@ function selectCollection(name) {
 
 async function deleteCollection(name) {
   if (!await PrismModal.confirm(`Delete collection "${name}" and all its documents?`, { danger: true })) return
-  await settingsFetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+  await settingsFetch(`/api/rag/collections?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
   if (currentCollection === name) {
     currentCollection = null
     const content = document.getElementById('rag-content')
@@ -2979,10 +3007,10 @@ async function saveDescription(value) {
   const col = collections.find(c => c.name === currentCollection)
   if (!col) return
   col.description = value
-  await settingsFetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
+  await settingsFetch('/api/rag/collections', {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: currentCollection, description: value })
-  })
+  }, [document.getElementById('desc-input')])
 }
 
 async function loadDocuments() {
@@ -3036,8 +3064,8 @@ async function pollIngestProgress(collection, filename, progress, stop) {
     if (stop.done) return
     let d
     try {
-      const res = await settingsFetch(`/api/rag/upload/progress?session=${encodeURIComponent(SESSION)}`
-        + `&collection=${encodeURIComponent(collection)}&filename=${encodeURIComponent(filename)}`)
+      const res = await settingsFetch('/api/rag/upload/progress'
+        + `?collection=${encodeURIComponent(collection)}&filename=${encodeURIComponent(filename)}`)
       d = await res.json()
     } catch (_) { continue }
     if (!d || !d.found) continue
@@ -3067,7 +3095,7 @@ async function uploadFiles(files) {
     progress.textContent = `Uploading ${i+1}/${files.length}: ${file.name}…`
     try {
       const form = new FormData()
-      form.append('file', file); form.append('collection', currentCollection); form.append('session', SESSION)
+      form.append('file', file); form.append('collection', currentCollection)
       const stop = { done: false }
       pollIngestProgress(currentCollection, file.name, progress, stop)
       let res
@@ -3110,7 +3138,7 @@ async function createCollection() {
   // The description is what the agent reads to decide when to search here — see the
   // "## Knowledge Base (RAG)" block built in internal/server/ws.go.
   try {
-    await settingsFetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
+    await settingsFetch('/api/rag/collections', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, description }),
     })

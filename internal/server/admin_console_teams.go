@@ -2,7 +2,7 @@ package server
 
 const adminTeamsJS = `
 let teamsLoadVersion=0,teamsLoadedGroup='',teamsBusy=false;
-async function teamsRequest(url,options){const r=await fetch(url,options);let d;try{d=await r.json();}catch{throw new Error('Unexpected server response');}if(!r.ok)throw new Error(d.error||'Request failed ('+r.status+')');return d;}
+async function teamsRequest(url,options,controls=null){const r=await (globalThis.PrismSettingsState?.request||fetch)(url,options,controls);let d;try{d=await r.json();}catch{throw new Error('Unexpected server response');}if(!r.ok)throw new Error(d.error||'Request failed ('+r.status+')');return d;}
 function teamsButtons(){const ready=teamsLoadedGroup===$('ag-group').value&&!teamsBusy;for(const id of ['tm-save','tm-disconnect'])$(id).disabled=!ready;}
 async function loadTeams(){const g=$('ag-group').value,v=++teamsLoadVersion;teamsLoadedGroup='';teamsButtons();
  for(const id of ['tm-app','tm-tenant','tm-secret','tm-read','tm-write','tm-tools'])$(id).value='';
@@ -22,7 +22,7 @@ async function loadTeamsConversations(){const g=$('ag-group').value,v=teamsLoadV
  }catch(e){if(v===teamsLoadVersion)$('tm-status').textContent=e.message;}}
 async function saveTeams(){const g=$('ag-group').value;if(teamsBusy||teamsLoadedGroup!==g)return;teamsBusy=true;teamsButtons();const v=teamsLoadVersion;
  const b={appId:$('tm-app').value.trim(),tenantId:$('tm-tenant').value.trim(),ragRead:$('tm-read').value,ragWrite:$('tm-write').value,tools:$('tm-tools').value,ownerConversation:$('tm-room').value};if($('tm-secret').value.trim())b.clientSecret=$('tm-secret').value.trim();
- try{await teamsRequest('/api/teams/config?group='+encodeURIComponent(g),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(v===teamsLoadVersion){await loadTeams();$('tm-status').textContent='Saved ✓';}}
+ try{await teamsRequest('/api/teams/config?group='+encodeURIComponent(g),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)},['tm-app','tm-tenant','tm-secret','tm-read','tm-write','tm-tools','tm-room'].map($));if(v===teamsLoadVersion){await loadTeams();$('tm-status').textContent='Saved ✓';}}
  catch(e){if(v===teamsLoadVersion)$('tm-status').textContent=e.message;}finally{teamsBusy=false;teamsButtons();}}
 async function disconnectTeams(){const g=$('ag-group').value;if(teamsBusy||teamsLoadedGroup!==g)return;teamsBusy=true;teamsButtons();const v=teamsLoadVersion;
  try{await teamsRequest('/api/teams/config?group='+encodeURIComponent(g),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({disconnect:true})});if(v===teamsLoadVersion)await loadTeams();}

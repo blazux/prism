@@ -340,11 +340,6 @@ func (s *Server) handleRAGUpload(w http.ResponseWriter, r *http.Request) {
 		ms.AddUsage(r.Context(), uid, "", "rag_upload", scopeCollection(upScope, displayCol), 1, nil)
 	}
 
-	_, upOK := s.sessionFor(r, r.FormValue("session"))
-	if !upOK {
-		jsonError(w, "forbidden", http.StatusForbidden)
-		return
-	}
 	// Scope the collection so tenants never collide (Phase 3b); ?group=<id>
 	// (admin console) targets that group's base.
 	scope := upScope

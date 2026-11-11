@@ -41,6 +41,7 @@ func (c *Client) postChat(ctx context.Context, body []byte) (*http.Response, err
 
 		resp, err := c.httpClient.Do(httpReq)
 		if err == nil {
+			ObserveHTTPStatus(ctx, resp.StatusCode)
 			switch resp.StatusCode {
 			case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 				resp.Body.Close()
@@ -207,6 +208,8 @@ type ToolProperty struct {
 }
 
 type ChatRequest struct {
+	// TaskID correlates runtime diagnostics without entering a provider payload.
+	TaskID   string    `json:"-"`
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
 	Tools    []Tool    `json:"tools,omitempty"`
@@ -253,6 +256,7 @@ type Options struct {
 }
 
 type ChatChunk struct {
+	Error           string  `json:"error"`
 	PromptEvalCount *int64  `json:"prompt_eval_count"`
 	EvalCount       *int64  `json:"eval_count"`
 	Model           string  `json:"model"`
@@ -408,6 +412,10 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 		if err := json.Unmarshal(line, &chunk); err != nil {
 			continue
 		}
+		if chunk.Error != "" {
+			out <- StreamEvent{Err: fmt.Errorf("ollama stream error: %s", chunk.Error)}
+			return
+		}
 
 		ev := StreamEvent{
 			Content:    chunk.Message.Content,
@@ -428,7 +436,11 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 
 	if err := scanner.Err(); err != nil {
 		out <- StreamEvent{Err: fmt.Errorf("scan: %w", err)}
+		return
 	}
+	// Closing the HTTP body does not finish an Ollama generation. Without its
+	// explicit done marker, text is partial and accumulated tools cannot run.
+	out <- StreamEvent{Done: true, DoneReason: "interrupted"}
 }
 
 func (c *Client) Ping(ctx context.Context) error {

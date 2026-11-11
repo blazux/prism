@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"prism/internal/agent"
-	"prism/workspaceexec"
 )
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +112,10 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = "default"
 	}
+	if s.hiddenToolsFor(r.Context(), sessionID, s.ragScopeFor(r.Context(), currentUser(r)))[name] {
+		writeErr(w, http.StatusForbidden, "tool is disabled in this context")
+		return
+	}
 
 	// Shed load before spawning a docker exec: a widget with a button stuck in a
 	// fetch() loop would otherwise launch unbounded execs and OOM the host.
@@ -131,25 +134,27 @@ func (s *Server) handleToolCall(w http.ResponseWriter, r *http.Request) {
 	defer finish()
 	r = r.WithContext(jobCtx)
 
-	env := map[string]string{
-		"PRISM_SESSION": sessionID,
-		"PRISM_URL":     "http://prism-server:8080",
-		"PRISM_TOKEN":   s.selfCallToken(sessionID),
-	}
-
-	// Pass the JSON payload via stdin to avoid shell argument-length limits (ARG_MAX).
-	// The one-liner shim injects stdin into sys.argv[1] so tools are unchanged.
-	escape := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
-	cmd := fmt.Sprintf(
-		"python3 -c 'import sys,runpy;sys.argv=[sys.argv[1],open(\"/dev/stdin\").read()];runpy.run_path(sys.argv[0],run_name=\"__main__\")' %s",
-		escape("/workspace/agent_tools/"+tool.Filename),
-	)
-
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-
-	out, execErr := s.docker.ExecWithStdin(workspaceexec.WithScope(ctx, sessionID), cmd, body, 2*time.Minute, env)
+	out, execErr := s.programmaticToolExecutor(r, sessionID).ExecuteCustomTool(ctx, tool.Name, body)
 	w.Write(toolResponseBody(out, execErr))
+}
+
+// Shared setup for programmatic tools. It needs no AI source: deterministic
+// custom tools must remain usable while a provider is unavailable/unconfigured.
+func (s *Server) programmaticToolExecutor(r *http.Request, session string) *agent.ToolExecutor {
+	e := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, filepath.Join(s.cfg.PluginDir, session), s.cfg.SearxngURL, s.selfCallToken(session))
+	e.SetRawResults(true)
+	e.SetSessionID(session)
+	e.SetMemoryStore(s.store())
+	s.callerContextForUser(r.Context(), currentUser(r), session).apply(e)
+	e.SetCustomTools(s.customMgr, func() {
+		if s.customMgr != nil {
+			s.customMgr.Reload()
+			s.broadcastTools()
+		}
+	})
+	return e
 }
 
 // toolResponseBody shapes a custom tool's stdout into the HTTP response body a
@@ -247,36 +252,25 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 	ms := s.memStore
 	s.mu.RUnlock()
 
-	sessionPluginDir := filepath.Join(s.cfg.PluginDir, sessionID)
-	executor := agent.NewToolExecutor(s.docker, s.cfg.WorkspaceDir, sessionPluginDir, s.cfg.SearxngURL, s.selfCallToken(sessionID))
-	executor.SetRawResults(true) // the result is data for a widget/script, not context for the model
-	ai, err := s.aiConfigFor(r.Context(), requestUserID(r))
-	if err != nil {
-		writeErr(w, 503, err.Error())
-		return
+	executor := s.programmaticToolExecutor(r, sessionID)
+	// Custom tools execute Python directly; no connection to an AI source is
+	// necessary to run them. Tools which use a model initialize it as before.
+	if s.customMgr == nil || s.customMgr.Get(name) == nil {
+		ai, err := s.aiConfigFor(r.Context(), requestUserID(r))
+		if err != nil {
+			writeErr(w, 503, err.Error())
+			return
+		}
+		if !s.userCanUseModel(r.Context(), currentUser(r), ai.cfg.Model) {
+			writeErr(w, 403, "model not allowed")
+			return
+		}
+		executor.SetLLM(ai.newChatBackend(), ai.cfg.Model)
+		executor.SetChatBlind(!ai.cfg.ChatVision)
 	}
-	if !s.userCanUseModel(r.Context(), currentUser(r), ai.cfg.Model) {
-		writeErr(w, 403, "model not allowed")
-		return
-	}
-	executor.SetLLM(ai.newChatBackend(), ai.cfg.Model)
-	executor.SetChatBlind(!ai.cfg.ChatVision)
 	executor.SetVoxScope(s.voxScopeHeader(context.Background(), sessionID))
 	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
 	executor.SetRAGProvider(s.acquireRAG)
-	executor.SetSessionID(sessionID)
-	if ms != nil {
-		executor.SetMemoryStore(ms)
-	}
-	// RBAC + tenant scoping: this endpoint runs tools with the caller's
-	// permissions and RAG scope, exactly like the WebSocket chat path — see
-	// callerContextForUser for why this also resolves scope correctly for
-	// service-token self-calls (cron, custom tools, widgets).
-	s.callerContextForUser(r.Context(), currentUser(r), sessionID).apply(executor)
-	executor.SetCustomTools(s.customMgr, func() {
-		s.customMgr.Reload()
-		s.broadcastTools()
-	})
 	executor.SetMCPManager(s.mcpMgr, func() { s.broadcastMCP(sessionID) })
 
 	if ms != nil {

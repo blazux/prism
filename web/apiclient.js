@@ -34,7 +34,7 @@
     } catch (e) {
       throw new Error('server unreachable: ' + ((e && e.message) || e));
     }
-    if (!res.ok) throw new Error(await failure(res));
+    if (!res.ok) { const error=new Error(await failure(res));error.status=res.status;throw error; }
     const raw = await res.text();
     if (!raw) return {};
     if (!(res.headers.get('content-type') || '').includes('json')) return raw;

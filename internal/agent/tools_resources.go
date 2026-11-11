@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -162,24 +163,26 @@ func (e *ToolExecutor) resourceSnapshot(ctx context.Context) ([]resources.Node, 
 	toolIDs := []string{}
 	if e.customMgr != nil {
 		e.customMgr.Reload()
-		for _, t := range e.customMgr.All() {
+		tools := e.customMgr.All()
+		for _, t := range tools {
 			id := "tool:" + t.Name
 			toolIDs = append(toolIDs, id)
 			scriptTools[filepath.ToSlash(filepath.Join(filepath.Base(e.customMgr.Dir()), t.Filename))] = id
 			origin, tracked := catalog[id]
 			nodes = append(nodes, resources.Node{ID: id, Kind: "tool", Name: t.Name, Session: origin.Session, Tracked: tracked, Protected: t.Protected || (e.multiUser && (!tracked || !e.ownResourceSession(origin.Session)))})
 		}
-		for i := range nodes {
-			t := e.customMgr.Get(nodes[i].Name)
-			if t == nil {
-				return nil, fmt.Errorf("custom tools changed during inventory; retry")
-			}
+		for i, t := range tools {
 			b, err := e.readManagedFile(filepath.Join(e.customMgr.Dir(), t.Filename))
 			if err != nil {
 				return nil, fmt.Errorf("cannot inspect custom tool %q: %w", t.Name, err)
 			}
 			nodes[i].Dependencies = resourceReferences(string(b), scriptTools, toolIDs)
 			sources[nodes[i].ID] = string(b)
+		}
+		// Inspect metadata once more, not once per script. Get() also checks every
+		// file's stamp; repeating it here made an inventory quadratic in file I/O.
+		if !reflect.DeepEqual(tools, e.customMgr.All()) {
+			return nil, fmt.Errorf("custom tools changed during inventory; retry")
 		}
 	}
 	root := filepath.Dir(e.pluginDir)
@@ -418,7 +421,10 @@ func (e *ToolExecutor) visibleResources(nodes []resources.Node) []resources.Node
 // BindWidgetResources declares these resources dedicated to a widget. Other
 // observed consumers still protect them; files remain manual cleanup only.
 func (e *ToolExecutor) BindWidgetResources(ctx context.Context, id string, refs []string) error {
-	unlock := resources.Lock(e.workspaceDir)
+	unlock, err := resources.LockContext(ctx, e.workspaceDir)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	if id == "" || strings.ContainsAny(id, "/\\") || id == "." || id == ".." {
 		return fmt.Errorf("invalid widget id")
@@ -559,7 +565,10 @@ type ResourceResult struct {
 // deletion. Every apply recomputes its plan. Failures stop the operation before
 // dependent files/widgets disappear; successful removals are safe to retry.
 func (e *ToolExecutor) CleanupResources(ctx context.Context, widget string, board bool, selected []string, dryRun bool) (ResourceResult, error) {
-	unlock := resources.Lock(e.workspaceDir)
+	unlock, err := resources.LockContext(ctx, e.workspaceDir)
+	if err != nil {
+		return ResourceResult{}, err
+	}
 	defer unlock()
 	return e.cleanupResourcesLocked(ctx, widget, board, selected, dryRun)
 }
@@ -567,7 +576,10 @@ func (e *ToolExecutor) CleanupResources(ctx context.Context, widget string, boar
 // DeleteDashboard keeps resource deletion and the session-store/file commit
 // under one environment mutation lock. The server quiesces the agent first.
 func (e *ToolExecutor) DeleteDashboard(ctx context.Context, selected []string, commit func() error) (ResourceResult, error) {
-	unlock := resources.Lock(e.workspaceDir)
+	unlock, err := resources.LockContext(ctx, e.workspaceDir)
+	if err != nil {
+		return ResourceResult{}, err
+	}
 	defer unlock()
 	r, err := e.cleanupResourcesLocked(ctx, "", true, selected, false)
 	if err != nil {
@@ -669,7 +681,10 @@ func resourceMutation(name string, args map[string]interface{}) bool {
 }
 
 func (e *ToolExecutor) ResourceInventory(ctx context.Context) ([]resources.Node, error) {
-	unlock := resources.Lock(e.workspaceDir)
+	unlock, err := resources.LockContext(ctx, e.workspaceDir)
+	if err != nil {
+		return nil, err
+	}
 	defer unlock()
 	nodes, err := e.resourceSnapshot(ctx)
 	if err != nil {

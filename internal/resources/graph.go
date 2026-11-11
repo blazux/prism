@@ -5,6 +5,7 @@
 package resources
 
 import (
+	"context"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -15,11 +16,29 @@ var locks sync.Map
 // Lock serializes resource and crontab mutations across executors and HTTP UI
 // handlers attached to the same environment in this process.
 func Lock(root string) func() {
+	unlock, _ := LockContext(context.Background(), root)
+	return unlock
+}
+
+// LockContext uses the same environment lock as mutations, but lets a cancelled
+// inventory or cleanup request leave the queue without executing later.
+func LockContext(ctx context.Context, root string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	key, _ := filepath.Abs(root)
-	v, _ := locks.LoadOrStore(key, &sync.Mutex{})
-	m := v.(*sync.Mutex)
-	m.Lock()
-	return m.Unlock
+	v, _ := locks.LoadOrStore(key, make(chan struct{}, 1))
+	gate := v.(chan struct{})
+	select {
+	case gate <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-gate
+			return nil, err
+		}
+		return func() { <-gate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 type Node struct {

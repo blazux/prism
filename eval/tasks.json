@@ -48,7 +48,7 @@
       },
       {
         "response": true,
-        "regex": "\\b(3|three)\\b"
+        "regex": "(?i)\\b(3|three|trois)\\b"
       }
     ],
     "max_tool_calls": 4,
@@ -614,7 +614,7 @@
       },
       {
         "response": true,
-        "regex": "\\b22(:00)?\\b|\\b10(:00)? ?pm\\b"
+        "regex": "(?i)\\b22(?:[:h]00|h)?(?:[^\\w:]|$)|\\b10(?::00)?\\s*pm\\b"
       }
     ],
     "max_tool_calls": 1

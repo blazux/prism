@@ -54,7 +54,9 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		for _, sess := range sessions {
 			switch userPrefixRe.ReplaceAllString(sess.ID, "") {
 			case "assistant", "telegram":
-				continue
+				if r.URL.Query().Get("includeSystem") != "1" {
+					continue
+				}
 			}
 			visible = append(visible, sess)
 		}
@@ -66,6 +68,8 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 				run.mu.Lock()
 				row["runStatus"] = run.status
 				run.mu.Unlock()
+			} else if len(s.sessionJobs[session.ID]) > 0 {
+				row["runStatus"] = "running"
 			}
 			rows = append(rows, row)
 		}
@@ -113,6 +117,10 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	rawID := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if strings.HasSuffix(rawID, "/activity") {
+		s.handleWorkspaceActivity(w, r, strings.TrimSuffix(rawID, "/activity"))
+		return
+	}
 	if rawID == "" {
 		http.Error(w, "missing id", 400)
 		return

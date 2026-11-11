@@ -19,6 +19,7 @@ type childOptions struct {
 }
 type childTask struct {
 	id     string
+	task   string
 	status string
 	result string
 	err    string
@@ -62,7 +63,7 @@ func (s *Server) subagentTool(parent *Client, parentExecutor *agent.ToolExecutor
 			}
 			id = hex.EncodeToString(b)
 			childCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-			child := &childTask{id: id, status: "running", cancel: cancel, done: make(chan struct{})}
+			child := &childTask{id: id, task: activityText(task), status: "running", cancel: cancel, done: make(chan struct{})}
 			if r.children == nil {
 				r.children = make(map[string]*childTask)
 			}

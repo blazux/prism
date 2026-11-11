@@ -4,33 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"html"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"prism/internal/mcp"
 )
 
-// personalMCPScope returns the storage scope for this request's PERSONAL
-// (non-group) MCP servers. Authenticated users get a stable per-user scope
-// ("u<id>") instead of the literal per-board session id: a personal MCP
-// server is the user's own connection, independent of which board/session
-// window they happened to have open when they added it, and must stay
-// reachable from every board they use afterward. Falls back to sessionID for
-// the service identity / legacy no-DB mode, where there is no user to key on.
-func (s *Server) personalMCPScope(r *http.Request, sessionID string) string {
-	if s.cfg.MultiUser {
-		return "" // MULTI_USER: no personal MCP scope, ever — group scope only.
-	}
-	if u := currentUser(r); u != nil && u.ID > 0 {
-		return fmt.Sprintf("u%d", u.ID)
-	}
-	return sessionID
-}
-
-// handleMCPServers handles GET /api/mcp/servers?session=<id>
-// and POST /api/mcp/servers (body: {session, name, url, auth_secret?}).
+// handleMCPServers manages the installation-wide single-owner MCP registry.
 func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -44,15 +26,7 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID, sessOK := s.sessionFor(r, r.URL.Query().Get("session"))
-	if !sessOK {
-		http.Error(w, "forbidden", 403)
-		return
-	}
-	if sessionID == "" {
-		sessionID = "default"
-	}
-	scope := s.personalMCPScope(r, sessionID)
+	scope := "global"
 
 	switch r.Method {
 	case "GET":
@@ -68,7 +42,6 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 
 	case "POST":
 		var body struct {
-			Session    string `json:"session"`
 			Name       string `json:"name"`
 			URL        string `json:"url"`
 			AuthSecret string `json:"authSecret"`
@@ -76,17 +49,6 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" || body.URL == "" {
 			http.Error(w, "name and url required", 400)
 			return
-		}
-		if body.Session != "" {
-			// Route through sessionFor so a client cannot smuggle a foreign
-			// namespace (another user's session or a group scope) in the body.
-			mapped, ok := s.sessionFor(r, body.Session)
-			if !ok {
-				http.Error(w, "forbidden", 403)
-				return
-			}
-			sessionID = mapped
-			scope = s.personalMCPScope(r, sessionID)
 		}
 		tools, err := s.mcpMgr.Connect(r.Context(), scope, body.Name, body.URL, body.AuthSecret)
 		if err != nil {
@@ -110,7 +72,7 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		s.broadcastMCP(sessionID)
+		s.broadcastMCP("")
 		json.NewEncoder(w).Encode(map[string]interface{}{"tools": tools, "count": len(tools)})
 
 	default:
@@ -118,7 +80,7 @@ func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleMCPServerByID handles DELETE and PATCH /api/mcp/servers/<id>?session=<sid>.
+// handleMCPServerByID manages a server in the single-owner MCP registry.
 func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == "OPTIONS" {
@@ -136,20 +98,12 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing server id", 400)
 		return
 	}
-	sessionID, sessOK := s.sessionFor(r, r.URL.Query().Get("session"))
-	if !sessOK {
-		http.Error(w, "forbidden", 403)
-		return
-	}
-	if sessionID == "" {
-		sessionID = "default"
-	}
-	scope := s.personalMCPScope(r, sessionID)
+	scope := "global"
 
 	switch r.Method {
 	case http.MethodPost:
 		if s.refreshMCPServer(w, r, scope, id) {
-			s.broadcastMCP(sessionID)
+			s.broadcastMCP("")
 		}
 
 	case "DELETE":
@@ -157,7 +111,7 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		s.broadcastMCP(sessionID)
+		s.broadcastMCP("")
 		w.WriteHeader(204)
 
 	case "PATCH":
@@ -172,7 +126,7 @@ func (s *Server) handleMCPServerByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		s.broadcastMCP(sessionID)
+		s.broadcastMCP("")
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 
@@ -198,43 +152,41 @@ func (s *Server) refreshMCPServer(w http.ResponseWriter, r *http.Request, scope,
 	return true
 }
 
-// broadcastMCP pushes updated MCP server list to all WS clients for a session.
-// Lists both the board's own servers and the user's personal-scope servers
-// ("u<id>", derived from the session id's own "u<id>-" prefix — see
-// personalMCPScope) so a client watching one board still sees a server it
-// connected while on another board.
+// broadcastMCP refreshes every connected chat using the same registry.
 func (s *Server) broadcastMCP(sessionID string) {
-	servers, _ := s.mcpMgr.List(context.Background(), sessionID)
-	if scope := personalScopeFromSessionID(sessionID); !s.cfg.MultiUser && scope != "" && scope != sessionID {
-		if personal, err := s.mcpMgr.List(context.Background(), scope); err == nil {
-			seen := make(map[string]bool, len(servers))
-			for _, sv := range servers {
-				seen[sv.Name] = true
-			}
-			for _, sv := range personal {
-				if !seen[sv.Name] {
-					servers = append(servers, sv)
-				}
-			}
+	s.mu.RLock()
+	clients := make([]*Client, 0, len(s.clients))
+	for c := range s.clients {
+		if !s.cfg.MultiUser || c.sessionID == sessionID {
+			clients = append(clients, c)
 		}
 	}
-	if servers == nil {
-		servers = []mcp.ServerConfig{}
-	}
-	msg, _ := json.Marshal(map[string]interface{}{
-		"type":    "mcp_updated",
-		"session": sessionID,
-		"servers": servers,
-	})
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for c := range s.clients {
-		if c.sessionID == sessionID {
+	s.mu.RUnlock()
+	for _, c := range clients {
+		scope := "global"
+		if s.cfg.MultiUser {
+			scope = s.ragScopeFor(context.Background(), c.user)
+			gid, err := strconv.ParseInt(strings.TrimPrefix(scope, "g"), 10, 64)
+			if !strings.HasPrefix(scope, "g") || err != nil || gid <= 0 {
+				continue
+			}
+		}
+		servers, err := s.mcpMgr.List(context.Background(), scope)
+		if err != nil {
+			continue
+		}
+		if servers == nil {
+			servers = []mcp.ServerConfig{}
+		}
+		msg, _ := json.Marshal(map[string]any{"type": "mcp_updated", "session": c.sessionID, "servers": servers})
+		s.mu.RLock()
+		if _, connected := s.clients[c]; connected {
 			select {
 			case c.send <- msg:
 			default:
 			}
 		}
+		s.mu.RUnlock()
 	}
 }
 
