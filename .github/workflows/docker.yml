@@ -51,10 +51,18 @@ jobs:
         timeout-minutes: 5
         run: |
           export NODE_PATH="$RUNNER_TEMP/prism-browser/node_modules"
-          node web/tests/response-attachments-browser.cjs
-          node web/tests/teams-admin-browser.cjs
-          node web/tests/telephony-app-browser.cjs
-          node web/tests/conversation-settings-browser.cjs
+          for test in web/tests/response-attachments-browser.cjs web/tests/teams-admin-browser.cjs web/tests/telephony-app-browser.cjs web/tests/conversation-settings-browser.cjs; do
+            echo "::group::$test"
+            if node "$test" > "$RUNNER_TEMP/prism-browser-test.log" 2>&1; then
+              cat "$RUNNER_TEMP/prism-browser-test.log"
+              echo '::endgroup::'
+            else
+              cat "$RUNNER_TEMP/prism-browser-test.log"
+              echo '::endgroup::'
+              node -e 'const fs=require("node:fs"); const message=fs.readFileSync(process.argv[1],"utf8").slice(-6000).replaceAll("%","%25").replaceAll("\r","%0D").replaceAll("\n","%0A"); console.log("::error title=Browser regression,file="+process.argv[2]+"::"+message)' "$RUNNER_TEMP/prism-browser-test.log" "$test"
+              exit 1
+            fi
+          done
   build:
     needs: verify
     if: github.event_name == 'push'
