@@ -374,6 +374,8 @@ func (s *Store) initSchema(ctx context.Context) error {
 		)`,
 		`ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS tool_events JSONB NOT NULL DEFAULT '[]'::jsonb`,
 		`ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'complete'`,
+		`ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS request_id TEXT`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS room_messages_request_idx ON room_messages(group_id, author_id, request_id) WHERE request_id IS NOT NULL`,
 		`CREATE INDEX IF NOT EXISTS room_messages_group_idx ON room_messages(group_id, id)`,
 		// Per-group tool restrictions (Phase 5). A group admin may only *tighten*
 		// within the global ceiling, so rows here always mean 'admin_only' for that

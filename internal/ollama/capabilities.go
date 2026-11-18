@@ -9,10 +9,11 @@ import (
 )
 
 // ModelCapabilities describes the effective context, not a name-based guess.
-// Zero/nil means the provider did not supply the information.
+// Zero/nil means no capability or manual generation override was supplied.
 type ModelCapabilities struct {
-	ContextWindow int   `json:"contextWindow,omitempty"`
-	Vision        *bool `json:"vision,omitempty"`
+	ContextWindow   int   `json:"contextWindow,omitempty"`
+	Vision          *bool `json:"vision,omitempty"`
+	MaxOutputTokens int   `json:"maxOutputTokens,omitempty"` // Manual generation ceiling; zero keeps the default.
 }
 
 // Optional: existing backends and integrations keep the small Backend contract.

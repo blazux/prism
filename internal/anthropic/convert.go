@@ -1,8 +1,10 @@
 package anthropic
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"prism/internal/ollama"
@@ -55,8 +57,8 @@ type apiBlock struct {
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
 
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
+	ToolUseID string      `json:"tool_use_id,omitempty"`
+	Content   interface{} `json:"content,omitempty"` // string, or text/image blocks for tool results
 }
 
 // Tool-search blocks must be replayed exactly, including provider-only fields.
@@ -72,6 +74,17 @@ type imageSource struct {
 	Type      string `json:"type"`
 	MediaType string `json:"media_type"`
 	Data      string `json:"data"`
+}
+
+func imageBlock(data string) apiBlock {
+	mediaType := "image/jpeg" // preserve legacy inputs whose format cannot be identified
+	if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
+		switch detected := http.DetectContentType(decoded); detected {
+		case "image/jpeg", "image/png", "image/gif", "image/webp":
+			mediaType = detected
+		}
+	}
+	return apiBlock{Type: "image", Source: &imageSource{Type: "base64", MediaType: mediaType, Data: data}}
 }
 
 type apiTool struct {
@@ -264,7 +277,15 @@ func buildMessages(in []ollama.Message) []apiMessage {
 				// result block, and silence reads as failure to the model.
 				content = "(no output)"
 			}
-			appendBlocks("user", apiBlock{Type: "tool_result", ToolUseID: id, Content: content})
+			result := apiBlock{Type: "tool_result", ToolUseID: id, Content: content}
+			if len(m.Images) > 0 {
+				blocks := []apiBlock{{Type: "text", Text: content}}
+				for _, img := range m.Images {
+					blocks = append(blocks, imageBlock(img))
+				}
+				result.Content = blocks
+			}
+			appendBlocks("user", result)
 
 		default: // user
 			var blocks []apiBlock
@@ -272,11 +293,7 @@ func buildMessages(in []ollama.Message) []apiMessage {
 				blocks = append(blocks, apiBlock{Type: "text", Text: text})
 			}
 			for _, img := range m.Images {
-				blocks = append(blocks, apiBlock{Type: "image", Source: &imageSource{
-					Type:      "base64",
-					MediaType: "image/jpeg",
-					Data:      img,
-				}})
+				blocks = append(blocks, imageBlock(img))
 			}
 			appendBlocks("user", blocks...)
 		}

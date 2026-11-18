@@ -23,7 +23,7 @@ type workspaceActivity struct {
 	Messages       []activityMessage  `json:"messages"`
 	RecentTools    []activityTool     `json:"recentTools"`
 	Subagents      []activitySubagent `json:"subagents"`
-	BackgroundJobs int                `json:"backgroundJobs"`
+	BackgroundJobs int                `json:"backgroundJobs"` // headless agent turns, excluding direct tool calls
 }
 
 type activityMessage struct {
@@ -110,7 +110,7 @@ func (s *Server) handleWorkspaceActivity(w http.ResponseWriter, r *http.Request,
 	// Read the persisted state while holding runsMu too, so a task finishing
 	// between lookups cannot be mistaken for a server restart.
 	s.runsMu.Lock()
-	activity.BackgroundJobs = len(s.sessionJobs[id])
+	activity.BackgroundJobs = s.agentJobsLocked(id)
 	if run := s.runs[runKey(c)]; run != nil {
 		run.mu.Lock()
 		activity.RunStatus = run.status

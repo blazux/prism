@@ -90,6 +90,7 @@ type Agent struct {
 	histMu               sync.Mutex // guards history, toolSeq and historyLoaded (Chat goroutine vs WS read pump: InjectNote, ResetHistory, SetSession)
 	history              []ollama.Message
 	modelContextTokens   int
+	modelMaxOutputTokens int
 	contextOverheadChars int
 	contextCharsPerToken float64
 	toolSeq              int // monotonically increasing tool call ID across all iterations
@@ -126,10 +127,10 @@ type Agent struct {
 	prepareApprovalFn func(string)
 	historyLoaded     bool // true after first DB load
 	// historyGen counts every external mutation of history (InjectNote,
-	// ResetHistory, SetSession) — bumped under histMu. compactLiveContextIfNeeded
+	// ResetHistory, SetSession, ReloadStoredHistory) — bumped under histMu. compactLiveContextIfNeeded
 	// captures it before releasing the lock for its ~20s best-effort LLM
 	// summarization call, then checks it again before applying the compacted
-	// result: if a concurrent InjectNote/ResetHistory/SetSession landed in
+	// result: if a concurrent history mutation landed in
 	// that window, the generation no longer matches and the stale compaction
 	// is discarded instead of clobbering what changed in the meantime.
 	historyGen int
@@ -632,7 +633,7 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 // then sizes history from the selected model's effective context window.
 func (a *Agent) modelInputBudgetChars() int {
 	a.histMu.Lock()
-	tokens, overhead, ratio := a.modelContextTokens, a.contextOverheadChars, a.contextCharsPerToken
+	tokens, maxOutput, overhead, ratio := a.modelContextTokens, a.modelMaxOutputTokens, a.contextOverheadChars, a.contextCharsPerToken
 	a.histMu.Unlock()
 	if tokens <= 0 {
 		return 0
@@ -643,7 +644,7 @@ func (a *Agent) modelInputBudgetChars() int {
 	if overhead == 0 {
 		overhead = int(10_000 * ratio)
 	}
-	return int(float64(tokens-modelOutputReserve(tokens))*ratio) - overhead
+	return int(float64(tokens-modelOutputReserve(tokens, maxOutput))*ratio) - overhead
 }
 
 func (a *Agent) effectiveHistoryBudget() int {
@@ -670,12 +671,14 @@ func (a *Agent) effectiveHistoryBudget() int {
 	return budget
 }
 
-func modelOutputReserve(tokens int) int {
-	reserve := tokens / 4
-	if reserve > ollama.DefaultNumPredict {
-		reserve = ollama.DefaultNumPredict
+func modelOutputReserve(tokens, maxOutput int) int {
+	if maxOutput <= 0 {
+		maxOutput = ollama.DefaultNumPredict
 	}
-	return reserve
+	if tokens > 0 && tokens/4 < maxOutput {
+		return tokens / 4
+	}
+	return maxOutput
 }
 
 func (a *Agent) refreshModelCapabilities(ctx context.Context) {
@@ -685,6 +688,7 @@ func (a *Agent) refreshModelCapabilities(ctx context.Context) {
 	}
 	a.histMu.Lock()
 	a.modelContextTokens = info.ContextWindow
+	a.modelMaxOutputTokens = info.MaxOutputTokens
 	a.histMu.Unlock()
 	if info.Vision != nil {
 		a.SetChatBlind(!*info.Vision)
@@ -792,15 +796,16 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 
 	a.histMu.Lock()
 	if a.historyGen != genBefore {
-		// InjectNote/ResetHistory/SetSession ran while summarizeDroppedSpan was
+		// An external history mutation ran while summarizeDroppedSpan was
 		// in flight (deliberately unlocked, possibly for a couple of minutes) —
 		// a.history has moved on since `dropped` was captured. Applying our
 		// stale view now would silently discard whatever that concurrent call
 		// did (a note, a "new chat", a session switch). Skip this pass; if
 		// still over budget, the next check will recompute from the current
 		// state.
+		genNow := a.historyGen
 		a.histMu.Unlock()
-		log.Printf("[agent] session=%s compaction aborted: history changed concurrently (gen %d -> %d)", a.sessionID, genBefore, a.historyGen)
+		log.Printf("[agent] session=%s compaction aborted: history changed concurrently (gen %d -> %d)", a.sessionID, genBefore, genNow)
 		return errors.New("context changed while summarizing; retry")
 	}
 	note := "[Context compacted automatically — summary of the earlier exchanges: " + summary + "]"
@@ -972,6 +977,7 @@ func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Messa
 
 	var out strings.Builder
 	var firstErr error
+	completed := false
 	for ev := range ch {
 		if ev.Err != nil {
 			if firstErr == nil {
@@ -980,12 +986,34 @@ func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Messa
 			continue
 		}
 		out.WriteString(ev.Content)
+		if len(ev.ToolCalls) > 0 && firstErr == nil {
+			firstErr = errors.New("summarization returned unexpected tool calls")
+		}
+		if ev.Done {
+			switch ev.DoneReason {
+			case "stop", "end_turn", "stop_sequence":
+				completed = true
+			default:
+				if firstErr == nil {
+					firstErr = fmt.Errorf("summarization did not finish successfully (%q)", ev.DoneReason)
+				}
+			}
+		}
+	}
+	if firstErr == nil {
+		firstErr = sctx.Err()
 	}
 	if firstErr != nil {
-		if sctx.Err() != nil {
+		if errors.Is(sctx.Err(), context.Canceled) {
+			return "", fmt.Errorf("summarization cancelled: %w", sctx.Err())
+		}
+		if errors.Is(sctx.Err(), context.DeadlineExceeded) {
 			return "", fmt.Errorf("summarization timed out after %s (excerpt %d chars)", timeout, len(excerpt))
 		}
 		return "", fmt.Errorf("summarization failed after %s: %w", time.Since(started).Round(time.Second), firstErr)
+	}
+	if !completed {
+		return "", errors.New("summarization ended without a successful terminal event")
 	}
 	summary := strings.TrimSpace(stripThinkingBlocks(out.String()))
 	if summary == "" {
@@ -1086,6 +1114,14 @@ func (a *Agent) saveMessageToDB(ctx context.Context, msg ollama.Message) int64 {
 		return 0
 	}
 	return id
+}
+
+// Once an assistant tool batch is accepted, record every result even if Stop
+// cancels the task. Without those rows a reload could replay unanswered calls.
+func (a *Agent) saveToolBatchMessageToDB(ctx context.Context, msg ollama.Message) int64 {
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	return a.saveMessageToDB(saveCtx, msg)
 }
 
 // Personal timezone is reloaded each turn; TZ remains the deployment fallback.
@@ -1489,7 +1525,11 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		dbMsg := assistantMsg
 		dbMsg.Content = stripThinkingBlocks(fullContent)
 		dbMsg.ProviderBlocks = nil
-		assistantMsg.DBID = a.saveMessageToDB(ctx, dbMsg)
+		if len(toolCalls) > 0 {
+			assistantMsg.DBID = a.saveToolBatchMessageToDB(ctx, dbMsg)
+		} else {
+			assistantMsg.DBID = a.saveMessageToDB(ctx, dbMsg)
+		}
 		a.histMu.Lock()
 		a.history = append(a.history, assistantMsg)
 		a.histMu.Unlock()
@@ -1545,14 +1585,17 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			rejected := false
 			// Manual approval gate. Voice bypasses it — a caller can't click, and
 			// silence while the dashboard waits would read as a dead line.
-			if loopError == "" && tc.Function.ArgumentError == "" && a.channel != voiceChannel && a.approvalNeededFn != nil && a.approvalNeededFn() && a.awaitApprovalFn != nil {
+			if ctx.Err() == nil && loopError == "" && tc.Function.ArgumentError == "" && a.channel != voiceChannel && a.approvalNeededFn != nil && a.approvalNeededFn() && a.awaitApprovalFn != nil {
 				if a.prepareApprovalFn != nil {
 					a.prepareApprovalFn(toolID)
 				}
 				events <- Event{Type: "approval_request", ID: toolID, Tool: tc.Function.Name, Input: tc.Function.Arguments}
 				rejected = !a.awaitApprovalFn(ctx, toolID)
 			}
-			if loopError != "" {
+			if ctx.Err() != nil {
+				result = "Tool call cancelled before execution; no action was taken."
+				toolFailed = true
+			} else if loopError != "" {
 				result = "Tool call skipped because repeated calls returned unchanged results. Review the previous results before continuing."
 				toolFailed = true
 			} else if tc.Function.ArgumentError != "" {
@@ -1565,6 +1608,9 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			} else if tc.Function.Name == "tool_catalog" && catalogFromContext(ctx) != nil {
 				if err := a.executor.Authorize(tc.Function.Name, tc.Function.Arguments); err != nil {
 					result = fmt.Sprintf("Error: %v", err)
+					toolFailed = true
+				} else if ctx.Err() != nil {
+					result = "Tool call cancelled before execution; no action was taken."
 					toolFailed = true
 				} else {
 					var execErr error
@@ -1581,6 +1627,9 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 				// (or a Webex sender without it) could still call it.
 				if err := a.executor.Authorize(tc.Function.Name, tc.Function.Arguments); err != nil {
 					result = fmt.Sprintf("Error: %v", err)
+					toolFailed = true
+				} else if ctx.Err() != nil {
+					result = "Tool call cancelled before execution; no action was taken."
 					toolFailed = true
 				} else {
 					result = a.handleUpdateSystemPrompt(ctx, tc.Function.Arguments)
@@ -1628,7 +1677,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 			} else if len(toolImages) > 0 {
 				toolMsg.Images = toolImages
 			}
-			toolMsg.DBID = a.saveMessageToDB(ctx, toolMsg)
+			toolMsg.DBID = a.saveToolBatchMessageToDB(ctx, toolMsg)
 			a.histMu.Lock()
 			a.history = append(a.history, toolMsg)
 			a.histMu.Unlock()
@@ -1638,6 +1687,10 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 					tc.Function.Name,
 				)
 			}
+		}
+		if ctx.Err() != nil {
+			events <- Event{Type: "stream_end"}
+			return
 		}
 		if loopError != "" {
 			a.recordAgentStop(ctx, loopError)
@@ -1809,6 +1862,7 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 	a.histMu.Lock()
 	messages := append([]ollama.Message{{Role: "system", Content: prompt}}, a.history...)
 	contextTokens := a.modelContextTokens
+	maxOutputTokens := a.modelMaxOutputTokens
 	a.histMu.Unlock()
 	if contextTokens > 0 && a.liveHistoryChars() > a.modelInputBudgetChars() {
 		return "", nil, nil, "", errors.New("the conversation does not fit this model's context window; its history was retained. Retry if summarization failed, choose a larger-context model or lighter prompt profile, or start a new conversation")
@@ -1830,13 +1884,11 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 		req.ReasoningEffort = "low"
 		req.NoThinkingIfUnsupported = true
 	}
-	if contextTokens > 0 {
-		req.Options.NumPredict = modelOutputReserve(contextTokens)
-	}
+	req.Options.NumPredict = modelOutputReserve(contextTokens, maxOutputTokens)
 	// The sources router forwards an explicit per-model num_ctx to Ollama;
 	// OpenAI/Anthropic receive only the generation ceiling.
 
-	log.Printf("[agent] → model=%q backend=%T: %d messages, %d tools, system_prompt_bytes=%d", a.model, a.ollama, len(messages), len(tools), len(prompt))
+	log.Printf("[agent] → model=%q backend=%T: %d messages, %d tools, system_prompt_bytes=%d output_tokens_limit=%d", a.model, a.ollama, len(messages), len(tools), len(prompt), req.Options.NumPredict)
 
 	historyContentBytes, toolResultBytes, toolArgumentBytes, imageBytes := historyFootprint(messages)
 	scope := a.usageScope
@@ -1990,6 +2042,7 @@ func (a *Agent) SetBackend(backend ollama.Backend, model string) {
 	a.model = model
 	a.histMu.Lock()
 	a.modelContextTokens = 0
+	a.modelMaxOutputTokens = 0
 	a.contextOverheadChars = 0
 	a.contextCharsPerToken = 0
 	a.histMu.Unlock()
@@ -2005,4 +2058,5 @@ func (a *Agent) ReloadStoredHistory() {
 	defer a.histMu.Unlock()
 	a.history = nil
 	a.historyLoaded = false
+	a.historyGen++
 }

@@ -81,7 +81,7 @@ button:focus-visible,summary:focus-visible,.mrow:focus-visible{outline:2px solid
 .filter-summary{list-style:none;cursor:pointer;color:var(--text2);background:transparent}
 .filter-summary::-webkit-details-marker{display:none}
 .filter-summary.has-filter{color:var(--accent);border-color:var(--accent)}
-.filter-active{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;font-size:10px;background:var(--accent);color:#fff}
+.filter-active{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;font-size:10px;background:var(--accent);color:var(--on-accent,#fff)}
 .filter-active[hidden]{display:none}
 .filter-panel{position:absolute;top:calc(100% + 12px);right:0;width:min(380px,calc(100vw - 24px));max-height:65vh;overflow:auto;padding:12px;background:var(--bg1);border:1px solid var(--border2);border-radius:12px;box-shadow:0 12px 40px #0004}
 .filter-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px}

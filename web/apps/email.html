@@ -84,6 +84,7 @@
   .mtags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
   .mtag { font-size: 9.5px; padding: 1px 7px; border-radius: 999px; background: var(--bg4); color: var(--text2); }
   .mcat { font-size: 9.5px; padding: 1px 7px; border-radius: 999px; font-weight: 600; color: #fff; }
+  .mcat.mcat-accent { color: var(--on-accent,#fff); }
   .rbody { flex: 1; overflow-y: auto; padding: 16px 18px; white-space: pre-wrap; line-height: 1.5; font-family: var(--sans, sans-serif); }
   .rhtml { flex: 1; width: 100%; border: none; background: #fff; }
   .placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text3); }
@@ -149,7 +150,13 @@ const TOP_TAGS = 5;
 const CAT_COLORS = { Action: 'var(--red)', FYI: 'var(--accent)', Newsletter: 'var(--text3)', Personal: 'var(--green)', Promo: 'var(--yellow)', Spam: 'var(--red)' };
 
 const SESSION = new URLSearchParams(location.search).get('session') || 'default';
-function openSettings() { window.top.location.href = `/settings.html?session=${encodeURIComponent(SESSION)}#email`; }
+function openSettings() {
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: 'open-settings', tab: 'email' }, location.origin);
+  } else {
+    location.href = '/?view=settings&tab=email';
+  }
+}
 
 async function init() {
   // A 503 from the store used to land here as "no mailbox connected", sending
@@ -390,7 +397,7 @@ function renderList() {
     const t = mailTags[m.uid];
     let tagsHTML = '';
     if (t) {
-      const cat = t.category ? `<span class="mcat" style="background:${CAT_COLORS[t.category] || 'var(--text3)'}">${esc(t.category)}</span>` : '';
+      const cat = t.category ? `<span class="mcat${t.category === 'FYI' ? ' mcat-accent' : ''}" style="background:${CAT_COLORS[t.category] || 'var(--text3)'}">${esc(t.category)}</span>` : '';
       const tags = (t.tags || []).map(x => `<span class="mtag">${esc(x)}</span>`).join('');
       if (cat || tags) tagsHTML = `<div class="mtags">${cat}${tags}</div>`;
     }

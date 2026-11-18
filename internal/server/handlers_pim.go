@@ -146,6 +146,15 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
+	noteSession := ""
+	if (r.Method == http.MethodPost || r.Method == http.MethodDelete) && r.URL.Query().Get("session") != "" {
+		var ok bool
+		noteSession, ok = s.sessionFor(r, r.URL.Query().Get("session"))
+		if !ok {
+			http.Error(w, "forbidden session", http.StatusForbidden)
+			return
+		}
+	}
 	prov := notes.ProviderFor(r.Context(), s.userStore(r), s.pimScopeFor(r))
 	switch r.Method {
 	case "GET":
@@ -223,7 +232,7 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 			if title == "" {
 				title = "(untitled)"
 			}
-			s.injectAgentNote(r.URL.Query().Get("session"), fmt.Sprintf(
+			s.injectAgentNote(noteSession, fmt.Sprintf(
 				"[Notes] The user just created note id=%s titled %q in the Notes app. Any note list you read earlier is out of date — re-read with the note tool before answering about notes.", id, title))
 		}
 		writeJSON(w, map[string]interface{}{"id": id})
@@ -257,7 +266,7 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		s.injectAgentNote(r.URL.Query().Get("session"), fmt.Sprintf(
+		s.injectAgentNote(noteSession, fmt.Sprintf(
 			"[Notes] The user just deleted note id=%s in the Notes app. It no longer exists — re-read with the note tool before answering about notes.", delID))
 		writeJSON(w, map[string]interface{}{"ok": true})
 	default:

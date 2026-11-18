@@ -389,6 +389,16 @@
 <script>
 let currentCollection = null
 let collections = []
+let documentsRequestVersion = 0, collectionsRequestVersion = 0, displayedDocuments = null
+async function requireRAGSuccess(response) {
+  if (!response.ok) {
+    const raw = await response.text()
+    let message = raw.trim()
+    try { const data = JSON.parse(raw); message = data.error || data.message || message } catch (_) {}
+    throw new Error(message || 'Request failed (' + response.status + ')')
+  }
+  return response
+}
 const SESSION = new URLSearchParams(window.location.search).get('session') || 'default'
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -464,14 +474,15 @@ function showStatusBar(msg) {
 // ── Collections ───────────────────────────────────────────────────────────────
 
 async function loadCollections() {
+  const version = ++collectionsRequestVersion
   try {
-    const res = await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`)
-    collections = await res.json()
-    if (!Array.isArray(collections)) collections = []
+    const res = await requireRAGSuccess(await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`))
+    const data = await res.json()
+    if (!Array.isArray(data)) throw new Error('Invalid collection list')
+    if (version !== collectionsRequestVersion) return
+    collections = data
     renderCollections()
-  } catch(e) {
-    showToast('Connection error: ' + e.message, true)
-  }
+  } catch(e) { if (version === collectionsRequestVersion) showToast('Could not load collections: ' + e.message, true) }
 }
 
 function renderCollections() {
@@ -505,6 +516,7 @@ function renderCollections() {
 }
 
 function selectCollection(name) {
+  documentsRequestVersion++; displayedDocuments = null
   currentCollection = name
   renderCollections()
   renderContent()
@@ -513,24 +525,36 @@ function selectCollection(name) {
 
 async function deleteCollection(name) {
   if (!await PrismModal.confirm(`Delete collection "${name}" and all its documents?`, { danger: true })) return
-  await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
-  if (currentCollection === name) {
-    currentCollection = null
-    renderContentEmpty()
-  }
-  await loadCollections()
+  try {
+    await requireRAGSuccess(await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' }))
+    if (currentCollection === name) {
+      documentsRequestVersion++; displayedDocuments = null
+      currentCollection = null
+      renderContentEmpty()
+    }
+    await loadCollections()
+  } catch (e) { showToast('Could not delete collection: ' + e.message, true) }
 }
 
 // ── Documents ─────────────────────────────────────────────────────────────────
 
 async function loadDocuments() {
-  if (!currentCollection) return
+  const collection = currentCollection, area = document.getElementById('docs-area')
+  if (!collection || !area) return
+  const version = ++documentsRequestVersion
+  displayedDocuments = null
+  area.querySelectorAll('.doc-del-btn').forEach(button => button.disabled = true)
   try {
-    const res = await fetch(`/api/rag/documents?collection=${encodeURIComponent(currentCollection)}`)
+    const res = await requireRAGSuccess(await fetch(`/api/rag/documents?collection=${encodeURIComponent(collection)}`))
     const docs = await res.json()
-    renderDocuments(Array.isArray(docs) ? docs : [])
+    if (version !== documentsRequestVersion || collection !== currentCollection || area !== document.getElementById('docs-area')) return
+    if (!Array.isArray(docs)) throw new Error('Invalid document list')
+    displayedDocuments = { collection, area, ids: new Set(docs.map(doc => Number(doc.id))), deleting: new Set() }
+    renderDocuments(docs)
   } catch(e) {
-    showToast('Failed to load documents', true)
+    if (version !== documentsRequestVersion || collection !== currentCollection || area !== document.getElementById('docs-area')) return
+    showToast('Failed to load documents: ' + e.message, true)
+    if (!area.querySelectorAll('.doc-del-btn').length) area.textContent = 'Could not load documents. Select the collection to retry.'
   }
 }
 
@@ -559,35 +583,52 @@ function renderDocuments(docs) {
             <td>${fmtSize(d.size_bytes)}</td>
             <td>${d.chunk_count}</td>
             <td>${fmtDate(d.updated_at)}</td>
-            <td><button class="doc-del-btn" title="Delete" onclick="deleteDocument(${d.id})">✕</button></td>
+            <td>${CAN_MANAGE ? `<button class="doc-del-btn" title="Delete" data-id="${d.id}">✕</button>` : ''}</td>
           </tr>
         `).join('')}
       </tbody>
     </table>
   `
+  const snapshot = displayedDocuments
+  area.querySelectorAll('.doc-del-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteDocument(Number(btn.dataset.id), snapshot))
+  })
 }
 
-async function deleteDocument(id) {
-  await fetch(`/api/rag/document?id=${id}`, { method: 'DELETE' })
-  loadDocuments()
-  loadCollections()
+async function deleteDocument(id, snapshot = displayedDocuments) {
+  if (!snapshot || snapshot !== displayedDocuments || snapshot.collection !== currentCollection ||
+      snapshot.area !== document.getElementById('docs-area') || !snapshot.ids.has(id) || snapshot.deleting.has(id)) return
+  snapshot.deleting.add(id)
+  const button = [...snapshot.area.querySelectorAll('.doc-del-btn')].find(btn => Number(btn.dataset.id) === id)
+  if (button) button.disabled = true
+  try {
+    await requireRAGSuccess(await fetch(`/api/rag/document?id=${encodeURIComponent(id)}`, { method: 'DELETE' }))
+    if (snapshot === displayedDocuments) await loadDocuments()
+    await loadCollections()
+  } catch (e) { showToast('Could not delete document: ' + e.message, true) }
+  finally {
+    snapshot.deleting.delete(id)
+    if (snapshot === displayedDocuments && button) button.disabled = false
+  }
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 
-async function saveDescription(value) {
-  const col = collections.find(c => c.name === currentCollection)
+async function saveDescription(value, collection = currentCollection) {
+  const col = collections.find(c => c.name === collection)
   if (!col) return
-  col.description = value
-  await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: currentCollection, description: value })
-  })
+  try {
+    await requireRAGSuccess(await fetch(`/api/rag/collections?session=${encodeURIComponent(SESSION)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: collection, description: value })
+    }))
+    col.description = value
+  } catch (e) { showToast('Could not save description: ' + e.message, true) }
 }
 
 function renderContent() {
-  const col = collections.find(c => c.name === currentCollection)
+  const collection = currentCollection
+  const col = collections.find(c => c.name === collection)
   const desc = col ? (col.description || '') : ''
   const content = document.getElementById('content')
   content.innerHTML = `
@@ -616,7 +657,7 @@ function renderContent() {
   `
 
   const descInput = document.getElementById('desc-input')
-  descInput.addEventListener('blur', () => saveDescription(descInput.value.trim()))
+  descInput.addEventListener('blur', () => saveDescription(descInput.value.trim(), collection))
   descInput.addEventListener('keydown', e => { if (e.key === 'Enter') { descInput.blur() } })
 
   const zone = document.getElementById('upload-zone')
@@ -642,6 +683,7 @@ async function uploadFiles(files) {
   if (!files || files.length === 0) return
   if (!currentCollection) { showToast('Select a collection first', true); return }
 
+  const collection = currentCollection, input = document.getElementById('upload-input')
   const zone = document.getElementById('upload-zone')
   const progress = document.getElementById('upload-progress')
   zone.classList.add('uploading')
@@ -653,7 +695,7 @@ async function uploadFiles(files) {
     try {
       const form = new FormData()
       form.append('file', file)
-      form.append('collection', currentCollection)
+      form.append('collection', collection)
       form.append('session', SESSION)
       const res = await fetch('/api/rag/upload', { method: 'POST', body: form })
       const data = await res.json()
@@ -667,8 +709,8 @@ async function uploadFiles(files) {
   zone.classList.remove('uploading')
   progress.classList.remove('visible')
   progress.textContent = ''
-  document.getElementById('upload-input').value = ''
-  await loadDocuments()
+  input.value = ''
+  if (currentCollection === collection) await loadDocuments()
   await loadCollections()
 }
 

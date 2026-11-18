@@ -10,151 +10,82 @@
 (function () {
   'use strict';
 
-  // ─── Token sets ──────────────────────────────────────────────────────────
-  // Every theme defines the FULL token set so switching is always complete.
+  // Every preset defines a complete palette; derived controls and surfaces reset on switch.
+  const COLOR_KEYS = ["--bg", "--bg1", "--bg2", "--bg3", "--bg4", "--border", "--border2", "--text", "--text2", "--text3", "--accent", "--accent-dim", "--green", "--red", "--yellow", "--orange"];
+  const BASE_VARS = Object.fromEntries(COLOR_KEYS.map((key, i) => [key, ['#090c13','#10151f','#171e2b','#202a3a','#2b3749','#293549','#3c4c65','#eef2fb','#b9c3d6','#91a0b9','#9baeff','#293654','#72d6ad','#ff939d','#e9c783','#f1ae7f'][i]]));
+
+  function luminance(hex) {
+    const c = hex.slice(1).match(/../g).map(v => parseInt(v, 16) / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
+    return c[0] * .2126 + c[1] * .7152 + c[2] * .0722;
+  }
+  function contrast(a, b) { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); }
+  function mix(a, b, amount) {
+    const rgb = value => value.slice(1).match(/../g).map(v => parseInt(v, 16));
+    return '#' + rgb(a).map((v, i) => Math.round(v + (rgb(b)[i] - v) * amount).toString(16).padStart(2, '0')).join('');
+  }
+  function readable(color, backgrounds, minimum = 4.5) {
+    const target = luminance(backgrounds[0]) < .4 ? '#ffffff' : '#000000';
+    for (let step = 0; step <= 100; step++) {
+      const candidate = mix(color, target, step / 100);
+      if (backgrounds.every(bg => contrast(candidate, bg) >= minimum)) return candidate;
+    }
+    return target;
+  }
+  function onColor(color) {
+    return contrast('#111820', color) >= 4.5 ? '#111820' : contrast('#ffffff', color) >= 4.5 ? '#ffffff' : '#000000';
+  }
+  function completeVars(input = {}, radius = '9px') {
+    const vars = { ...BASE_VARS };
+    for (const key of COLOR_KEYS) {
+      let value = input[key];
+      if (typeof value === 'string' && /^#[0-9a-f]{3}$/i.test(value)) value = '#' + [...value.slice(1)].map(c => c + c).join('');
+      if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) vars[key] = value;
+    }
+    const dark = luminance(vars['--bg1']) < .4;
+    vars['color-scheme'] = dark ? 'dark' : 'light';
+    vars['--on-accent'] = onColor(vars['--accent']);
+    vars['--on-danger'] = onColor(vars['--red']);
+    vars['--on-success'] = onColor(vars['--green']);
+    vars['--on-warning'] = onColor(vars['--yellow']);
+    vars['--radius'] = typeof input['--radius'] === 'string' && /^(?:[0-9]|1[0-9]|2[0-4])px$/.test(input['--radius']) ? input['--radius'] : radius;
+    vars['--shadow-color'] = dark ? '#00000066' : '#24344a1a';
+    vars['--panel-shadow'] = dark ? '0 12px 36px #00000038' : '0 8px 28px #24344a12';
+    vars['--popup-shadow'] = dark ? '0 16px 48px #00000080' : '0 14px 40px #24344a24';
+    return vars;
+  }
+  function readablePalette(input, radius) {
+    const vars = completeVars(input, radius);
+    for (const key of ['--text', '--text2', '--text3']) vars[key] = readable(vars[key], [vars['--bg1'], vars['--bg2']]);
+    for (const key of ['--accent', '--green', '--red', '--yellow', '--orange']) vars[key] = readable(vars[key], [vars['--bg1']]);
+    return completeVars(vars, radius);
+  }
+  function preset(label, group, description, mode, colors, radius) {
+    return { label, group, description, mode, vars: readablePalette(Object.fromEntries(COLOR_KEYS.map((key, i) => [key, '#' + colors.split(' ')[i]])), radius) };
+  }
+
   const THEMES = {
-    'prism-dark': {
-      label: 'Prism Dark',
-      vars: {
-        '--bg': '#080809', '--bg1': '#0e0e10', '--bg2': '#141416', '--bg3': '#1a1a1e', '--bg4': '#212126',
-        '--border': '#232328', '--border2': '#2e2e35',
-        '--text': '#e8e8f0', '--text2': '#9090a0', '--text3': '#55555f',
-        '--accent': '#6b8afd', '--accent-dim': '#2a3566',
-        '--green': '#4dba87', '--red': '#e06c75', '--yellow': '#e5c07b', '--orange': '#d19a66',
-      },
-    },
-    'prism-light': {
-      label: 'Prism Light',
-      vars: {
-        '--bg': '#f4f4f6', '--bg1': '#ffffff', '--bg2': '#ececef', '--bg3': '#e2e2e6', '--bg4': '#d6d6da',
-        '--border': '#dcdce0', '--border2': '#c8c8d0',
-        '--text': '#1c1c22', '--text2': '#55555f', '--text3': '#9090a0',
-        '--accent': '#4f6ef0', '--accent-dim': '#d3dbfb',
-        '--green': '#2e9e6b', '--red': '#d05661', '--yellow': '#b8862a', '--orange': '#c2772f',
-      },
-    },
-    // ── The sober/professional set: neutral surfaces, desaturated accents,
-    // muted status colors. Their aurora is damped in style.css.
-    'graphite': {
-      label: 'Graphite',
-      vars: {
-        '--bg': '#0e0e0f', '--bg1': '#131315', '--bg2': '#19191b', '--bg3': '#202023', '--bg4': '#28282c',
-        '--border': '#242428', '--border2': '#303036',
-        '--text': '#e2e2e5', '--text2': '#94949c', '--text3': '#58585f',
-        '--accent': '#7d9cc0', '--accent-dim': '#263140',
-        '--green': '#58a377', '--red': '#c56b6f', '--yellow': '#c0a468', '--orange': '#b58a5c',
-      },
-    },
-    'slate': {
-      label: 'Slate',
-      vars: {
-        '--bg': '#12161c', '--bg1': '#171c23', '--bg2': '#1d232c', '--bg3': '#242c37', '--bg4': '#2d3643',
-        '--border': '#262f3a', '--border2': '#333f4e',
-        '--text': '#dbe2ea', '--text2': '#8b98a8', '--text3': '#52606f',
-        '--accent': '#74a0c8', '--accent-dim': '#1f3446',
-        '--green': '#56a888', '--red': '#c76e75', '--yellow': '#c2a56b', '--orange': '#b8875f',
-      },
-    },
-    'paper': {
-      label: 'Paper',
-      vars: {
-        '--bg': '#f5f3ee', '--bg1': '#fdfcf9', '--bg2': '#edeae3', '--bg3': '#e3dfd6', '--bg4': '#d6d1c6',
-        '--border': '#ddd8cd', '--border2': '#c8c2b4',
-        '--text': '#26241e', '--text2': '#5f5b50', '--text3': '#9a9484',
-        '--accent': '#56718f', '--accent-dim': '#dde4ec',
-        '--green': '#588a5e', '--red': '#b05d5d', '--yellow': '#96772e', '--orange': '#a06a3a',
-      },
-    },
-    'boardroom': {
-      label: 'Boardroom',
-      vars: {
-        '--bg': '#eef1f4', '--bg1': '#ffffff', '--bg2': '#e4e8ee', '--bg3': '#d8dee6', '--bg4': '#c9d1db',
-        '--border': '#d5dce4', '--border2': '#bcc6d2',
-        '--text': '#182635', '--text2': '#4d5d70', '--text3': '#8496a8',
-        '--accent': '#2e5d8c', '--accent-dim': '#d0deee',
-        '--green': '#2f7d5b', '--red': '#b2555e', '--yellow': '#8f7020', '--orange': '#a5622c',
-      },
-    },
-    'midnight': {
-      label: 'Midnight',
-      vars: {
-        '--bg': '#070b16', '--bg1': '#0b1120', '--bg2': '#111a2e', '--bg3': '#18233d', '--bg4': '#1f2d4d',
-        '--border': '#1c2842', '--border2': '#26365a',
-        '--text': '#e6ecf7', '--text2': '#8a99b8', '--text3': '#4d5a78',
-        '--accent': '#5aa2ff', '--accent-dim': '#163059',
-        '--green': '#3fb98a', '--red': '#e06c75', '--yellow': '#e5c07b', '--orange': '#d19a66',
-      },
-    },
-    'nord': {
-      label: 'Nord',
-      vars: {
-        '--bg': '#2e3440', '--bg1': '#2e3440', '--bg2': '#343b4a', '--bg3': '#3b4252', '--bg4': '#434c5e',
-        '--border': '#3b4252', '--border2': '#4c566a',
-        '--text': '#eceff4', '--text2': '#d8dee9', '--text3': '#7b8494',
-        '--accent': '#88c0d0', '--accent-dim': '#3b4a52',
-        '--green': '#a3be8c', '--red': '#bf616a', '--yellow': '#ebcb8b', '--orange': '#d08770',
-      },
-    },
-    'solarized-dark': {
-      label: 'Solarized Dark',
-      vars: {
-        '--bg': '#002b36', '--bg1': '#073642', '--bg2': '#08404f', '--bg3': '#0a4a5a', '--bg4': '#0d5263',
-        '--border': '#0a4a5a', '--border2': '#11617a',
-        '--text': '#eee8d5', '--text2': '#93a1a1', '--text3': '#586e75',
-        '--accent': '#268bd2', '--accent-dim': '#0d3d52',
-        '--green': '#859900', '--red': '#dc322f', '--yellow': '#b58900', '--orange': '#cb4b16',
-      },
-    },
-    'rose-pine': {
-      label: 'Rosé Pine',
-      vars: {
-        '--bg': '#191724', '--bg1': '#1f1d2e', '--bg2': '#26233a', '--bg3': '#2f2b45', '--bg4': '#393552',
-        '--border': '#26233a', '--border2': '#403d5c',
-        '--text': '#e0def4', '--text2': '#908caa', '--text3': '#6e6a86',
-        '--accent': '#c4a7e7', '--accent-dim': '#2a2740',
-        '--green': '#9ccfd8', '--red': '#eb6f92', '--yellow': '#f6c177', '--orange': '#ebbcba',
-      },
-    },
-    'tech': {
-      label: 'Tech',
-      vars: {
-        '--bg': '#0a0e14', '--bg1': '#0e131c', '--bg2': '#131a26', '--bg3': '#1a2433', '--bg4': '#223044',
-        '--border': '#1c2738', '--border2': '#2a3a52',
-        '--text': '#d6e4f0', '--text2': '#7d93ab', '--text3': '#455369',
-        '--accent': '#18b3ff', '--accent-dim': '#0d3a52',
-        '--green': '#2bd4a0', '--red': '#ff5d6c', '--yellow': '#ffcf5c', '--orange': '#ff9d4d',
-      },
-    },
-    'cyberpunk': {
-      label: 'Cyberpunk',
-      vars: {
-        '--bg': '#0a0420', '--bg1': '#0f0a33', '--bg2': '#161045', '--bg3': '#21185c', '--bg4': '#2e2278',
-        '--border': '#241a60', '--border2': '#3b2c8f',
-        '--text': '#e9e6ff', '--text2': '#9d8ad6', '--text3': '#6a5fa0',
-        '--accent': '#7c4dff', '--accent-dim': '#2a1a5a',
-        '--green': '#21e6ff', '--red': '#ff3c6e', '--yellow': '#fee440', '--orange': '#ff7b00',
-      },
-    },
-    'matrix': {
-      label: 'Matrix',
-      vars: {
-        '--bg': '#000000', '--bg1': '#020a02', '--bg2': '#041204', '--bg3': '#061a06', '--bg4': '#0a240a',
-        '--border': '#0d3d0d', '--border2': '#135413',
-        '--text': '#33ff66', '--text2': '#1fb84a', '--text3': '#0d6b2a',
-        '--accent': '#39ff14', '--accent-dim': '#0a3d0a',
-        '--green': '#39ff14', '--red': '#ff3333', '--yellow': '#ccff33', '--orange': '#ff9933',
-      },
-    },
-    'synthwave': {
-      label: 'Synthwave',
-      vars: {
-        '--bg': '#1a0b2e', '--bg1': '#240b36', '--bg2': '#2d1147', '--bg3': '#3a1659', '--bg4': '#491d70',
-        '--border': '#3a1659', '--border2': '#5a2a85',
-        '--text': '#ffe6ff', '--text2': '#d18ad6', '--text3': '#8a5a9e',
-        '--accent': '#fe53bb', '--accent-dim': '#5a1a4d',
-        '--green': '#08f7fe', '--red': '#ff5e5e', '--yellow': '#f5d300', '--orange': '#ff8b3d',
-      },
-    },
+    "prism-dark": preset("Prism Dark", "essential", "Balanced dark surfaces with a clear iris accent.", "dark", "090c13 10151f 171e2b 202a3a 2b3749 293549 3c4c65 eef2fb b9c3d6 91a0b9 9baeff 293654 72d6ad ff939d e9c783 f1ae7f", "9px"),
+    "prism-light": preset("Prism Light", "essential", "Cool white, soft lavender and crisp blue.", "light", "f3f5fb ffffff eceff8 e2e7f2 d4ddeb d6deed bbc7df 20283b 4b5670 606b83 4657b8 e3e7fa 226c50 b1374f 815c13 9c5023", "9px"),
+    "graphite": preset("Graphite", "professional", "Charcoal, silver and a restrained steel blue.", "dark", "101113 17191c 202327 292d32 353a40 34393f 4b535e f0f1f3 c1c6ce 9ba3af adbfda 303d50 8fc6a5 e49fa8 dac28f d6ac86", "6px"),
+    "slate": preset("Slate", "professional", "Deep blue slate with a quiet mineral accent.", "dark", "111a23 18232e 212f3c 2c3d4c 394c5b 33495a 506777 eaf2f7 b6c9d5 95afc0 9cbfd3 2c4457 91c7b6 e4a2aa d9c093 d2ad91", "7px"),
+    "paper": preset("Paper", "professional", "Warm ivory, olive ink and a paper canvas.", "light", "f1eee6 faf8f2 eae5d9 e0d9ca d1c8b7 d4cdbc b9b09a 302e25 5b584a 6c6756 67623e e6e1c9 456b42 a64040 7b5e14 96502b", "7px"),
+    "boardroom": preset("Boardroom", "professional", "Porcelain white and precise navy blue.", "light", "eef2f6 ffffff e5ebf1 d9e2eb c8d5e1 ccd7e3 aabbd0 1c3047 455c74 5b6d82 2d557e dce8f4 286349 a83f4e 805d14 954a25", "5px"),
+    "ink": preset("Ink", "professional", "A sharp black-and-white workspace.", "light", "f4f4f2 ffffff eaeae7 dfdfdb cfcfca d3d5cf b3b7ae 202220 4c4e4b 63655f 303633 e0e5df 316649 a53642 775b13 8b4c2c", "3px"),
+    "spruce": preset("Spruce", "professional", "Fresh linen, evergreen and muted sage.", "light", "edf2ed f9fcf8 e1eae1 d5e2d5 c5d5c7 c9d8cb a9bfae 1e382c 435d4d 596f60 30664e d7e7dc 2b6743 a63c4c 7c5a15 97532d", "8px"),
+    "midnight": preset("Midnight", "studio", "Inky blue and cool starlight.", "dark", "090e1d 10192b 19263d 243550 324665 2c3e5b 476184 edf3ff b5c9e6 94acd0 9dc6ff 283e61 81d4b5 ff9aa9 e8cd8c ecb48d", "10px"),
+    "nord": preset("Nord", "studio", "Frosted blue-gray and soft arctic color.", "dark", "272e39 303947 3a4554 465264 536174 4c5b6d 657891 f1f5fa d4dfeb b2c2d4 a9d3dd 3c5260 bbd49f f3a0aa f1d99e ebbfa5", "8px"),
+    "solarized-dark": preset("Solarized Dark", "studio", "Petrol blue, parchment text and amber details.", "dark", "052a34 0a3540 13434f 205460 2f6671 2a5862 42717a f4eedb c4d1c9 a3bbb8 8ac8d4 214e5c b9cf87 f3a39b ebcc80 efb18b", "8px"),
+    "rose-pine": preset("Rosé Pine", "studio", "Smoky plum, lavender and rose.", "dark", "1c1928 252132 302b40 3d354e 4d435f 493d59 675477 f1eaf9 cfc1df b3a3c7 d5b9f3 473556 b6dacd f6a9c2 f1d3a5 eac1b9", "12px"),
+    "espresso": preset("Espresso", "studio", "Roasted coffee, warm cream and copper.", "dark", "1a1513 241e1a 302823 3d332b 4c4036 4e4035 6b5846 f7eddf d7c5af bba58a e4ba8f 513c2c b7c994 e5a79d e8cb8b ddb091", "10px"),
+    "dune": preset("Dune", "studio", "Sand, terracotta and sunlit cream.", "light", "f4eadb fff8ed efe0cc e5d2b8 d8bd9c dcc6aa c3a47f 443328 70513c 806047 995332 f1d7c4 516b3a ab3f42 7d5b15 9a5122", "11px"),
+    "tech": preset("Tech", "playful", "Cold titanium, electric cyan and a network grid.", "dark", "09141c 101f2a 192d3b 243c4c 334f60 2b4b5d 41677d e7f5fc b1d4e6 8eb8cf 70d9ff 17475a 7ee3c3 ff9ba8 f0d17f f2b184", "5px"),
+    "cyberpunk": preset("Cyberpunk", "playful", "Night-city blue, signal yellow and cyan circuitry.", "dark", "0a1019 101a25 172535 203146 2b3e55 2a4357 46647b edf6f8 b3c9d4 8fa8ba f6e75a 393817 74dbcd ff91b3 f6e75a f3af77", "3px"),
+    "matrix": preset("Matrix", "playful", "Terminal green on black with digital rain.", "dark", "020804 07120b 0e1e14 172d1e 223d2a 24432d 3b6343 e0f3df add4af 87b88e 7ee787 163d24 87e8ac ff9d9d e4db87 edb387", "3px"),
+    "synthwave": preset("Synthwave", "playful", "Hot pink, violet nights and a neon horizon.", "dark", "190f2c 261637 351e49 47265e 5b3276 563265 774684 fceefe decce9 cfaccf ff91d5 5b2b55 93e3ec ffa8b6 f1db9a f4bd9a", "8px"),
+    "dracula": preset("Dracula", "playful", "Purple-gray panels with mint and violet highlights.", "dark", "20212e 282a38 333646 414558 51566c 4d4e69 6b6c8b f4f2fc ccd1e7 aeb7d3 c7adff 4a3a67 a3e2b9 ffa3b8 f0db96 f5be93", "8px"),
+    "amber-terminal": preset("Amber Terminal", "playful", "Phosphor amber, black glass and scanlines.", "dark", "100c05 1a140a 282010 372c17 493b21 4d3d20 6c5730 f8edce ddcca0 bfaa77 f5c86a 463514 bed394 f2a18b f1d17c e8b184", "3px"),
+    "arcade": preset("Arcade", "playful", "Violet cabinets, electric peach and pixel accents.", "dark", "19142d 251d3b 342749 45335e 594176 614377 82619c f9f0ff dcc7ef bda4d6 ffb087 593443 a8e9ca ff9fbc efd88c eeb583", "4px"),
+    "bubblegum": preset("Bubblegum", "playful", "Strawberry pink, lilac and a soft candy canvas.", "light", "fceef5 fff9fc f3e0ed ebd1e3 dfbdd6 e0bfd6 c89dba 4b2a47 724768 855578 a23877 f2d4e9 366c57 b03759 815b13 a34d32", "14px"),
   };
 
   const DEFAULT_THEME = 'prism-dark';
@@ -171,29 +102,34 @@
   // ─── Custom themes (localStorage) ─────────────────────────────────────────
   const CUSTOM_KEY = 'prism-custom-themes';
   function readCustomArr() {
-    try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); } catch (_) { return []; }
+    try { const arr = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); return Array.isArray(arr) ? arr : []; } catch (_) { return []; }
   }
   function loadCustomThemes() {
     const out = {};
-    for (const t of readCustomArr()) if (t && t.id && t.vars) out[t.id] = { label: t.label || t.id, vars: t.vars, custom: true };
+    for (const t of readCustomArr()) if (t && typeof t.id === 'string' && t.vars && !THEMES[t.id]) {
+      const vars = completeVars(t.vars);
+      out[t.id] = { label: t.label || t.id, vars, custom: true, group: 'custom', mode: vars['color-scheme'], description: 'Your saved palette.' };
+    }
     return out;
   }
-  function getAllThemes() { return Object.assign({}, THEMES, loadCustomThemes()); }
+  function getAllThemes() { return { ...THEMES, ...loadCustomThemes() }; }
   function saveCustomTheme(id, label, vars) {
     const arr = readCustomArr();
     const i = arr.findIndex((t) => t.id === id);
-    const entry = { id, label, vars };
+    const entry = { id, label, vars: completeVars(vars) };
     if (i >= 0) arr[i] = entry; else arr.push(entry);
     localStorage.setItem(CUSTOM_KEY, JSON.stringify(arr));
+    window.dispatchEvent(new CustomEvent('prism-theme-catalog-change'));
   }
   function deleteCustomTheme(id) {
     localStorage.setItem(CUSTOM_KEY, JSON.stringify(readCustomArr().filter((t) => t.id !== id)));
     if (localStorage.getItem(STORAGE_KEY) === id) applyTheme(DEFAULT_THEME);
+    window.dispatchEvent(new CustomEvent('prism-theme-catalog-change'));
   }
 
   function getThemeId() {
     const id = localStorage.getItem(STORAGE_KEY);
-    return getAllThemes()[id] ? id : DEFAULT_THEME;
+    return Object.hasOwn(getAllThemes(), id) ? id : DEFAULT_THEME;
   }
 
   function activeVars() {
@@ -210,12 +146,14 @@
   // Apply to the dashboard itself + broadcast to every widget iframe.
   function applyTheme(id, broadcast = true) {
     const all = getAllThemes();
-    if (!all[id]) id = DEFAULT_THEME;
+    if (!Object.hasOwn(all, id)) id = DEFAULT_THEME;
     const vars = all[id].vars;
     const root = document.documentElement.style;
     for (const k in vars) root.setProperty(k, vars[k]);
     // data-theme drives the per-theme animated background (see style.css #bg-fx).
     document.documentElement.setAttribute('data-theme', id);
+    document.documentElement.setAttribute('data-theme-group', all[id].group || 'custom');
+    document.documentElement.setAttribute('data-theme-mode', all[id].mode || vars['color-scheme']);
     localStorage.setItem(STORAGE_KEY, id);
     if (broadcast) {
       // widgets (board) + the full-pane app iframe both get live updates
@@ -232,12 +170,17 @@
 
   // Live preview a token map without persisting it (used by the theme studio).
   function previewVars(vars) {
+    vars = completeVars(vars);
     const root = document.documentElement.style;
     for (const k in vars) root.setProperty(k, vars[k]);
     const frames = [...document.querySelectorAll('.widget-body iframe')];
     const appFrame = document.getElementById('app-frame');
     if (appFrame) frames.push(appFrame);
     frames.forEach((f) => { try { f.contentWindow.postMessage({ type: 'prism-theme', vars }, '*'); } catch (_) {} });
+    document.documentElement.setAttribute('data-theme', 'custom-preview');
+    document.documentElement.setAttribute('data-theme-group', 'custom');
+    document.documentElement.setAttribute('data-theme-mode', vars['color-scheme']);
+    window.dispatchEvent(new CustomEvent('prism-theme-change', { detail: { id: 'custom-preview', vars, preview: true } }));
   }
 
   // ─── Palette generation: one accent → a coherent token set ────────────────
@@ -292,7 +235,7 @@
       v['--accent-dim'] = hsl(h, Math.max(s, 35), 87);
     }
     v['--green'] = '#4dba87'; v['--red'] = '#e06c75'; v['--yellow'] = '#e5c07b'; v['--orange'] = '#d19a66';
-    return v;
+    return readablePalette(v);
   }
 
   // ─── UI preferences (scale / density / animated-bg intensity) ─────────────
@@ -311,6 +254,8 @@
   function applyBgfx(v) {
     v = (v == null ? getPref(BGFX_KEY, '100') : String(v)); localStorage.setItem(BGFX_KEY, v);
     document.documentElement.style.setProperty('--bgfx-opacity', String(Number(v) / 100));
+    document.documentElement.setAttribute('data-bgfx-disabled', String(Number(v) === 0));
+    window.dispatchEvent(new CustomEvent('prism-bgfx-change'));
   }
   // ─── Interface font (overrides --sans) ────────────────────────────────────
   const FONT_KEY = 'prism-ui-font';
@@ -329,7 +274,7 @@
     localStorage.setItem(CHATSIDE_KEY, v);
     document.documentElement.setAttribute('data-chat-side', v);
   }
-  function applyPrefs() { applyTheme(getThemeId(), false); applyUIScale(); applyDensity(); applyBgfx(); applyChatSide(); applyFont(); }
+  function applyPrefs(broadcast = false) { applyTheme(getThemeId(), broadcast); applyUIScale(); applyDensity(); applyBgfx(); applyChatSide(); applyFont(); }
 
   // Wrap an agent-authored widget document with the active theme tokens, the
   // shared widget stylesheet and the live-update bootstrap.
@@ -353,11 +298,15 @@
     if (!sel) return;
     const all = getAllThemes();
     sel.innerHTML = '';
+    const labels = { essential: 'Essentials', professional: 'Focus & work', studio: 'Color & atmosphere', playful: 'Geek & retro', custom: 'Your themes' };
+    const groups = {};
     for (const id in all) {
+      const group = all[id].custom ? 'custom' : all[id].group;
+      if (!groups[group]) { const g = document.createElement('optgroup'); g.label = labels[group] || 'Themes'; sel.appendChild(g); groups[group] = g; }
       const o = document.createElement('option');
       o.value = id;
       o.textContent = all[id].label + (all[id].custom ? ' ✦' : '');
-      sel.appendChild(o);
+      groups[group].appendChild(o);
     }
     sel.value = getThemeId();
     sel.onchange = () => applyTheme(sel.value);
@@ -373,10 +322,11 @@
 
   // Cross-tab: when settings change prefs/themes, re-apply + refresh the picker.
   window.addEventListener('storage', (e) => {
-    if ([STORAGE_KEY, CUSTOM_KEY, SCALE_KEY, DENSITY_KEY, BGFX_KEY].includes(e.key)) {
-      applyPrefs();
+    if ([STORAGE_KEY, CUSTOM_KEY, SCALE_KEY, DENSITY_KEY, BGFX_KEY, FONT_KEY, CHATSIDE_KEY].includes(e.key)) {
+      applyPrefs(true);
       const sel = document.getElementById('theme-select');
       if (sel) populateSelect(sel);
+      if (e.key === CUSTOM_KEY) window.dispatchEvent(new CustomEvent('prism-theme-catalog-change'));
     }
   });
 

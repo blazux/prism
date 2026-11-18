@@ -16,9 +16,12 @@ password** instead:
 
 **ProtonMail is the exception**: there is no app password to go and fetch, because
 Proton has no IMAP at all. A local Bridge container logs into Proton and *generates*
-the password Prism uses — see the dedicated ProtonMail guide. If the Bridge logs
-say `no such user`, the Bridge itself isn't logged in yet, and nothing you type in
-Prism will help.
+the credentials Prism uses. For guided setup, read `prism_help` with topic
+`protonmail-bridge` before giving commands: first open the Bridge CLI from the
+Docker host, then sign in there, then configure Prism with the generated
+credentials. `login` belongs to the Bridge console, not Bash, and
+`protonmail-bridge init` is not the Docker initialization command. A workspace's
+Docker list does not establish whether the host's Bridge service exists.
 
 ## Notes → Obsidian / Logseq vault
 A vault is just a folder of Markdown files, so Prism reads and writes it directly.

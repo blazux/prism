@@ -11,6 +11,8 @@ the current request, recent tools, subagents, background jobs and any queued
 Room messages. This view
 refreshes every five seconds while visible. It follows your own workspace and
 Room permissions; the **everyone** audit filter does not extend this view.
+Workspace badges and **In progress** indicate agent conversations. A widget or
+scheduled script calling a tool directly does not mark the agent as working.
 
 **Details**, **Tools**, **Chat**, **Errors** and **Webhooks** expose the technical
 history when investigating a problem. Tool entries show whether the call completed or failed

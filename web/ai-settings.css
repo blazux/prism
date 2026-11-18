@@ -35,7 +35,7 @@
 .ai-settings .ai-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 5px 0 9px; }
 .ai-settings .ai-button { padding: 6px 11px; border: 1px solid var(--border2); border-radius: var(--radius); background: var(--bg3); color: var(--text2); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .ai-settings .ai-button:hover { color: var(--text); background: var(--bg4); }
-.ai-settings .ai-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.ai-settings .ai-button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); font-weight: 600; }
 .ai-settings .ai-button.danger { color: var(--red); }
 .ai-settings button:disabled { opacity: .5; cursor: not-allowed; }
 .ai-settings.is-busy button:disabled { cursor: wait; }

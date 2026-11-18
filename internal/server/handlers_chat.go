@@ -243,7 +243,7 @@ func (s *Server) runHeadlessChatTap(ctx context.Context, sessionID, message, mod
 
 // Channel images use the same capability checks and text-only fallback as web uploads.
 func (s *Server) runHeadlessChatImagesTap(ctx context.Context, sessionID, message, model string, images []string, cc CallerContext, tap func(agent.Event), limits agent.Limits) (string, error) {
-	ctx, finish, err := s.beginSessionJob(ctx, sessionID)
+	ctx, finish, err := s.beginAgentJob(ctx, sessionID)
 	if err != nil {
 		return "", err
 	}

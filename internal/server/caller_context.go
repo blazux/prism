@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"prism/internal/agent"
 	"prism/internal/memory"
@@ -69,6 +70,15 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 	if u != nil && u.ID < 0 {
 		return s.callerContextForGroup(ctx, -u.ID)
 	}
+	if fresh, err := s.freshUser(ctx, u); err != nil {
+		return CallerContext{
+			Guard:        func(string, map[string]interface{}) error { return err },
+			MutationGate: func() error { return err },
+			MultiUser:    s.cfg.MultiUser,
+		}
+	} else {
+		u = fresh
+	}
 	scopeUser := u
 	if scopeUser == nil || scopeUser.ID == 0 {
 		if uid := userIDFromSessionID(sessionID); uid > 0 {
@@ -92,8 +102,12 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 		groups, _ = ms.UserGroups(ctx, scopeUser.ID)
 	}
 	aid := int64(0)
+	personalScope := ""
 	if scopeUser != nil {
 		aid = scopeUser.ID
+		if aid > 0 {
+			personalScope = fmt.Sprintf("u%d", aid)
+		}
 	}
 	return CallerContext{
 		MutationGate: func() error {
@@ -105,17 +119,63 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 			}
 			return nil
 		},
-		Guard:        s.buildUserGuard(ctx, u),
-		RAGScope:     scope,
-		HiddenTools:  s.hiddenToolsFor(ctx, sessionID, scope),
-		MultiUser:    s.cfg.MultiUser,
-		Groups:       groups,
-		ActingUserID: aid,
-		Help:         s.helpFn(),
-		Status:       s.integrationsStatusFor(scopeUser),
-		ServerTools:  s.serverToolsFor(scopeUser),
-		GlobalAdmin:  u != nil && u.IsGlobalAdmin(),
-		RAGReadOnly:  !s.canManageRAGScope(ctx, scopeUser),
+		Guard:         s.revocableUserGuard(u, groups, s.buildUserGuard(ctx, u)),
+		RAGScope:      scope,
+		PersonalScope: personalScope,
+		HiddenTools:   s.hiddenToolsFor(ctx, sessionID, scope),
+		MultiUser:     s.cfg.MultiUser,
+		Groups:        groups,
+		ActingUserID:  aid,
+		Help:          s.helpFn(),
+		Status:        s.integrationsStatusFor(scopeUser),
+		ServerTools:   s.serverToolsFor(scopeUser),
+		GlobalAdmin:   u != nil && u.IsGlobalAdmin(),
+		RAGReadOnly:   !s.canManageRAGScope(ctx, scopeUser),
+	}
+}
+
+// A server-owned turn survives a normal browser disconnect. Account revocation
+// must still stop its next tool call, including headless/channel turns. Keep
+// this lookup independent of the original HTTP/socket context and bounded.
+func (s *Server) revocableUserGuard(user *memory.User, groups []memory.Membership, guard agent.ToolGuard) agent.ToolGuard {
+	if user == nil || user.ID <= 0 {
+		return guard
+	}
+	uid, role := user.ID, user.Role
+	permissions := make(map[int64]string, len(groups))
+	for _, group := range groups {
+		permissions[group.GroupID] = group.Role
+	}
+	return func(name string, args map[string]interface{}) error {
+		ctx, cancel := context.WithTimeout(s.runtimeContext(), 3*time.Second)
+		defer cancel()
+		fresh, err := s.freshUser(ctx, &memory.User{ID: uid})
+		if err != nil {
+			return err
+		}
+		if fresh.Role != role {
+			return fmt.Errorf("account permissions changed; start a new task")
+		}
+		ms := s.store()
+		if ms == nil {
+			return fmt.Errorf("account permissions unavailable")
+		}
+		current, err := ms.UserGroups(ctx, uid)
+		if err != nil {
+			return fmt.Errorf("account permissions unavailable")
+		}
+		if len(current) != len(permissions) {
+			return fmt.Errorf("group permissions changed; start a new task")
+		}
+		for _, group := range current {
+			if permissions[group.GroupID] != group.Role {
+				return fmt.Errorf("group permissions changed; start a new task")
+			}
+		}
+		if guard != nil {
+			return guard(name, args)
+		}
+		return nil
 	}
 }
 

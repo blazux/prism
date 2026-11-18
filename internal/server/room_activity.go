@@ -91,7 +91,7 @@ func (s *Server) handleRoomActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	response.Messages = append(response.Messages, messages...)
 	s.runsMu.Lock()
-	response.BackgroundJobs = len(s.sessionJobs[fmt.Sprintf("room-g%d", group)])
+	response.BackgroundJobs = s.agentJobsLocked(fmt.Sprintf("room-g%d", group))
 	s.runsMu.Unlock()
 	// Keep the snapshot's state separate from the archived last reply: a stale
 	// persisted 'running' row after a restart is not an active model request.

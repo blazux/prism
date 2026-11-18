@@ -242,7 +242,7 @@ func (c *Client) readMessage(body io.Reader, out chan<- ollama.StreamEvent) {
 	}
 	var content strings.Builder
 	var calls []ollama.ToolCall
-	for _, raw := range response.Content {
+	for i, raw := range response.Content {
 		var block struct {
 			Type  string          `json:"type"`
 			Text  string          `json:"text"`
@@ -257,11 +257,15 @@ func (c *Client) readMessage(body io.Reader, out chan<- ollama.StreamEvent) {
 		case "text":
 			content.WriteString(block.Text)
 		case "tool_use":
-			args := block.Input
-			if len(args) == 0 {
-				args = json.RawMessage(`{}`)
+			call := validatedToolCall(block.Name, string(block.Input))
+			calls = append(calls, call)
+			if call.Function.ArgumentError != "" {
+				// Replay provider-only fields while keeping rejected input valid.
+				var fields map[string]json.RawMessage
+				_ = json.Unmarshal(raw, &fields)
+				fields["input"] = call.Function.Arguments
+				response.Content[i], _ = json.Marshal(fields)
 			}
-			calls = append(calls, ollama.ToolCall{Function: ollama.ToolCallFunction{Name: block.Name, Arguments: args}})
 		}
 	}
 	out <- ollama.StreamEvent{Content: content.String(), ToolCalls: calls, ProviderBlocks: response.Content, Done: true, DoneReason: response.StopReason, Usage: response.Usage.usage()}
@@ -378,29 +382,28 @@ func (t *toolBuilder) result() []ollama.ToolCall {
 	calls := make([]ollama.ToolCall, 0, len(t.order))
 	for _, idx := range t.order {
 		p := t.byIdx[idx]
-		args := p.args.String()
-		if args == "" {
-			// A tool called with no arguments streams no input_json_delta at all.
-			args = "{}"
-		} else if !json.Valid([]byte(args)) {
-			// A dropped connection or a max_tokens cutoff mid-stream leaves the
-			// fragments truncated. Storing that would poison the history: every
-			// later turn would replay unparseable arguments.
-			snippet := args
-			if len(snippet) > 200 {
-				snippet = snippet[:200]
-			}
-			log.Printf("[anthropic] tool call %q got invalid JSON arguments, discarding: %s", p.name, snippet)
-			args = "{}"
-		}
-		calls = append(calls, ollama.ToolCall{
-			Function: ollama.ToolCallFunction{
-				Name:      p.name,
-				Arguments: json.RawMessage(args),
-			},
-		})
+		calls = append(calls, validatedToolCall(p.name, p.args.String()))
 	}
 	return calls
+}
+
+func validatedToolCall(name, args string) ollama.ToolCall {
+	argumentError := ""
+	if args == "" {
+		// A tool called with no arguments streams no input_json_delta at all.
+		args = "{}"
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal([]byte(args), &object) != nil || object == nil {
+		// Keep replay valid without allowing truncated arguments to execute with
+		// defaults. Raw arguments can contain credentials and must not be logged.
+		log.Printf("[anthropic] rejecting tool call %q: arguments are not a complete JSON object", name)
+		argumentError = "Tool arguments were invalid or incomplete JSON. No action was performed. Retry with a complete JSON object."
+		args = "{}"
+	}
+	return ollama.ToolCall{Function: ollama.ToolCallFunction{
+		Name: name, Arguments: json.RawMessage(args), ArgumentError: argumentError,
+	}}
 }
 
 func (c *Client) readStream(ctx context.Context, body io.Reader, model string, maxTokens int, out chan<- ollama.StreamEvent) {

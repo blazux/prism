@@ -50,8 +50,8 @@ type Provider interface {
 const KeyProvider = "calendar_provider"
 
 // ProviderFor returns the active provider. An explicit choice wins when its
-// backend is actually available; otherwise (auto) the precedence is Google →
-// CalDAV → local.
+// backend is available. An unavailable explicit choice fails instead of writing
+// to a different calendar. Only auto/unset follows Google → Microsoft → CalDAV → local.
 func ProviderFor(ctx context.Context, store *memory.Store, session string) Provider {
 	if store != nil {
 		choice, _, err := store.GetConfig(ctx, KeyProvider)
@@ -67,14 +67,20 @@ func ProviderFor(ctx context.Context, store *memory.Store, session string) Provi
 			if p := googleProvider(ctx, store); p != nil {
 				return p
 			}
+			return &unavailableProvider{fmt.Errorf("Google calendar is selected but not connected; reconnect it or choose another calendar source")}
 		case "microsoft":
 			if p := microsoftProvider(ctx, store); p != nil {
 				return p
 			}
+			return &unavailableProvider{fmt.Errorf("Microsoft calendar is selected but not connected; reconnect it or choose another calendar source")}
 		case "caldav":
 			if p := caldavProvider(ctx, store); p != nil {
 				return p
 			}
+			return &unavailableProvider{fmt.Errorf("CalDAV calendar is selected but not configured; reconnect it or choose another calendar source")}
+		case "", "auto":
+		default:
+			return &unavailableProvider{fmt.Errorf("unknown calendar source %q; choose a calendar source in Settings", choice)}
 		}
 	}
 	if p := googleProvider(ctx, store); p != nil {
@@ -91,24 +97,32 @@ func ProviderFor(ctx context.Context, store *memory.Store, session string) Provi
 
 func googleProvider(ctx context.Context, store *memory.Store) Provider {
 	if store != nil && oauthx.Connected(ctx, store, "google") {
-		if c, err := oauthx.HTTPClient(ctx, store, "google"); err == nil {
-			return &GoogleProvider{client: c}
+		c, err := oauthx.HTTPClient(ctx, store, "google")
+		if err != nil {
+			return &unavailableProvider{err}
 		}
+		return &GoogleProvider{client: c}
 	}
 	return nil
 }
 
 func microsoftProvider(ctx context.Context, store *memory.Store) Provider {
 	if store != nil && oauthx.Connected(ctx, store, "microsoft") {
-		if c, err := oauthx.HTTPClient(ctx, store, "microsoft"); err == nil {
-			return &MicrosoftProvider{client: c}
+		c, err := oauthx.HTTPClient(ctx, store, "microsoft")
+		if err != nil {
+			return &unavailableProvider{err}
 		}
+		return &MicrosoftProvider{client: c}
 	}
 	return nil
 }
 
 func caldavProvider(ctx context.Context, store *memory.Store) Provider {
-	if cfg, ok, _ := caldav.Load(ctx, store); ok {
+	cfg, ok, err := caldav.Load(ctx, store)
+	if err != nil {
+		return &unavailableProvider{err}
+	}
+	if ok {
 		return &CalDAVProvider{cfg: cfg}
 	}
 	return nil

@@ -252,6 +252,10 @@ func (s *Server) handleWebhookIncoming(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "webhook disabled")
 		return
 	}
+	if _, err := s.webhookOwner(r.Context(), hook); err != nil {
+		writeErr(w, http.StatusForbidden, err.Error())
+		return
+	}
 
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxWebhookBody))
 	if err != nil {
@@ -327,24 +331,34 @@ func webhookTokenOK(r *http.Request, want string) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
-// webhookCallerContext resolves the owner of a webhook ("u<id>" scope) to a
-// real user record and builds their standard caller context. Falls back to the
-// unrestricted context only when there is no user to resolve.
-func (s *Server) webhookCallerContext(ctx context.Context, hook memory.WebhookRow, session string) CallerContext {
-	ms := s.store()
-	if ms == nil || !strings.HasPrefix(hook.Scope, "u") {
-		return trustedCallerContext()
+func (s *Server) webhookOwner(ctx context.Context, hook memory.WebhookRow) (*memory.User, error) {
+	if hook.Scope == "global" || hook.Scope == "" {
+		return nil, nil
 	}
 	id, err := strconv.ParseInt(strings.TrimPrefix(hook.Scope, "u"), 10, 64)
-	if err != nil || id <= 0 {
-		return trustedCallerContext()
+	if err != nil || id <= 0 || hook.Scope != fmt.Sprintf("u%d", id) {
+		return nil, fmt.Errorf("invalid webhook owner")
 	}
-	u, err := ms.GetUserByID(ctx, id)
-	if err != nil || u == nil {
-		// Owner gone: a webhook must not outlive its user's permissions.
-		return CallerContext{Guard: func(string, map[string]interface{}) error {
-			return fmt.Errorf("webhook owner no longer exists")
-		}, MultiUser: s.cfg.MultiUser}
+	u, err := s.freshUser(ctx, &memory.User{ID: id})
+	if err != nil {
+		return nil, fmt.Errorf("webhook owner is unavailable or not approved")
+	}
+	return u, nil
+}
+
+// webhookCallerContext applies the owner's current permissions and personal
+// scope; an unresolved personal owner never falls back to a service identity.
+func (s *Server) webhookCallerContext(ctx context.Context, hook memory.WebhookRow, session string) CallerContext {
+	u, err := s.webhookOwner(ctx, hook)
+	if err != nil {
+		return CallerContext{
+			Guard:        func(string, map[string]interface{}) error { return err },
+			MutationGate: func() error { return err },
+			MultiUser:    s.cfg.MultiUser,
+		}
+	}
+	if u == nil {
+		return trustedCallerContext()
 	}
 	return s.callerContextForUser(ctx, u, session)
 }
@@ -355,6 +369,9 @@ func (s *Server) webhookCallerContext(ctx context.Context, hook memory.WebhookRo
 func webhookSession(h memory.WebhookRow) string {
 	if s := strings.TrimSpace(h.SessionID); s != "" {
 		return s
+	}
+	if id, err := strconv.ParseInt(strings.TrimPrefix(h.Scope, "u"), 10, 64); err == nil && id > 0 && h.Scope == fmt.Sprintf("u%d", id) {
+		return h.Scope + "-webhook-" + h.ID
 	}
 	return "webhook-" + h.ID
 }
@@ -405,7 +422,21 @@ func prettyJSON(s string) string {
 // in the "global" scope (single-user, or created by the service identity) is
 // unrestricted, as before.
 func (s *Server) runWebhook(ctx context.Context, hook memory.WebhookRow, message string) (string, error) {
+	owner, err := s.webhookOwner(ctx, hook)
+	if err != nil {
+		return "", err
+	}
 	session := webhookSession(hook)
+	if owner != nil {
+		if userIDFromSessionID(session) != owner.ID {
+			return "", fmt.Errorf("webhook session does not belong to its owner")
+		}
+		if hook.SessionID == "" {
+			if err := s.store().MigrateWebhookSession(ctx, hook.ID, owner.ID); err != nil {
+				return "", err
+			}
+		}
+	}
 	var files responseAttachments
 	resp, err := s.runHeadlessChatTap(ctx, session, message, hook.Model, s.webhookCallerContext(ctx, hook, session), files.tap, agent.Limits{})
 	if ms := s.store(); ms != nil {

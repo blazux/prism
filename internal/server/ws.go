@@ -273,12 +273,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		// snapshot so changes apply without reconnecting.
 		cc := s.callerContextForUser(r.Context(), wsUser, sessionID)
 		ragScope = cc.RAGScope
-		// Personal knowledge (profile, learnings) is per-user, not per-group: the
-		// browser session id doesn't carry "u<id>-", so pin it explicitly or a grouped
-		// user reads their profile under the group scope and finds nothing.
-		if wsUser != nil && wsUser.ID > 0 {
-			cc.PersonalScope = fmt.Sprintf("u%d", wsUser.ID)
-		}
 		cc.apply(executor)
 	}
 
@@ -516,6 +510,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// Registration must precede this final account check: a revocation while
+	// connection setup was in progress otherwise misses the new transport.
+	if fresh, err := s.freshUser(r.Context(), callerUser); err != nil ||
+		(fresh != nil && callerUser != nil && fresh.Role != callerUser.Role) {
+		return
+	}
+
 	if !voiceCall {
 		// Dashboard state is unnecessary on a phone connection. Vox opens one
 		// socket per turn, so avoid Docker/filesystem/MCP/widget work before reading it.
@@ -616,6 +617,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(msgBytes, &msg); err != nil {
 			continue
 		}
+		// Cookies are checked only during the upgrade. Revalidate each complete
+		// operation so a disabled account or an old admin snapshot cannot act.
+		identity := client.user
+		fresh, err := s.freshUser(r.Context(), identity)
+		if err != nil || (fresh != nil && identity != nil && fresh.Role != identity.Role) {
+			return
+		}
 
 		if !voiceCall && s.routeRunControl(client, msg) {
 			continue
@@ -649,9 +657,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				// A long-lived browser connection must not keep obsolete policies
 				// or group scopes after settings change between turns.
 				cc := s.callerContextForUser(r.Context(), client.user, sessionID)
-				if client.user != nil && client.user.ID > 0 {
-					cc.PersonalScope = fmt.Sprintf("u%d", client.user.ID)
-				}
 				if cc.ServerTools == nil {
 					cc.ServerTools = make(map[string]agent.ServerTool)
 				}

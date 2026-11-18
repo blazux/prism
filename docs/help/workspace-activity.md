@@ -37,9 +37,10 @@ curl --fail-with-body -sS "$PRISM_URL/api/sessions/WORKSPACE_ID/activity" \
 The response is an observation at `observedAt`. `runStatus` reports whether
 the dashboard task is `running`, `waiting_for_input`, `waiting_for_approval`,
 `completed`, `failed`, `stopped`, `timed_out` or `interrupted`. `idle` means
-there is no recorded dashboard task state. A headless job, such as a scheduled
-agent turn, also makes the status `running`; `backgroundJobs` counts active
-headless jobs, including delegated workers and tool executions.
+there is no recorded dashboard task state. A headless agent turn, such as a
+scheduled conversation, also makes the status `running`; `backgroundJobs` counts
+these active agent turns, including delegated workers. Direct tool calls from
+widgets or scripts do not mark the agent as working.
 
 While a dashboard task is active, `request` contains its initiating message,
 `recentTools` lists up to eight recent tool calls and their states, and
@@ -88,7 +89,7 @@ shared agent is answering, `request` describes the current request and
 `recentTools` lists up to eight tool calls and their states. The optional
 `limit` parameter accepts 1–20 messages. Message content and the current request
 are clipped to 1,000 characters. Full tool arguments, outputs and private
-reasoning are excluded. `backgroundJobs` counts active headless executions
+reasoning are excluded. `backgroundJobs` counts active headless agent turns
 using the Room's agent session. Delegated subagents are a dashboard feature;
 the Room does not provide a delegated-worker list.
 

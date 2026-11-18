@@ -41,7 +41,7 @@
   .check { width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%; border: 2px solid var(--border2); background: none; cursor: pointer; position: relative; }
   .check:hover { border-color: var(--accent); }
   .check.on { background: var(--accent); border-color: var(--accent); }
-  .check.on::after { content: '✓'; position: absolute; inset: 0; color: #fff; font-size: 12px; line-height: 16px; text-align: center; }
+  .check.on::after { content: '✓'; position: absolute; inset: 0; color: var(--on-accent,#fff); font-size: 12px; line-height: 16px; text-align: center; }
   .todo-main { flex: 1; min-width: 0; }
   .todo-title { color: var(--text); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .todo.done .todo-title { text-decoration: line-through; color: var(--text3); }
@@ -342,7 +342,7 @@ function openBreakdown() {
   bdSuggestions = null;
   $('bd-obj').value = ''; $('bd-err').textContent = '';
   $('bd-input').style.display = ''; $('bd-review').style.display = 'none';
-  $('bd-go').textContent = 'Generate';
+  $('bd-go').textContent = 'Generate'; $('bd-go').disabled = false;
   $('bd-overlay').classList.add('open');
   publishTaskContext();
   setTimeout(() => $('bd-obj').focus(), 30);
@@ -376,15 +376,33 @@ function renderBdReview() {
   $('bd-go').textContent = 'Add tasks';
 }
 async function addBreakdown() {
-  const picks = [...$('bd-list').querySelectorAll('input:checked')].map(c => bdSuggestions[+c.dataset.i]);
+  if ($('bd-go').disabled) return;
+  const picks = [...$('bd-list').querySelectorAll('input:checked')];
   if (!picks.length) { closeBreakdown(); return; }
+  const suggestions = bdSuggestions;
   $('bd-go').disabled = true;
-  for (const title of picks) {
-    await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, priority: 'normal' }) });
+  $('bd-err').textContent = '';
+  let added = 0;
+  const errors = [];
+  try {
+    for (const choice of picks) {
+      const title = suggestions[+choice.dataset.i];
+      try {
+        const response = await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, priority: 'normal' }) });
+        if (!response.ok) throw new Error((await response.text()) || 'HTTP ' + response.status);
+        // Keep confirmed successes out of retries, even when another task fails.
+        choice.checked = false; choice.disabled = true;
+        added++;
+      } catch (e) { errors.push(title + ': ' + e.message); }
+    }
+    if (bdSuggestions === suggestions) {
+      if (errors.length) $('bd-err').textContent = 'Some tasks were not confirmed. Review your task list before retrying: ' + errors.join('; ');
+      else closeBreakdown();
+    }
+  } finally {
+    if (bdSuggestions === suggestions) $('bd-go').disabled = false;
+    if (added || errors.length) loadTodos();
   }
-  $('bd-go').disabled = false;
-  closeBreakdown();
-  loadTodos();
 }
 
 // ═══════════════════════ Scheduled (cron) ═══════════════════════

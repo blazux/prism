@@ -61,6 +61,16 @@ func checkDashboardRunReplay(t *testing.T, user *memory.User) {
 	}))
 	defer backend.Close()
 	s := New(Config{WorkspaceDir: t.TempDir(), PluginDir: t.TempDir(), Model: "fixture", LLMBackend: "openai", OpenAIBaseURL: backend.URL, AgentContainer: "fixture"})
+	if user != nil {
+		ms := securityStore(t)
+		var err error
+		user, err = ms.CreateUser(t.Context(), "replay@example.test", "unused", "Replay fixture", memory.RoleMember, memory.StatusApproved)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.memStore = ms
+		s.cfg.MultiUser = true
+	}
 	s.docker = docker.WithExecution(nil)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if user != nil {
@@ -114,6 +124,19 @@ func checkDashboardRunReplay(t *testing.T, user *memory.User) {
 	resumed.Close()
 	final := dial(stored)
 	defer final.Close()
+	if user != nil {
+		// With a database, completed runs are reconstructed from the durable
+		// transcript rather than retained in the in-memory replay cache.
+		history := readRunEvent(t, final, "chat_history")
+		raw, _ := json.Marshal(history)
+		if !strings.Contains(string(raw), "Finished.") {
+			t.Fatal("persisted result lost after offline completion")
+		}
+		if m := readRunEvent(t, final, "run_status"); m["status"] != "completed" {
+			t.Fatal(m)
+		}
+		return
+	}
 	m := readRunEvent(t, final, "run_replay")
 	raw, _ := json.Marshal(m)
 	if m["status"] != "completed" || !strings.Contains(string(raw), "Finished.") {

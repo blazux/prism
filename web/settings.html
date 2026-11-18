@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="/style.css">
 <!-- Applies the saved theme (sets CSS vars on :root) before the page renders -->
 <script src="/theme.js"></script>
+<script src="/theme-gallery.js"></script>
+<link rel="stylesheet" href="/theme-gallery.css">
 <script src="/modal.js"></script>
 <script src="/resources.js"></script>
 <script src="/ai-settings.js"></script>
@@ -163,6 +165,8 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
   .resources-widget { flex: 1; width: auto; }
 }
 @media (max-width: 760px) {
+  #settings-app #dash-header { height: auto; min-height: var(--header-h); flex-wrap: wrap; gap: 8px; padding: 7px 12px; }
+  #settings-app .header-right { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
   #settings-main { flex-direction: column; }
   #settings-nav { width: auto; flex-direction: row; overflow-x: auto; gap: 0; padding: 0 6px; border-right: 0; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
   #settings-nav .nav-head { display: none; }
@@ -365,8 +369,8 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
   border-radius: var(--radius); cursor: pointer; transition: background 0.1s, color 0.1s;
 }
 .btn:hover { background: var(--bg4); color: var(--text); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover { filter: brightness(1.1); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent,#fff); }
+.btn-primary:hover { background:var(--accent); color:var(--on-accent,#fff); border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-dim); }
 
 /* ── Email tab ─────────────────────────────────────────────────────────────── */
 .eplogos { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -423,6 +427,7 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
       <span class="logo" style="color:var(--text2);font-size:13px;font-weight:600">Settings</span>
     </div>
     <div class="header-right"><span id="settings-save-status" role="status" aria-live="polite"></span>
+      <a id="settings-chat-link" class="hdr-btn" href="/?view=settings&amp;tab=profile&amp;chat=open" style="display:none;white-space:nowrap">Chat with agent</a>
       <button id="logout-btn" onclick="logout()" style="display:none;background:transparent;border:1px solid var(--border2);color:var(--text3);font-size:11.5px;padding:4px 10px;border-radius:var(--radius);cursor:pointer;transition:color .15s,border-color .15s" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--text3)';this.style.borderColor='var(--border2)'">Sign out</button>
     </div>
   </header>
@@ -519,6 +524,13 @@ let mcpServers = []
 
 document.getElementById('back-link').href = '/'
 
+function updateSettingsChatLink() {
+  const link = document.getElementById('settings-chat-link')
+  link.href = '/?' + new URLSearchParams({ view: 'settings', tab: currentTab, chat: 'open' })
+  link.style.display = window.parent === window ? '' : 'none'
+}
+updateSettingsChatLink()
+
 document.querySelectorAll('.nav-item').forEach(el => {
   el.classList.toggle('active', el.dataset.tab === currentTab)
   if(el.dataset.tab===currentTab && el.closest('details'))el.closest('details').open=true
@@ -570,6 +582,7 @@ async function switchTab(tab) {
   const previous=currentTab
   if(tab!==currentTab && PrismSettingsState.dirty()){if(!await PrismModal.confirm('Leave this section without saving your edits?'))return;if(currentTab!==previous)return;PrismSettingsState.clear()}
   currentTab = tab
+  updateSettingsChatLink()
   const navLink=document.querySelector(`.nav-item[data-tab="${tab}"]`)
   if(navLink?.closest('details'))navLink.closest('details').open=true
   window.location.hash = tab
@@ -581,6 +594,9 @@ async function switchTab(tab) {
 
 function renderTab(tab) {
   const content = document.getElementById('settings-content')
+  if (tab !== 'appearance' && content.querySelector('.appearance-content') && document.documentElement.dataset.theme === 'custom-preview') {
+    PrismTheme.applyTheme(PrismTheme.getThemeId())
+  }
   content.innerHTML = ''
   content.classList.toggle('telephony-settings', tab === 'telephony')
   if (tab === 'profile') renderProfileTab(content)
@@ -619,16 +635,17 @@ function settingsHeading(title, description, scope = 'Personal') {
 function renderAppearanceTab(container) {
   const T = window.PrismTheme
   const pane = document.createElement('div')
-  pane.style.cssText = 'max-width:560px'
+  pane.className = 'appearance-content'
   pane.innerHTML = `
     ${settingsHeading('Appearance', 'Theme and interface preferences apply immediately. Custom themes use Save & apply.', 'This browser')}
-    <p class="settings-page-title">Theme</p>
-    <div class="appe-card">
-      <div class="appe-row"><label>Active theme</label><select id="appe-theme"></select></div>
+    <div class="appe-card appearance-current">
+      <div class="appe-row"><label for="appe-theme">Current theme</label><select id="appe-theme"></select></div>
     </div>
+    <div id="appe-theme-gallery"></div>
 
-    <p class="settings-page-title" style="margin-top:20px">Create a custom theme</p>
+    <details class="appearance-studio"><summary>Create a custom theme</summary>
     <div class="appe-card">
+      <div class="appearance-base"><span>Edit the colors below, or start from your current theme.</span><button class="btn" id="appe-use-theme">Use current theme</button></div>
       <div class="appe-row"><label>Accent color</label>
         <span style="display:flex;gap:8px;align-items:center"><input type="color" id="appe-accent" value="#6b8afd"><input type="text" id="appe-accent-hex" value="#6b8afd" style="width:90px"></span></div>
       <div class="appe-row"><label>Mode</label>
@@ -645,6 +662,7 @@ function renderAppearanceTab(container) {
       </div>
     </div>
     <div id="appe-custom-list" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div>
+    </details>
 
     <p class="settings-page-title" style="margin-top:20px">Interface</p>
     <div class="appe-card">
@@ -681,6 +699,7 @@ function renderAppearanceTab(container) {
   // Active theme picker
   const themeSel = pane.querySelector('#appe-theme')
   T.populateSelect(themeSel)
+  const gallery = PrismThemeGallery.mount(pane.querySelector('#appe-theme-gallery'), {select: themeSel})
 
   // Custom theme builder — `pal` is the working palette (source of truth).
   const accent = pane.querySelector('#appe-accent'), accentHex = pane.querySelector('#appe-accent-hex')
@@ -693,7 +712,9 @@ function renderAppearanceTab(container) {
     ['--accent', 'Accent'], ['--accent-dim', 'Accent dim'],
     ['--green', 'Success'], ['--red', 'Error'], ['--yellow', 'Warning'], ['--orange', 'Orange'],
   ]
-  let pal = T.generatePalette(accent.value, modeSel.value, harmSel.value)
+  let pal = Object.assign({}, T.activeVars())
+  if (/^#[0-9a-f]{6}$/i.test(pal['--accent'])) accent.value = accentHex.value = pal['--accent']
+  modeSel.value = T.getAllThemes()[T.getThemeId()]?.mode || 'dark'
 
   function renderSwatches() {
     const keys = ['--bg', '--bg2', '--bg4', '--border2', '--text', '--text2', '--accent']
@@ -718,6 +739,12 @@ function renderAppearanceTab(container) {
   modeSel.addEventListener('change', regen)
   harmSel.addEventListener('change', regen)
   renderSwatches(); buildColorEditor()
+  pane.querySelector('#appe-use-theme').onclick = () => {
+    pal = Object.assign({}, T.activeVars())
+    if (/^#[0-9a-f]{6}$/i.test(pal['--accent'])) accent.value = accentHex.value = pal['--accent']
+    modeSel.value = T.getAllThemes()[T.getThemeId()]?.mode || 'dark'
+    renderSwatches(); syncColorInputs()
+  }
   pane.querySelector('#appe-preview').addEventListener('click', () => T.previewVars(pal))
   pane.querySelector('#appe-save').addEventListener('click', () => {
     const name = (pane.querySelector('#appe-name').value || '').trim() || 'Custom'
@@ -749,6 +776,7 @@ function renderAppearanceTab(container) {
 
   // Import / export custom themes (JSON)
   const ioBar = document.createElement('div')
+  ioBar.className = 'appearance-io'
   ioBar.style.cssText = 'display:flex;gap:8px;margin-top:8px'
   ioBar.innerHTML = `<button class="btn" id="appe-export">${icon('download',14)} Export</button><button class="btn" id="appe-import">${icon('upload',14)} Import</button><input type="file" id="appe-import-file" accept="application/json" style="display:none">`
   pane.querySelector('#appe-custom-list').after(ioBar)
@@ -772,6 +800,16 @@ function renderAppearanceTab(container) {
     } catch { showToast('Invalid theme file') }
     fileInp.value = ''
   }
+
+  const themeEvents = new AbortController()
+  function refreshThemeCatalog() {
+    if (!pane.isConnected) { themeEvents.abort(); gallery.destroy(); return }
+    T.populateSelect(themeSel); renderCustomList()
+  }
+  window.addEventListener('prism-theme-catalog-change', refreshThemeCatalog, {signal: themeEvents.signal})
+  window.addEventListener('storage', e => {
+    if (e.key === 'prism-custom-themes') refreshThemeCatalog()
+  }, {signal: themeEvents.signal})
 
   // Interface prefs
   const scaleSel = pane.querySelector('#appe-scale'), densSel = pane.querySelector('#appe-density')
@@ -2323,6 +2361,16 @@ async function renderEmailTab(container) {
 
 let currentCollection = null
 let collections = []
+let documentsRequestVersion = 0, collectionsRequestVersion = 0, displayedDocuments = null
+async function requireRAGSuccess(response) {
+  if (!response.ok) {
+    const raw = await response.text()
+    let message = raw.trim()
+    try { const data = JSON.parse(raw); message = data.error || data.message || message } catch (_) {}
+    throw new Error(message || 'Request failed (' + response.status + ')')
+  }
+  return response
+}
 
 async function renderNotesTab(container) {
   const wrap = document.createElement('div')
@@ -2692,7 +2740,7 @@ function initialsOf(name) {
 function avatarMarkup(scope, ver, name, size) {
   const px = size || 72, fs = Math.round(px * 0.42)
   const src = `/api/avatar?scope=${encodeURIComponent(scope)}${ver ? '&v=' + ver : ''}`
-  return `<span style="position:relative;display:inline-flex;width:${px}px;height:${px}px;border-radius:50%;overflow:hidden;background:var(--accent);color:#fff;align-items:center;justify-content:center;font-weight:600;font-size:${fs}px;flex:0 0 auto">${escHtml(initialsOf(name))}<img src="${src}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover" onerror="this.remove()"></span>`
+  return `<span style="position:relative;display:inline-flex;width:${px}px;height:${px}px;border-radius:50%;overflow:hidden;background:var(--accent);color:var(--on-accent,#fff);align-items:center;justify-content:center;font-weight:600;font-size:${fs}px;flex:0 0 auto">${escHtml(initialsOf(name))}<img src="${src}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover" onerror="this.remove()"></span>`
 }
 // Downscale to a max edge (default 256px) and return a small PNG blob.
 async function downscaleImage(file, max) {
@@ -2890,12 +2938,15 @@ async function renderRAGTab(container) {
 }
 
 async function loadCollections() {
+  const version = ++collectionsRequestVersion
   try {
-    const res = await settingsFetch('/api/rag/collections')
-    collections = await res.json()
-    if (!Array.isArray(collections)) collections = []
+    const res = await requireRAGSuccess(await settingsFetch('/api/rag/collections'))
+    const data = await res.json()
+    if (!Array.isArray(data)) throw new Error('Invalid collection list')
+    if (version !== collectionsRequestVersion) return
+    collections = data
     renderCollections()
-  } catch(e) { showToast('Connection error: ' + e.message, true) }
+  } catch(e) { if (version === collectionsRequestVersion) showToast('Could not load collections: ' + e.message, true) }
 }
 
 function renderCollections() {
@@ -2922,6 +2973,7 @@ function renderCollections() {
 }
 
 function selectCollection(name) {
+  documentsRequestVersion++; displayedDocuments = null
   currentCollection = name
   renderCollections()
   renderRAGContent()
@@ -2930,13 +2982,16 @@ function selectCollection(name) {
 
 async function deleteCollection(name) {
   if (!await PrismModal.confirm(`Delete collection "${name}" and all its documents?`, { danger: true })) return
-  await settingsFetch(`/api/rag/collections?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
-  if (currentCollection === name) {
-    currentCollection = null
+  try {
+    await requireRAGSuccess(await settingsFetch(`/api/rag/collections?name=${encodeURIComponent(name)}`, { method: 'DELETE' }))
+    if (currentCollection === name) {
+      documentsRequestVersion++; displayedDocuments = null
+      currentCollection = null
     const content = document.getElementById('rag-content')
     if (content) content.innerHTML = `<div id="no-collection-msg"><div class="icon">${icon('knowledge',40)}</div><div>Select a collection or create a new one</div></div>`
-  }
-  await loadCollections()
+    }
+    await loadCollections()
+  } catch (e) { showToast('Could not delete collection: ' + e.message, true) }
 }
 
 // Le <select> de la zone d'upload reflète la collection courante ; le choisir ici
@@ -2957,7 +3012,8 @@ function onUploadTargetChange(value) {
 }
 
 function renderRAGContent() {
-  const col = collections.find(c => c.name === currentCollection)
+  const collection = currentCollection
+  const col = collections.find(c => c.name === collection)
   const desc = col ? (col.description || '') : ''
   const content = document.getElementById('rag-content')
   if (!content) return
@@ -2998,28 +3054,42 @@ function renderRAGContent() {
     zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'))
     zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); uploadFiles(e.dataTransfer.files) })
     const di = document.getElementById('desc-input')
-    di.addEventListener('blur', () => saveDescription(di.value.trim()))
+    di.addEventListener('blur', () => saveDescription(di.value.trim(), collection))
     di.addEventListener('keydown', e => { if (e.key === 'Enter') di.blur() })
   }
 }
 
-async function saveDescription(value) {
-  const col = collections.find(c => c.name === currentCollection)
+async function saveDescription(value, collection = currentCollection) {
+  const col = collections.find(c => c.name === collection)
   if (!col) return
-  col.description = value
-  await settingsFetch('/api/rag/collections', {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: currentCollection, description: value })
-  }, [document.getElementById('desc-input')])
+  const controls = collection === currentCollection ? [document.getElementById('desc-input')].filter(Boolean) : []
+  try {
+    await requireRAGSuccess(await settingsFetch('/api/rag/collections', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: collection, description: value })
+    }, controls))
+    col.description = value
+  } catch (e) { showToast('Could not save description: ' + e.message, true) }
 }
 
 async function loadDocuments() {
-  if (!currentCollection) return
+  const collection = currentCollection, area = document.getElementById('docs-area')
+  if (!collection || !area) return
+  const version = ++documentsRequestVersion
+  displayedDocuments = null
+  area.querySelectorAll('.doc-del-btn').forEach(button => button.disabled = true)
   try {
-    const res = await settingsFetch(`/api/rag/documents?collection=${encodeURIComponent(currentCollection)}`)
+    const res = await requireRAGSuccess(await settingsFetch(`/api/rag/documents?collection=${encodeURIComponent(collection)}`))
     const docs = await res.json()
-    renderDocuments(Array.isArray(docs) ? docs : [])
-  } catch { showToast('Failed to load documents', true) }
+    if (version !== documentsRequestVersion || collection !== currentCollection || area !== document.getElementById('docs-area')) return
+    if (!Array.isArray(docs)) throw new Error('Invalid document list')
+    displayedDocuments = { collection, area, ids: new Set(docs.map(doc => Number(doc.id))), deleting: new Set() }
+    renderDocuments(docs)
+  } catch(e) {
+    if (version !== documentsRequestVersion || collection !== currentCollection || area !== document.getElementById('docs-area')) return
+    showToast('Failed to load documents: ' + e.message, true)
+    if (!area.querySelectorAll('.doc-del-btn').length) area.textContent = 'Could not load documents. Select the collection to retry.'
+  }
 }
 
 function renderDocuments(docs) {
@@ -3042,21 +3112,34 @@ function renderDocuments(docs) {
         </tr>`).join('')}
       </tbody>
     </table>`
+  const snapshot = displayedDocuments
   area.querySelectorAll('.doc-del-btn').forEach(btn => {
-    btn.addEventListener('click', () => deleteDocument(Number(btn.dataset.id)))
+    btn.addEventListener('click', () => deleteDocument(Number(btn.dataset.id), snapshot))
   })
 }
 
-async function deleteDocument(id) {
-  await settingsFetch(`/api/rag/document?id=${id}`, { method: 'DELETE' })
-  loadDocuments(); loadCollections()
+async function deleteDocument(id, snapshot = displayedDocuments) {
+  if (!snapshot || snapshot !== displayedDocuments || snapshot.collection !== currentCollection ||
+      snapshot.area !== document.getElementById('docs-area') || !snapshot.ids.has(id) || snapshot.deleting.has(id)) return
+  snapshot.deleting.add(id)
+  const button = [...snapshot.area.querySelectorAll('.doc-del-btn')].find(btn => Number(btn.dataset.id) === id)
+  if (button) button.disabled = true
+  try {
+    await requireRAGSuccess(await settingsFetch(`/api/rag/document?id=${encodeURIComponent(id)}`, { method: 'DELETE' }))
+    if (snapshot === displayedDocuments) await loadDocuments()
+    await loadCollections()
+  } catch (e) { showToast('Could not delete document: ' + e.message, true) }
+  finally {
+    snapshot.deleting.delete(id)
+    if (snapshot === displayedDocuments && button) button.disabled = false
+  }
 }
 
 // L'upload est un POST synchrone qui parse, embedde et écrit avant de répondre —
 // des minutes sur un gros manuel. On interroge /api/rag/upload/progress pendant
 // que le POST est en vol pour dire où on en est.
-function fmtETA(s) { if (!s || s < 1) return ''; if (s < 60) return `~${s}s restantes`
-  const m = Math.floor(s / 60); return `~${m}m${s % 60 ? ' ' + (s % 60) + 's' : ''} restantes` }
+function fmtETA(s) { if (!s || s < 1) return ''; if (s < 60) return `~${s}s left`
+  const m = Math.floor(s / 60); return `~${m}m${s % 60 ? ' ' + (s % 60) + 's' : ''} left` }
 
 async function pollIngestProgress(collection, filename, progress, stop) {
   while (!stop.done) {
@@ -3069,14 +3152,14 @@ async function pollIngestProgress(collection, filename, progress, stop) {
       d = await res.json()
     } catch (_) { continue }
     if (!d || !d.found) continue
-    if (d.stage === 'parsing') progress.textContent = `Analyse de ${filename}…`
+    if (d.stage === 'parsing') progress.textContent = `Parsing ${filename}…`
     else if (d.stage === 'embedding') {
       progress.textContent = d.done
-        ? `Indexation ${d.done}/${d.total} passages (${Math.round(d.rate)}/s) ${fmtETA(d.etaSecs)}`
-        : `Indexation de ${d.total} passages…`
-    } else if (d.stage === 'storing') progress.textContent = `Enregistrement de ${d.total} passages…`
-    else if (d.stage === 'failed') { progress.textContent = `Échec : ${d.error || 'erreur inconnue'}`; return }
-    else if (d.stage === 'done') { progress.textContent = `${d.total} passages indexés ✓`; return }
+        ? `Indexing ${d.done}/${d.total} chunks (${Math.round(d.rate)}/s) ${fmtETA(d.etaSecs)}`
+        : `Indexing ${d.total} chunks…`
+    } else if (d.stage === 'storing') progress.textContent = `Saving ${d.total} chunks…`
+    else if (d.stage === 'failed') { progress.textContent = `Failed: ${d.error || 'unknown error'}`; return }
+    else if (d.stage === 'done') { progress.textContent = `${d.total} chunks indexed ✓`; return }
   }
 }
 
@@ -3087,6 +3170,7 @@ async function uploadFiles(files) {
     selectCollection(sel.value)   // l'utilisateur a changé de cible sans quitter la zone
   }
   if (!currentCollection) { showToast('Select a collection first', true); return }
+  const collection = currentCollection, input = document.getElementById('upload-input')
   const zone = document.getElementById('upload-zone')
   const progress = document.getElementById('upload-progress')
   zone.classList.add('uploading'); progress.classList.add('visible')
@@ -3095,9 +3179,9 @@ async function uploadFiles(files) {
     progress.textContent = `Uploading ${i+1}/${files.length}: ${file.name}…`
     try {
       const form = new FormData()
-      form.append('file', file); form.append('collection', currentCollection)
+      form.append('file', file); form.append('collection', collection)
       const stop = { done: false }
-      pollIngestProgress(currentCollection, file.name, progress, stop)
+      pollIngestProgress(collection, file.name, progress, stop)
       let res
       try { res = await settingsFetch('/api/rag/upload', { method: 'POST', body: form }) }
       finally { stop.done = true }
@@ -3107,8 +3191,9 @@ async function uploadFiles(files) {
     } catch(e) { showToast(`Error ${file.name}: ${e.message}`, true) }
   }
   zone.classList.remove('uploading'); progress.classList.remove('visible'); progress.textContent = ''
-  document.getElementById('upload-input').value = ''
-  await loadDocuments(); await loadCollections()
+  input.value = ''
+  if (currentCollection === collection) await loadDocuments()
+  await loadCollections()
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
@@ -3131,18 +3216,17 @@ async function createCollection() {
   if (!name) { input.focus(); return }
   const description = descEl.value.trim()
 
-  document.getElementById('modal-overlay').classList.remove('visible')
-  input.value = ''; descEl.value = ''
-
   // Persist the collection (and its description) so it survives with zero documents.
   // The description is what the agent reads to decide when to search here — see the
   // "## Knowledge Base (RAG)" block built in internal/server/ws.go.
   try {
-    await settingsFetch('/api/rag/collections', {
+    await requireRAGSuccess(await settingsFetch('/api/rag/collections', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, description }),
-    })
-  } catch (_) {}
+    }))
+  } catch (e) { showToast('Could not create collection: ' + e.message, true); return }
+  document.getElementById('modal-overlay').classList.remove('visible')
+  input.value = ''; descEl.value = ''
   if (!collections.find(c => c.name === name)) {
     collections.push({ name, description, doc_count: 0, chunk_count: 0 })
     renderCollections()

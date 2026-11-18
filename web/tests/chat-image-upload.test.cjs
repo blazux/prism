@@ -19,7 +19,7 @@ test('sending selected images preserves filenames and raw vision payloads', () =
   };
   vm.createContext(context);
   vm.runInContext('let pendingImages = [], pendingFiles = [], isStreaming = false;', context);
-  for (const name of ['attachmentDraft', 'addImageFromFile', 'sendChat', 'receiveChatReceipt']) {
+  for (const name of ['attachmentDraft', 'addImageFromFile', 'sendChat', 'replyToWidgetChat', 'receiveChatReceipt']) {
     vm.runInContext(source.match(new RegExp(`function ${name}\\([^]*?^}`, 'm'))[0], context);
   }
   context.addImageFromFile({type:'image/png',name:'discard.png',bytes:'REMOVED'});

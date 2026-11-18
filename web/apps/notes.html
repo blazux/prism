@@ -163,11 +163,12 @@
         </div>
         <div class="ai-result" id="ai-result">
           <div class="lbl" id="ar-title">✨ Result</div>
+          <div id="ar-status" role="status"></div>
           <div class="artext" id="ar-text"></div>
           <div class="arf">
-            <button class="btn btn-accent" onclick="applyResult('replace')">Replace</button>
-            <button class="btn" onclick="applyResult('insert')">Insert at cursor</button>
-            <button class="btn" onclick="applyResult('copy')">Copy</button>
+            <button class="btn btn-accent" id="ar-replace" disabled onclick="applyResult('replace')">Replace</button>
+            <button class="btn" id="ar-insert" disabled onclick="applyResult('insert')">Insert at cursor</button>
+            <button class="btn" id="ar-copy" disabled onclick="applyResult('copy')">Copy</button>
             <button class="btn" onclick="closeResult()" style="margin-left:auto">Dismiss</button>
           </div>
         </div>
@@ -205,7 +206,8 @@ const api = (path, opts) => PrismAPI.api(`/api/notes${path}`, opts);
 const $ = id => document.getElementById(id);
 let savedNoteDraft = '', noteSaveQueue = Promise.resolve(true), notesLoadVersion = 0, notesSyncRequested = false, pendingNoteUpdate = null;
 function noteDraft() { return JSON.stringify([$('e-title').value, $('e-body').value, noteTags({tags:$('e-tags').value}).join(', ')]); }
-let notes = [], selectedId = null, filter = '', tagFilter = '', mode = 'edit', lastTarget = null;
+let notes = [], selectedId = null, filter = '', tagFilter = '', mode = 'edit';
+let aiRequestVersion = 0, aiEditVersion = 0, aiResult = null;
 
 // Capabilities, resolved once at startup:
 //  - hasGroup      → the user belongs to a group (can Share notes to it)
@@ -563,6 +565,7 @@ async function closeEditor() {
   selectedId = null;
   pendingNoteUpdate = null; $('note-conflict').hidden = true;
   publishNoteContext();
+  closeResult();
   $('editor').style.display = 'none';
   $('empty').style.display = 'flex';
   $('app').classList.remove('editing');
@@ -579,28 +582,64 @@ async function assist(task, text, instruction) {
   if (!r.ok) throw new Error(await r.text());
   return (await r.json()).result || '';
 }
+function aiContextMatches(result) {
+  const ta = $('e-body');
+  return !!result && result.noteId === selectedId && result.editVersion === aiEditVersion &&
+    result.draft === noteDraft() && !pendingNoteUpdate && !ta.readOnly &&
+    result.selectionStart === ta.selectionStart && result.selectionEnd === ta.selectionEnd;
+}
+function updateAIResultActions() {
+  const valid = aiContextMatches(aiResult);
+  for (const id of ['ar-replace', 'ar-insert', 'ar-copy']) $(id).disabled = !valid;
+  if (aiResult && !valid) $('ar-status').textContent = 'The note or selection changed. Run the action again.';
+}
 async function runAI(task, instruction, label) {
-  const tgt = aiTarget();
-  if (!tgt.text.trim()) return;
-  lastTarget = tgt;
+  const tgt = aiTarget(), ta = $('e-body');
+  if (!selectedId || ta.readOnly || pendingNoteUpdate || !tgt.text.trim()) return;
+  const version = ++aiRequestVersion;
+  const context = { target: tgt, noteId: selectedId, editVersion: aiEditVersion, draft: noteDraft(),
+    selectionStart: ta.selectionStart, selectionEnd: ta.selectionEnd };
+  aiResult = null;
+  updateAIResultActions();
   $('ar-title').textContent = '✨ ' + (label || 'Result') + (tgt.isSel ? ' (selection)' : ' (whole note)');
-  $('ar-text').textContent = 'Working…';
+  $('ar-text').textContent = '';
+  $('ar-status').textContent = 'Working…';
   $('ai-result').classList.add('open');
   document.querySelectorAll('.ai-btn').forEach(b => b.disabled = true);
-  try { $('ar-text').textContent = await assist(task, tgt.text, instruction); }
-  catch (e) { $('ar-text').textContent = 'Failed: ' + e.message; }
-  finally { document.querySelectorAll('.ai-btn').forEach(b => b.disabled = false); }
+  try {
+    const text = await assist(task, tgt.text, instruction);
+    if (version !== aiRequestVersion) return;
+    if (!aiContextMatches(context)) { $('ar-status').textContent = 'The note or selection changed. Run the action again.'; return; }
+    if (typeof text !== 'string' || !text.trim()) throw new Error('No text returned.');
+    aiResult = { ...context, text };
+    $('ar-text').textContent = text;
+    $('ar-status').textContent = '';
+    updateAIResultActions();
+  } catch (e) {
+    if (version === aiRequestVersion) $('ar-status').textContent = 'Failed: ' + e.message;
+  } finally {
+    if (version === aiRequestVersion) document.querySelectorAll('.ai-btn').forEach(b => b.disabled = false);
+  }
 }
 function applyResult(how) {
-  const ta = $('e-body'), text = $('ar-text').textContent;
+  updateAIResultActions();
+  if (!aiContextMatches(aiResult)) return;
+  const ta = $('e-body'), { text, target } = aiResult;
   if (how === 'copy') { navigator.clipboard?.writeText(text); return; }
-  const t = lastTarget || { start: ta.value.length, end: ta.value.length };
-  if (how === 'replace') ta.value = ta.value.slice(0, t.start) + text + ta.value.slice(t.end);
-  else { const at = ta.selectionStart != null ? ta.selectionStart : ta.value.length; ta.value = ta.value.slice(0, at) + text + ta.value.slice(at); }
+  if (how === 'replace') ta.value = ta.value.slice(0, target.start) + text + ta.value.slice(target.end);
+  else if (how === 'insert') { const at = aiResult.selectionStart; ta.value = ta.value.slice(0, at) + text + ta.value.slice(at); }
+  else return;
+  aiEditVersion++;
   if (mode !== 'edit') updatePreview();
   closeResult(); saveNote();
 }
-function closeResult() { $('ai-result').classList.remove('open'); }
+function closeResult() {
+  aiRequestVersion++;
+  aiResult = null;
+  updateAIResultActions();
+  $('ai-result').classList.remove('open');
+  document.querySelectorAll('.ai-btn').forEach(b => b.disabled = false);
+}
 
 async function insertImage(event) {
   const file = event.target.files[0];
@@ -619,6 +658,7 @@ async function insertImage(event) {
     const alt = file.name.replace(/\.[^.]+$/, '');
     const md = `![${alt}](${data.url})`;
     ta.value = ta.value.slice(0, at) + md + ta.value.slice(at);
+    aiEditVersion++; updateAIResultActions();
     if (mode !== 'edit') updatePreview();
     saveNote();
   } catch (e) {
@@ -633,9 +673,10 @@ function runCustom() { const i = $('p-instr').value.trim(); closePrompt(); if (i
 
 document.querySelectorAll('.ai-btn[data-task]').forEach(b => b.addEventListener('click', () => runAI(b.dataset.task, '', b.textContent)));
 $('p-instr').addEventListener('keydown', e => { if (e.key === 'Enter') runCustom(); });
-function updateScope() { const ta = $('e-body'); $('ai-scope').textContent = ta.selectionStart !== ta.selectionEnd ? 'AI → selection' : 'AI → whole note'; }
+function updateScope() { const ta = $('e-body'); $('ai-scope').textContent = ta.selectionStart !== ta.selectionEnd ? 'AI → selection' : 'AI → whole note'; updateAIResultActions(); }
 ['select', 'keyup', 'mouseup'].forEach(ev => $('e-body').addEventListener(ev, updateScope));
 $('e-body').addEventListener('input', () => { if (mode !== 'edit') updatePreview(); });
+['e-title', 'e-tags', 'e-body'].forEach(id => $(id).addEventListener('input', () => { aiEditVersion++; updateAIResultActions(); }));
 
 $('search').addEventListener('input', e => { filter = e.target.value; render(); });
 ['e-title', 'e-tags', 'e-body'].forEach(id => $(id).addEventListener('blur', () => { if (selectedId) saveNote(); }));
@@ -643,7 +684,7 @@ $('search').addEventListener('input', e => { filter = e.target.value; render(); 
 // Reload when the agent changes notes via chat.
 addEventListener('message', e => { if (e.source === parent && e.origin === location.origin && e.data?.type === 'data-changed' && (!e.data.app || e.data.app === 'notes')) load(true); });
 
-function publishNoteContext() { if (typeof noteEditor !== 'undefined') noteEditor.publish(); }
+function publishNoteContext() { updateAIResultActions(); if (typeof noteEditor !== 'undefined') noteEditor.publish(); }
 async function resolveNoteUpdate(keepLocal) {
   const remote = pendingNoteUpdate;
   if (!remote) return;
@@ -665,6 +706,7 @@ const noteEditor = PrismEditor.connect({
   update:async patch => {
     if (pendingNoteUpdate) throw Error('The note has conflicting edits. Ask the user to resolve them first.');
     for (const [key,value] of Object.entries(patch)) $('e-'+key).value=value;
+    aiEditVersion++; updateAIResultActions();
     if (mode !== 'edit') updatePreview();
     publishNoteContext();
     if (!await saveNote()) throw Error('The changes are visible in the editor but could not be saved. They are preserved on screen; do not claim they were saved.');

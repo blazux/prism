@@ -1,0 +1,32 @@
+# Dedicated host rules. Docker retains ownership of its own NAT/filter chains.
+table inet vps_firewall {
+    chain input {
+        type filter hook input priority -10; policy drop;
+        iifname "lo" accept
+        ct state invalid drop
+        ct state established,related accept
+
+        # Address configuration, neighbour discovery and path MTU discovery.
+        ip protocol icmp accept
+        meta l4proto ipv6-icmp accept
+        iifname "ens3" udp sport 67 udp dport 68 accept
+        iifname "ens3" udp sport 547 udp dport 546 accept
+
+        iifname "ens3" tcp dport { 22, 80, 443 } accept
+        # Authenticated WireGuard transport for the model-only private link.
+        iifname "ens3" udp dport 51820 accept
+        counter drop
+    }
+
+    chain output {
+        type filter hook output priority -10; policy accept;
+        ip daddr 10.203.54.2 oifname != "wg-prism" counter drop
+        ip daddr 83.203.35.34 tcp dport 62544 counter reject with tcp reset
+    }
+
+    chain forward {
+        type filter hook forward priority -10; policy accept;
+        ip daddr 10.203.54.2 oifname != "wg-prism" counter drop
+        ip daddr 83.203.35.34 tcp dport 62544 counter reject with tcp reset
+    }
+}

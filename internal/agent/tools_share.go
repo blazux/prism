@@ -82,6 +82,7 @@ func (e *ToolExecutor) sharedAdd(ctx context.Context, idStr string) (string, err
 		return "", fmt.Errorf("that shared item has no widgets")
 	}
 	added := 0
+	var importErr error
 	for i, wdg := range p.Widgets {
 		wid := fmt.Sprintf("%s-shared%d-%d", slugify(wdg.Title), id, i)
 		cols, height := wdg.Cols, wdg.Height
@@ -91,9 +92,14 @@ func (e *ToolExecutor) sharedAdd(ctx context.Context, idStr string) (string, err
 		if height <= 0 {
 			height = 280
 		}
-		if e.writeSharedWidget(wid, wdg.Title, wdg.Content, cols, height, pluginMeta{Resources: wdg.Resources, ResourceVersions: wdg.ResourceVersions}) == nil {
+		if err := e.writeSharedWidget(wid, wdg.Title, wdg.Content, cols, height, pluginMeta{Resources: wdg.Resources, ResourceVersions: wdg.ResourceVersions}); err == nil {
 			added++
+		} else {
+			importErr = err
 		}
+	}
+	if added == 0 && importErr != nil {
+		return "", fmt.Errorf("could not import shared widgets: %w", importErr)
 	}
 	return fmt.Sprintf("Added %d widget(s) from %q to this dashboard.", added, item.Title), nil
 }
@@ -140,16 +146,20 @@ func (e *ToolExecutor) adminOfSharingGroup(id int64) bool {
 }
 
 func (e *ToolExecutor) writeSharedWidget(id, title, content string, cols, height int, bindings ...pluginMeta) error {
-	if err := e.writeManagedFile(filepath.Join(e.pluginDir, id+".html"), []byte(content)); err != nil {
-		return err
-	}
 	m := pluginMeta{Title: title, Cols: cols, Height: height}
 	if len(bindings) > 0 {
 		m.Resources = bindings[0].Resources
 		m.ResourceVersions = bindings[0].ResourceVersions
 	}
 	meta, _ := json.Marshal(m)
-	e.writeManagedFile(filepath.Join(e.pluginDir, id+".meta.json"), meta)
+	root, rel, err := e.fileRoot(e.pluginDir)
+	if err != nil {
+		return err
+	}
+	id, err = resources.CreateWidgetCopy(root, rel, id, []byte(content), meta)
+	if err != nil {
+		return err
+	}
 	if e.onPluginAdd != nil {
 		e.onPluginAdd(id, title, content, cols, height)
 	}

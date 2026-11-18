@@ -15,6 +15,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"prism/internal/agent"
 	"prism/internal/memory"
@@ -121,6 +123,18 @@ func (h *roomHub) remove(c *roomClient) {
 	h.mu.Unlock()
 }
 
+// closeClients revokes passive room subscriptions after membership removal or
+// group deletion. A nil userID closes every subscription to the group.
+func (h *roomHub) closeClients(groupID int64, userID *int64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for c := range h.clients {
+		if c.groupID == groupID && (userID == nil || c.userID == *userID) && c.conn != nil {
+			_ = c.conn.Close()
+		}
+	}
+}
+
 // sendJSON queues a frame for this client through the writer pump. gorilla's
 // Conn panics on concurrent writes, and the pump is already running by the
 // time the join handler wants to send history — so the handler must never
@@ -196,8 +210,8 @@ func (s *Server) userInGroup(ctx context.Context, userID, groupID int64) bool {
 
 // handleRoomWS serves /wsroom?group=<id> for a group member.
 func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
-	user := currentUser(r)
-	if user == nil {
+	user, err := s.freshUser(r.Context(), currentUser(r))
+	if err != nil || user == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -217,10 +231,20 @@ func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
 	}
 	stopOnCancel := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
 	defer stopOnCancel()
+	// A full 16,000-codepoint message may use four UTF-8 bytes per character,
+	// or twelve bytes per escaped surrogate pair in JSON.
+	conn.SetReadLimit(256 * 1024)
 
 	c := &roomClient{conn: conn, send: make(chan []byte, 64), groupID: groupID, userID: user.ID, userName: user.DisplayName}
 	s.rooms.add(c)
 	defer func() { s.rooms.remove(c); conn.Close(); s.pushPresence(groupID) }()
+	// A revocation may have committed while the handshake was in flight. Once
+	// registered, either its socket closer sees this client or this check sees
+	// the new authorization state, before any room history can be delivered.
+	user, err = s.freshUser(r.Context(), user)
+	if err != nil || user == nil || (!user.IsGlobalAdmin() && !s.userInGroup(r.Context(), user.ID, groupID)) {
+		return
+	}
 
 	// Writer pump.
 	go func() {
@@ -256,10 +280,25 @@ func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
 			ReplyTo   *int64 `json:"replyTo"`
 			MessageID int64  `json:"messageId"`
 			Emoji     string `json:"emoji"`
+			RequestID string `json:"requestId"`
 		}
 		if json.Unmarshal(data, &in) != nil {
 			continue
 		}
+		// Room sockets can outlive changes to approval, role and membership.
+		// Recheck each operation, including typing, stop and reactions.
+		opCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		fresh, authErr := s.freshUser(opCtx, user)
+		allowed := authErr == nil && fresh != nil && (fresh.IsGlobalAdmin() || s.userInGroup(opCtx, fresh.ID, groupID))
+		cancel()
+		if !allowed {
+			c.roomReceipt(in.RequestID, "rejected", "You no longer have access to this room.", nil, false)
+			return
+		}
+		user = fresh
+		s.rooms.mu.Lock()
+		c.userName = fresh.DisplayName
+		s.rooms.mu.Unlock()
 		switch in.Type {
 		case "stop":
 			s.rooms.stop(groupID)
@@ -271,16 +310,19 @@ func (s *Server) handleRoomWS(w http.ResponseWriter, r *http.Request) {
 		case "unreact":
 			s.handleRoomReaction(c, in.MessageID, in.Emoji, false)
 		default:
-			if len(in.Content) > 16000 {
-				c.sendJSON(map[string]any{"type": "error", "content": "Message too long (maximum 16000 characters)."})
-				continue
-			}
-			if strings.TrimSpace(in.Content) == "" {
-				continue
-			}
-			s.handleRoomMessage(context.Background(), c, strings.TrimSpace(in.Content), in.ReplyTo)
+			s.handleRoomMessage(context.Background(), c, in.Content, in.ReplyTo, in.RequestID)
 		}
 	}
+}
+
+func (c *roomClient) roomReceipt(id, status, content string, message *memory.RoomMessage, replayed bool) {
+	if id == "" {
+		if content != "" {
+			c.sendJSON(map[string]any{"type": "error", "content": content})
+		}
+		return
+	}
+	c.sendJSON(map[string]any{"type": "room_receipt", "groupId": c.groupID, "requestId": id, "status": status, "content": content, "message": message, "replayed": replayed})
 }
 
 // pushPresence broadcasts the current set of connected users to a group's room.
@@ -295,12 +337,23 @@ func (s *Server) handleRoomReaction(c *roomClient, msgID int64, emoji string, ad
 		return
 	}
 	ctx := context.Background()
-	if add {
-		ms.AddReaction(ctx, msgID, c.userID, emoji)
-	} else {
-		ms.RemoveReaction(ctx, msgID, c.userID, emoji)
+	// Message ids are global; a room connection only authorizes its own room.
+	if ms.RoomMessageGroup(ctx, msgID) != c.groupID {
+		return
 	}
-	rs, _ := ms.MessageReactions(ctx, msgID)
+	if add {
+		if err := ms.AddRoomReaction(ctx, c.groupID, msgID, c.userID, emoji); err != nil {
+			return
+		}
+	} else {
+		if err := ms.RemoveRoomReaction(ctx, c.groupID, msgID, c.userID, emoji); err != nil {
+			return
+		}
+	}
+	rs, err := ms.RoomMessageReactions(ctx, c.groupID, msgID)
+	if err != nil {
+		return
+	}
 	if rs == nil {
 		rs = []memory.RoomReaction{}
 	}
@@ -309,28 +362,60 @@ func (s *Server) handleRoomReaction(c *roomClient, msgID int64, emoji string, ad
 
 // handleRoomMessage persists a human message, broadcasts it, and — if the shared
 // agent is @mentioned — runs it and broadcasts the reply.
-func (s *Server) handleRoomMessage(ctx context.Context, c *roomClient, content string, replyTo *int64) {
+func (s *Server) handleRoomMessage(ctx context.Context, c *roomClient, content string, replyTo *int64, requestIDs ...string) {
+	requestID := ""
+	if len(requestIDs) > 0 {
+		requestID = requestIDs[0]
+	}
+	if requestID != "" && !chatRequestIDPattern.MatchString(requestID) {
+		c.roomReceipt(requestID, "rejected", "Invalid message identifier.", nil, false)
+		return
+	}
+	// Correlated requests keep their exact payload so even a whitespace-only
+	// change cannot silently reuse an accepted id. Legacy clients retain their
+	// previous trimming behavior; the current browser already sends trimmed text.
+	if requestID == "" {
+		content = strings.TrimSpace(content)
+	}
+	if strings.TrimSpace(content) == "" || utf8.RuneCountInString(content) > 16000 {
+		c.roomReceipt(requestID, "rejected", "Messages must contain between 1 and 16000 characters.", nil, false)
+		return
+	}
 	ms := s.store()
 	if ms == nil {
+		c.roomReceipt(requestID, "unavailable", "Delivery could not be confirmed. Your message can be retried.", nil, false)
 		return
 	}
-	authorID := c.userID
-	msg, err := ms.AddRoomMessage(ctx, c.groupID, &authorID, c.userName, content, false, replyTo)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	msg, created, err := ms.AddRoomMessageOnce(ctx, c.groupID, c.userID, c.userName, content, replyTo, requestID)
 	if err != nil {
+		if errors.Is(err, memory.ErrRoomRequestConflict) || errors.Is(err, memory.ErrRoomReplyNotFound) {
+			c.roomReceipt(requestID, "rejected", err.Error(), nil, false)
+			return
+		}
 		log.Printf("[room] add message: %v", err)
+		// A failed database response can leave the commit outcome uncertain.
+		// Keep the same id so a retry can safely recover its receipt.
+		c.roomReceipt(requestID, "unavailable", "Delivery could not be confirmed. Your message can be retried.", nil, false)
 		return
 	}
+	c.roomReceipt(requestID, "accepted", "", &msg, !created)
+	if !created {
+		return
+	}
+	authorName := c.userName
 	s.rooms.broadcast(c.groupID, roomEvent(msg))
 	ms.AddUsage(ctx, c.userID, fmt.Sprintf("room-g%d", c.groupID), "channel_msg", "room", 1, nil)
 
 	// Notify any @mentioned members (in their personal notification feed).
-	s.background(func() { s.notifyRoomMentions(c.groupID, c.userID, c.userName, content) })
+	s.background(func() { s.notifyRoomMentions(c.groupID, c.userID, authorName, content) })
 
 	cfg, _ := ms.GetRoomConfig(ctx, c.groupID)
 	if !mentionsAgent(content, cfg.AgentName) {
 		return
 	}
-	s.rooms.enqueue(c.groupID, func() { s.runRoomAgent(c.groupID, cfg, c.userName, content, msg.ID) })
+	s.rooms.enqueue(c.groupID, func() { s.runRoomAgent(c.groupID, cfg, authorName, content, msg.ID) })
 	s.rooms.broadcast(c.groupID, s.rooms.activity(c.groupID))
 }
 

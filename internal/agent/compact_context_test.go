@@ -22,7 +22,7 @@ func (f *fakeSummarizeBackend) Chat(ctx context.Context, req ollama.ChatRequest,
 		out <- ollama.StreamEvent{Err: f.err}
 		return
 	}
-	out <- ollama.StreamEvent{Content: f.reply}
+	out <- ollama.StreamEvent{Content: f.reply, Done: true, DoneReason: "stop"}
 }
 func (f *fakeSummarizeBackend) Ping(ctx context.Context) error                   { return nil }
 func (f *fakeSummarizeBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }
@@ -40,7 +40,7 @@ type historyMutatingBackend struct {
 
 func (f *historyMutatingBackend) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
 	f.agent.InjectNote("concurrent note landed mid-summarization")
-	out <- ollama.StreamEvent{Content: f.reply}
+	out <- ollama.StreamEvent{Content: f.reply, Done: true, DoneReason: "stop"}
 }
 func (f *historyMutatingBackend) Ping(ctx context.Context) error                   { return nil }
 func (f *historyMutatingBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }
@@ -192,7 +192,7 @@ type capturingBackend struct {
 
 func (f *capturingBackend) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
 	f.req = req
-	out <- ollama.StreamEvent{Content: f.reply}
+	out <- ollama.StreamEvent{Content: f.reply, Done: true, DoneReason: "stop"}
 }
 func (f *capturingBackend) Ping(ctx context.Context) error                   { return nil }
 func (f *capturingBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }
@@ -259,7 +259,7 @@ func (f *appendingBackend) Chat(ctx context.Context, req ollama.ChatRequest, out
 		ollama.Message{Role: "assistant", Content: "next turn's answer"},
 	)
 	f.agent.histMu.Unlock()
-	out <- ollama.StreamEvent{Content: "summary of the old span"}
+	out <- ollama.StreamEvent{Content: "summary of the old span", Done: true, DoneReason: "stop"}
 }
 func (f *appendingBackend) Ping(ctx context.Context) error                   { return nil }
 func (f *appendingBackend) ListModels(ctx context.Context) ([]string, error) { return nil, nil }

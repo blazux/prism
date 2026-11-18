@@ -5,24 +5,34 @@ layout. You can use a built-in theme or create and save your own palette.
 
 ## Choose a theme
 
-Select **Active theme**, or use the theme dropdown in the header. **Prism Dark**
-and **Prism Light** provide plain backgrounds. For a more restrained decorative
-background, choose **Graphite** with pinstripes, **Slate** with a subtle chart,
-**Paper** with a still background, or **Boardroom** with an office skyline.
+Choose a preview card, use **Current theme**, or use the theme dropdown in the
+header. Changes apply immediately. The gallery groups the palettes by atmosphere:
 
-The other themes include **Midnight** with stars, **Nord** with snow,
-**Solarized Dark** with bokeh, **Rosé Pine** with petals, **Tech** with a network,
-**Cyberpunk** with a circuit, **Matrix**, and **Synthwave** with a grid. For themes
-with animation, use **Animated background** to set its intensity from 0 to 100%.
-A value of 0 turns the animation off.
+- **Essentials**: Prism Dark and Prism Light.
+- **Focus & work**: Graphite, Slate, Paper, Boardroom, Ink and Spruce. These use
+  still backgrounds, with neutral, navy, ivory or sage surfaces.
+- **Color & atmosphere**: Midnight, Nord, Solarized Dark, Rosé Pine, Espresso
+  and Dune. Choose deep blue, arctic gray, plum, coffee or warm sand.
+- **Geek & retro**: Tech, Cyberpunk, Matrix, Synthwave, Dracula, Amber Terminal,
+  Arcade and Bubblegum. These include terminal colors, cyan circuitry, neon
+  horizons, pixel patterns and pastel pink.
+- **Your themes**: palettes you have saved in this browser.
+
+Some backgrounds include animated details. **Animated background** adjusts their
+intensity from 0 to 100%; 0 turns the effects off. Animations pause while the page
+is hidden. With reduced motion enabled in your system or browser, animated
+backgrounds become still. Theme changes also reach Prism's apps and widgets that
+use its theme tokens.
 
 ## Create a custom theme
 
-Choose an **Accent color**, a dark or light **Mode**, and a **Harmony**:
+Open **Create a custom theme**. Use **Use current theme** to copy its palette,
+or choose an **Accent color**, a dark or light **Mode**, and a **Harmony**:
 monochromatic, analogous, complementary or triadic. Prism generates the palette
 from these choices. Open **Edit every color** to adjust individual colors.
 
 Click **Preview**, enter a **Name**, then click **Save & apply** to use the theme.
+Leaving Appearance without applying a preview restores the saved theme.
 You can export a custom theme as JSON with **Export** and load it again with
 **Import**.
 

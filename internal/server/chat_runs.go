@@ -416,22 +416,42 @@ func (s *Server) quiesceSession(ctx context.Context, c *Client) (func(bool), err
 	return release, nil
 }
 
-// A headless call has no browser chatRun, but still owns work in a dashboard.
-// Register before creating its directory and keep it registered until its
-// agent, tools and persistence have finished.
+// Both agent turns and direct tool calls own work in a dashboard. All must
+// finish before deletion; only agent turns contribute to the agent indicator.
 type sessionJob struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel    context.CancelFunc
+	done      chan struct{}
+	agentTurn bool
 }
 
 func (s *Server) beginSessionJob(ctx context.Context, session string) (context.Context, func(), error) {
+	return s.beginSessionWork(ctx, session, false)
+}
+
+func (s *Server) beginAgentJob(ctx context.Context, session string) (context.Context, func(), error) {
+	return s.beginSessionWork(ctx, session, true)
+}
+
+// Caller holds runsMu. Widget/cron tool calls remain tracked for cancellation,
+// but are not agent conversations even when a tool internally uses a model.
+func (s *Server) agentJobsLocked(session string) int {
+	count := 0
+	for job := range s.sessionJobs[session] {
+		if job.agentTurn {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *Server) beginSessionWork(ctx context.Context, session string, agentTurn bool) (context.Context, func(), error) {
 	s.runsMu.Lock()
 	defer s.runsMu.Unlock()
 	if s.deletingSessions[session] {
 		return nil, nil, fmt.Errorf("workspace is being deleted or has been deleted")
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	job := &sessionJob{cancel: cancel, done: make(chan struct{})}
+	job := &sessionJob{cancel: cancel, done: make(chan struct{}), agentTurn: agentTurn}
 	if s.sessionJobs == nil {
 		s.sessionJobs = make(map[string]map[*sessionJob]bool)
 	}

@@ -78,6 +78,14 @@ The configured socket is also passed as DOCKER_HOST to ordinary workspace
 commands so scripts can use the inner Docker CLI. No host socket must be
 mounted inside that workspace.
 
+The inner daemon does not list installation services on the outer host, such as
+the database or Proton Mail Bridge. An empty inner `docker ps`, an empty managed
+service list, or no Compose file in `/workspace` does not prove that those
+services are absent. Keep the scope of each check explicit. Account settings
+can be saved without a live connection; verify the relevant app operation before
+calling an integration working. Host-side setup may require the operator's host
+terminal while the agent guides the steps.
+
 ## Security and Cloud status
 
 This selects the Docker **service backend**, not an isolation technology.

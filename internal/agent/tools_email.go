@@ -75,6 +75,41 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 
 	switch strings.ToLower(strings.TrimSpace(str("action"))) {
 	case "config", "setup":
+		// Models also use config to inspect the current mailbox. Without
+		// configuration fields this is a read, not an empty configuration write.
+		update := false
+		for _, key := range []string{"imap_host", "imap_port", "smtp_host", "smtp_port", "user", "from", "security", "insecure", "list_limit", "password", "password_secret"} {
+			if _, present := args[key]; present {
+				update = true
+				break
+			}
+		}
+		if !update {
+			store := e.userStore()
+			raw, ok, err := store.GetConfig(ctx, emailConfigKey)
+			if err != nil {
+				return "", fmt.Errorf("could not read email configuration: %w", err)
+			}
+			var sc emailStoredConfig
+			if ok && raw != "" {
+				if err := json.Unmarshal([]byte(raw), &sc); err != nil {
+					return "", fmt.Errorf("corrupt email config: %w", err)
+				}
+			}
+			password, hasPassword, err := store.GetSecret(ctx, emailPasswordSecret)
+			if err != nil {
+				return "", fmt.Errorf("could not read email password status: %w", err)
+			}
+			return jsonResult(map[string]interface{}{
+				"configured": sc.IMAPHost != "" && sc.User != "",
+				"imap_host":  sc.IMAPHost, "imap_port": sc.IMAPPort,
+				"smtp_host": sc.SMTPHost, "smtp_port": sc.SMTPPort,
+				"user": sc.User, "from": sc.From,
+				"security": sc.Security, "insecure": sc.Insecure,
+				"list_limit":   sc.ListLimit,
+				"has_password": hasPassword && password != "", "connection_tested": false,
+			}), nil
+		}
 		// Merge over any existing config so partial updates work.
 		var sc emailStoredConfig
 		if raw, ok, _ := e.userStore().GetConfig(ctx, emailConfigKey); ok {

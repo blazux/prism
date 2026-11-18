@@ -71,6 +71,8 @@ async function renderAITab(container, options = {}) {
         <label class="ai-field">Context window<select name="contextMode"><option value="auto">Automatic</option><option value="manual">Set token limit</option></select></label>
         <label class="ai-field" data-context-limit hidden>Context window (tokens)<input name="contextWindow" type="number" min="4096" max="2000000" step="1" placeholder="e.g. 500000"></label>
         <p class="ai-hint" data-context-detected></p>
+        <label class="ai-field">Generation limit (tokens)<input name="maxOutputTokens" type="number" min="1" max="2000000" step="1" placeholder="16384 (default)"></label>
+        <p class="ai-hint">Includes reasoning, replies and tool arguments. Leave blank for the default. When the context window is known, generation uses at most one quarter of it.</p>
         <label class="ai-field">Vision support<select name="modelVision"><option value="auto">Automatic</option><option value="yes">Supports images</option><option value="no">Text only</option></select></label>
         <p class="ai-hint" data-vision-detected></p>
         <p class="ai-hint">Prism manages conversation compaction automatically. These settings do not change your default model.</p>
@@ -357,6 +359,7 @@ async function renderAITab(container, options = {}) {
       if(src){modelInfo.set(modelInfoKey(src,id),{data,loading:false});refresh()}
       mf('contextMode').value=data.settings?.contextWindow?'manual':'auto'
       mf('contextWindow').value=data.settings?.contextWindow || ''
+      mf('maxOutputTokens').value=data.settings?.maxOutputTokens || ''
       mf('modelVision').value=data.settings?.vision===true?'yes':data.settings?.vision===false?'no':'auto'
       const detected=data.detected?.contextWindow
       mf('contextMode').options[0].textContent=detected ? `Automatic — ${modelTokenLabel(detected)} tokens` : 'Automatic — not detected'
@@ -382,7 +385,7 @@ async function renderAITab(container, options = {}) {
   mf('settingsModel').addEventListener('change',()=>{if(mf('settingsModel').value.trim())void readModelInfo()})
   mf('contextMode').addEventListener('change',contextFields)
   dialog.querySelector('[data-model-reset]').addEventListener('click',()=>{
-    mf('contextMode').value='auto';mf('contextWindow').value='';mf('modelVision').value='auto';contextFields()
+    mf('contextMode').value='auto';mf('contextWindow').value='';mf('maxOutputTokens').value='';mf('modelVision').value='auto';contextFields()
     modelStatus.textContent='Click Save to restore automatic settings for this model.'
   })
   dialog.querySelector('[data-model-close]').addEventListener('click',()=>dialog.close())
@@ -390,7 +393,7 @@ async function renderAITab(container, options = {}) {
   dialog.addEventListener('close',()=>{modelGeneration++;modelControls(false)})
   modelForm.addEventListener('submit',async e=>{
     e.preventDefault();if(modelWorking || !modelForm.reportValidity())return
-    const settings={contextWindow:mf('contextMode').value==='manual'?Number(mf('contextWindow').value):0}
+    const settings={contextWindow:mf('contextMode').value==='manual'?Number(mf('contextWindow').value):0,maxOutputTokens:mf('maxOutputTokens').value===''?0:Number(mf('maxOutputTokens').value)}
     if(mf('modelVision').value!=='auto')settings.vision=mf('modelVision').value==='yes'
     const sourceID=modelSourceID, id=mf('settingsModel').value.trim(), generation=++modelGeneration
     modelControls(true);modelStatus.classList.remove('error');modelStatus.textContent='Saving…'
@@ -399,7 +402,7 @@ async function renderAITab(container, options = {}) {
       for(const list of [sources,saved.sources]) {
         const src=list.find(s=>s.id===sourceID);if(!src)continue
         src.modelSettings={...(src.modelSettings||{})}
-        if(!settings.contextWindow && settings.vision===undefined)delete src.modelSettings[id]
+        if(!settings.contextWindow && !settings.maxOutputTokens && settings.vision===undefined)delete src.modelSettings[id]
         else src.modelSettings[id]={...settings}
       }
       refresh()

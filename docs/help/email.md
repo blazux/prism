@@ -1,5 +1,22 @@
 # Email: folders and inbox rules
 
+For help connecting a mailbox, first read `prism_help` with topic
+`connecting-accounts`. For **Proton Mail**, read `protonmail-bridge` before
+requesting credentials or configuring Email: the user first signs in through
+Bridge's interactive console, closes it and starts the permanent service, then
+Prism uses the credentials Bridge generates. The temporary console does not
+provide the permanent service's standard hostname and forwarded ports.
+Explain how to open that console from the Docker host before asking them to type
+`login`; a Bash terminal is not the Bridge console.
+
+The `email` tool's `config` action **reads** saved non-secret settings when called
+without configuration fields. Supplying connection fields saves those settings.
+The read reports `configured`, `has_password` and `connection_tested:false`;
+it does not contact the mail server. Complete the provider's prerequisites
+before collecting the mail-client password. Use `email action=list` to validate
+IMAP access after setup. `prism_help` without a topic also reports saved
+integration status.
+
 Connect your IMAP/SMTP account in **Settings → Email**, then open **Email**.
 The left sidebar lists your server's folders, including Sent, Archive and
 Trash when the server provides them. On small screens, the top-left menu opens

@@ -99,9 +99,10 @@ func (e *ToolExecutor) dockerPS(ctx context.Context) (string, error) {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
 	if len(services) == 0 {
-		return "No service containers running. Use docker_run to start one.", nil
+		return e.dockerInventoryScope("prism-svc-") + "No matching service containers found.", nil
 	}
 	var sb strings.Builder
+	sb.WriteString(e.dockerInventoryScope("prism-svc-"))
 	fmt.Fprintf(&sb, "Service containers (%d):\n\n", len(services))
 	for _, s := range services {
 		portInfo := ""
@@ -122,10 +123,11 @@ func (e *ToolExecutor) dockerList(ctx context.Context) (string, error) {
 		return fmt.Sprintf("ERROR: %v", err), nil
 	}
 	if len(containers) == 0 {
-		return "No containers found.", nil
+		return e.dockerInventoryScope("prism") + "No matching containers found.", nil
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "All Docker containers (%d):\n\n", len(containers))
+	sb.WriteString(e.dockerInventoryScope("prism"))
+	fmt.Fprintf(&sb, "Matching Docker containers (%d):\n\n", len(containers))
 	for _, c := range containers {
 		portInfo := ""
 		if c.Port > 0 {
@@ -134,6 +136,14 @@ func (e *ToolExecutor) dockerList(ctx context.Context) (string, error) {
 		fmt.Fprintf(&sb, "  • %-30s  %-35s  %s%s\n", c.Name, c.Image, c.Status, portInfo)
 	}
 	return sb.String(), nil
+}
+
+func (e *ToolExecutor) dockerInventoryScope(nameFilter string) string {
+	daemon := "host Docker daemon"
+	if e.docker.WorkspaceDocker() {
+		daemon = "workspace Docker daemon (outer host containers are not listed)"
+	}
+	return fmt.Sprintf("Docker inventory: %s; filter name=%s; includes running and stopped containers.\n", daemon, nameFilter)
 }
 
 func (e *ToolExecutor) dockerLogs(ctx context.Context, name string, tail int) (string, error) {

@@ -66,11 +66,12 @@ with sync_playwright() as p:
  page.locator('[name=settingsModel]').press('Tab')
  page.locator('[name=contextMode]').select_option('manual')
  page.locator('[name=contextWindow]').fill('500000')
+ page.locator('[name=maxOutputTokens]').fill('65536')
  page.locator('[name=modelVision]').select_option('no')
  page.locator('[data-model-form] button[type=submit]').click()
  page.get_by_text('Saved. Applied to the next message using this model.',exact=True).wait_for()
  assert state['model']=='model-a' and state['sources'][0]['model']=='model-a'
- assert state['sources'][0]['modelSettings']['model-b']=={'contextWindow':500000,'vision':False}
+ assert state['sources'][0]['modelSettings']['model-b']=={'contextWindow':500000,'maxOutputTokens':65536,'vision':False}
  page.locator('[data-model-close]').click()
  reopen()
  page.locator('[data-model-settings]').click()
@@ -78,12 +79,28 @@ with sync_playwright() as p:
  page.locator('[name=settingsModel]').press('Tab')
  page.locator('[name=contextWindow]').wait_for(state='visible')
  assert page.locator('[name=contextWindow]').input_value()=='500000'
+ assert page.locator('[name=maxOutputTokens]').input_value()=='65536'
  page.locator('[data-model-reset]').click()
+ assert page.locator('[name=maxOutputTokens]').input_value()==''
  page.locator('[data-model-form] button[type=submit]').click()
  page.get_by_text('Saved. Applied to the next message using this model.',exact=True).wait_for()
  assert state['model']=='model-a'
+ assert state['sources'][0]['modelSettings']['model-b']['maxOutputTokens']==0
  page.locator('[data-model-close]').click()
- print('Per-model override persists, does not change default, reset saves: OK',flush=True)
+ # A generation-only override must persist even with automatic context/vision.
+ page.locator('[data-model-settings]').click()
+ page.locator('[data-context-detected]').filter(has_text='500,000').wait_for()
+ page.locator('[name=maxOutputTokens]').fill('65536')
+ page.locator('[data-model-form] button[type=submit]').click()
+ page.get_by_text('Saved. Applied to the next message using this model.',exact=True).wait_for()
+ assert state['sources'][0]['modelSettings']['model-a']=={'contextWindow':0,'maxOutputTokens':65536}
+ page.locator('[data-model-close]').click()
+ reopen()
+ page.locator('[data-model-settings]').click()
+ page.locator('[data-context-detected]').filter(has_text='500,000').wait_for()
+ assert page.locator('[name=maxOutputTokens]').input_value()=='65536'
+ page.locator('[data-model-close]').click()
+ print('Per-model context/generation override persists, generation-only settings survive reopen, reset saves: OK',flush=True)
  # Switching the configured model must refresh context AND text-only detection.
  page.locator('[data-action=models]').click()
  page.get_by_text('Connected · 2 models',exact=True).wait_for()
@@ -91,6 +108,8 @@ with sync_playwright() as p:
  page.get_by_text('All changes saved.',exact=True).wait_for()
  page.locator('[data-model-capabilities]').filter(has_text='Context: 32,768 tokens (auto-detected) · Vision: text only (auto-detected)').wait_for()
  page.locator('[data-model-settings]').click()
+ page.locator('[data-context-detected]').filter(has_text='32,768').wait_for()
+ assert page.locator('[name=maxOutputTokens]').input_value()==''
  page.locator('[name=contextMode]').select_option('manual')
  page.locator('[name=contextWindow]').fill('500000')
  page.locator('[name=modelVision]').select_option('yes')
@@ -133,6 +152,8 @@ with sync_playwright() as p:
  assert next(v for v in reversed(calls) if v['action']!='model_info')['action']=='chat'
  assert state['model']=='model-b'
  assert state['defaultSource']==state['sources'][1]['id']
+ assert state['sources'][0]['modelSettings']['model-a']['maxOutputTokens']==65536
+ assert not state['sources'][1].get('modelSettings',{}).get('model-a',{}).get('maxOutputTokens')
  assert page.locator('[data-default-source]').is_hidden()
  assert page.locator('[data-action=models]').is_enabled()
  reopen()
@@ -149,6 +170,7 @@ with sync_playwright() as p:
  reopen()
  assert len(state['sources'])==1
  assert page.locator('[data-sources] button').count()==1
+ assert state['sources'][0]['modelSettings']['model-a']['maxOutputTokens']==65536
  print('Saved source removal persists on reopen: OK',flush=True)
  fail['models']=True
  page.locator('[data-action=models]').click()

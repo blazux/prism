@@ -611,20 +611,34 @@ function renderChatStatus() {
     el.append(' ', retry)
   }
   const input = document.getElementById('chat-input')
-  if (input) input.readOnly = !!pending
+  if (input) input.readOnly = !!pending && !pending.widget
+}
+
+function replyToWidgetChat(widget, status, error) {
+  if (!widget) return
+  if (widget.id) {
+    try { widget.source.postMessage({type:'prism-chat-response',id:widget.id,status,error},widget.origin) } catch (_) {}
+  } else if (error) showToast({title:'Widget message',message:error,level:'warning'})
 }
 
 function receiveChatReceipt(msg) {
   const pending = pendingChats.get(currentSessionID)
   if (!pending || pending.payload.requestId !== msg.requestId) return
-  if (['unknown','unavailable'].includes(msg.status)) { pending.uncertain = true; renderChatStatus(); return }
+  if (['unknown','unavailable'].includes(msg.status)) {
+    pending.uncertain = true
+    replyToWidgetChat(pending.widget, 'unconfirmed', 'Message acceptance could not be confirmed. Check the chat before sending again.')
+    renderChatStatus(); return
+  }
   if (['invalid','conflict','rejected'].includes(msg.status)) {
-    pendingChats.delete(currentSessionID); renderChatStatus(); appendError('The message was not accepted. Your draft has been kept.'); return
+    pendingChats.delete(currentSessionID)
+    replyToWidgetChat(pending.widget, 'rejected', 'The server did not accept the message.')
+    renderChatStatus(); appendError(pending.widget ? 'The widget message was not accepted.' : 'The message was not accepted. Your draft has been kept.'); return
   }
   pendingChats.delete(currentSessionID)
+  replyToWidgetChat(pending.widget, 'accepted')
   if (!msg.replayed) appendUserMessage(pending.payload.content, pending.payload.images, pending.payload.files)
   const input = document.getElementById('chat-input')
-  if (input.value.trim() === pending.payload.content) input.value = ''
+  if (!pending.widget && input.value.trim() === pending.payload.content) input.value = ''
   autoResizeTextarea(input)
   // A previously started upload may have finished while waiting for the receipt.
   // Clear only the attachments actually included in the accepted request.
@@ -666,22 +680,33 @@ function receiveChatHistory(msg) {
   historyBefore = msg.hasMore ? msg.before : 0; historyLoading = false; renderHistoryButton()
 }
 
-function sendChat() {
+function sendChat(widgetRequest) {
+  // onclick passes an event; only the dashboard bridge supplies a widget request.
+  const widget = widgetRequest?.widget
   const input = document.getElementById('chat-input')
-  const text = input.value.trim()
-  if ((!text && pendingImages.length === 0 && pendingFiles.length === 0) || isStreaming || pendingChats.has(currentSessionID)) return
-
-  const images = pendingImages.map(image => image.data)
-  const imageNames = pendingImages.map(image => image.name)
-  const files  = pendingFiles.slice()
-  const requestId = crypto.randomUUID?.() || Array.from(crypto.getRandomValues(new Uint8Array(16)), n=>n.toString(16).padStart(2,'0')).join('')
-  const request = { type: 'chat', requestId, content: text, images: images.length ? images : undefined, imageNames: images.length ? imageNames : undefined, files: files.length ? files : undefined, disabledTools: getDisabledTools() }
-  if (!send(request)) {
-    showToast({ title: 'Connection unavailable', message: 'Your message and attachments have been kept. Retry when the connection is restored.', level: 'warning' })
+  const text = widget ? widgetRequest.text.trim() : input.value.trim()
+  if (isStreaming || pendingChats.has(currentSessionID)) {
+    if (widget) replyToWidgetChat(widget, 'rejected', 'The agent is busy. Wait for the current message to finish before sending again.')
+    return
+  }
+  if (!text && (widget || (!pendingImages.length && !pendingFiles.length))) {
+    if (widget) replyToWidgetChat(widget, 'rejected', 'Enter a message first.')
     return
   }
 
-  pendingChats.set(currentSessionID, {payload:request,images:pendingImages.slice(),files:pendingFiles.slice()})
+  const selectedImages = widget ? [] : pendingImages.slice()
+  const selectedFiles = widget ? [] : pendingFiles.slice()
+  const images = selectedImages.map(image => image.data)
+  const imageNames = selectedImages.map(image => image.name)
+  const requestId = crypto.randomUUID?.() || Array.from(crypto.getRandomValues(new Uint8Array(16)), n=>n.toString(16).padStart(2,'0')).join('')
+  const request = { type: 'chat', requestId, content: text, images: images.length ? images : undefined, imageNames: images.length ? imageNames : undefined, files: selectedFiles.length ? selectedFiles : undefined, disabledTools: getDisabledTools() }
+  if (!send(request)) {
+    if (widget) replyToWidgetChat(widget, 'rejected', 'Connection unavailable. The message was not sent.')
+    else showToast({ title: 'Connection unavailable', message: 'Your message and attachments have been kept. Retry when the connection is restored.', level: 'warning' })
+    return
+  }
+
+  pendingChats.set(currentSessionID, {payload:request,images:selectedImages,files:selectedFiles,widget})
   renderChatStatus()
 }
 
@@ -1418,8 +1443,9 @@ function setView(view) {
     dock.style.display = 'none'
     if (title) title.textContent = 'Settings'
     setChatAgentLabel(agentDockLabel()); refreshAgentDockLabel()
-    setContext('Viewing the Settings page. The user may be configuring email, a Notes vault, CalDAV, Todoist, or Google Calendar (OAuth). Help them set it up step by step using the Prism help docs (search the prism-help collection).')
+    setContext('Viewing the Settings page. The user may be configuring email, a Notes vault, CalDAV, Todoist, or Google Calendar (OAuth). Help them set it up step by step using prism_help.')
     setSuggestions([
+      ...(DISABLED_APPS.has('email') ? [] : [{ label: '✉ Connect my mailbox', prompt: 'Help me connect my mailbox, step by step.' }]),
       ...(DISABLED_APPS.has('calendar') ? [] : [{ label: '🔗 Connect Google Calendar', prompt: 'Walk me through connecting my Google Calendar, step by step.' }]),
       ...(DISABLED_APPS.has('notes') ? [] : [{ label: '🗂 Connect my notes vault', prompt: 'Help me connect my Obsidian/Logseq vault to Notes.' }]),
       { label: '❓ What can you do?', prompt: 'What can you do in Prism?' },
@@ -1492,13 +1518,15 @@ function refreshBoardContext() {
   setContext(`Viewing the "${boardName(ws_id)}" workspace dashboard (workspace id ${ws_id}, ${widgets.size} widget(s)).${wlist} Widgets you create go into THIS workspace — build, add or remove them here when asked.`)
 }
 
+let sessionLoadGeneration = 0
 async function loadSessions() {
+  const generation = ++sessionLoadGeneration
   try {
-    const res = await fetch('/api/sessions')
+    const res = await fetch('/api/sessions', { cache: 'no-store' })
+    if (!res.ok) return
     const data = await res.json()
+    if (generation !== sessionLoadGeneration) return
     allSessions = data.sessions || []
-    try{voxWorkspaceAvailable=!!(await fetch('/api/vox-workspace').then(r=>r.json())).available}catch{voxWorkspaceAvailable=false}
-    applyDisabledApps()
     renderBoardList(allSessions)
     // Names arrive async — refresh the title/agent label if on a workspace.
     if (currentView.type === 'board') {
@@ -1506,6 +1534,12 @@ async function loadSessions() {
       if (t) t.textContent = boardName(lastWorkspace)
       setChatAgentLabel(boardName(lastWorkspace))
     }
+    // A slow telephony availability check must not hold back workspace status.
+    let voxAvailable = false
+    try{voxAvailable=!!(await fetch('/api/vox-workspace').then(r=>r.json())).available}catch{}
+    if (generation !== sessionLoadGeneration) return
+    voxWorkspaceAvailable = voxAvailable
+    applyDisabledApps()
   } catch {}
 }
 
@@ -1839,7 +1873,7 @@ function renderBoardList(sessions) {
     label.className = 'rail-label'
     label.textContent = sess.name
     item.append(icon, label)
-    if (sess.runStatus) {
+    if (['running','waiting_for_input','waiting_for_approval'].includes(sess.runStatus)) {
       const badge = document.createElement('span')
       badge.className = 'rail-badge'
       badge.textContent = sess.runStatus.startsWith('waiting') ? '…' : '●'
@@ -2196,6 +2230,14 @@ function renderMarkdown(text) {
 
   if (!text) return result
 
+  // A missing parser or sanitizer must still leave the reply readable and inert.
+  const plainHtml = escHtml(text).replace(/\n/g, '<br>')
+  const markdown = window.marked
+  const sanitizer = window.DOMPurify
+  if (typeof markdown?.parse !== 'function' || typeof sanitizer?.sanitize !== 'function' || sanitizer.isSupported === false) {
+    return result + plainHtml
+  }
+
   // Extract math blocks before marked so it doesn't mangle underscores/stars in LaTeX
   const mathBlocks = []
   // Private-use chars, not \x00: the HTML parser DOMPurify runs would turn a
@@ -2210,17 +2252,23 @@ function renderMarkdown(text) {
     return placeholder(mathBlocks.length - 1)
   })
 
-  let html = marked.parse(text, { breaks: true, gfm: true })
+  let html
   // marked passes raw HTML through. Model output quotes web pages, emails and
   // RAG chunks verbatim, so an <img onerror> in any of those would run here.
-  if (window.DOMPurify) html = DOMPurify.sanitize(html)
+  try {
+    html = sanitizer.sanitize(markdown.parse(text, { breaks: true, gfm: true }))
+  } catch {
+    return result + plainHtml
+  }
 
   // Restore math blocks as KaTeX-rendered HTML
-  html = html.replace(/\uE000MATH(\d+)\uE000/g, (_, i) => {
-    const { inner, display } = mathBlocks[parseInt(i)]
+  html = html.replace(/\uE000MATH(\d+)\uE000/g, (match, i) => {
+    const block = mathBlocks[Number(i)]
+    if (!block) return match
+    const { inner, display } = block
     try {
-      return katex.renderToString(inner, { displayMode: display, throwOnError: false, output: 'html' })
-    } catch { return display ? `$$${inner}$$` : `$${inner}$` }
+      return window.katex.renderToString(inner, { displayMode: display, throwOnError: false, output: 'html', trust: false })
+    } catch { return escHtml(display ? `$$${inner}$$` : `$${inner}$`) }
   })
 
   result += html
@@ -2430,6 +2478,8 @@ window.addEventListener('message', e => {
     send({type:'editor_response', id:d.id, data:active ? d.result : {error:'The active app changed. Read the editor again.'}})
   } else if (d.type === 'openFile' && d.path) {
     send({ type: 'file_open', path: d.path.replace(/^\/workspace\//, '') })
+  } else if (d.type === 'open-settings' && e.origin === location.origin && e.source === document.getElementById('app-frame').contentWindow) {
+    setView({ type: 'settings', tab: typeof d.tab === 'string' ? d.tab : 'profile' })
   } else if (d.type === 'close-settings') {
     setView({ type: 'board', workspace: lastWorkspace })
   } else if (d.type === 'context' && typeof d.text === 'string') {
@@ -2438,10 +2488,9 @@ window.addEventListener('message', e => {
     setSuggestions(d.items)
   } else if (d.type === 'mail-unread-changed') {
     refreshMailBadge()
-  } else if (d.type === 'sendChat' && d.text) {
-    document.getElementById('chat-input').value = d.text
+  } else if (d.type === 'sendChat' && typeof d.text === 'string') {
     if (!chatOpen) toggleChat()
-    sendChat()
+    sendChat({text:d.text,widget:{source:e.source,origin:e.origin,id:typeof d.id === 'string' ? d.id : null}})
   } else if (d.type === 'notify' && (d.title || d.message)) {
     fetch('/api/notify', {
       method: 'POST',
@@ -2566,7 +2615,10 @@ async function initApp() {
   updateAdminLink()
   await loadSessions()
   const requestedApp = new URLSearchParams(location.search)
-  if (requestedApp.get('app') === 'telephony' && voxWorkspaceAvailable) {
+  if (requestedApp.get('view') === 'settings') {
+    setView({ type: 'settings', tab: requestedApp.get('tab') || 'profile' })
+    if (requestedApp.get('chat') === 'open' && !chatOpen) toggleChat()
+  } else if (requestedApp.get('app') === 'telephony' && voxWorkspaceAvailable) {
     setView({ type: 'app', name: 'telephony', tab: requestedApp.get('tab'), group: requestedApp.get('group') })
   } else setView({ type: 'board', workspace: lastWorkspace })
   if (!ws) connect()

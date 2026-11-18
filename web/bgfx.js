@@ -5,22 +5,22 @@
 //   cyberpunk → circuit   matrix → matrix     midnight → stars
 //   nord      → snow       solarized-dark → bokeh   rose-pine → petals
 //   tech      → network    synthwave → grid
-//   slate     → sparkline  boardroom → skyline
-//   (graphite's pinstripe and paper's stillness are pure CSS — see style.css)
+//   espresso/dracula/bubblegum → bokeh     amber-terminal → amber glyphs
+//   Professional palettes stay still; paper, dune and arcade use CSS textures.
 
 (function () {
   'use strict';
 
-  const GS = 32; // grid step for circuit traces
   const EFFECTS = {
     cyberpunk: 'circuit', matrix: 'matrix',
     midnight: 'stars', nord: 'snow', 'solarized-dark': 'bokeh',
     'rose-pine': 'petals', tech: 'network', synthwave: 'grid',
-    slate: 'sparkline', boardroom: 'skyline',
+    espresso: 'bokeh', dracula: 'bokeh', 'amber-terminal': 'matrix', bubblegum: 'bokeh',
   };
 
   let canvas, ctx, w = 0, h = 0;
-  let traces = [], pads = [], pulses = [];   // circuit
+  let traces = [], pads = [], chips = [], pulses = []; // circuit
+  let circuitBoard, circuitTime = null;
   let drops = [], matrixSpeed = [];          // matrix
   let parts = [], shooters = [], gridPhase = 0; // generic particle effects
   let effect = null, raf = null, active = false;
@@ -28,9 +28,11 @@
   let colAccent = '#7c4dff', colCyan = '#21e6ff', colText = '#e8e8f0', colWarm = '#ff9e64';
   const FONT = 16;
   const GLYPHS = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎ0123456789:.=*+<>';
+  let glyphs = GLYPHS;
   let colRain = '#39ff14', colLead = '#d7ffd7', colBgFade = 'rgba(0,0,0,0.08)';
 
-  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const motion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  let reduceMotion = !!(motion && motion.matches);
   function rand(a, b) { return a + Math.random() * (b - a); }
 
   function hexToRgba(hex, a) {
@@ -75,7 +77,7 @@
     colWarm = cs.getPropertyValue('--orange').trim() || cs.getPropertyValue('--yellow').trim() || colAccent;
     // matrix uses the (green) accent for glyphs; trails fade toward the bg.
     colRain = colAccent;
-    colLead = '#e9ffe9';
+    colLead = colText;
     colBgFade = hexToRgba(cs.getPropertyValue('--bg').trim() || '#000', 0.06);
   }
 
@@ -94,66 +96,155 @@
     }
     return pts[pts.length - 1];
   }
-  function makePulse(ti) {
-    const len = traceLen(traces[ti]);
-    return { ti, len, dist: Math.random() * len, speed: 0.9 + Math.random() * 1.8, color: Math.random() < 0.5 ? colAccent : colCyan };
+  // Route parallel buses between chip pins. All bends are 45 degrees, and the
+  // horizontal/vertical corridors meet at components rather than random junctions.
+  function circuitBus(a, b, vertical, count, side, terminals = 0) {
+    const gap = b.u - a.u;
+    if (gap <= 0) return;
+    const bend = Math.min(52, gap * 0.16);
+    const middle = (a.v + b.v) / 2 + side * bend;
+    const diagonal = Math.abs(middle - a.v) + Math.abs(b.v - middle);
+    const lead = Math.min(26, gap * 0.12, (gap - diagonal) / 2);
+    if (lead <= 0) return;
+    for (let lane = 0; lane < count; lane++) {
+      const offset = (lane - (count - 1) / 2) * 8;
+      const points = [
+        [a.u, a.v], [a.u + lead, a.v],
+        [a.u + lead + Math.abs(middle - a.v), middle],
+        [b.u - lead - Math.abs(b.v - middle), middle],
+        [b.u - lead, b.v], [b.u, b.v],
+      ].map(([u, v]) => vertical ? { x: v + offset, y: u } : { x: u, y: v + offset });
+      traces.push(points);
+      if (terminals & 1) pads.push(points[0]);
+      if (terminals & 2) pads.push(points[points.length - 1]);
+    }
   }
   function genCircuit() {
-    traces = []; pads = [];
-    const C = Math.max(2, Math.floor(w / GS)), R = Math.max(2, Math.floor(h / GS));
-    const n = Math.max(10, Math.round((C * R) / 7));
-    for (let k = 0; k < n; k++) {
-      let cx = (Math.random() * C) | 0, cy = (Math.random() * R) | 0;
-      let d = [[1, 0], [-1, 0], [0, 1], [0, -1]][(Math.random() * 4) | 0];
-      const pts = [{ x: cx * GS, y: cy * GS }];
-      const len = 3 + ((Math.random() * 8) | 0);
-      for (let i = 0; i < len; i++) {
-        if (Math.random() < 0.45) d = Math.random() < 0.5 ? [d[1], -d[0]] : [-d[1], d[0]];
-        cx += d[0]; cy += d[1];
-        if (cx < 0 || cx > C || cy < 0 || cy > R) break;
-        pts.push({ x: cx * GS, y: cy * GS });
+    traces = []; pads = []; chips = []; pulses = []; circuitTime = null;
+    const cols = Math.max(1, Math.min(6, Math.round(w / 480)));
+    const rows = Math.max(1, Math.min(4, Math.round(h / 340)));
+    const sx = w / cols, sy = h / rows;
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < cols; c++) {
+        const chip = {
+          x: Math.round((c + 0.5) * sx + (r % 2 ? 24 : -24)),
+          y: Math.round((r + 0.5) * sy + (c % 2 ? 18 : -18)),
+        };
+        chips.push(chip); row.push(chip);
       }
-      if (pts.length >= 2) {
-        traces.push(pts);
-        pads.push(pts[0], pts[pts.length - 1]);
-        if (pts.length > 3 && Math.random() < 0.5) pads.push(pts[(pts.length / 2) | 0]);
+      for (let c = 0; c <= cols; c++) {
+        const left = row[c - 1], right = row[c];
+        circuitBus(
+          { u: left ? left.x + 47 : 24, v: left ? left.y : right.y },
+          { u: right ? right.x - 47 : w - 24, v: right ? right.y : left.y },
+          false, 6, r % 2 ? -1 : 1, (left ? 0 : 1) | (right ? 0 : 2)
+        );
       }
     }
-    pulses = [];
-    for (let i = 0; i < traces.length; i++) if (Math.random() < 0.55) pulses.push(makePulse(i));
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r <= rows; r++) {
+        const top = chips[(r - 1) * cols + c], bottom = chips[r * cols + c];
+        circuitBus(
+          { u: top ? top.y + 39 : 24, v: top ? top.x : bottom.x },
+          { u: bottom ? bottom.y - 39 : h - 24, v: bottom ? bottom.x : top.x },
+          true, 4, c % 2 ? 1 : -1, (top ? 0 : 1) | (bottom ? 0 : 2)
+        );
+      }
+    }
+    // Keep most of the board quiet; each signal has a pause between journeys.
+    const routes = traces.map((_, i) => i);
+    const count = Math.min(16, Math.max(4, Math.round(w * h / 85000)), routes.length);
+    for (let i = 0; i < count; i++) {
+      const ti = routes.splice(Math.floor(Math.random() * routes.length), 1)[0];
+      const len = traceLen(traces[ti]), tail = rand(46, 78), cycle = len + tail + rand(140, 300);
+      pulses.push({ ti, len, tail, cycle, dist: rand(0, cycle), speed: rand(65, 100), color: i % 4 ? colAccent : colCyan });
+    }
+    // Etched copper, pads and components are painted once, not on every frame.
+    circuitBoard = document.createElement('canvas');
+    circuitBoard.width = w; circuitBoard.height = h;
+    paintCircuit(circuitBoard.getContext('2d'));
   }
-  function drawCircuit(alpha) {
-    ctx.strokeStyle = hexToRgba(colAccent, alpha);
-    ctx.lineWidth = 1.4; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.beginPath();
+  function paintCircuit(board) {
+    board.lineJoin = 'round'; board.lineCap = 'round';
+    board.strokeStyle = hexToRgba(colCyan, 0.22); board.lineWidth = 1;
+    board.beginPath();
     for (const pts of traces) {
-      ctx.moveTo(pts[0].x + 0.5, pts[0].y + 0.5);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x + 0.5, pts[i].y + 0.5);
+      board.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) board.lineTo(pts[i].x, pts[i].y);
+    }
+    board.stroke();
+    board.strokeStyle = hexToRgba(colCyan, 0.42); board.lineWidth = 1.2;
+    for (const p of pads) { board.beginPath(); board.arc(p.x, p.y, 2.6, 0, Math.PI * 2); board.stroke(); }
+    for (let i = 0; i < chips.length; i++) {
+      const { x, y } = chips[i];
+      board.strokeStyle = hexToRgba(colCyan, 0.36); board.lineWidth = 2;
+      board.beginPath();
+      for (let pin = -20; pin <= 20; pin += 8) {
+        board.moveTo(x - 47, y + pin); board.lineTo(x - 40, y + pin);
+        board.moveTo(x + 40, y + pin); board.lineTo(x + 47, y + pin);
+      }
+      for (let pin = -12; pin <= 12; pin += 8) {
+        board.moveTo(x + pin, y - 39); board.lineTo(x + pin, y - 32);
+        board.moveTo(x + pin, y + 32); board.lineTo(x + pin, y + 39);
+      }
+      board.stroke();
+      board.fillStyle = hexToRgba(colCyan, 0.025); board.fillRect(x - 40, y - 32, 80, 64);
+      board.strokeStyle = hexToRgba(colCyan, 0.26); board.lineWidth = 1;
+      board.strokeRect(x - 40, y - 32, 80, 64);
+      board.strokeStyle = hexToRgba(colCyan, 0.10); board.strokeRect(x - 27, y - 19, 54, 38);
+      board.fillStyle = hexToRgba(colCyan, 0.38);
+      board.beginPath(); board.arc(x - 33, y - 25, 1.5, 0, Math.PI * 2); board.fill();
+      board.font = '9px monospace'; board.textAlign = 'center'; board.textBaseline = 'middle';
+      board.fillText('U' + String(i + 1).padStart(2, '0'), x, y);
+    }
+  }
+  function strokeTraceRange(pts, from, to) {
+    if (to <= from) return;
+    const start = posOnTrace(pts, from);
+    ctx.beginPath(); ctx.moveTo(start.x, start.y);
+    let distance = 0;
+    for (let i = 1; i < pts.length; i++) {
+      distance += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+      if (distance <= from) continue;
+      if (distance >= to) { const end = posOnTrace(pts, to); ctx.lineTo(end.x, end.y); break; }
+      ctx.lineTo(pts[i].x, pts[i].y);
     }
     ctx.stroke();
-    ctx.fillStyle = hexToRgba(colAccent, Math.min(1, alpha * 1.8));
-    for (const p of pads) { ctx.beginPath(); ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2); ctx.fill(); }
   }
   function drawPulse(pl) {
-    const p = posOnTrace(traces[pl.ti], pl.dist);
-    ctx.shadowColor = pl.color; ctx.shadowBlur = 12; ctx.fillStyle = pl.color;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 2.0, 0, Math.PI * 2); ctx.fill();
-  }
-  function frameCircuit() {
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.fillStyle = 'rgba(0,0,0,0.12)';
-    ctx.fillRect(0, 0, w, h);
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.shadowBlur = 0;
-    drawCircuit(0.03);
-    for (const pl of pulses) {
-      pl.dist += pl.speed;
-      if (pl.dist > pl.len) { pl.dist = 0; pl.color = Math.random() < 0.5 ? colAccent : colCyan; }
-      drawPulse(pl);
+    if (pl.dist > pl.len + pl.tail) return;
+    const pts = traces[pl.ti];
+    ctx.shadowColor = pl.color; ctx.shadowBlur = 7;
+    ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // Draw the tail along the path itself so it stays on the copper at corners.
+    for (let i = 0; i < 8; i++) {
+      const from = Math.max(0, pl.dist - pl.tail + pl.tail * i / 8);
+      const to = Math.min(pl.len, pl.dist - pl.tail + pl.tail * (i + 1) / 8);
+      ctx.strokeStyle = hexToRgba(pl.color, 0.75 * ((i + 1) / 8) ** 2);
+      strokeTraceRange(pts, from, to);
+    }
+    if (pl.dist <= pl.len) {
+      const p = posOnTrace(pts, pl.dist);
+      ctx.fillStyle = hexToRgba(colText, 0.9);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 1.4, 0, Math.PI * 2); ctx.fill();
     }
     ctx.shadowBlur = 0;
   }
-  function staticCircuit() { drawCircuit(0.16); ctx.shadowBlur = 0; for (const pl of pulses) drawPulse(pl); }
+  function staticCircuit() {
+    if (!w || !h) return;
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(circuitBoard, 0, 0);
+    for (const pl of pulses) drawPulse(pl);
+  }
+  function frameCircuit(time) {
+    // Pixels per second, independent of a 60/120/144 Hz display. Clamp after a
+    // stalled frame; hidden pages stop through the shared lifecycle below.
+    const dt = circuitTime === null ? 0 : Math.min(0.05, Math.max(0, (time - circuitTime) / 1000));
+    circuitTime = time;
+    for (const pl of pulses) pl.dist = (pl.dist + pl.speed * dt) % pl.cycle;
+    staticCircuit();
+  }
 
   // ─── Matrix ───────────────────────────────────────────────────────────────
   function spawnMatrix() {
@@ -171,13 +262,13 @@
       if (row === prevRow) continue;
       const y = row * FONT;
       ctx.fillStyle = Math.random() < 0.12 ? colLead : colRain;
-      ctx.fillText(GLYPHS[(Math.random() * GLYPHS.length) | 0], i * FONT, y);
+      ctx.fillText(glyphs[(Math.random() * glyphs.length) | 0], i * FONT, y);
       if (y > h && Math.random() > 0.96) { drops[i] = 0; matrixSpeed[i] = 0.14 + Math.random() * 0.26; }
     }
   }
   function staticMatrix() {
     ctx.font = FONT + 'px monospace'; ctx.textBaseline = 'top'; ctx.fillStyle = colRain;
-    for (let i = 0; i < drops.length; i++) ctx.fillText(GLYPHS[(Math.random() * GLYPHS.length) | 0], i * FONT, drops[i] * FONT);
+    for (let i = 0; i < drops.length; i++) ctx.fillText(glyphs[(Math.random() * glyphs.length) | 0], i * FONT, drops[i] * FONT);
   }
 
   // ─── Stars (midnight) ──────────────────────────────────────────────────────
@@ -395,9 +486,10 @@
     const e = effects[effect]; if (!e) return;
     (e.static || e.frame)();
   }
-  function frame() {
+  function frame(time) {
+    raf = null;
     if (!active) return;
-    const e = effects[effect]; if (e && e.frame) e.frame();
+    const e = effects[effect]; if (e && e.frame) e.frame(time);
     raf = requestAnimationFrame(frame);
   }
 
@@ -416,19 +508,19 @@
   }
 
   function update() {
+    stop();
+    document.documentElement.setAttribute('data-bgfx-paused', String(!!document.hidden));
     const id = document.documentElement.getAttribute('data-theme');
     const eff = EFFECTS[id] || null;
-    if (eff) {
-      if (!ensureCanvas()) return;
-      if (active) {
-        effect = eff;
-        ctx.clearRect(0, 0, w, h);
-        readColors(); spawn();
-        if (reduceMotion) drawStatic();
-      } else { effect = eff; start(); }
-    } else { stop(); }
+    const intensity = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bgfx-opacity'));
+    if (document.hidden || intensity === 0) return;
+    glyphs = id === 'amber-terminal' ? '0123456789ABCDEF_/:.=>[]' : GLYPHS;
+    if (eff && ensureCanvas()) { effect = eff; start(); }
   }
 
   window.addEventListener('prism-theme-change', update);
+  window.addEventListener('prism-bgfx-change', update);
+  document.addEventListener('visibilitychange', update);
+  if (motion && motion.addEventListener) motion.addEventListener('change', e => { reduceMotion = e.matches; update(); });
   update();
 })();

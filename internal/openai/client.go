@@ -266,7 +266,8 @@ func (u *streamUsage) usage() *ollama.Usage {
 }
 
 type streamChunk struct {
-	Usage   *streamUsage `json:"usage"`
+	Usage   *streamUsage    `json:"usage"`
+	Error   json.RawMessage `json:"error"`
 	Choices []struct {
 		Delta struct {
 			Content          string         `json:"content"`
@@ -487,6 +488,19 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		var chunk streamChunk
 		if err := json.Unmarshal(data, &chunk); err != nil {
 			continue
+		}
+		if len(chunk.Error) > 0 && string(bytes.TrimSpace(chunk.Error)) != "null" {
+			var providerError struct {
+				Message string `json:"message"`
+			}
+			message := "provider reported an error"
+			if json.Unmarshal(chunk.Error, &providerError) == nil && strings.TrimSpace(providerError.Message) != "" {
+				message = providerError.Message
+			}
+			// An error envelope invalidates this completion, even if a preceding
+			// delta already supplied tool arguments or a finish reason.
+			out <- ollama.StreamEvent{Err: fmt.Errorf("openai stream error: %s", message)}
+			return
 		}
 		if chunk.Usage != nil {
 			usage = chunk.Usage.usage()

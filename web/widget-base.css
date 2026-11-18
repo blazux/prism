@@ -43,11 +43,11 @@ code,kbd{font-family:var(--mono,monospace);background:var(--bg3);padding:1px 5px
   background:var(--bg3);color:var(--text);padding:5px 12px;transition:border-color .15s,background .15s;
 }
 .btn:hover{border-color:var(--accent);background:var(--bg4)}
-.btn-accent{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn-accent:hover{filter:brightness(1.08)}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:var(--on-accent,#fff)}
+.btn-accent:hover{background:var(--accent);border-color:var(--accent);color:var(--on-accent,#fff);box-shadow:0 0 0 2px var(--accent-dim)}
 .badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:999px;background:var(--bg3);color:var(--text2)}
 .ok,.success{color:var(--green)}.warn,.warning{color:var(--yellow)}.err,.error{color:var(--red)}.info{color:var(--accent)}
-.bg-ok{background:var(--green)}.bg-warn{background:var(--yellow)}.bg-err{background:var(--red)}
+.bg-ok{background:var(--green);color:var(--on-success,#fff)}.bg-warn{background:var(--yellow);color:var(--on-warning,#111)}.bg-err{background:var(--red);color:var(--on-danger,#fff)}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--border)}

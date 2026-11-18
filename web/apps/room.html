@@ -61,7 +61,7 @@
 
   .av { width: 30px; height: 30px; border-radius: 50%; overflow: hidden; position: relative;
         display: inline-flex; align-items: center; justify-content: center;
-        background: var(--accent); color: #fff; font-weight: 600; font-size: 12px; flex: 0 0 auto; }
+        background: var(--accent); color: var(--on-accent,#fff); font-weight: 600; font-size: 12px; flex: 0 0 auto; }
   .av img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .av.sm { width: 22px; height: 22px; font-size: 10px; }
 
@@ -96,6 +96,8 @@
   .room-empty { color: var(--text3); font-size: 13px; padding: 24px; text-align: center; }
 
   .composer { border-top: 1px solid var(--border); flex-shrink: 0; position: relative; }
+  #send-status { padding: 0 88px 6px 16px; color: var(--text2); font-size: 12px; }
+  #send-status:empty { display: none; }
   .reply-bar { display: none; align-items: center; gap: 8px; padding: 6px 88px 0 16px; font-size: 12px; color: var(--text2); }
   .reply-bar.on { display: flex; }
   .reply-bar .x { margin-left: auto; cursor: pointer; color: var(--text3); }
@@ -108,7 +110,7 @@
          background: var(--bg2); color: var(--text); font: inherit; font-size: 13.5px; resize: none; max-height: 120px; }
   #box:focus { outline: none; border-color: var(--accent); }
   #send-ic { position: absolute; right: 6px; bottom: 5px; width: 28px; height: 28px;
-             border: none; border-radius: 50%; background: var(--accent); color: #fff;
+             border: none; border-radius: 50%; background: var(--accent); color: var(--on-accent,#fff);
              display: flex; align-items: center; justify-content: center; cursor: pointer;
              opacity: .45; transition: opacity .15s, transform .12s; }
   #send-ic.ready { opacity: 1; }
@@ -159,9 +161,10 @@
   <div class="composer">
     <div class="reply-bar" id="reply-bar"><span id="reply-txt"></span><span class="x" id="reply-x">✕</span></div>
     <form id="f"><div class="inputwrap">
-      <textarea id="box" rows="1" maxlength="16000" placeholder="Message the room…  @ to mention  ·  @agent to ask the shared agent" autocomplete="off"></textarea>
+      <textarea id="box" rows="1" placeholder="Message the room…  @ to mention  ·  @agent to ask the shared agent" autocomplete="off"></textarea>
       <button id="send-ic" type="submit" title="Send (Enter)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
     </div></form>
+    <div id="send-status" role="status" aria-live="polite"></div>
     <div id="mention-pop"></div>
   </div>
 </div>
@@ -176,6 +179,8 @@ let members = []          // [{userId,name,avatarVer,role}]
 let msgs = []             // ordered message objects
 const msgById = new Map()
 let replyTo = null
+let draftRevision = 0
+const roomDrafts = new Map(), pendingMessages = new Map()
 const typingUsers = new Map() // userId -> timeout
 let agentTyping = false
 let agentTools = [] // live indicator; durable traces belong to their message
@@ -426,13 +431,16 @@ function setLive(v){
   if (!bar) return
   bar.style.display = v ? 'none' : 'block'
   bar.textContent = 'Disconnected from the room — reconnecting…'
+  updateSendStatus()
 }
 function scheduleReconnect(g){
   if (retry) return
   retry = setTimeout(() => { retry = null; retryDelay = Math.min(retryDelay * 2, 15000); if (gid === g) connect(g,true) }, retryDelay)
 }
 function handleRoomEvent(d){
-  if (d.type === 'history') {
+  if (d.type === 'room_receipt') {
+    handleRoomReceipt(d)
+  } else if (d.type === 'history') {
     for (const m of d.messages || []) upsertMessage(m)
     msgs.sort((a,b) => a.id-b.id); renderAll()
     $('history-more').disabled = (d.messages || []).length < 50
@@ -460,12 +468,14 @@ function handleRoomEvent(d){
   else if (d.type === 'error') PrismAPI.toast(d.content)
 }
 function connect(g,reconnecting = false){
+  g = String(g)
+  if (gid !== null) saveRoomDraft()
   const generation = ++roomGeneration
   if (retry){ clearTimeout(retry); retry = null }
   gid = g
   if (ws){ ws.onclose = null; ws.close() }
   if (!reconnecting){
-    msgs = []; msgById.clear(); clearReply(); $('log').innerHTML = ''
+    msgs = []; msgById.clear(); restoreRoomDraft(g); $('log').innerHTML = ''
     $('context-panel').hidden = true; $('history-more').disabled = true
   }
   typingUsers.forEach(clearTimeout); typingUsers.clear(); agentTyping = false; agentTools = []
@@ -473,7 +483,8 @@ function connect(g,reconnecting = false){
   loadMembers(g)
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   ws = new WebSocket(proto + '://' + location.host + '/wsroom?group=' + encodeURIComponent(g))
-  ws.onopen = () => { if (generation === roomGeneration){ setLive(true); retryDelay = 1000 } }
+  setLive(false)
+  ws.onopen = () => { if (generation === roomGeneration){ setLive(true); retryDelay = 1000; sendPending(g) } }
   ws.onclose = () => { if (generation === roomGeneration){ setLive(false); scheduleReconnect(g) } }
   ws.onerror = () => { if (generation === roomGeneration) setLive(false) }
   ws.onmessage = e => { if (generation === roomGeneration) handleRoomEvent(JSON.parse(e.data)) }
@@ -494,19 +505,80 @@ async function loadMembers(g){
 
 // ── send / reply ─────────────────────────────────────────────────────────────────
 function setReply(m){
+  draftRevision++
   replyTo = m.id
   $('reply-txt').innerHTML = `Replying to <b>${esc(m.authorName)}</b>: ${esc(m.content.slice(0,60))}`
   $('reply-bar').classList.add('on'); $('box').focus()
 }
-function clearReply(){ replyTo = null; $('reply-bar').classList.remove('on') }
+function clearReply(){ if (replyTo !== null) draftRevision++; replyTo = null; $('reply-bar').classList.remove('on') }
 $('reply-x').onclick = clearReply
 
+function saveRoomDraft(){
+  roomDrafts.set(String(gid), {text:$('box').value, replyTo, replyLabel:$('reply-txt').innerHTML, revision:draftRevision})
+}
+function restoreRoomDraft(g){
+  const d = roomDrafts.get(g) || {text:'',replyTo:null,replyLabel:'',revision:0}
+  $('box').value = d.text; replyTo = d.replyTo; draftRevision = d.revision
+  $('reply-txt').innerHTML = d.replyLabel
+  $('reply-bar').classList.toggle('on', replyTo !== null)
+  $('send-ic').classList.toggle('ready', !!d.text.trim()); autoGrow(); hideMentions()
+}
+function updateSendStatus(message){
+  const pending = pendingMessages.get(String(gid))
+  $('send-status').textContent = message || (pending ? (live ? 'Sending message…' : 'Delivery not confirmed. Your text is kept while reconnecting…') : '')
+}
+function sendPending(g){
+  const pending = pendingMessages.get(String(g))
+  if (!pending || String(gid) !== String(g) || !ws || ws.readyState !== 1) return
+  clearTimeout(pending.timer)
+  try {
+    ws.send(JSON.stringify({type:'message',requestId:pending.requestId,content:pending.content,replyTo:pending.replyTo}))
+    // Missing receipts are uncertain: reconnect and retry the exact same id.
+    pending.timer = setTimeout(() => {
+      if (pendingMessages.get(String(g)) === pending && String(gid) === String(g)) ws.close()
+    }, 10000)
+  } catch(e) {
+    setLive(false); ws.close()
+  }
+  updateSendStatus()
+}
+function handleRoomReceipt(d){
+  const g = String(d.groupId), pending = pendingMessages.get(g)
+  if (!pending || d.requestId !== pending.requestId) return
+  clearTimeout(pending.timer)
+  if (d.status === 'unavailable') {
+    updateSendStatus('Delivery not confirmed. Your text is kept while reconnecting…')
+    if (g === String(gid)) ws.close()
+    return
+  }
+  if (d.status !== 'accepted' && d.status !== 'rejected') return
+  pendingMessages.delete(g)
+  if (d.status === 'accepted') {
+    if (g === String(gid)) {
+      if (d.message) addMessage(d.message)
+      // A later edit or reply selection belongs to the next message.
+      if (draftRevision === pending.revision && $('box').value === pending.draft && replyTo === pending.replyTo) {
+        $('box').value = ''; autoGrow(); clearReply(); hideMentions()
+        $('send-ic').classList.remove('ready')
+      }
+      saveRoomDraft()
+    } else {
+      const draft = roomDrafts.get(g)
+      if (draft && draft.revision === pending.revision && draft.text === pending.draft && draft.replyTo === pending.replyTo) roomDrafts.delete(g)
+    }
+  } else {
+    PrismAPI.toast(d.content || 'Message not sent. Your text is still in the box.')
+  }
+  if (g === String(gid)) updateSendStatus(d.status === 'rejected' ? (d.content || 'Message not sent. Your text is still in the box.') : '')
+}
 function send(){
   const v = $('box').value.trim(); if (!v) return
+  if (pendingMessages.has(String(gid))){ PrismAPI.toast('Your previous message is awaiting confirmation. Your text is kept.'); return }
+  if ([...v].length > 16000){ PrismAPI.toast('Message too long (maximum 16000 characters).'); return }
   if (!ws || ws.readyState !== 1){ PrismAPI.toast('Not sent: you are disconnected from the room. It reconnects on its own; your text is still in the box.'); return }
-  ws.send(JSON.stringify({ type: 'message', content: v, replyTo: replyTo }))
-  $('box').value = ''; autoGrow(); clearReply(); hideMentions()
-  $('send-ic').classList.remove('ready')
+  const requestId = globalThis.crypto?.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2)
+  pendingMessages.set(String(gid), {requestId,content:v,draft:$('box').value,replyTo,revision:draftRevision})
+  saveRoomDraft(); sendPending(gid)
 }
 $('f').onsubmit = e => { e.preventDefault(); send() }
 
@@ -514,6 +586,8 @@ $('f').onsubmit = e => { e.preventDefault(); send() }
 let lastTyping = 0
 function autoGrow(){ const b = $('box'); b.style.height = 'auto'; b.style.height = Math.min(b.scrollHeight, 120) + 'px' }
 $('box').addEventListener('input', () => {
+  draftRevision++
+  updateSendStatus()
   autoGrow()
   $('send-ic').classList.toggle('ready', !!$('box').value.trim())
   const now = Date.now(); if (ws && ws.readyState === 1 && now - lastTyping > 1800){ ws.send(JSON.stringify({type:'typing'})); lastTyping = now }

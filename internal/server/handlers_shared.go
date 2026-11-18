@@ -270,9 +270,9 @@ func (s *Server) handleSharedItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		added := 0
+		var importErr error
 		for i, wdg := range p.Widgets {
-			// Fresh id so it never collides with an existing widget on the board.
-			wid := fmt.Sprintf("%s-shared%d-%d", shareSlug(wdg.Title), id, i)
+			preferredID := fmt.Sprintf("%s-shared%d-%d", shareSlug(wdg.Title), id, i)
 			cols, height := wdg.Cols, wdg.Height
 			if cols <= 0 {
 				cols = 1
@@ -280,13 +280,23 @@ func (s *Server) handleSharedItem(w http.ResponseWriter, r *http.Request) {
 			if height <= 0 {
 				height = 280
 			}
-			if err := s.writeManagedFile(filepath.Join(dir, wid+".html"), []byte(wdg.Content)); err != nil {
+			meta, _ := json.Marshal(map[string]interface{}{"title": wdg.Title, "cols": cols, "height": height, "resources": wdg.Resources, "resourceVersions": wdg.ResourceVersions})
+			root, rel, err := s.fileRoot(dir)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "could not import widget")
+				return
+			}
+			wid, err := resources.CreateWidgetCopy(root, rel, preferredID, []byte(wdg.Content), meta)
+			if err != nil {
+				importErr = err
 				continue
 			}
-			meta, _ := json.Marshal(map[string]interface{}{"title": wdg.Title, "cols": cols, "height": height, "resources": wdg.Resources, "resourceVersions": wdg.ResourceVersions})
-			s.writeManagedFile(filepath.Join(dir, wid+".meta.json"), meta)
 			s.pushPluginToSession(target, wid, wdg.Title, wdg.Content, cols, height)
 			added++
+		}
+		if added == 0 && importErr != nil {
+			writeErr(w, http.StatusInternalServerError, "could not import the shared widgets")
+			return
 		}
 		writeJSON(w, map[string]interface{}{"added": added})
 

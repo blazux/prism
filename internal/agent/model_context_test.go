@@ -66,3 +66,59 @@ func TestToolArgumentsAndImagesTriggerCompaction(t *testing.T) {
 		t.Fatal("unfinished tool turn was split")
 	}
 }
+
+func TestGenerationLimitUsesMatchingContextReserve(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		context, limit, want int
+	}{
+		{"large context with override", 500000, 65536, 65536},
+		{"large context automatic", 500000, 0, 16384},
+		{"small context retains input room", 32768, 65536, 8192},
+		{"unknown context explicit", 0, 65536, 65536},
+		{"unknown context automatic", 0, 0, 16384},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &capturingBackend{reply: "ok"}
+			a := &Agent{
+				ollama: backend, executor: &ToolExecutor{}, model: "fixture", sessionID: "fixture",
+				modelContextTokens: tc.context, modelMaxOutputTokens: tc.limit, contextCharsPerToken: 3.5,
+				history: []ollama.Message{{Role: "user", Content: "Hello"}},
+			}
+			if _, _, _, _, err := a.callOllama(t.Context(), "", make(chan Event, 20)); err != nil {
+				t.Fatal(err)
+			}
+			if got := backend.req.Options.NumPredict; got != tc.want {
+				t.Fatalf("generation limit sent to backend = %d, want %d", got, tc.want)
+			}
+			if tc.context > 0 {
+				wantInput := int(float64(tc.context-tc.want)*3.5) - a.contextOverheadChars
+				if got := a.modelInputBudgetChars(); got != wantInput {
+					t.Fatalf("input budget = %d, want %d with the same output reserve", got, wantInput)
+				}
+			}
+			if len(a.history) != 1 || a.history[0].Content != "Hello" {
+				t.Fatal("generation setting changed conversation history")
+			}
+		})
+	}
+}
+
+func TestModelSwitchDoesNotReuseGenerationLimit(t *testing.T) {
+	backend := &metadataContextBackend{info: ollama.ModelCapabilities{ContextWindow: 500000, MaxOutputTokens: 65536}}
+	a := &Agent{ollama: backend, executor: &ToolExecutor{}}
+	a.refreshModelCapabilities(t.Context())
+	if a.modelMaxOutputTokens != 65536 {
+		t.Fatal("per-model generation limit not loaded")
+	}
+	a.SetBackend(&capturingBackend{}, "other")
+	if a.modelContextTokens != 0 || a.modelMaxOutputTokens != 0 {
+		t.Fatal("new source/model inherited the previous generation limit")
+	}
+	backend.info = ollama.ModelCapabilities{ContextWindow: 32768}
+	a.SetBackend(backend, "small")
+	a.refreshModelCapabilities(t.Context())
+	if a.modelMaxOutputTokens != 0 || modelOutputReserve(a.modelContextTokens, a.modelMaxOutputTokens) != 8192 {
+		t.Fatal("automatic limit not restored for the new model")
+	}
+}

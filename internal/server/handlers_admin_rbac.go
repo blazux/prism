@@ -118,6 +118,9 @@ func (s *Server) handleAdminGroups(w http.ResponseWriter, r *http.Request) {
 		case "delete":
 			err = ms.DeleteGroup(r.Context(), b.GroupID)
 			if err == nil {
+				if s.rooms != nil {
+					s.rooms.closeClients(b.GroupID, nil)
+				}
 				// Best-effort purge of everything keyed by the group outside the FK
 				// cascades: RAG collections, group MCP servers, Webex config/token,
 				// shared notes, agent avatar, room/Webex histories.
@@ -142,6 +145,9 @@ func (s *Server) handleAdminGroups(w http.ResponseWriter, r *http.Request) {
 			err = ms.AddGroupMember(r.Context(), b.GroupID, b.UserID, role)
 		case "remove_member":
 			err = ms.RemoveGroupMember(r.Context(), b.GroupID, b.UserID)
+			if err == nil && s.rooms != nil {
+				s.rooms.closeClients(b.GroupID, &b.UserID)
+			}
 		default:
 			writeErr(w, http.StatusBadRequest, "unknown action")
 			return

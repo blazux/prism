@@ -1,0 +1,124 @@
+services:
+  prism-server:
+    image: ${PRISM_IMAGE:?Set the tested Prism image}
+    container_name: ${DEMO_NAME:?Set a unique demo name}-server
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DEMO_PORT:?Set a loopback HTTP port}:8080"
+    environment:
+      PRISM_TOKEN: ${PRISM_TOKEN:?Set a random access token}
+      MULTI_USER: ${MULTI_USER:-}
+      POSTGRES_URL: postgres://prism:${POSTGRES_PASSWORD:?Set a database password}@postgres:5432/prism?sslmode=disable
+      LLM_BACKEND: openai
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:?Set the existing model endpoint}
+      OPENAI_MODEL: ${CHAT_MODEL:-flash-next}
+      OLLAMA_URL: ${OLLAMA_URL:-http://localhost:11434}
+      EMBED_BACKEND: ${EMBED_BACKEND:-openai}
+      EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding}
+      SEARXNG_URL: http://searxng:8080
+      AGENT_CONTAINER: ${DEMO_NAME}-workspace
+      WORKSPACE_DIR: /workspace
+      PLUGIN_DIR: /workspace/.plugins
+      DOCKER_MODE: workspace
+      WORKSPACE_DOCKER_SOCKET: unix:///var/run/docker.sock
+      WORKSPACE_DOCKER_USER: "0"
+      TZ: ${TZ:-America/Martinique}
+    volumes:
+      - workspace:/workspace
+      - server-private:/var/lib/prism
+      - notes:/vault
+      - /var/run/docker.sock:/var/run/docker.sock
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 0.75
+    pids_limit: 192
+    depends_on:
+      postgres:
+        condition: service_healthy
+      workspace:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+    logging: &logs
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "2"
+
+  workspace:
+    image: ${WORKSPACE_IMAGE:?Set the tested CPU workspace image}
+    container_name: ${DEMO_NAME}-workspace
+    privileged: true
+    cgroup: private
+    restart: unless-stopped
+    stop_grace_period: 45s
+    environment:
+      TZ: ${TZ:-America/Martinique}
+      TERM: xterm-256color
+      LANG: C.UTF-8
+      NO_PROXY: prism-server,localhost,127.0.0.1
+      no_proxy: prism-server,localhost,127.0.0.1
+    volumes:
+      - workspace:/workspace
+      - service-images:/var/lib/docker
+    mem_limit: ${WORKSPACE_MEMORY:-768m}
+    cpus: 1.25
+    pids_limit: 512
+    logging: *logs
+
+  postgres:
+    image: ${POSTGRES_IMAGE:?Set a pgvector image digest}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: prism
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: prism
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=40, -c, max_parallel_workers_per_gather=0]
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U prism -d prism"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 96
+    logging: *logs
+
+  searxng:
+    image: ${SEARXNG_IMAGE:?Set a SearXNG image digest}
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?Set a random search secret}
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./searxng.yml:/etc/searxng/settings.yml:ro
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 96
+    logging: *logs
+
+  protonmail-bridge:
+    profiles: [protonmail]
+    image: ${PROTONMAIL_IMAGE:-blazux/prism-protonmail-bridge:demo-vps-20261112}
+    container_name: ${DEMO_NAME}-protonmail-bridge
+    restart: unless-stopped
+    volumes:
+      - protonmail:/root
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 128
+    logging: *logs
+
+volumes:
+  workspace:
+  server-private:
+  service-images:
+  notes:
+  database:
+  protonmail:

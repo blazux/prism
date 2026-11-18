@@ -33,9 +33,9 @@ a{color:#3b82f6}
 `
 
 const loginPage = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Spectrum · Sign in</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Prism · Sign in</title>
 <style>` + authPageCSS + `</style></head><body>
-<h1>Sign in</h1><div class="sub">Spectrum workspace</div>
+<h1>Sign in</h1><div class="sub">Prism workspace</div>
 <label>Email<input id="email" type="email" autocomplete="username"></label>
 <label>Password<input id="password" type="password" autocomplete="current-password"></label>
 <button id="btn" onclick="login()">Sign in</button>
@@ -55,7 +55,7 @@ $('password').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
 </script></body></html>`
 
 const signupPage = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Spectrum · Create account</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Prism · Create account</title>
 <style>` + authPageCSS + `</style></head><body>
 <h1>Create account</h1><div class="sub">The first account becomes the admin. Others need admin approval.</div>
 <label>Display name<input id="name" autocomplete="name"></label>

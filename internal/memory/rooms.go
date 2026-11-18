@@ -6,7 +6,10 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type RoomMessage struct {
@@ -65,6 +68,52 @@ func (s *Store) AddRoomMessage(ctx context.Context, groupID int64, authorID *int
 	return m, err
 }
 
+var ErrRoomRequestConflict = errors.New("message identifier was already used for different content")
+var ErrRoomReplyNotFound = errors.New("the quoted message is not in this room")
+
+// AddRoomMessageOnce durably admits a human message. A retried request returns
+// its original message, without repeating notifications or agent work. The
+// database key also serializes concurrent retries on different connections.
+// Empty request ids preserve compatibility with older room clients.
+func (s *Store) AddRoomMessageOnce(ctx context.Context, groupID, authorID int64, authorName, content string, replyTo *int64, requestID string) (RoomMessage, bool, error) {
+	var m RoomMessage
+	var request *string
+	if requestID != "" {
+		request = &requestID
+	}
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO room_messages (group_id, author_id, author_name, content, reply_to, request_id)
+		SELECT $1, $2, $3, $4, $5, $6
+		WHERE $5::bigint IS NULL OR EXISTS (SELECT 1 FROM room_messages WHERE id=$5 AND group_id=$1)
+		ON CONFLICT (group_id, author_id, request_id) WHERE request_id IS NOT NULL DO NOTHING
+		RETURNING id, group_id, author_id, author_name, content, is_agent, created_at, reply_to, status
+	`, groupID, authorID, authorName, content, replyTo, request).
+		Scan(&m.ID, &m.GroupID, &m.AuthorID, &m.AuthorName, &m.Content, &m.IsAgent, &m.CreatedAt, &m.ReplyTo, &m.Status)
+	if err == nil {
+		return m, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return m, false, err
+	}
+	if requestID != "" {
+		err = s.pool.QueryRow(ctx, `
+			SELECT id, group_id, author_id, author_name, content, is_agent, created_at, reply_to, status
+			FROM room_messages WHERE group_id=$1 AND author_id=$2 AND request_id=$3
+		`, groupID, authorID, requestID).
+			Scan(&m.ID, &m.GroupID, &m.AuthorID, &m.AuthorName, &m.Content, &m.IsAgent, &m.CreatedAt, &m.ReplyTo, &m.Status)
+		if err == nil {
+			if m.Content != content || (m.ReplyTo == nil) != (replyTo == nil) || (replyTo != nil && *m.ReplyTo != *replyTo) {
+				return RoomMessage{}, false, ErrRoomRequestConflict
+			}
+			return m, false, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return m, false, err
+		}
+	}
+	return RoomMessage{}, false, ErrRoomReplyNotFound
+}
+
 // RecentRoomMessages returns the last `limit` messages for a group's room, oldest
 // first, each with its reactions attached.
 func (s *Store) RecentRoomMessages(ctx context.Context, groupID int64, limit int) ([]RoomMessage, error) {
@@ -121,6 +170,44 @@ func (s *Store) RoomMessagesBefore(ctx context.Context, groupID, before int64, l
 }
 
 // ─── Reactions ──────────────────────────────────────────────────────────────────
+
+func (s *Store) AddRoomReaction(ctx context.Context, groupID, msgID, userID int64, emoji string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO room_reactions (message_id, user_id, emoji)
+		SELECT id, $3, $4 FROM room_messages WHERE id = $2 AND group_id = $1
+		ON CONFLICT DO NOTHING
+	`, groupID, msgID, userID, emoji)
+	return err
+}
+
+func (s *Store) RemoveRoomReaction(ctx context.Context, groupID, msgID, userID int64, emoji string) error {
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM room_reactions rr USING room_messages m
+		WHERE rr.message_id = m.id AND m.group_id = $1 AND m.id = $2 AND rr.user_id = $3 AND rr.emoji = $4
+	`, groupID, msgID, userID, emoji)
+	return err
+}
+
+func (s *Store) RoomMessageReactions(ctx context.Context, groupID, msgID int64) ([]RoomReaction, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT rr.message_id, rr.user_id, rr.emoji
+		FROM room_reactions rr JOIN room_messages m ON m.id = rr.message_id
+		WHERE m.group_id = $1 AND m.id = $2
+	`, groupID, msgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RoomReaction
+	for rows.Next() {
+		var x RoomReaction
+		if err := rows.Scan(&x.MessageID, &x.UserID, &x.Emoji); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
 
 func (s *Store) AddReaction(ctx context.Context, msgID, userID int64, emoji string) error {
 	_, err := s.pool.Exec(ctx, `

@@ -94,6 +94,37 @@ func WriteFile(dir, name string, data []byte) error {
 	_, err := Write(dir, name, strings.NewReader(string(data)))
 	return err
 }
+
+// CreateFile writes a new confined file without replacing an existing file,
+// symlink or metadata entry. Import/copy operations must not behave like edits.
+func CreateFile(dir, name string, data []byte) error {
+	name, err := Name(name)
+	if err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err = root.MkdirAll(filepath.Dir(name), 0755); err != nil {
+		return err
+	}
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		return err
+	}
+	_, writeErr := f.Write(data)
+	closeErr := f.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = root.Remove(name)
+		if writeErr != nil {
+			return writeErr
+		}
+		return closeErr
+	}
+	return nil
+}
 func Remove(dir, name string) error {
 	name, err := Name(name)
 	if err != nil {

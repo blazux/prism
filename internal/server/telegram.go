@@ -83,7 +83,7 @@ func (m *telegramManager) usersWithToken() []int64 {
 	}
 	var out []int64
 	for _, u := range users {
-		if tgToken(m.s.tgScope(u.ID)) != "" {
+		if u.Status == memory.StatusApproved && tgToken(m.s.tgScope(u.ID)) != "" {
 			out = append(out, u.ID)
 		}
 	}
@@ -252,7 +252,13 @@ func (s *Server) telegramLoop(ctx context.Context, token string, userID int64) {
 
 func (s *Server) handleTelegramMessage(ctx context.Context, api, token string, userID, chatID int64, text string, fileIDs, names []string) {
 	var ms *memory.Store
+	var u *memory.User
 	if userID > 0 {
+		var err error
+		u, err = s.freshUser(ctx, &memory.User{ID: userID})
+		if err != nil {
+			return
+		}
 		ms = s.tgScope(userID)
 	} else {
 		ms = s.store()
@@ -292,10 +298,8 @@ func (s *Server) handleTelegramMessage(ctx context.Context, api, token string, u
 	// scopes — same identity as their browser chat, so their agent, their RAG,
 	// their knowledge. Legacy (userID 0): the old global "telegram" session.
 	session := "telegram"
-	var u *memory.User
 	if userID > 0 {
 		session = fmt.Sprintf("u%d-telegram", userID)
-		u, _ = s.store().GetUserByID(ctx, userID)
 	}
 
 	s.tgAction(api, chatID, "typing")

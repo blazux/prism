@@ -110,6 +110,28 @@ func TestSharedGalleryUpgradeKeepsLegacySharesAndGroupAccess(t *testing.T) {
 	if content, err := os.ReadFile(path); err != nil || string(content) != "<div>original clock</div>" {
 		t.Fatal("legacy widget content changed", string(content), err)
 	}
+	// Adding the same publication is a copy, never an update to a customized widget.
+	if err := os.WriteFile(path, []byte("customized clock"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	metaPath := strings.TrimSuffix(path, ".html") + ".meta.json"
+	lockedMeta := []byte(`{"title":"My clock","locked":true,"cols":3,"height":640}`)
+	if err := os.WriteFile(metaPath, lockedMeta, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if w := call("POST", "/api/shared/73/add?session=target", "", member, false); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if content, err := os.ReadFile(path); err != nil || string(content) != "customized clock" {
+		t.Fatal("customized widget replaced", string(content), err)
+	}
+	if meta, err := os.ReadFile(metaPath); err != nil || !bytes.Equal(meta, lockedMeta) {
+		t.Fatal("layout or lock replaced", string(meta), err)
+	}
+	copyPath := strings.TrimSuffix(path, ".html") + "-2.html"
+	if content, err := os.ReadFile(copyPath); err != nil || string(content) != "<div>original clock</div>" {
+		t.Fatal("new copy missing", string(content), err)
+	}
 	if w := call("GET", "/api/shared/73/preview", "", member, false); w.Code != 404 {
 		t.Fatal("legacy missing preview", w.Code)
 	}

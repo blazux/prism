@@ -44,17 +44,33 @@
     return r;
   };
 
-  // prismChat(message) → send a message to the agent in THIS dashboard's live
-  // chat (e.g. from an "Analyse" button): it lands in the chat input, opens the
-  // panel, and sends — exactly as if the user typed it — so the agent's reply
-  // streams into the panel where the user sees it. Routed via the parent
-  // dashboard (postMessage), NOT a direct /api/chat POST — that runs a headless
-  // turn whose answer never reaches the visible chat. Fire-and-forget.
+  // prismChat(message) → resolves when the dashboard's server accepts the
+  // message. The agent's reply streams in the dashboard; acceptance does not
+  // mean that the agent has finished the task. Busy or unavailable chat rejects.
+  let chatRequestSequence = 0;
   window.prismChat = function (message) {
-    try {
-      window.parent.postMessage({ type: 'sendChat', text: String(message) }, '*');
-    } catch (_) {}
-    return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      if (window.parent === window) { reject(new Error('Open this widget in a dashboard to message the agent.')); return; }
+      const id = 'prism-chat-' + Date.now() + '-' + (++chatRequestSequence);
+      let timer;
+      function finish(error, result) {
+        clearTimeout(timer);
+        window.removeEventListener('message', onResponse);
+        if (error) reject(new Error(error)); else resolve(result);
+      }
+      function onResponse(event) {
+        const data = event.data;
+        if (event.source !== window.parent || !data || data.type !== 'prism-chat-response' || data.id !== id) return;
+        if (data.status === 'accepted') finish(null, { status: 'accepted' });
+        else finish(data.error || 'The message was not accepted.');
+      }
+      window.addEventListener('message', onResponse);
+      timer = setTimeout(function () {
+        finish('Message acceptance could not be confirmed. Check the chat before sending again.');
+      }, 30000);
+      try { window.parent.postMessage({ type: 'sendChat', id: id, text: String(message) }, '*'); }
+      catch (error) { finish(error.message || 'The message could not be sent.'); }
+    });
   };
 
   // prismToolRaw(name, args?) → the full { result, images } a tool returns, for

@@ -37,3 +37,41 @@ test('restored chat diagnostics stay visible as errors',()=>{
  c.restoreChatHistory([{role:'error',content:'The model connection ended before completion.'}]);
  assert.deepEqual(seen,['chat-history-sep',{error:'The model connection ended before completion.'},'chat-history-sep']);
 });
+test('an older session-list response cannot restore a finished workspace badge',async()=>{
+ const pending=[],rendered=[];
+ const c={allSessions:[],voxWorkspaceAvailable:false,currentView:{type:'app'},fetch:async url=>{
+  if(url==='/api/sessions')return new Promise(resolve=>pending.push(resolve));
+  return {json:async()=>({available:false})};
+ },applyDisabledApps(){},renderBoardList:rows=>rendered.push(rows),document:{}};
+ vm.createContext(c);
+ vm.runInContext(source.slice(source.indexOf('let sessionLoadGeneration'),source.indexOf('// ─── Workspace icons')),c);
+ const older=c.loadSessions(),newer=c.loadSessions();
+ pending[1]({ok:true,json:async()=>({sessions:[{id:'finance'}]})});await newer;
+ pending[0]({ok:true,json:async()=>({sessions:[{id:'finance',runStatus:'running'}]})});await older;
+ assert.equal(rendered.length,1);assert.equal(rendered[0][0].runStatus,undefined);
+ assert.equal(c.allSessions[0].runStatus,undefined);
+});
+test('workspace badges only represent active agent states',()=>{
+ function node(){return {dataset:{},children:[],classList:{add(){}},append(...children){this.children.push(...children)},appendChild(child){this.children.push(child)}}}
+ const host=node();
+ const c={document:{getElementById:()=>host,createElement:node},ASSISTANT:'assistant',currentView:{type:'app'},currentSessionID:'default',getWorkspaceIcon:()=>'',WS_ICONS:{},wsIconSvg:()=>'',selectBoard(){},editWorkspace(){}};
+ vm.createContext(c);vm.runInContext(fn('renderBoardList','selectBoard'),c);
+ const states=['running','waiting_for_input','waiting_for_approval','completed','failed','stopped','interrupted','idle',undefined];
+ c.renderBoardList(states.map((runStatus,i)=>({id:'board-'+i,name:'Board '+i,runStatus})));
+ const badges=host.children.map(item=>item.children[0].children.filter(el=>el.className==='rail-badge'));
+ assert.deepEqual(badges.map(list=>list.length),[1,1,1,0,0,0,0,0,0]);
+ assert.equal(badges[0][0].title,'Agent working');
+ assert.equal(badges[1][0].title,'Waiting for your input');
+});
+test('workspace status refresh does not wait for telephony availability',async()=>{
+ let finishVox;const rendered=[];
+ const c={allSessions:[],voxWorkspaceAvailable:false,currentView:{type:'app'},fetch:async url=>{
+  if(url==='/api/sessions')return {ok:true,json:async()=>({sessions:[{id:'finance'}]})};
+  return new Promise(resolve=>finishVox=resolve);
+ },applyDisabledApps(){},renderBoardList:rows=>rendered.push(rows),document:{}};
+ vm.createContext(c);
+ vm.runInContext(source.slice(source.indexOf('let sessionLoadGeneration'),source.indexOf('// ─── Workspace icons')),c);
+ const request=c.loadSessions();await new Promise(setImmediate);
+ assert.equal(rendered.length,1);assert.equal(rendered[0][0].runStatus,undefined);
+ finishVox({json:async()=>({available:false})});await request;
+});

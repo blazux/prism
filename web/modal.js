@@ -33,9 +33,10 @@
     cursor: pointer; border: 1px solid var(--border2, var(--border, #2a2e3a));
     background: var(--bg2, #16181f); color: var(--text, #e6e8ef); }
   .pm-btn:hover { border-color: var(--accent, #6b8afd); }
-  .pm-btn.pm-primary { background: var(--accent, #6b8afd); border-color: var(--accent, #6b8afd); color: #fff; }
-  .pm-btn.pm-danger { background: var(--red, #e5534b); border-color: var(--red, #e5534b); color: #fff; }
-  .pm-btn.pm-primary:hover, .pm-btn.pm-danger:hover { filter: brightness(1.1); }`
+  .pm-btn.pm-primary { background: var(--accent, #6b8afd); border-color: var(--accent, #6b8afd); color: var(--on-accent, #fff); }
+  .pm-btn.pm-danger { background: var(--red, #e5534b); border-color: var(--red, #e5534b); color: var(--on-danger, #fff); }
+  .pm-btn.pm-primary:hover { box-shadow: 0 0 0 2px var(--accent-dim, transparent); }
+  .pm-btn.pm-danger:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--red, #e5534b) 20%, transparent); }`
 
   function ensureStyle() {
     if (document.getElementById('pm-style')) return

@@ -48,6 +48,51 @@ func withUser(r *http.Request, u *memory.User) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), userCtxKey, u))
 }
 
+// freshUser revalidates real accounts at long-lived entry points. Service and
+// signed group identities keep their separate authorization contracts.
+func (s *Server) freshUser(ctx context.Context, u *memory.User) (*memory.User, error) {
+	if u == nil || u.ID <= 0 {
+		return u, nil
+	}
+	ms := s.store()
+	if ms == nil {
+		return nil, fmt.Errorf("account database unavailable")
+	}
+	fresh, err := ms.GetUserByID(ctx, u.ID)
+	if err != nil || fresh == nil || fresh.Status != memory.StatusApproved {
+		return nil, fmt.Errorf("account is unavailable or not approved")
+	}
+	return fresh, nil
+}
+
+// closeUserSockets revokes existing transports after an account restriction.
+// Ongoing server work remains governed by its own cancellation and tool gates.
+func (s *Server) closeUserSockets(userID int64) {
+	s.mu.RLock()
+	var clients []*Client
+	for c := range s.clients {
+		match := c.user != nil && c.user.ID == userID
+		if match {
+			clients = append(clients, c)
+		}
+	}
+	s.mu.RUnlock()
+	for _, c := range clients {
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
+	}
+	if s.rooms != nil {
+		s.rooms.mu.Lock()
+		for c := range s.rooms.clients {
+			if c.userID == userID && c.conn != nil {
+				_ = c.conn.Close()
+			}
+		}
+		s.rooms.mu.Unlock()
+	}
+}
+
 func (s *Server) store() *memory.Store {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -494,6 +539,9 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if b.Action == "disable" || b.Action == "make_member" {
+			s.closeUserSockets(b.ID)
 		}
 		s.audit(r, "user_"+b.Action, map[string]interface{}{"targetUserId": b.ID})
 		writeJSON(w, map[string]any{"ok": true})

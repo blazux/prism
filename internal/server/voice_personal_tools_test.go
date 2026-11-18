@@ -19,25 +19,33 @@ import (
 func TestVoiceCallerToolBoundary(t *testing.T) {
 	s := &Server{}
 	for _, role := range []string{memory.RoleMember, memory.RoleGlobalAdmin} {
-		cc := s.callerContextForVoice(context.Background(), &memory.User{ID: 7, Role: role}, "vox-fixture")
-		if cc.PersonalScope != "u7" {
-			t.Fatal("phone lost its real account scope")
-		}
-		for _, tool := range []string{"note", "task", "calendar", "email", "prism_help"} {
-			if cc.HiddenTools[tool] || cc.Guard(tool, map[string]any{"action": "list"}) != nil {
-				t.Errorf("%s cannot use %s", role, tool)
+		t.Run(role, func(t *testing.T) {
+			ms := securityStore(t)
+			u, err := ms.CreateUser(t.Context(), role+"@example.test", "unused", "Phone fixture", role, memory.StatusApproved)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-		for _, tool := range []string{"exec_command", "secrets", "pim_source", "agent_settings", "place_call", "list_calls", "cancel_call"} {
-			if !cc.HiddenTools[tool] || cc.Guard(tool, nil) == nil {
-				t.Errorf("%s exposes forbidden phone tool %s", role, tool)
+			server := &Server{memStore: ms, cfg: Config{MultiUser: true}}
+			cc := server.callerContextForVoice(context.Background(), u, "vox-fixture")
+			if cc.PersonalScope != fmt.Sprintf("u%d", u.ID) {
+				t.Fatal("phone lost its real account scope")
 			}
-		}
-		for _, action := range []string{"config", "setup", " CONFIG ", "rule_save", "rules_apply", "delete_folder"} {
-			if cc.Guard("email", map[string]any{"action": action}) == nil {
-				t.Errorf("phone allowed mailbox administration %s", action)
+			for _, tool := range []string{"note", "task", "calendar", "email", "prism_help"} {
+				if cc.HiddenTools[tool] || cc.Guard(tool, map[string]any{"action": "list"}) != nil {
+					t.Errorf("%s cannot use %s", role, tool)
+				}
 			}
-		}
+			for _, tool := range []string{"exec_command", "secrets", "pim_source", "agent_settings", "place_call", "list_calls", "cancel_call"} {
+				if !cc.HiddenTools[tool] || cc.Guard(tool, nil) == nil {
+					t.Errorf("%s exposes forbidden phone tool %s", role, tool)
+				}
+			}
+			for _, action := range []string{"config", "setup", " CONFIG ", "rule_save", "rules_apply", "delete_folder"} {
+				if cc.Guard("email", map[string]any{"action": action}) == nil {
+					t.Errorf("phone allowed mailbox administration %s", action)
+				}
+			}
+		})
 	}
 	guest := s.callerContextForVoice(context.Background(), nil, "vox-guest")
 	for _, tool := range []string{"note", "task", "calendar", "email", "save_user_info", "prism_help", "place_call"} {

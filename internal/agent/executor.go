@@ -606,6 +606,9 @@ func canonicalToolName(name string) string {
 // work is prioritised on. The model sees exactly the same result and error as
 // before; this is observation, not behaviour.
 func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, []string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
 	ctx = workspaceexec.WithScope(ctx, e.sessionID)
 	if e.resourceMutationGuard != nil {
 		var args map[string]interface{}
@@ -715,6 +718,9 @@ func truncateForAudit(s string) string {
 }
 
 func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.RawMessage) (string, []string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
 	var args map[string]interface{}
 	if err := json.Unmarshal(rawArgs, &args); err != nil {
 		return "", nil, fmt.Errorf("invalid args: %w", err)
@@ -741,6 +747,11 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			}
 			return "", nil, err
 		}
+	}
+	// A guard may block or wait for approval. Recheck before dispatching a
+	// synchronous mutation, whose implementation may not consume the context.
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
 	}
 
 	// Telephony tools are performed by Vox, not here: relay and return its result

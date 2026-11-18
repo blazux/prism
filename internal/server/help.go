@@ -151,7 +151,7 @@ func (s *Server) integrationsStatusFor(u *memory.User) func(ctx context.Context)
 			row("AI", "server defaults — "+location)
 		}
 		if has(us, "email_config") {
-			row("Email", "connected (the email tool works; Settings → Email to change the account)")
+			row("Email", "configured; connection not tested — use email action=list to check access, Settings → Email to change the account")
 		} else {
 			row("Email", "not configured — Settings → Email, or ask me to set it up (email action=config)")
 		}

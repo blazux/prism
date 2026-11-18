@@ -19,7 +19,7 @@ func TestWorkspaceDeletionWaitsForBrowserAndHeadlessJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jobCtx, finish, err := s.beginSessionJob(context.Background(), owner.sessionID)
+	jobCtx, finish, err := s.beginAgentJob(context.Background(), owner.sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}

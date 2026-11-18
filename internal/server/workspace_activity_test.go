@@ -88,7 +88,7 @@ func TestWorkspaceActivityReadsLiveRunWithoutChangingIt(t *testing.T) {
 	if got := readActivity(t, handler, "/api/sessions/report/activity", "fixture"); got.RunStatus != "interrupted" {
 		t.Fatal("stale running state not detected")
 	}
-	_, finish, err := s.beginSessionJob(ctx, "report")
+	_, finish, err := s.beginAgentJob(ctx, "report")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,6 +237,12 @@ func TestTelegramFollowsDashboardTaskThroughExistingExecutionTool(t *testing.T) 
 			return "", nil // unrelated workspace/git bookkeeping
 		}
 		observations++
+		s.runsMu.Lock()
+		agentJobs := s.agentJobsLocked("telegram")
+		s.runsMu.Unlock()
+		if agentJobs != 1 {
+			t.Error("the actual Telegram turn is not counted as agent work", agentJobs)
+		}
 		if env["PRISM_SESSION"] != "telegram" {
 			t.Error("workspace check lost the Telegram execution session")
 		}

@@ -22,6 +22,9 @@ func validateModelSettings(settings map[string]ollama.ModelCapabilities) error {
 		if c.ContextWindow != 0 && (c.ContextWindow < 4096 || c.ContextWindow > 2_000_000) {
 			return errors.New("context window must be between 4096 and 2000000 tokens")
 		}
+		if c.MaxOutputTokens < 0 || c.MaxOutputTokens > 2_000_000 {
+			return errors.New("maximum output must be between 1 and 2000000 tokens, or 0 for automatic")
+		}
 	}
 	return nil
 }
@@ -60,17 +63,21 @@ func (s *Server) aiModelSettingsTool(ctx context.Context, u *memory.User, args m
 		raw, _ := json.Marshal(map[string]any{"source_id": sourceID, "model": model, "detected": detected, "settings": settings})
 		return string(raw), nil
 	}
-	if n, ok := args["context_window"]; ok {
+	for key, target := range map[string]*int{"context_window": &settings.ContextWindow, "max_output_tokens": &settings.MaxOutputTokens} {
+		n, ok := args[key]
+		if !ok {
+			continue
+		}
 		switch v := n.(type) {
 		case float64:
 			if v != float64(int(v)) {
-				return "", errors.New("context_window must be an integer")
+				return "", fmt.Errorf("%s must be an integer", key)
 			}
-			settings.ContextWindow = int(v)
+			*target = int(v)
 		case int:
-			settings.ContextWindow = v
+			*target = v
 		default:
-			return "", errors.New("context_window must be an integer")
+			return "", fmt.Errorf("%s must be an integer", key)
 		}
 	}
 	if v, ok := args["model_vision"].(string); ok {
@@ -92,7 +99,7 @@ func (s *Server) aiModelSettingsTool(ctx context.Context, u *memory.User, args m
 	for k, v := range src.ModelSettings {
 		next[k] = v
 	}
-	if settings.ContextWindow == 0 && settings.Vision == nil {
+	if settings.ContextWindow == 0 && settings.Vision == nil && settings.MaxOutputTokens == 0 {
 		delete(next, model)
 	} else {
 		next[model] = settings
@@ -125,6 +132,9 @@ func (b *sourcesBackend) ModelCapabilities(ctx context.Context, model string) (o
 	}
 	if override.Vision != nil {
 		info.Vision = override.Vision
+	}
+	if override.MaxOutputTokens > 0 {
+		info.MaxOutputTokens = override.MaxOutputTokens
 	}
 	return info, nil
 }
@@ -170,7 +180,7 @@ func (s *Server) handleModelSettings(w http.ResponseWriter, r *http.Request, p *
 	for k, v := range src.ModelSettings {
 		next[k] = v
 	}
-	if settings.ContextWindow == 0 && settings.Vision == nil {
+	if settings.ContextWindow == 0 && settings.Vision == nil && settings.MaxOutputTokens == 0 {
 		delete(next, model)
 	} else {
 		next[model] = settings

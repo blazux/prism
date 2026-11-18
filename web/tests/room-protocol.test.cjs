@@ -5,22 +5,38 @@ const vm = require('node:vm');
 const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '../apps/room.html'), 'utf8');
 
-function roomClient() {
+function roomClient({network=false} = {}) {
   const nodes = new Map();
   const element = id => {
-    if (!nodes.has(id)) nodes.set(id, {
+    if (!nodes.has(id)) {
+      const classes = new Set(), listeners = new Map();
+      nodes.set(id, {
       hidden:true, disabled:false, innerHTML:'', textContent:'', style:{}, value:'',
       scrollHeight:0, scrollTop:0, clientHeight:0,
-      classList:{contains:()=>false,add(){},remove(){}},
-      addEventListener(){},querySelectorAll:()=>[],querySelector:()=>null,focus(){},
-    });
+      classList:{contains:x=>classes.has(x),add:x=>classes.add(x),remove:x=>classes.delete(x),toggle(x,on){if(on)classes.add(x);else classes.delete(x);}},
+      addEventListener:(name,fn)=>listeners.set(name,fn),dispatch:(name,event={})=>listeners.get(name)?.(event),
+      querySelectorAll:()=>[],querySelector:()=>null,focus(){},
+      });
+    }
     return nodes.get(id);
   };
+  const sockets = [], toasts = [], timers = new Map();
+  let timerID = 0, requestID = 0;
+  class RoomSocket {
+    constructor(url){this.url=url;this.readyState=0;this.frames=[];sockets.push(this);}
+    async open(){this.readyState=1;await Promise.resolve();this.onopen?.();}
+    async deliver(frame){await Promise.resolve();this.onmessage?.({data:JSON.stringify(frame)});}
+    send(frame){this.frames.push(JSON.parse(frame));}
+    close(){this.readyState=3;this.onclose?.();}
+  }
   const context = {
     document:{getElementById:element,querySelector:()=>null,addEventListener(){}},
     navigator:{language:'fr'}, Date, Map, Set, JSON, console,
-    setTimeout,clearTimeout,
-    PrismAPI:{toast(){},api(){throw Error('Unexpected request');}},
+    location:{protocol:'http:',host:'fixture.test'},WebSocket:RoomSocket,
+    crypto:{randomUUID:()=>`room-client-request-${++requestID}`},
+    setTimeout:network ? fn=>{timers.set(++timerID,fn);return timerID;} : setTimeout,
+    clearTimeout:network ? id=>timers.delete(id) : clearTimeout,
+    PrismAPI:{toast:message=>toasts.push(message),api(){if(network)return Promise.resolve({members:[]});throw Error('Unexpected request');}},
   };
   vm.createContext(context);
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
@@ -29,7 +45,8 @@ function roomClient() {
   // This test drives the real frame handler and render functions. The browser
   // fixture checks DOM updates; here only the full-list DOM rebuild is stubbed.
   vm.runInContext('renderAll = () => {}; renderTyping = () => {}; ME = {uid:1,name:"Vincent"}', context);
-  return {context,element,read:expression=>vm.runInContext(expression,context)};
+  return {context,element,sockets,toasts,read:expression=>vm.runInContext(expression,context),
+    async runTimers(){const callbacks=[...timers.values()];timers.clear();for(const fn of callbacks)fn();await Promise.resolve();}};
 }
 const question = {id:1,groupId:1,authorId:1,authorName:'Vincent',content:'@assistant salut',isAgent:false,createdAt:'2026-10-26T23:45:00-04:00'};
 const pending = {id:2,groupId:1,authorName:'Assistant',content:'',isAgent:true,status:'running',replyTo:1,createdAt:'2026-10-26T23:45:01-04:00'};
@@ -84,4 +101,85 @@ test('tool events are retained through progress, completion and history replay',
   c.handleRoomEvent({type:'activity',running:false,queued:0});
   assert.equal(element('room-stop').disabled,true);
   assert.equal(element('context-compact').disabled,false);
+});
+
+test('composer keeps text and reply until the correlated durable receipt arrives',async()=>{
+  const {context:c,element,read,sockets}=roomClient({network:true});
+  c.connect('1');await sockets[0].open();
+  element('box').value='  Ready to send  ';c.setReply(question);c.send();
+  const sent=sockets[0].frames[0];
+  assert.equal(sent.content,'Ready to send');assert.equal(sent.replyTo,1);
+  assert.equal(element('box').value,'  Ready to send  ');assert.equal(read('replyTo'),1);
+  await sockets[0].deliver({type:'message',message:{...question,content:sent.content}});
+  assert.equal(element('box').value,'  Ready to send  ');
+  await sockets[0].deliver({type:'room_receipt',groupId:1,requestId:'another-request',status:'accepted'});
+  assert.equal(element('box').value,'  Ready to send  ');
+  await sockets[0].deliver({type:'room_receipt',groupId:1,requestId:sent.requestId,status:'accepted',message:{...question,content:sent.content}});
+  assert.equal(element('box').value,'');assert.equal(read('replyTo'),null);assert.equal(read('msgs.length'),1);
+  assert.equal(read('pendingMessages.size'),0);
+});
+
+test('lost receipt reconnects with the same id and keeps subsequent edits',async()=>{
+  const fixture=roomClient({network:true}),{context:c,element,read,sockets}=fixture;
+  c.connect('1');await sockets[0].open();element('box').value='First draft';c.send();
+  const sent=sockets[0].frames[0];
+  // The durable write happened, but its receipt was lost with the socket.
+  await fixture.runTimers();assert.equal(sockets[0].readyState,3);
+  await fixture.runTimers();await sockets[1].open();
+  assert.equal(sockets[1].frames[0].requestId,sent.requestId);
+  assert.equal(element('box').value,'First draft');
+  element('box').value='A newer draft';element('box').dispatch('input');c.setReply({...question,id:9});
+  await sockets[1].deliver({type:'room_receipt',groupId:1,requestId:sent.requestId,status:'accepted',replayed:true,message:question});
+  assert.equal(element('box').value,'A newer draft');assert.equal(read('replyTo'),9);
+  assert.equal(read('pendingMessages.size'),0);
+});
+
+test('uncertain database delivery retains the id while an explicit rejection permits correction',async()=>{
+  const fixture=roomClient({network:true}),{context:c,element,read,sockets,toasts}=fixture;
+  c.connect('1');await sockets[0].open();element('box').value='Draft';c.setReply(question);c.send();
+  const sent=sockets[0].frames[0];
+  await sockets[0].deliver({type:'room_receipt',groupId:1,requestId:sent.requestId,status:'unavailable'});
+  assert.equal(element('box').value,'Draft');assert.equal(read('replyTo'),1);
+  await fixture.runTimers();await sockets[1].open();
+  assert.equal(sockets[1].frames[0].requestId,sent.requestId);
+  await sockets[1].deliver({type:'room_receipt',groupId:1,requestId:sent.requestId,status:'rejected',content:'Quoted message is unavailable.'});
+  assert.equal(element('box').value,'Draft');assert.equal(read('replyTo'),1);assert.equal(read('pendingMessages.size'),0);
+  assert.equal(toasts.at(-1),'Quoted message is unavailable.');
+  c.clearReply();c.send();assert.notEqual(sockets[1].frames.at(-1).requestId,sent.requestId);
+});
+
+test('switching rooms preserves each draft and retries only its own pending message',async()=>{
+  const {context:c,element,read,sockets}=roomClient({network:true});
+  c.connect('1');await sockets[0].open();element('box').value='Room one';c.setReply(question);c.send();
+  const first=sockets[0].frames[0];
+  c.connect('2');await sockets[1].open();
+  assert.equal(element('box').value,'');assert.equal(read('replyTo'),null);assert.equal(sockets[1].frames.length,0);
+  element('box').value='Room two';element('box').dispatch('input');
+  c.connect('1');await sockets[2].open();
+  assert.equal(element('box').value,'Room one');assert.equal(read('replyTo'),1);
+  assert.equal(sockets[2].frames[0].requestId,first.requestId);
+  await sockets[2].deliver({type:'room_receipt',groupId:1,requestId:first.requestId,status:'accepted',message:question});
+  c.connect('2');await sockets[3].open();assert.equal(element('box').value,'Room two');
+});
+
+test('the message limit counts Unicode codepoints and preserves oversize text',async()=>{
+  const {context:c,element,sockets,toasts}=roomClient({network:true});
+  c.connect('1');await sockets[0].open();element('box').value='🚀'.repeat(16001);c.send();
+  assert.equal(sockets[0].frames.length,0);assert.ok(toasts.at(-1).includes('16000'));
+  assert.equal([...element('box').value].length,16001);
+  element('box').value='🚀'.repeat(16000);c.send();assert.equal(sockets[0].frames.length,1);
+  assert.equal([...sockets[0].frames[0].content].length,16000);assert.equal(element('box').value.length,32000);
+  assert.ok(!html.includes('maxlength="16000"'));
+});
+
+test('a socket send exception keeps the draft and retries its existing identifier',async()=>{
+  const fixture=roomClient({network:true}),{context:c,element,read,sockets}=fixture;
+  c.connect('1');await sockets[0].open();element('box').value='Keep this text';
+  sockets[0].send=()=>{throw Error('fixture disconnect');};c.send();
+  const requestID=read('pendingMessages.get("1").requestId');
+  assert.equal(element('box').value,'Keep this text');assert.equal(sockets[0].readyState,3);
+  await fixture.runTimers();await sockets[1].open();
+  assert.equal(sockets[1].frames[0].requestId,requestID);
+  await sockets[1].deliver({type:'room_receipt',groupId:1,requestId:requestID,status:'accepted',message:question});
+  assert.equal(element('box').value,'');
 });

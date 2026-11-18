@@ -1,0 +1,10 @@
+{
+  "hosts": ["unix:///var/run/docker.sock"],
+  "data-root": "/var/lib/docker",
+  "exec-root": "/run/docker",
+  "pidfile": "/run/dockerd.pid",
+  "storage-driver": "overlay2",
+  "features": {"containerd-snapshotter": false},
+  "log-driver": "local",
+  "log-opts": {"max-size": "10m", "max-file": "2"}
+}

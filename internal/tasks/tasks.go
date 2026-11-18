@@ -43,8 +43,8 @@ type Provider interface {
 const KeyProvider = "tasks_provider"
 
 // ProviderFor returns the active provider. An explicit choice wins when its
-// backend is available; otherwise (auto) the precedence is Todoist → CalDAV →
-// local.
+// backend is available. An unavailable explicit choice fails instead of writing
+// to a different list. Only auto/unset follows Todoist → CalDAV → local.
 func ProviderFor(ctx context.Context, store *memory.Store, session string) Provider {
 	if store != nil {
 		choice, _, err := store.GetConfig(ctx, KeyProvider)
@@ -61,10 +61,15 @@ func ProviderFor(ctx context.Context, store *memory.Store, session string) Provi
 			if p := todoistProvider(ctx, store); p != nil {
 				return p
 			}
+			return &unavailableProvider{fmt.Errorf("Todoist is selected but not connected; reconnect it or choose another task source")}
 		case "caldav":
 			if p := caldavProvider(ctx, store); p != nil {
 				return p
 			}
+			return &unavailableProvider{fmt.Errorf("CalDAV tasks are selected but not configured; reconnect them or choose another task source")}
+		case "", "auto":
+		default:
+			return &unavailableProvider{fmt.Errorf("unknown task source %q; choose a task source in Settings", choice)}
 		}
 	}
 	if p := todoistProvider(ctx, store); p != nil {

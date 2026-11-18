@@ -42,6 +42,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	owner := ownerPtr(currentUser(r))
 	switch r.Method {
 	case "GET":
+		w.Header().Set("Cache-Control", "no-store")
 		sessions, err := ms.ListSessions(r.Context(), owner)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -68,7 +69,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 				run.mu.Lock()
 				row["runStatus"] = run.status
 				run.mu.Unlock()
-			} else if len(s.sessionJobs[session.ID]) > 0 {
+			} else if s.agentJobsLocked(session.ID) > 0 {
 				row["runStatus"] = "running"
 			}
 			rows = append(rows, row)

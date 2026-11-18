@@ -12,6 +12,10 @@ docker-compose.mu.yml
 # Go binary
 /prism
 
+# Python test caches
+__pycache__/
+*.py[cod]
+
 # Runtime-generated content
 web/plugins/
 /workspace/
