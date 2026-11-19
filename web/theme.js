@@ -64,6 +64,7 @@
   }
 
   const THEMES = {
+    "prism": preset("Prism", "essential", "A glass prism separates white light into a quiet moving spectrum.", "dark", "0a0e18 121927 1b2536 26354b 354762 2d3e58 4c6484 f0f6ff c3d0e3 9bafcd b6b7ff 333454 8bdfc1 ffa1b4 efd98d f6bf91", "8px"),
     "prism-dark": preset("Prism Dark", "essential", "Balanced dark surfaces with a clear iris accent.", "dark", "090c13 10151f 171e2b 202a3a 2b3749 293549 3c4c65 eef2fb b9c3d6 91a0b9 9baeff 293654 72d6ad ff939d e9c783 f1ae7f", "9px"),
     "prism-light": preset("Prism Light", "essential", "Cool white, soft lavender and crisp blue.", "light", "f3f5fb ffffff eceff8 e2e7f2 d4ddeb d6deed bbc7df 20283b 4b5670 606b83 4657b8 e3e7fa 226c50 b1374f 815c13 9c5023", "9px"),
     "graphite": preset("Graphite", "professional", "Charcoal, silver and a restrained steel blue.", "dark", "101113 17191c 202327 292d32 353a40 34393f 4b535e f0f1f3 c1c6ce 9ba3af adbfda 303d50 8fc6a5 e49fa8 dac28f d6ac86", "6px"),
@@ -81,16 +82,16 @@
     "tech": preset("Tech", "playful", "Cold titanium, electric cyan and a network grid.", "dark", "09141c 101f2a 192d3b 243c4c 334f60 2b4b5d 41677d e7f5fc b1d4e6 8eb8cf 70d9ff 17475a 7ee3c3 ff9ba8 f0d17f f2b184", "5px"),
     "cyberpunk": preset("Cyberpunk", "playful", "Night-city blue, signal yellow and cyan circuitry.", "dark", "0a1019 101a25 172535 203146 2b3e55 2a4357 46647b edf6f8 b3c9d4 8fa8ba f6e75a 393817 74dbcd ff91b3 f6e75a f3af77", "3px"),
     "matrix": preset("Matrix", "playful", "Terminal green on black with digital rain.", "dark", "020804 07120b 0e1e14 172d1e 223d2a 24432d 3b6343 e0f3df add4af 87b88e 7ee787 163d24 87e8ac ff9d9d e4db87 edb387", "3px"),
-    "synthwave": preset("Synthwave", "playful", "Hot pink, violet nights and a neon horizon.", "dark", "190f2c 261637 351e49 47265e 5b3276 563265 774684 fceefe decce9 cfaccf ff91d5 5b2b55 93e3ec ffa8b6 f1db9a f4bd9a", "8px"),
-    "dracula": preset("Dracula", "playful", "Purple-gray panels with mint and violet highlights.", "dark", "20212e 282a38 333646 414558 51566c 4d4e69 6b6c8b f4f2fc ccd1e7 aeb7d3 c7adff 4a3a67 a3e2b9 ffa3b8 f0db96 f5be93", "8px"),
-    "amber-terminal": preset("Amber Terminal", "playful", "Phosphor amber, black glass and scanlines.", "dark", "100c05 1a140a 282010 372c17 493b21 4d3d20 6c5730 f8edce ddcca0 bfaa77 f5c86a 463514 bed394 f2a18b f1d17c e8b184", "3px"),
-    "arcade": preset("Arcade", "playful", "Violet cabinets, electric peach and pixel accents.", "dark", "19142d 251d3b 342749 45335e 594176 614377 82619c f9f0ff dcc7ef bda4d6 ffb087 593443 a8e9ca ff9fbc efd88c eeb583", "4px"),
-    "bubblegum": preset("Bubblegum", "playful", "Strawberry pink, lilac and a soft candy canvas.", "light", "fceef5 fff9fc f3e0ed ebd1e3 dfbdd6 e0bfd6 c89dba 4b2a47 724768 855578 a23877 f2d4e9 366c57 b03759 815b13 a34d32", "14px"),
+    "synthwave": preset("Synthwave", "playful", "A striped sunset, wireframe mountains and a moving neon grid.", "dark", "190f2c 261637 351e49 47265e 5b3276 563265 774684 fceefe decce9 cfaccf ff91d5 5b2b55 93e3ec ffa8b6 f1db9a f4bd9a", "8px"),
+    "dracula": preset("Dracula", "playful", "A moonlit castle, drifting mist and bats in a violet night.", "dark", "20212e 282a38 333646 414558 51566c 4d4e69 6b6c8b f4f2fc ccd1e7 aeb7d3 c7adff 4a3a67 a3e2b9 ffa3b8 f0db96 f5be93", "8px"),
+    "amber-terminal": preset("Amber Terminal", "playful", "Amber phosphor, scrolling memory and a typing cursor.", "dark", "100c05 1a140a 282010 372c17 493b21 4d3d20 6c5730 f8edce ddcca0 bfaa77 f5c86a 463514 bed394 f2a18b f1d17c e8b184", "3px"),
+    "arcade": preset("Arcade", "playful", "Pixel spacecraft and mint invaders in a violet starfield.", "dark", "19142d 251d3b 342749 45335e 594176 614377 82619c f9f0ff dcc7ef bda4d6 ffb087 593443 a8e9ca ff9fbc efd88c eeb583", "4px"),
+    "bubblegum": preset("Bubblegum", "playful", "Pink, lilac and floating iridescent soap bubbles.", "light", "fceef5 fff9fc f3e0ed ebd1e3 dfbdd6 e0bfd6 c89dba 4b2a47 724768 855578 a23877 f2d4e9 366c57 b03759 815b13 a34d32", "14px"),
   };
 
   const DEFAULT_THEME = 'prism-dark';
   const STORAGE_KEY = 'prism-theme';
-  const GLASS_THEMES = new Set(['midnight', 'rose-pine', 'tech', 'cyberpunk', 'matrix', 'synthwave', 'dracula', 'amber-terminal', 'arcade']);
+  const GLASS_THEMES = new Set(['prism', 'midnight', 'rose-pine', 'tech', 'cyberpunk', 'matrix', 'synthwave', 'dracula', 'amber-terminal', 'arcade']);
 
   // The shared widget stylesheet (the agent's class/token vocabulary) lives in
   // /widget-base.css and is pulled in via <link>, so the dashboard srcdoc path

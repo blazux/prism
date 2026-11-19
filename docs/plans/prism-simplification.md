@@ -567,3 +567,54 @@ les domaines HTTPS des démos servent la nouvelle version. Configurations et
 comptes conservés, bases sauvegardées, anciennes images gardées. Contrôles et
 sauvegardes privés : `/tmp/prism-circuit-deploy-20261119-035941` en local et
 `/root/prism-circuit-deploy-20261119-035941` sur le VPS. Aucun commit ni push Git.
+
+### Fonds Geek & retro et thème Prism
+
+Les sept autres fonds de la collection ont une scène distincte : réseau avec
+paquets, pluie Matrix à différentes profondeurs, paysage Synthwave en perspective,
+nuit gothique Dracula, mémoire défilante Amber Terminal, jeu spatial en pixels
+Arcade et bulles irisées Bubblegum. Les scènes utilisent une horloge en secondes,
+des caches statiques et une libération des caches à l'arrêt. Les anciens décors
+inutilisés Sparkline/Skyline sont retirés ; le circuit Cyberpunk est conservé.
+
+Le nouveau thème Prism figure dans Essentials, avec une palette sombre et un
+chat translucide. Un rayon blanc traverse les faces d'un prisme de verre ; les
+sept rayons sortants suivent une réfraction calculée et quelques fronts lumineux
+progressent lentement. La sélection existante et le thème par défaut restent
+inchangés. L'aide et les descriptions de la galerie décrivent les nouveaux fonds.
+
+Validation : 38 suites JavaScript, galerie et contrôles sur les 23 palettes,
+460 contrôles de contraste du chat (minimum 5,27:1), parcours des effets incluant
+Prism/Cyberpunk, mobilité et accessibilité. Une revue indépendante des huit scènes
+confirme 16 captures desktop/mobile, aucune erreur navigateur et des pixels
+identiques à 60/120 Hz après la même seconde simulée. Preuves temporaires :
+`/tmp/prism-retro-review/`, `/tmp/prism-retro-chat-*.png` et
+`/tmp/prism-retro-*-validation*`.
+
+Les quatre instances utilisent l'image
+`sha256:208bf804756963c8649e2645c576cff7c780cd2992a40d7d71fd1fd2b46ad241`.
+Les 23 fichiers web et l'aide embarquée correspondent au checkout. Les contrôles
+HTTPS des démos passent ; configurations, comptes, conversations et conteneurs
+annexes sont conservés. Sauvegardes et contrôles privés :
+`/tmp/prism-retro-deploy-20261119-041738` en local et
+`/root/prism-retro-deploy-20261119-041738` sur le VPS. Aucun commit ni push Git
+pendant cette passe.
+
+### Rétablissement du fond Tech
+
+Le périmètre de la refonte avait inclus Tech, dont l'utilisateur souhaitait
+conserver le rendu. Ses fonctions de constellation, son CSS et sa description
+sont rétablis depuis `5f499e6`. Les autres nouveaux fonds et le thème Prism sont
+conservés. Le helper de cache propre au réseau remplacé est retiré. Les tests de
+cadence des nouvelles scènes excluent Tech, qui retrouve sa cadence d'origine.
+
+Validation : 38 suites JavaScript, parcours navigateur des effets et comparaison
+indépendante avec la version originale, même seed et 60 frames. Canvas, captures
+et styles Tech sont strictement identiques sur desktop 1440 × 1000 et mobile
+390 × 844. Rapport : `/tmp/prism-tech-restore-review/report.json`.
+
+Les quatre serveurs utilisent l'image
+`sha256:b34574ac2e716bedb2c1c63f9f9da98477ad713946961764e1b69943118306e4`.
+Paramètres, conversations et conteneurs annexes conservés. Sauvegardes et
+contrôles : `/tmp/prism-tech-restore-deploy-20261119-103753` en local et
+`/root/prism-tech-restore-deploy-20261119-103753` sur le VPS. Aucun commit ni push.

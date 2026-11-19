@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../theme.js'),'utf8');
-const historical=['prism-dark','prism-light','graphite','slate','paper','boardroom','midnight','nord','solarized-dark','rose-pine','tech','cyberpunk','matrix','synthwave'];
+const historical=['prism','prism-dark','prism-light','graphite','slate','paper','boardroom','midnight','nord','solarized-dark','rose-pine','tech','cyberpunk','matrix','synthwave'];
 
 function boot(storage=new Map()) {
  const vars=new Map(),attributes=new Map(),listeners=new Map(),messages=[];

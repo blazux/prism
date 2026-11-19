@@ -8,14 +8,16 @@ layout. You can use a built-in theme or create and save your own palette.
 Choose a preview card, use **Current theme**, or use the theme dropdown in the
 header. Changes apply immediately. The gallery groups the palettes by atmosphere:
 
-- **Essentials**: Prism Dark and Prism Light.
+- **Essentials**: Prism, Prism Dark and Prism Light. Prism shows a glass prism
+  separating a white beam into a gently moving spectrum.
 - **Focus & work**: Graphite, Slate, Paper, Boardroom, Ink and Spruce. These use
   still backgrounds, with neutral, navy, ivory or sage surfaces.
 - **Color & atmosphere**: Midnight, Nord, Solarized Dark, Rosé Pine, Espresso
   and Dune. Choose deep blue, arctic gray, plum, coffee or warm sand.
 - **Geek & retro**: Tech, Cyberpunk, Matrix, Synthwave, Dracula, Amber Terminal,
-  Arcade and Bubblegum. These include terminal colors, cyan circuitry, neon
-  horizons, pixel patterns and pastel pink.
+  Arcade and Bubblegum. Their backgrounds show a drifting constellation,
+  circuitry, falling code, a neon landscape, a moonlit castle, an amber terminal,
+  a pixel shooter or iridescent bubbles.
 - **Your themes**: palettes you have saved in this browser.
 
 Some backgrounds include animated details. **Animated background** adjusts their
@@ -24,8 +26,8 @@ is hidden. With reduced motion enabled in your system or browser, animated
 backgrounds become still. Theme changes also reach Prism's apps and widgets that
 use its theme tokens.
 
-Midnight, Rosé Pine, Tech, Cyberpunk, Matrix, Synthwave, Dracula, Amber Terminal
-and Arcade show the background through the chat, between the message cards.
+Prism, Midnight, Rosé Pine, Tech, Cyberpunk, Matrix, Synthwave, Dracula, Amber
+Terminal and Arcade show the background through the chat, between the message cards.
 The header and message composer are opaque. Other themes use an opaque panel.
 A system or browser preference for reduced transparency or higher contrast
 restores an opaque chat background.

@@ -2425,6 +2425,13 @@ html[data-bgfx-paused="true"] #bg-fx::after { animation-play-state:paused; }
   100% { transform: translate(-3%, 2%) scale(1.05); }
 }
 
+/* ── Prism — glass and a gently travelling spectrum (canvas) ─────────────── */
+[data-theme="prism"] #bg-fx {
+  background: radial-gradient(ellipse at 45% 45%,var(--bg2),var(--bg) 72%);
+}
+[data-theme="prism"] #bg-fx::before,
+[data-theme="prism"] #bg-fx::after { display:none; }
+
 /* ── Tech — faint drifting grid + accent scan ─────────────────────────────── */
 [data-theme="tech"] #bg-fx::before {
   inset: 0;
@@ -2457,46 +2464,12 @@ html[data-bgfx-paused="true"] #bg-fx::after { animation-play-state:paused; }
 }
 /* The CSS aurora layer is replaced by the canvas for this theme. */
 [data-theme="cyberpunk"] #bg-fx::before { display: none; }
-@keyframes bgGrid {
-  from { background-position: 0 0, 0 0; }
-  to   { background-position: 0 50px, 50px 0; }
-}
-
-/* ── Synthwave — retro sun + horizon grid ─────────────────────────────────── */
+/* ── Synthwave — striped sunset, mountain mesh and moving perspective grid ── */
 [data-theme="synthwave"] #bg-fx {
-  background: linear-gradient(180deg, var(--bg) 0%, var(--accent-dim) 72%, var(--bg2) 100%);
+  background: linear-gradient(180deg, var(--bg) 0%, var(--accent-dim) 63%, var(--bg) 100%);
 }
-[data-theme="synthwave"] #bg-fx::before {
-  content: '';
-  position: absolute;
-  left: -50%; right: -50%; bottom: -8%;
-  height: 120%;
-  background:
-    linear-gradient(var(--accent) 2px, transparent 2px) 0 0 / 50px 50px,
-    linear-gradient(90deg, var(--green) 2px, transparent 2px) 0 0 / 50px 50px;
-  opacity: .18;
-  transform: perspective(440px) rotateX(64deg);
-  transform-origin: bottom center;
-  animation: bgGrid 6s linear infinite;
-}
-[data-theme="synthwave"] #bg-fx::after {
-  content: '';
-  position: absolute;
-  left: 50%; top: 14%;
-  width: 280px; height: 280px;
-  margin-left: -140px;
-  border-radius: 50%;
-  background: linear-gradient(180deg, var(--yellow), var(--accent));
-  -webkit-mask: repeating-linear-gradient(180deg, #000 0 9px, transparent 9px 14px);
-          mask: repeating-linear-gradient(180deg, #000 0 9px, transparent 9px 14px);
-  filter: blur(1px);
-  opacity: .55;
-  animation: bgSun 7s ease-in-out infinite alternate;
-}
-@keyframes bgSun {
-  from { opacity: .4; filter: blur(1px); }
-  to   { opacity: .65; filter: blur(3px); }
-}
+[data-theme="synthwave"] #bg-fx::before,
+[data-theme="synthwave"] #bg-fx::after { display:none; }
 
 /* ── Matrix — falling code rain (canvas: bgfx.js) + CRT scanlines on top ───── */
 [data-theme="matrix"] #bg-fx {
@@ -2507,20 +2480,8 @@ html[data-bgfx-paused="true"] #bg-fx::after { animation-play-state:paused; }
   content: '';
   position: absolute;
   inset: 0;
-  background: repeating-linear-gradient(0deg, rgba(57,255,20,.07) 0 1px, transparent 1px 3px);
-  box-shadow: inset 0 0 220px 50px rgba(0,0,0,.85);
-  animation: bgScan 7s linear infinite, bgFlicker 4s ease-in-out infinite;
-}
-@keyframes bgScan {
-  from { background-position: 0 0; }
-  to   { background-position: 0 120px; }
-}
-/* Gentle CRT brightness drift — subtle, not a strobe */
-@keyframes bgFlicker {
-  0%, 100% { opacity: .85; }
-  47%      { opacity: .7; }
-  50%      { opacity: 1; }
-  53%      { opacity: .72; }
+  background: repeating-linear-gradient(0deg, rgba(57,255,20,.025) 0 1px, transparent 1px 3px);
+  box-shadow: inset 0 0 180px 35px rgba(0,0,0,.55);
 }
 
 /* ── Midnight — drifting, twinkling starfield + faint nebula ───────────────── */
@@ -2647,8 +2608,8 @@ html[data-bgfx-paused="true"] #bg-fx::after { animation-play-state:paused; }
   display:block; inset:0; opacity:.13; filter:none; will-change:auto;
   background:radial-gradient(var(--border2) .5px,transparent .6px) 0 0 / 6px 6px;
 }
-[data-theme="espresso"] #bg-fx,
-[data-theme="dracula"] #bg-fx { background:radial-gradient(ellipse at 80% 15%,var(--accent-dim),var(--bg) 65%); }
+[data-theme="espresso"] #bg-fx { background:radial-gradient(ellipse at 80% 15%,var(--accent-dim),var(--bg) 65%); }
+[data-theme="dracula"] #bg-fx { background:linear-gradient(180deg,var(--bg),#171523 65%,#12111c); }
 [data-theme="espresso"] #bg-fx::before,
 [data-theme="dracula"] #bg-fx::before,
 [data-theme="bubblegum"] #bg-fx::before { display:none; }
@@ -2665,13 +2626,13 @@ html[data-bgfx-paused="true"] #bg-fx::after { animation-play-state:paused; }
   content:''; position:absolute; inset:0;
   background:repeating-linear-gradient(0deg,transparent 0 3px,#000000 3px 4px); opacity:.12;
 }
-[data-theme="arcade"] #bg-fx { background:linear-gradient(160deg,var(--bg),var(--accent-dim)); }
-[data-theme="arcade"] #bg-fx::before {
-  inset:0; filter:none; opacity:.28; animation:none; will-change:auto;
-  background:radial-gradient(var(--accent) 1px,transparent 1.5px) 0 0 / 32px 32px;
+[data-theme="arcade"] #bg-fx {
+  background:radial-gradient(ellipse at 50% 35%,var(--bg2),var(--bg) 75%);
 }
+[data-theme="arcade"] #bg-fx::before,
+[data-theme="arcade"] #bg-fx::after { display:none; }
 [data-theme="bubblegum"] #bg-fx {
-  background:radial-gradient(ellipse at 10% 10%,var(--accent-dim),transparent 55%),radial-gradient(ellipse at 95% 90%,var(--bg3),transparent 55%),var(--bg);
+  background:radial-gradient(ellipse at 15% 10%,#fae0ef,transparent 65%),radial-gradient(ellipse at 90% 80%,#e8def8,transparent 60%),var(--bg);
 }
 [data-theme="matrix"] :is(#view-title,#chat-header,.widget-header),
 [data-theme="amber-terminal"] :is(#view-title,#chat-header,.widget-header) { font-family:var(--mono); }
