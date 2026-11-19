@@ -241,7 +241,7 @@ Injected into every widget alongside prismTool/prismChat — call these, never h
   prismSuggest([{label, prompt, send}])   — suggestion chips under the chat input (send:true fires it on click)
   prismContext(text)                       — attach text as context for the agent's next message
   prismOpenFile('path/to/file.py')         — open a workspace file in the editor pane
-  prismOnData(callback)                    — callback() runs whenever notes/tasks/events change elsewhere, so refresh on real change instead of a blind setInterval
+  prismOnData(callback, topic?)            — re-read data on change/reconnection; returns unsubscribe. Scoped custom signals and scripts: prism_help topic=data-events
 
 ### Widget preview
 

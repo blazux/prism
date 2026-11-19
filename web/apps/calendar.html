@@ -9,6 +9,7 @@
 <script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
 <script src="/editor-bridge.js"></script>
+<script src="/object-links.js"></script>
 <script src="/pim-editor.js"></script>
 <script>
   addEventListener('message', e => {
@@ -138,6 +139,7 @@
       <div class="err" id="f-err"></div>
       <div class="form-foot">
         <button class="btn btn-del" id="f-del" onclick="deleteEvent()">Delete</button>
+        <button class="btn" id="copy-link" onclick="if(editing)PrismLinks.copy({type:'app',name:'calendar',id:editing.id})">Copy link</button>
         <span class="grow"></span>
         <button class="btn" onclick="closeForm()">Cancel</button>
         <button class="btn btn-accent" onclick="saveForm()">Save</button>
@@ -404,13 +406,14 @@ function toggleTimes() { $('f-times').style.display = $('f-allday').checked ? 'n
 $('f-allday').addEventListener('change', toggleTimes);
 $('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeForm(); });
 
-let calendarEditorGeneration = 0, calendarSaving = false;
+let calendarEditorGeneration = 0, calendarSaving = false, calendarSavedDraft = '';
 function publishCalendarContext() { if (typeof calendarEditor !== 'undefined') calendarEditor.publish(); }
 function openForm(dateKey, start, allday) {
   calendarEditorGeneration++;
   editing = null;
   $('form-title').textContent = 'New event';
   $('f-del').style.display = 'none';
+  $('copy-link').hidden = true;
   const s = start || '09:00';
   const [hh, mm] = s.split(':').map(Number);
   const endM = hh * 60 + mm + 60;
@@ -420,6 +423,7 @@ function openForm(dateKey, start, allday) {
   setFields({ title: '', date: dateKey, enddate: ymd(last), allday: !!allday, start: s, end, loc: '', desc: '' });
   $('f-err').textContent = '';
   $('overlay').classList.add('open');
+  calendarSavedDraft = calendarFormDraft();
   publishCalendarContext();
   setTimeout(() => $('f-title').focus(), 30);
 }
@@ -428,6 +432,7 @@ function openEvent(ev) {
   editing = ev;
   $('form-title').textContent = 'Edit event';
   $('f-del').style.display = '';
+  $('copy-link').hidden = false;
   const s=eventStart(ev), e=ev.endAt?eventEnd(ev):null;
   if(isAllDay(ev)&&e)e.setDate(e.getDate()-1);
   setFields({
@@ -438,6 +443,7 @@ function openEvent(ev) {
   });
   $('f-err').textContent = '';
   $('overlay').classList.add('open');
+  calendarSavedDraft = calendarFormDraft();
   publishCalendarContext();
   try {
     publishCalendarContext();
@@ -512,7 +518,26 @@ const calendarEditor = PrismEditor.connect({
 // Reload when the agent changes calendar data via chat.
 addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') load(); });
 
-load();
+async function openLinkedEvent(reference, isCurrent) {
+  if (!reference.id) return;
+  if ($('overlay').classList.contains('open')) throw Error('Close the current event form before opening another event.');
+  const generation = calendarEditorGeneration, listGeneration = loadGeneration;
+  const data = await PrismAPI.api('/api/events?id=' + encodeURIComponent(reference.id));
+  if (!isCurrent() || generation !== calendarEditorGeneration || listGeneration !== loadGeneration) return;
+  const event = data.event;
+  if (!event || !Number.isFinite(eventStart(event).getTime())) throw Error('This event is unavailable.');
+  view = eventStart(event);
+  const loaded = load(), requested = loadGeneration;
+  await loaded;
+  if (isCurrent() && generation === calendarEditorGeneration && requested === loadGeneration) openEvent(event);
+}
+const calendarReferenceReady = PrismLinks.receive('calendar', openLinkedEvent);
+function calendarFormDraft() { return JSON.stringify(['f-title','f-date','f-enddate','f-start','f-end','f-loc','f-desc'].map(id=>$(id).value).concat($('f-allday').checked)); }
+PrismLinks.beforeLeave = () => {
+  if (calendarSaving) { PrismAPI.toast('Wait for this event to finish saving.'); return false; }
+  return !$('overlay').classList.contains('open') || PrismLinks.confirmLeave(calendarFormDraft,calendarSavedDraft);
+};
+load().then(calendarReferenceReady);
 </script>
 </body>
 </html>

@@ -90,6 +90,7 @@
 
   const DEFAULT_THEME = 'prism-dark';
   const STORAGE_KEY = 'prism-theme';
+  const GLASS_THEMES = new Set(['midnight', 'rose-pine', 'tech', 'cyberpunk', 'matrix', 'synthwave', 'dracula', 'amber-terminal', 'arcade']);
 
   // The shared widget stylesheet (the agent's class/token vocabulary) lives in
   // /widget-base.css and is pulled in via <link>, so the dashboard srcdoc path
@@ -154,6 +155,7 @@
     document.documentElement.setAttribute('data-theme', id);
     document.documentElement.setAttribute('data-theme-group', all[id].group || 'custom');
     document.documentElement.setAttribute('data-theme-mode', all[id].mode || vars['color-scheme']);
+    document.documentElement.setAttribute('data-chat-surface', GLASS_THEMES.has(id) ? 'glass' : 'solid');
     localStorage.setItem(STORAGE_KEY, id);
     if (broadcast) {
       // widgets (board) + the full-pane app iframe both get live updates
@@ -180,6 +182,7 @@
     document.documentElement.setAttribute('data-theme', 'custom-preview');
     document.documentElement.setAttribute('data-theme-group', 'custom');
     document.documentElement.setAttribute('data-theme-mode', vars['color-scheme']);
+    document.documentElement.setAttribute('data-chat-surface', 'solid');
     window.dispatchEvent(new CustomEvent('prism-theme-change', { detail: { id: 'custom-preview', vars, preview: true } }));
   }
 

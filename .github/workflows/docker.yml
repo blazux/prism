@@ -61,7 +61,10 @@ jobs:
             web/tests/theme-effects-browser.cjs \
             web/tests/markdown-rendering-browser.cjs \
             web/tests/file-editor-browser.cjs \
-            web/tests/documents-browser.cjs; do
+            web/tests/documents-browser.cjs \
+            web/tests/interrupted-work-browser.cjs \
+            web/tests/object-links-browser.cjs \
+            web/tests/data-events-browser.cjs; do
             echo "::group::$test"
             if node "$test" > "$RUNNER_TEMP/prism-browser-test.log" 2>&1; then
               cat "$RUNNER_TEMP/prism-browser-test.log"

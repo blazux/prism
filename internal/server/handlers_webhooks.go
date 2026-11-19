@@ -358,7 +358,7 @@ func (s *Server) webhookCallerContext(ctx context.Context, hook memory.WebhookRo
 		}
 	}
 	if u == nil {
-		return trustedCallerContext()
+		return s.trustedCallerContext()
 	}
 	return s.callerContextForUser(ctx, u, session)
 }

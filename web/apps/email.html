@@ -9,6 +9,7 @@
 <script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
 <script src="/editor-bridge.js"></script>
+<script src="/object-links.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -141,7 +142,7 @@
 const J = (r) => r.json();
 function suggest(items) { try { parent.postMessage({ type: 'suggest', items }, '*'); } catch (_) {} }
 function fmtSize(n) { n = n || 0; if (n < 1024) return ' · ' + n + ' B'; if (n < 1048576) return ' · ' + (n / 1024).toFixed(0) + ' KB'; return ' · ' + (n / 1048576).toFixed(1) + ' MB'; }
-let folder = "INBOX", mailOffset=0, mailLoadGeneration=0, unreadOnly=false, searchQuery='';
+let folder = window.PrismLinks?.current('email')?.folder || "INBOX", mailOffset=0, mailLoadGeneration=0, unreadOnly=false, searchQuery='';
 let cfg = null, messages = [], current = null, replyUid = 0, mailTags = {}, activeFilter = '';
 let showAllTags = false, tagSearch = '', tagEntriesCache = [];
 const TOP_TAGS = 5;
@@ -168,7 +169,7 @@ async function init() {
     PrismAPI.toast('Could not read your mailbox settings: ' + e.message);
     return;
   }
-  if (!cfg || !cfg.configured || !cfg.has_password) renderNotConfigured();
+  if (!cfg || !cfg.configured || !cfg.has_password) { renderNotConfigured(); mailReferenceReady(); }
   else renderInbox();
 }
 
@@ -233,8 +234,22 @@ function renderInbox() {
   document.getElementById('search').addEventListener('search', () => {if(!document.getElementById('search').value)clearMailSearch();});
   suggest([{ label: '📋 Summarize unread', prompt: 'Summarize my unread emails', send: true }]);
   loadFolders();
-  loadInbox();
+  loadInbox().then(mailReferenceReady);
 }
+
+async function openLinkedMessage(reference, isCurrent) {
+  if (!reference.id && !reference.folder) return;
+  if (!cfg?.configured || !document.getElementById('mail')) throw Error('Connect your mailbox in Settings → Email first.');
+  if (document.getElementById('overlay').classList.contains('open')) throw Error('Close the current draft before opening a linked message.');
+  if (reference.folder && folder !== reference.folder) {
+    folder = reference.folder;
+    const loaded = loadInbox(), reading = readingGeneration;
+    await loaded;
+    if (!isCurrent() || reading !== readingGeneration) return;
+  }
+  if (reference.id && isCurrent()) await openMessage(Number(reference.id));
+}
+const mailReferenceReady = PrismLinks.receive('email', openLinkedMessage);
 
 // Inbox size is configured in Settings → Email (cfg.list_limit).
 function inboxLimit() { return Math.max(1, Math.min(500, (cfg && cfg.list_limit) || 60)); }
@@ -453,7 +468,7 @@ async function openMessage(uid) {
         <button class="btn" onclick="aiSummarize()">Summarize</button>
         <span class="toolbar-spacer"></span>
         <details class="action-menu"><summary class="icon-btn" aria-label="More message actions">${mailIcon('more')}</summary><div class="menu-panel">
-          <button onclick="markUnread()">Mark unread</button><button onclick="forward()">Forward</button>
+          <button onclick="markUnread()">Mark unread</button><button onclick="forward()">Forward</button><button onclick="PrismLinks.copy({type:'app',name:'email',id:String(current.uid),folder})">Copy link</button>
         </div></details>
       </div>
       <div class="rhead">
@@ -714,6 +729,11 @@ const mailEditor = PrismEditor.connect({
   idleContext:() => current ? `Reading email UID ${current.uid}, folder ${folder}, subject ${current.subject}.` : `Viewing email folder ${folder}.`,
   update:patch => { for (const [key,value] of Object.entries(patch)) document.getElementById('c-'+key).value=value; }
 });
+PrismLinks.beforeLeave = () => {
+  if (!document.getElementById('overlay').classList.contains('open')) return true;
+  if (sendingMail) { PrismAPI.toast('Wait for this message to finish sending.'); return false; }
+  return PrismLinks.confirmLeave(() => JSON.stringify([['c-to','c-subject','c-body'].map(id=>document.getElementById(id).value),composeAtts]),JSON.stringify([JSON.parse(composeSnapshot),[]]));
+};
 
 async function doSend() {
   if(sendingMail)return;

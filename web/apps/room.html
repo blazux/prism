@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
 <script src="/apiclient.js"></script>
+<script src="/smileys.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -228,7 +229,7 @@ function inlineMd(s){
   return s
 }
 function renderContent(raw){
-  const lines = esc(raw).split('\n')
+  const lines = esc(window.PrismSmileys?.text(raw) ?? raw).split('\n')
   let html = '', inList = false
   for (const ln of lines){
     if (/^\s*[-*]\s+/.test(ln)){

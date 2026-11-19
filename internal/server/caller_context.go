@@ -20,6 +20,7 @@ import (
 // scope never resolved for service-token self-calls). Bundling them into one
 // value with one apply step makes "forgot a field" structurally harder.
 type CallerContext struct {
+	DataChanged   func(scope, topic string)
 	MutationGate  func() error
 	Guard         agent.ToolGuard
 	RAGScope      string
@@ -38,6 +39,7 @@ type CallerContext struct {
 // apply sets every field this bundles onto an executor in one call, instead
 // of the 3-6 individual Set* calls each entry point used to repeat by hand.
 func (cc CallerContext) apply(e *agent.ToolExecutor) {
+	e.SetDataChangeFn(cc.DataChanged)
 	e.SetResourceMutationGuard(cc.MutationGate)
 	e.SetToolGuard(cc.Guard)
 	e.SetRAGScope(cc.RAGScope)
@@ -110,6 +112,7 @@ func (s *Server) callerContextForUser(ctx context.Context, u *memory.User, sessi
 		}
 	}
 	return CallerContext{
+		DataChanged: s.emitDataChange,
 		MutationGate: func() error {
 			s.runsMu.Lock()
 			blocked := s.deletingSessions[sessionID]
@@ -201,6 +204,7 @@ func (s *Server) callerContextForGroup(ctx context.Context, groupID int64) Calle
 		hideDenied(tool.Function.Name)
 	}
 	return CallerContext{
+		DataChanged: s.emitDataChange,
 		Guard:       guard,
 		HiddenTools: hidden,
 		RAGScope:    fmt.Sprintf("g%d", groupID),
@@ -227,7 +231,7 @@ func (cc CallerContext) withSenderGate(gate agent.ToolGuard) CallerContext {
 }
 
 // trustedCallerContext is the "no Prism identity to resolve a guard from"
-// case: a zero CallerContext is guard=nil (unrestricted), scope="" (no
+// case: guard=nil (unrestricted), scope="" (no
 // group/RAG), no personal scope, nothing hidden — exactly single-owner
 // Prism's own trust model. Used by Slack: its trust-on-first-use owner is a
 // bare Slack user id with no link to any Prism account/role (see slack.go),
@@ -235,4 +239,6 @@ func (cc CallerContext) withSenderGate(gate agent.ToolGuard) CallerContext {
 // behavior the bare nil/"" literal at the call site had before — expressed
 // through the shared type so it reads as a deliberate choice, not a special
 // case that's easy to mistake for an oversight.
-func trustedCallerContext() CallerContext { return CallerContext{} }
+func (s *Server) trustedCallerContext() CallerContext {
+	return CallerContext{DataChanged: s.emitDataChange}
+}

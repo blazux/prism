@@ -150,7 +150,7 @@ func (c *slackChannel) handleMessage(ctx context.Context, api *slack.Client, ev 
 
 	runCtx, cancel := context.WithTimeout(ctx, channelTurnTimeout)
 	defer cancel()
-	resp, err := c.s.runHeadlessChat(runCtx, "slack", text, "", trustedCallerContext())
+	resp, err := c.s.runHeadlessChat(runCtx, "slack", text, "", c.s.trustedCallerContext())
 	if err != nil {
 		log.Printf("[slack] chat: %v", err)
 		api.PostMessage(ev.Channel, slack.MsgOptionText(channelFailureMessage(err), false))

@@ -9,6 +9,7 @@
 <script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
 <script src="/editor-bridge.js"></script>
+<script src="/object-links.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <script src="/vendor/purify.min.js"></script>
 <script>
@@ -140,6 +141,7 @@
           <button class="btn" id="img-btn" onclick="$('img-file').click()" title="Insert an image">🖼 Image</button>
           <input type="file" id="img-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="insertImage(event)">
           <button class="btn" id="save-btn" onclick="saveNote()">Save</button>
+          <button class="btn" onclick="if(selectedId)PrismLinks.copy({type:'app',name:'notes',id:selectedId})">Copy link</button>
           <button class="btn" id="del-btn" onclick="deleteNote()" title="Delete" style="color:var(--red)">🗑</button>
         </div>
         <div id="note-conflict" hidden role="status" style="padding:10px;border-bottom:1px solid var(--border);font-size:12px">This note changed elsewhere. Your edits are still here.
@@ -713,7 +715,23 @@ const noteEditor = PrismEditor.connect({
   }
 });
 
-loadCaps().then(load);
+async function openLinkedNote(reference, isCurrent) {
+  if (!reference.id) return;
+  // Saving reloads the note list. Finish it before adding a linked item that
+  // was absent from that list, so the reload cannot discard the fetched item.
+  if (!await saveNote() || !isCurrent()) return;
+  const selection = selectedId, version = aiEditVersion;
+  if (!notes.some(note => note.id === reference.id)) {
+    const data = await api('?id=' + encodeURIComponent(reference.id));
+    if (!isCurrent() || selection !== selectedId || version !== aiEditVersion) return;
+    if (!data.note) throw Error('This note is unavailable.');
+    notes.push(data.note);
+  }
+  if (isCurrent()) await select(reference.id);
+}
+const noteReferenceReady = PrismLinks.receive('notes', openLinkedNote);
+PrismLinks.beforeLeave = saveNote;
+loadCaps().then(load).then(noteReferenceReady);
 </script>
 </body>
 </html>

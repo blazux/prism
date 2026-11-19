@@ -38,7 +38,9 @@ function roomClient({network=false} = {}) {
     clearTimeout:network ? id=>timers.delete(id) : clearTimeout,
     PrismAPI:{toast:message=>toasts.push(message),api(){if(network)return Promise.resolve({members:[]});throw Error('Unexpected request');}},
   };
+  context.window=context;
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../smileys.js'),'utf8'),context);
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
   const script = scripts.at(-1)[1].replace(/init\(\)\s*$/, '');
   vm.runInContext(script, context);
@@ -50,6 +52,15 @@ function roomClient({network=false} = {}) {
 }
 const question = {id:1,groupId:1,authorId:1,authorName:'Vincent',content:'@assistant salut',isAgent:false,createdAt:'2026-10-26T23:45:00-04:00'};
 const pending = {id:2,groupId:1,authorName:'Assistant',content:'',isAgent:true,status:'running',replyTo:1,createdAt:'2026-10-26T23:45:01-04:00'};
+
+test('room smileys affect display while messages and code remain literal',()=>{
+  const {context:c,read}=roomClient();
+  const message={...question,content:'Salut :D :thumbsup: `:smile:`'};
+  c.handleRoomEvent({type:'history',messages:[message]});
+  assert.equal(read('msgById.get(1).content'),message.content);
+  const html=read('rowHTML(msgById.get(1),null)');
+  assert.match(html,/Salut 😃 👍 <code>:smile:<\/code>/);
+});
 
 test('started, streamed and completed frames update one response bubble',()=>{
   const {context:c,read}=roomClient();

@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/widget-base.css">
 <script src="/theme.js"></script>
 <script src="/apiclient.js"></script>
+<script src="/object-links.js"></script>
 <script>
   addEventListener('message', e => {
     if (e.data && e.data.type === 'prism-theme' && e.data.vars) {
@@ -57,6 +58,7 @@
   .sess { font-size: 11px; color: var(--text3); }
   .detail { font-family: var(--mono, monospace); font-size: 12px; color: var(--text2);
             margin-top: 4px; white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+  .work-link { display:inline-block; margin-top:8px; color:var(--accent); font-size:12px; }
 
   .more { margin: 16px auto; display: block; font: inherit; font-size: 13px; cursor: pointer;
           border: 1px solid var(--border2); background: var(--bg2); color: var(--text);
@@ -74,6 +76,7 @@
     <div class="tabs" id="tabs">
       <button class="tab active" data-view="actions">Actions</button>
       <button class="tab" data-view="running">In progress</button>
+      <button class="tab" data-view="interrupted">Interrupted</button>
       <button class="tab" data-view="">Details</button>
       <button class="tab" data-view="errors">Errors</button>
       <button class="tab" data-view="tools">Tools</button>
@@ -98,11 +101,12 @@ const statusEl = document.getElementById('status');
 const moreBtn = document.getElementById('more');
 let view = 'actions', before = 0, loading = false;
 let canViewAll = false;
+function isWorkView() { return view === 'running' || view === 'interrupted'; }
 
 fetch('/api/me').then(r => r.json()).then(me => {
   if (me && me.user && me.user.role === 'global_admin') {
     canViewAll=true;
-    document.getElementById('scopeWrap').style.display = view==='running'?'none':'inline-flex';
+    document.getElementById('scopeWrap').style.display = isWorkView()?'none':'inline-flex';
   }
 }).catch(() => {});
 
@@ -167,28 +171,35 @@ async function load(reset) {
   statusEl.style.display = 'flex';
   statusEl.innerHTML = 'Loading…';
   moreBtn.style.display = 'none';
-  if (view === 'running') {
+  if (isWorkView()) {
     try {
-      const [sessions, membership] = await Promise.all([PrismAPI.api('/api/sessions?includeSystem=1'),PrismAPI.api('/api/my/groups')]);
+      const [sessions, membership] = await Promise.all([PrismAPI.api('/api/sessions?includeSystem=1'),view === 'running' ? PrismAPI.api('/api/my/groups') : Promise.resolve({groups:[]})]);
       const jobs = [];
       for (const session of sessions.sessions || []) {
-        if (!['running','waiting_for_input','waiting_for_approval'].includes(session.runStatus)) continue;
+        const states = view === 'interrupted' ? ['interrupted'] : ['running','waiting_for_input','waiting_for_approval'];
+        if (!states.includes(session.runStatus)) continue;
         const task = await PrismAPI.api('/api/sessions/'+encodeURIComponent(session.id)+'/activity?limit=1');
+        if (!states.includes(task.runStatus)) continue;
         jobs.push({name:session.name, ...task});
       }
-      for (const group of membership.groups || []) {
+      for (const group of view === 'running' ? membership.groups || [] : []) {
         const id = group.groupId || group.id;
         try { const task = await PrismAPI.api('/api/room/activity?group='+encodeURIComponent(id)+'&limit=1');
           if (task.runStatus==='running'||task.runStatus==='queued') jobs.push({name:'Room · '+(group.groupName||group.name),...task});
         } catch (error) {if(![403,404].includes(error.status))throw error;} // Room access is checked independently of group membership.
       }
       for (const task of jobs) {
-        const el=document.createElement('div');el.className='row info';
-        el.innerHTML='<div class="time">now</div><div class="rail"><span class="dot"></span></div><div class="body"><div class="line"><span class="badge">'+esc(task.runStatus.replaceAll('_',' '))+'</span><strong>'+esc(task.name)+'</strong></div><div class="detail">'+esc(task.request||'Background task')+'</div><div class="detail">'+esc([...(task.recentTools||[]).map(t=>t.tool+' · '+t.status),...(task.subagents||[]).map(t=>'Subagent: '+(t.task||t.id)+' · '+t.status),...(task.backgroundJobs?[task.backgroundJobs+' background job(s)']:[])].join('\n'))+(task.queued?'\n'+esc(task.queued)+' queued':'')+'</div></div>';
+        const el=document.createElement('div');el.className='row '+(view==='interrupted'?'warn':'info');
+        el.innerHTML='<div class="time">'+(view==='interrupted'?'stopped':'now')+'</div><div class="rail"><span class="dot"></span></div><div class="body"><div class="line"><span class="badge">'+esc(task.runStatus.replaceAll('_',' '))+'</span><strong>'+esc(task.name)+'</strong></div><div class="detail">'+esc(task.request||(view==='interrupted'?'Review the saved conversation before resuming.':'Background task'))+'</div><div class="detail">'+esc([...(task.recentTools||[]).map(t=>t.tool+' · '+t.status),...(task.subagents||[]).map(t=>'Subagent: '+(t.task||t.id)+' · '+t.status),...(task.backgroundJobs?[task.backgroundJobs+' background job(s)']:[])].join('\n'))+(task.queued?'\n'+esc(task.queued)+' queued':'')+'</div></div>';
+        if (task.session) {
+          const link=document.createElement('a');link.className='work-link';link.textContent='Open chat';
+          link.href='/?workspace='+encodeURIComponent(task.session)+'&chat=open';
+          el.querySelector('.body').appendChild(link);
+        }
         feed.append(el);
       }
-      statusEl.textContent=jobs.length?'':'No work in progress.';statusEl.style.display=jobs.length?'none':'';
-    } catch(e){ statusEl.textContent='Could not load work in progress: '+e.message; }
+      statusEl.textContent=jobs.length?'':view==='interrupted'?'No interrupted tasks.':'No work in progress.';statusEl.style.display=jobs.length?'none':'';
+    } catch(e){ statusEl.textContent='Could not load tasks: '+e.message; }
     finally {loading=false;}
     return;
   }
@@ -216,7 +227,7 @@ document.getElementById('tabs').addEventListener('click', e => {
   const b = e.target.closest('.tab'); if (!b) return;
   if(loading)return;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === b));
-  view = b.dataset.view; document.getElementById('scopeWrap').style.display=view==='running'||!canViewAll?'none':'inline-flex'; load(true);
+  view = b.dataset.view; document.getElementById('scopeWrap').style.display=isWorkView()||!canViewAll?'none':'inline-flex'; load(true);
 });
 document.getElementById('scopeAll').addEventListener('change', () => load(true));
 document.getElementById('refresh').addEventListener('click', () => load(true));

@@ -17,7 +17,7 @@ func TestWidgetRuntimeContract(t *testing.T) {
 	widget := readWeb(t, "prism-widget.js")
 	for _, helper := range []string{
 		"prismTool", "prismToolRaw", "prismChat", "prismNotify",
-		"prismSuggest", "prismContext", "prismOpenFile", "prismOnData",
+		"prismSuggest", "prismContext", "prismOpenFile", "prismOnData", "prismDataChanged",
 	} {
 		if !strings.Contains(widget, "window."+helper+" = ") {
 			t.Errorf("prism-widget.js no longer defines window.%s", helper)

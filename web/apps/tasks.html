@@ -9,6 +9,7 @@
 <script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
 <script src="/editor-bridge.js"></script>
+<script src="/object-links.js"></script>
 <script src="/pim-editor.js"></script>
 <script>
   addEventListener('message', e => {
@@ -268,6 +269,7 @@ function renderTodos() {
   for (const t of items) {
     const row = document.createElement('div');
     row.className = 'todo' + (t.done ? ' done' : '');
+    row.dataset.taskId = t.id;
     const due = t.dueAt ? `<div class="due ${isOverdue(t) ? 'over' : ''}">${esc(dueLabel(t.dueAt))}</div>` : '';
     row.innerHTML = `
       <button class="check ${t.done ? 'on' : ''}" title="Toggle done"></button>
@@ -329,7 +331,10 @@ function editTodo(t){
   const f=d.querySelector('form');f.elements.title.value=t.title;f.elements.priority.value=t.priority||'normal';
   if(t.dueAt){const dt=new Date(t.dueAt);f.elements.due.value=dt.getFullYear()+'-'+pad(dt.getMonth()+1)+'-'+pad(dt.getDate())+'T'+pad(dt.getHours())+':'+pad(dt.getMinutes());}
   d.querySelector('.cancel').onclick=()=>d.close();d.onclose=()=>{if(taskEditForm?.dialog===d)taskEditForm=null;d.remove();publishTaskContext();postTodoContext();};document.body.appendChild(d);d.showModal();
-  taskEditForm={dialog:d,form:f,id:t.id};publishTaskContext();
+  taskEditForm={dialog:d,form:f,id:t.id};
+  taskEditForm.saved=taskFormDraft();
+  const copy=document.createElement('button');copy.type='button';copy.className='btn';copy.textContent='Copy link';copy.onclick=()=>PrismLinks.copy({type:'app',name:'tasks',id:String(t.id)});f.querySelector('.form-foot').prepend(copy);
+  publishTaskContext();
   f.onsubmit=async e=>{e.preventDefault();const b=f.querySelector('[type=submit]');b.disabled=true;
     try{await PrismAPI.api('/api/tasks?id='+encodeURIComponent(t.id),PrismAPI.body('PUT',{title:f.elements.title.value.trim(),priority:f.elements.priority.value,due:f.elements.due.value?new Date(f.elements.due.value).toISOString():''}));d.close();loadTodos();}
     catch(e){d.querySelector('.err').textContent=e.message;}finally{b.disabled=false;}
@@ -644,8 +649,38 @@ const taskEditor = PrismEditor.connect({
 // Reload when the agent changes tasks/cron via chat.
 addEventListener('message', e => { if (e.data && e.data.type === 'data-changed') { loadTodos(); loadJobs(); } });
 
+async function openLinkedTask(reference, isCurrent) {
+  if (!reference.id) return;
+  if (taskEditForm?.dialog.open || taskCreateActive) throw Error('Close the current task form before opening another task.');
+  const generation = taskEditorGeneration;
+  let task = todos.find(task => task.id === reference.id);
+  if (!task) {
+    const data = await PrismAPI.api('/api/tasks?id=' + encodeURIComponent(reference.id));
+    if (!isCurrent() || generation !== taskEditorGeneration || taskCreateActive) return;
+    task = data.task;
+    if (!task) throw Error('This task is unavailable.');
+    todos.push(task);
+  }
+  if (!isCurrent()) return;
+  switchTab('todo');
+  if (task.done || task.cancelled) $('show-done').checked = true;
+  $('task-search').value = ''; $('task-filter').value = 'all';
+  renderTodos();
+  const row = [...$('todo-list').children].find(row => row.dataset.taskId === task.id);
+  row?.scrollIntoView({block:'center'});
+  if (!String(task.id).startsWith('call:')) editTodo(task);
+}
+const taskReferenceReady = PrismLinks.receive('tasks', openLinkedTask);
+function taskFormDraft() {
+  const f=taskEditForm?.form;
+  return JSON.stringify(f?['title','priority','due'].map(name=>f.elements[name].value):[$('t-title').value,$('t-prio').value,$('t-due').value]);
+}
+PrismLinks.beforeLeave = () => {
+  if (taskAdding || taskEditForm?.form.querySelector('[type=submit]').disabled) { PrismAPI.toast('Wait for this task to finish saving.'); return false; }
+  return PrismLinks.confirmLeave(taskFormDraft,taskEditForm?.saved || JSON.stringify(['','normal','']));
+};
 // init
-loadTodos();
+loadTodos().then(taskReferenceReady);
 loadJobs();
 switchTab('todo');
 setInterval(loadJobs, 30000);

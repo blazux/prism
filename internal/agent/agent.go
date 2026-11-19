@@ -612,6 +612,11 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 		}
 		a.history = append(a.history, msg)
 	}
+	var unknownResults int
+	a.history, unknownResults = normalizeReplayedToolBatches(a.history)
+	if unknownResults > 0 {
+		log.Printf("[agent] session=%s replay includes %d missing tool results with unknown outcomes; archive unchanged", a.sessionID, unknownResults)
+	}
 	switch {
 	case lc != nil:
 		log.Printf("[agent] session=%s loaded %d messages from DB (replayed live compaction note, rows before id %d covered by it, truncated=%v)", a.sessionID, len(a.history), lc.BeforeID, truncated)
@@ -759,7 +764,7 @@ func (a *Agent) forceCompactLiveContext(ctx context.Context, events chan<- Event
 }
 
 // compactLiveContextTo replaces the oldest completed turns with a summary until
-// the kept tail is under `target` chars, cutting only at a "user" boundary.
+// the kept tail is under `target` chars, cutting only at a safe "user" boundary.
 // events may be nil (background pass): then nothing is announced to the UI.
 func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, target int) error {
 	a.compactMu.Lock()
@@ -771,15 +776,13 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 		total += messageContextChars(m)
 	}
 	// Walk forward from the start until the KEPT tail is back under the target,
-	// then advance to the next "user" boundary for safety.
+	// then advance past any tool batch or reordered persisted message range.
 	cut, kept := 0, total
 	for cut < len(a.history) && kept > target {
 		kept -= messageContextChars(a.history[cut])
 		cut++
 	}
-	for cut < len(a.history) && a.history[cut].Role != "user" {
-		cut++
-	}
+	cut = safeCompactionCut(a.history, cut)
 	if cut == 0 || cut >= len(a.history) {
 		a.histMu.Unlock()
 		return nil // nothing safe to drop (e.g. a single huge in-progress turn)
@@ -818,7 +821,7 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 	// mutations change what precedes the cut; plain appends never do, so
 	// history[:cut] is still exactly the span that was summarized.
 	tail := a.history[cut:]
-	beforeID := firstDBID(tail)
+	beforeID := minDBID(tail)
 	if beforeID == 0 {
 		if m := maxDBID(dropped); m > 0 {
 			beforeID = m + 1
@@ -846,14 +849,15 @@ func (a *Agent) CompactContext(ctx context.Context) error {
 	return a.compactLiveContextTo(ctx, nil, a.liveHistoryChars()/2)
 }
 
-// firstDBID returns the row id of the first persisted message in msgs (0 if none).
-func firstDBID(msgs []ollama.Message) int64 {
+// minDBID returns the lowest row id in msgs (0 if none is persisted).
+func minDBID(msgs []ollama.Message) int64 {
+	var min int64
 	for _, m := range msgs {
-		if m.DBID > 0 {
-			return m.DBID
+		if m.DBID > 0 && (min == 0 || m.DBID < min) {
+			min = m.DBID
 		}
 	}
-	return 0
+	return min
 }
 
 // maxDBID returns the highest row id among msgs (0 if none is persisted).

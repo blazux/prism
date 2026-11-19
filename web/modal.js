@@ -65,7 +65,8 @@
       build.render(box, done)
       ov.addEventListener('mousedown', e => { if (e.target === ov) done(build.onEscape) })
       document.addEventListener('keydown', onKey, true)
-      document.body.appendChild(ov)
+      // Native modal dialogs sit above body overlays in the browser top layer.
+      ;(document.querySelector('dialog[open]') || document.body).appendChild(ov)
       const f = box.querySelector('input, button.pm-primary, button.pm-danger, button')
       if (f) f.focus()
     })

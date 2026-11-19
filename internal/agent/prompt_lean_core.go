@@ -23,7 +23,7 @@ Injected helpers:
 - prismSuggest([{label,prompt,send}]): suggestion chips, send:true submits on click.
 - prismContext(text): context for next agent message.
 - prismOpenFile(path): open workspace file in editor.
-- prismOnData(callback): refresh on notes/tasks/events changes.
+- prismOnData(callback, topic?): re-read on data changes/reconnection; returns unsubscribe. Custom signals: prism_help topic=data-events.
 Use these helpers, not parent.postMessage. Widget browser requests use relative URLs and session cookies; never embed server tokens or Docker-internal URLs. For pure display, a tool/cron can write data/name.json for fetch('/data/name.json'). Custom tools are Python scripts registered with register_tool and a single-line # TOOL: JSON header; hard 2-minute timeout.
 
 Personal-data REST uses ?session= plus window.PRISM_SESSION, never a literal board ID:

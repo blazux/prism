@@ -3,6 +3,7 @@ package calendar
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"prism/internal/caldav"
@@ -94,6 +95,14 @@ func (p Patch) Merge(cur Item, locations ...*time.Location) (Item, error) {
 	}
 	return cur, nil
 }
+
+var ErrNotFound = errors.New("event not found")
+
+type eventNotFound string
+
+func (e eventNotFound) Error() string        { return string(e) }
+func (e eventNotFound) Is(target error) bool { return target == ErrNotFound }
+
 func Get(ctx context.Context, prov Provider, id string) (Item, error) {
 	if strings.TrimSpace(id) == "" {
 		return Item{}, fmt.Errorf("event id is required")
@@ -109,9 +118,6 @@ func Get(ctx context.Context, prov Provider, id string) (Item, error) {
 		return e.item(), err
 	case *CalDAVProvider:
 		path, occ := caldav.SplitOccurrenceID(id)
-		if occ != "" {
-			return Item{}, caldav.ErrSingleOccurrence("edit")
-		}
 		conn, err := p.cfg.Connect(ctx)
 		if err != nil {
 			return Item{}, err
@@ -124,9 +130,26 @@ func Get(ctx context.Context, prov Provider, id string) (Item, error) {
 			return Item{}, err
 		}
 		if obj != nil && obj.Data != nil {
-			for _, it := range itemsFromEvents(path, obj.ModTime, obj.Data.Events()) {
+			for _, it := range itemsFromEvents(path, obj.ModTime, obj.Data.Events(), timeprefs.Location(ctx)) {
 				if it.ID == id {
 					return it, nil
+				}
+			}
+		}
+		if occ != "" {
+			// A stored override can be read above; a generated occurrence needs
+			// the same server-side expansion as List, in a bounded date window.
+			when, err := time.Parse("20060102T150405Z", occ)
+			if err == nil {
+				from, to := when.Add(-24*time.Hour), when.Add(24*time.Hour)
+				items, err := p.List(ctx, &from, &to)
+				if err != nil {
+					return Item{}, err
+				}
+				for _, it := range items {
+					if it.ID == id {
+						return it, nil
+					}
 				}
 			}
 		}
@@ -141,9 +164,14 @@ func Get(ctx context.Context, prov Provider, id string) (Item, error) {
 			}
 		}
 	}
-	return Item{}, fmt.Errorf("event %q not found; use calendar list for its id", id)
+	return Item{}, eventNotFound(fmt.Sprintf("event %q not found; use calendar list for its id", id))
 }
 func Update(ctx context.Context, prov Provider, id string, patch Patch) error {
+	if _, ok := prov.(*CalDAVProvider); ok {
+		if _, occurrence := caldav.SplitOccurrenceID(id); occurrence != "" {
+			return caldav.ErrSingleOccurrence("edit")
+		}
+	}
 	cur, err := Get(ctx, prov, id)
 	if err != nil {
 		return err

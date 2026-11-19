@@ -107,12 +107,72 @@
   // prismOpenFile(path) → open a workspace file in the editor pane.
   window.prismOpenFile = function (path) { toParent({ type: 'openFile', path: String(path) }); };
 
-  // prismOnData(cb) → run cb() whenever the agent changes shared data (notes,
-  // tasks, events) from elsewhere, so a widget refreshes on real change instead
-  // of a blind setInterval. Returns an unsubscribe function.
-  window.prismOnData = function (cb) {
-    function h(e) { if (e && e.data && e.data.type === 'data-changed') cb(); }
-    window.addEventListener('message', h);
-    return function () { window.removeEventListener('message', h); };
+  // Ordinary object links open in the dashboard without reloading the widget
+  // or losing the user's chat draft. The dashboard validates the destination.
+  document.addEventListener('click', function (event) {
+    if (event.defaultPrevented || event.button > 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const anchor = event.target.closest && event.target.closest('a[href]');
+    if (!anchor || anchor.hasAttribute('download')) return;
+    let url, base;
+    // srcdoc widgets inherit their parent's origin, while location.origin is
+    // "null" for about:srcdoc. baseURI resolves their ordinary relative links.
+    try { base = new URL(document.baseURI); url = new URL(anchor.getAttribute('href'), base); } catch (_) { return; }
+    if (url.origin !== base.origin || url.pathname !== '/') return;
+    if (!['email','notes','tasks','calendar'].includes(url.searchParams.get('app')) && !url.searchParams.get('workspace')) return;
+    event.preventDefault();
+    toParent({type:'open-reference',href:url.pathname + url.search});
+  });
+
+  // Signals contain no records: re-read the authorized tool/file/API on change.
+  // The dashboard shares its existing socket across every widget. Only a
+  // standalone preview opens an EventSource, closed after the last unsubscribe.
+  const dataListeners = new Set();
+  let dataSource = null;
+  function deliverData(change) {
+    const topic = change.topic || change.app || '*';
+    dataListeners.forEach(function (listener) {
+      const options = listener.options;
+      if (topic !== '*' && options.topic && options.topic !== topic) return;
+      if (change.scope && options.scope && options.scope !== change.scope) return;
+      if (topic !== '*' && options.group && Number(options.group) !== Number(change.group)) return;
+      try { listener.callback(Object.assign({}, change, {topic: topic})); }
+      catch (error) { setTimeout(function () { throw error; }, 0); }
+    });
+  }
+  function onDataMessage(event) {
+    if (event.source === window.parent && event.data && event.data.type === 'data-changed') deliverData(event.data);
+  }
+  window.prismOnData = function (callback, options) {
+    if (typeof callback !== 'function') throw new TypeError('prismOnData needs a callback');
+    const listener = {callback: callback, options: typeof options === 'string' ? {topic: options} : (options || {})};
+    if (!dataListeners.size) window.addEventListener('message', onDataMessage);
+    dataListeners.add(listener);
+    if (window.parent === window && !dataSource && typeof EventSource === 'function') {
+      dataSource = new EventSource('/api/data-events?session=' + encodeURIComponent(session()));
+      dataSource.addEventListener('change', function (event) {
+        try { deliverData(JSON.parse(event.data)); } catch (_) {}
+      });
+    }
+    return function () {
+      dataListeners.delete(listener);
+      if (!dataListeners.size) {
+        window.removeEventListener('message', onDataMessage);
+        if (dataSource) { dataSource.close(); dataSource = null; }
+      }
+    };
+  };
+
+  // Call after a custom backend has saved successfully. Shared data opts into
+  // its group scope; emitting a signal grants no access to that backend.
+  window.prismDataChanged = async function (topic, options) {
+    options = options || {};
+    const response = await fetch('/api/data-events?session=' + encodeURIComponent(session()), {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({topic: topic, scope: options.scope, group: options.group})
+    });
+    let data;
+    try { data = await response.json(); } catch (_) { throw new Error('Data signal failed: HTTP ' + response.status); }
+    if (!response.ok || data.error) throw new Error(data.error || 'Data signal failed: HTTP ' + response.status);
+    return data;
   };
 })();

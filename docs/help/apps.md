@@ -55,6 +55,27 @@ In a shared deployment a note can be **shared with your group**
 ("share my onboarding note with the team"); sharing it again refreshes the copy,
 and the author or a group admin can unshare it.
 
+## Link to an app item
+
+Use an ordinary Markdown link in a reply or an HTML link in a widget to open an
+item in its app. Use the exact ID returned by the corresponding tool, and URL-encode
+each value. Use **Copy link** in an open note, task, event or message to copy its URL.
+For email, the ID is the message UID and `folder` is its exact mailbox folder.
+
+- Note: `[Open the note](/?app=notes&id=42)`
+- Task: `[Open the task](/?app=tasks&id=17)`
+- Event: `[Open the event](/?app=calendar&id=23)`
+- Email: `[Read the message](/?app=email&id=153&folder=INBOX)`
+- Conversation: `[Open this workspace](/?workspace=finance&chat=open)`
+
+These links use the signed-in user's connections and permissions. They do not
+select another user's account. A recipient may not have access to the same item.
+IDs belong to the connected source: switching providers can change their meaning.
+An email UID identifies a message only in the same mailbox and folder; an email
+link is not a portable identifier for sharing that message with another account.
+Missing items and disconnected sources report an error. Files can already be
+opened from widgets with `prismOpenFile(path)`; use attachment links for downloads.
+
 ## Terminal
 The Terminal opens an interactive shell in the agent’s workspace container.
 Toggle it with **Ctrl+Enter**. It supports terminal programs such as `vim` and

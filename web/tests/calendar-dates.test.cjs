@@ -7,12 +7,13 @@ const vm = require('node:vm');
 const source = readFileSync(require('node:path').join(__dirname,'../apps/calendar.html'),'utf8');
 const helpers = source.slice(source.indexOf('function pad('),source.indexOf('function setMode('));
 const openForm = source.slice(source.indexOf('function openForm('),source.indexOf('function openEvent('));
+const formDraft = source.slice(source.indexOf('function calendarFormDraft('),source.indexOf('PrismLinks.beforeLeave'));
 for(const zone of ['UTC','America/Martinique','Europe/Paris']) {
  test('calendar dates in '+zone,()=>{
   const previous=process.env.TZ;process.env.TZ=zone;
   try {
    const context=vm.createContext({Date,String,calendarEditorGeneration:0,publishCalendarContext:()=>{},setTimeout:()=>{},$:()=>({style:{},classList:{add:()=>{}}})});
-   vm.runInContext(helpers+openForm+'\nfunction setFields(v){saved=v}',context);
+   vm.runInContext(helpers+formDraft+openForm+'\nfunction setFields(v){saved=v}',context);
    assert.equal(vm.runInContext(`ymd(eventStart({allDay:true,startAt:'2026-09-22T00:00:00Z'}))`,context),'2026-09-22');
    const event=`{allDay:true,startAt:'2026-09-22T00:00:00Z',endAt:'2026-09-24T00:00:00Z'}`;
    assert.equal(vm.runInContext(`occursOn(${event},new Date('2026-09-23T12:00:00'))`,context),true);

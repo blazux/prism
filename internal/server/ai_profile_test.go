@@ -350,7 +350,7 @@ func TestAIProfilePersistenceIsolationAndRouting(t *testing.T) {
 		if err != nil || len(hist) < 4 {
 			t.Fatal("conversation history lost", len(hist), err)
 		}
-		got, err := live.runHeadlessChat(ctx, "ai-profile-headless", "Third message", "", trustedCallerContext())
+		got, err := live.runHeadlessChat(ctx, "ai-profile-headless", "Third message", "", live.trustedCallerContext())
 		if err != nil || !strings.Contains(got, "mono-new-key:mono-new-model") {
 			t.Fatal("headless ignored personal profile", got, err)
 		}

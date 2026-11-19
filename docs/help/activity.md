@@ -14,6 +14,15 @@ Room permissions; the **everyone** audit filter does not extend this view.
 Workspace badges and **In progress** indicate agent conversations. A widget or
 scheduled script calling a tool directly does not mark the agent as working.
 
+**Interrupted** lists your personal conversations whose task stopped when the
+server stopped, including conversations started from Telegram. **Open chat**
+opens the saved conversation without starting any work. Review its tool results,
+then choose **Resume** or send a follow-up. Resume sends a normal continuation
+message; it preserves any separate draft and attachments in the composer.
+Reconnecting or opening the conversation does not resume it automatically. A
+tool without a saved result may already have changed something: the agent must
+check the current state before repeating it.
+
 **Details**, **Tools**, **Chat**, **Errors** and **Webhooks** expose the technical
 history when investigating a problem. Tool entries show whether the call completed or failed
 and how long it took. Refresh or load older entries as needed.

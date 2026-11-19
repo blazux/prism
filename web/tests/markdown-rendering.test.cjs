@@ -9,6 +9,7 @@ function fixture() {
   const context = {window: null}
   context.window = context
   vm.createContext(context)
+  vm.runInContext(fs.readFileSync(path.join(root, 'smileys.js'), 'utf8'), context)
   vm.runInContext(fs.readFileSync(path.join(root, 'vendor/marked/marked.min.js'), 'utf8'), context)
   context.DOMPurify = {sanitize: html => html}
   vm.runInContext(rendering, context)
@@ -53,6 +54,16 @@ test('normal markdown and fenced artifacts still use the pinned parser', () => {
   assert.doesNotMatch(html, /<img\b/)
   context.marked = undefined
   assert.equal(context.renderMarkdown('```html\n<img src=x>\n```'), '```html<br>&lt;img src=x&gt;<br>```')
+})
+
+test('chat smileys leave code, links, raw HTML and mathematical expressions unchanged', () => {
+  const context = fixture()
+  const html = context.renderMarkdown('Salut :) :thumbsup: **:smile:**\n\n`:) :joy:`\n\n[docs :heart:](https://example.com/:D)\n\n<span title=":smile:">:)</span>\n\n$x :D$')
+  assert.match(html, /Salut 🙂 👍 <strong>😄<\/strong>/)
+  assert.match(html, /<code>:\) :joy:<\/code>/)
+  assert.match(html, /<a href="https:\/\/example.com\/:D">docs :heart:<\/a>/)
+  assert.match(html, /<span title=":smile:">:\)<\/span>/)
+  assert.match(html, /\$x :D\$/)
 })
 
 test('missing or failed KaTeX preserves inert inline and display formulas', () => {

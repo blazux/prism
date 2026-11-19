@@ -83,6 +83,7 @@ type Config struct {
 
 type Server struct {
 	completedRuns map[string]*chatRun
+	dataEvents    dataEventHub
 
 	runsMu           sync.Mutex
 	chatReceipts     sync.Map // no-database fallback; durable installations use chat_requests
@@ -373,6 +374,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	// Shared group chat rooms (Phase 4)
 	mux.HandleFunc("/wsroom", s.resourceRoute((*Server).handleRoomWS))
 	mux.HandleFunc("/api/my/groups", s.resourceRoute((*Server).handleMyGroups))
+	mux.HandleFunc("/api/data-events", s.resourceRoute((*Server).handleDataEvents))
 	mux.HandleFunc("/api/my/tool-prefs", s.resourceRoute((*Server).handleMyToolPrefs))
 	mux.HandleFunc("/api/group/members", s.resourceRoute((*Server).handleGroupMembers))
 	mux.HandleFunc("/api/room/history", s.resourceRoute((*Server).handleRoomHistory))

@@ -131,6 +131,7 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr string, args 
 		if err != nil {
 			return "", err
 		}
+		e.dataChanged(e.pimSessionScope(), "notes")
 		return fmt.Sprintf("Note %q added.", id), nil
 	case "list", "":
 		items, err := prov.List(ctx)
@@ -187,6 +188,7 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr string, args 
 		if _, err := prov.Save(ctx, idStr, title, body, tags); err != nil {
 			return "", err
 		}
+		e.dataChanged(e.pimSessionScope(), "notes")
 		return fmt.Sprintf("Note %q updated.", idStr), nil
 	case "delete", "remove":
 		if strings.TrimSpace(idStr) == "" {
@@ -199,6 +201,7 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr string, args 
 		if err := prov.Delete(ctx, idStr); err != nil {
 			return "", err
 		}
+		e.dataChanged(e.pimSessionScope(), "notes")
 		msg := fmt.Sprintf("Note %q deleted.", idStr)
 		if item != nil {
 			// Echo what was destroyed: if this delete was a mistake, the content
@@ -228,6 +231,7 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr string, args 
 		if err != nil {
 			return "", err
 		}
+		e.dataChanged(gscope, "notes")
 		return fmt.Sprintf("Note %q shared with group %s as group note %d (read-only for members; share it again after editing to refresh the copy, note action=unshare id=%d removes it).", item.Title, e.groupNameFor(gid), newID, newID), nil
 	case "unshare":
 		gscope, gid, msg := e.noteGroupScope()
@@ -248,6 +252,7 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr string, args 
 		if err := e.memStore.DeleteNote(ctx, gscope, id); err != nil {
 			return "", err
 		}
+		e.dataChanged(gscope, "notes")
 		return fmt.Sprintf("Group note %d (%q) unshared — the author's personal note is untouched.", id, n.Title), nil
 	default:
 		return "", fmt.Errorf("note: unknown action %q (add, list, update, delete, share, unshare)", action)
@@ -323,6 +328,7 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 		if err != nil {
 			return "", err
 		}
+		e.dataChanged(e.pimSessionScope(), "tasks")
 		return fmt.Sprintf("Task %q added.", id), nil
 	case "list", "":
 		items, err := prov.List(ctx, includeDone)
@@ -349,6 +355,7 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 		if err := prov.SetDone(ctx, idStr, true); err != nil {
 			return "", err
 		}
+		e.dataChanged(e.pimSessionScope(), "tasks")
 		return fmt.Sprintf("Task %q completed.", idStr), nil
 	case "reopen", "undone":
 		if strings.TrimSpace(idStr) == "" {
@@ -360,6 +367,7 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 		if err := prov.SetDone(ctx, idStr, false); err != nil {
 			return "", err
 		}
+		e.dataChanged(e.pimSessionScope(), "tasks")
 		return fmt.Sprintf("Task %q reopened.", idStr), nil
 	case "delete", "remove":
 		if strings.TrimSpace(idStr) == "" {
@@ -372,6 +380,7 @@ func (e *ToolExecutor) taskTool(ctx context.Context, action, idStr, title, prior
 		if err := prov.Delete(ctx, idStr); err != nil {
 			return "", err
 		}
+		e.dataChanged(e.pimSessionScope(), "tasks")
 		msg := fmt.Sprintf("Task %q deleted.", idStr)
 		if item != nil {
 			msg += fmt.Sprintf(" Deleted task was: %q (priority %s).", item.Title, item.Priority)
@@ -407,6 +416,7 @@ func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, d
 		if err != nil {
 			return "", err
 		}
+		e.dataChanged(e.pimSessionScope(), "calendar")
 		return fmt.Sprintf("Event %q added.", id), nil
 	case "list", "":
 		items, err := prov.List(ctx, parseTimePtr(from, timeprefs.Location(ctx)), parseTimePtr(to, timeprefs.Location(ctx)))
@@ -445,6 +455,7 @@ func (e *ToolExecutor) calendarTool(ctx context.Context, action, idStr, title, d
 		if err := prov.Delete(ctx, idStr); err != nil {
 			return "", err
 		}
+		e.dataChanged(e.pimSessionScope(), "calendar")
 		msg := fmt.Sprintf("Event %q deleted.", idStr)
 		if deleted != nil {
 			msg += fmt.Sprintf(" Deleted event was: %q at %s.", deleted.Title, deleted.StartAt.Format("2006-01-02 15:04"))

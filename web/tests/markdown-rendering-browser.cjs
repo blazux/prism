@@ -3,9 +3,11 @@ const {chromium} = require('playwright')
 const root = path.resolve(__dirname, '..'), origin = 'http://fixture.invalid'
 const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8')
 const rendering = source.slice(source.indexOf('function renderMarkdown('), source.indexOf('// ─── Emoji picker'))
+const userRendering = source.slice(source.indexOf('function appendUserMessage('), source.indexOf('function appendStream('))
+const historyRendering = source.slice(source.indexOf('function restoreChatHistory('), source.indexOf('// Follow the conversation only'))
 const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8')
 const assets = [...index.matchAll(/<(?:script|link)\b[^>]*(?:src|href)="([^\"]+)"[^>]*>(?:<\/script>)?/g)]
-  .filter(match => /^\/vendor\/(?:katex|marked|purify)/.test(match[1]) || match[1] === '/editor-loader.js').map(match => match[0]).join('\n')
+  .filter(match => /^\/vendor\/(?:katex|marked|purify)/.test(match[1]) || ['/editor-loader.js', '/smileys.js'].includes(match[1])).map(match => match[0]).join('\n')
 
 ;(async () => {
   const executablePath = process.env.CHROMIUM_EXECUTABLE_PATH || process.env.CHROMIUM_EXECUTABLE
@@ -16,7 +18,7 @@ const assets = [...index.matchAll(/<(?:script|link)\b[^>]*(?:src|href)="([^\"]+)
     await page.route('**/*', route => {
       const url = new URL(route.request().url())
       if (url.origin !== origin) {external.push(url.href); return route.abort()}
-      if (url.pathname === '/') return route.fulfill({contentType: 'text/html', body: `<!doctype html><html><head>${assets}</head><body><div id="result"></div><div id="editor"></div><script>${rendering}</script></body></html>`})
+      if (url.pathname === '/') return route.fulfill({contentType: 'text/html; charset=utf-8', body: `<!doctype html><html><head><meta charset="utf-8">${assets}</head><body><div id="result"></div><div id="editor"></div><div id="chat-messages"></div><script>const userChip=()=>'',agentChip=()=>'';let AGENT_NAME='Agent';function fmtTime(){return ''}function scrollChat(){}function prepareChatImages(){}</script><script>${rendering}\n${userRendering}\n${historyRendering}</script></body></html>`})
       const file = path.resolve(root, '.' + url.pathname)
       if (file.startsWith(root + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile()) return route.fulfill({path: file})
       failures.push(url.pathname)
@@ -44,6 +46,20 @@ const assets = [...index.matchAll(/<(?:script|link)\b[^>]*(?:src|href)="([^\"]+)
     assert.equal(await page.locator('#result img').count(), 0)
     assert.equal(await page.locator('#result .katex').count(), 2)
     assert.equal(await page.locator('.CodeMirror').count(), 1)
+
+    const chatSource = 'Salut :) :thumbsup: `:D` https://example.com/:smile:/file'
+    await page.evaluate(text => {
+      result.innerHTML = renderMarkdown(text)
+      appendUserMessage(text)
+      restoreChatHistory([{role:'user',content:text},{role:'assistant',content:'Rebonjour :smile:'}])
+    }, chatSource)
+    assert.equal(await page.locator('#result p').textContent(), 'Salut 🙂 👍 :D https://example.com/:smile:/file')
+    assert.equal(await page.locator('#result code').textContent(), ':D')
+    assert.equal(await page.locator('#result a').getAttribute('href'), 'https://example.com/:smile:/file')
+    assert.deepEqual(await page.locator('#chat-messages .user .chat-msg-content').allTextContents(), [
+      'Salut 🙂 👍 `:D` https://example.com/:smile:/file', 'Salut 🙂 👍 `:D` https://example.com/:smile:/file'
+    ])
+    assert.equal(await page.locator('#chat-messages .assistant .chat-msg-content').textContent(), 'Rebonjour 😄\n')
 
     const unsafe = '<img src=x onerror="window.xss=1"><script>window.xss=1</script><a href="javascript:window.xss=1">link</a>'
     await page.evaluate(text => {result.innerHTML = renderMarkdown(text)}, unsafe)

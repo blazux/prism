@@ -61,6 +61,7 @@ type ToolExecutor struct {
 	onPluginRem           func(id string)
 	onOpenFile            func(path string)
 	onFileChange          func()
+	onDataChange          func(scope, topic string)
 	onToolsReload         func()
 	onMCPReload           func()
 	onNotification        func(title, message, level string)
@@ -652,6 +653,16 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, rawArgs json.Ra
 // 2026-09-04: every prismTool result cut at 4000 chars, JSON.parse failing).
 func (e *ToolExecutor) SetRawResults(v bool) { e.rawResults = v }
 
+// SetDataChangeFn reports committed native data writes without involving a
+// model. Custom tools can publish their own named invalidations over HTTP.
+func (e *ToolExecutor) SetDataChangeFn(fn func(scope, topic string)) { e.onDataChange = fn }
+
+func (e *ToolExecutor) dataChanged(scope, topic string) {
+	if e.onDataChange != nil {
+		e.onDataChange(scope, topic)
+	}
+}
+
 // capResult applies the model-context safety net, except for raw callers.
 func (e *ToolExecutor) capResult(s string) string {
 	if e.rawResults {
@@ -1048,6 +1059,7 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			if err := prov.Update(ctx, idArg(args), patch); err != nil {
 				return "", nil, err
 			}
+			e.dataChanged(e.pimSessionScope(), "tasks")
 			return "Task updated.", nil, nil
 		}
 		return wrap(e.taskTool(ctx, str("action"), idArg(args), str("title"), str("priority"), str("due"), includeDone, str("query"), str("filter")))
@@ -1060,6 +1072,7 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 			if err := calendar.Update(ctx, calendar.ProviderFor(ctx, e.userStore(), e.pimSessionScope()), idArg(args), patch); err != nil {
 				return "", nil, err
 			}
+			e.dataChanged(e.pimSessionScope(), "calendar")
 			return "Event updated.", nil, nil
 		}
 		return wrap(e.calendarTool(ctx, str("action"), idArg(args), str("title"), str("description"), str("location"), str("start"), str("end"), str("from"), str("to"), args["all_day"] == true))

@@ -111,7 +111,7 @@ func (s *Store) ShareNote(ctx context.Context, session string, ownerID, originID
 	var id int64
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO notes (session_id, owner_id, origin_id, title, body, tags)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
 	`, session, ownerID, originID, title, body, tags).Scan(&id)
 	return id, err
 }

@@ -121,8 +121,8 @@
   }
   function genCircuit() {
     traces = []; pads = []; chips = []; pulses = []; circuitTime = null;
-    const cols = Math.max(1, Math.min(6, Math.round(w / 480)));
-    const rows = Math.max(1, Math.min(4, Math.round(h / 340)));
+    const cols = Math.max(1, Math.min(8, Math.round(w / 360)));
+    const rows = Math.max(1, Math.min(6, Math.round(h / 260)));
     const sx = w / cols, sy = h / rows;
     for (let r = 0; r < rows; r++) {
       const row = [];
@@ -138,7 +138,7 @@
         circuitBus(
           { u: left ? left.x + 47 : 24, v: left ? left.y : right.y },
           { u: right ? right.x - 47 : w - 24, v: right ? right.y : left.y },
-          false, 6, r % 2 ? -1 : 1, (left ? 0 : 1) | (right ? 0 : 2)
+          false, 8, r % 2 ? -1 : 1, (left ? 0 : 1) | (right ? 0 : 2)
         );
       }
     }
@@ -148,17 +148,18 @@
         circuitBus(
           { u: top ? top.y + 39 : 24, v: top ? top.x : bottom.x },
           { u: bottom ? bottom.y - 39 : h - 24, v: bottom ? bottom.x : top.x },
-          true, 4, c % 2 ? 1 : -1, (top ? 0 : 1) | (bottom ? 0 : 2)
+          true, 6, c % 2 ? 1 : -1, (top ? 0 : 1) | (bottom ? 0 : 2)
         );
       }
     }
-    // Keep most of the board quiet; each signal has a pause between journeys.
+    // Independent signals keep the buses busy, with traffic in both directions.
     const routes = traces.map((_, i) => i);
-    const count = Math.min(16, Math.max(4, Math.round(w * h / 85000)), routes.length);
+    const count = Math.min(72, Math.max(6, Math.round(w * h / 26000)), routes.length);
     for (let i = 0; i < count; i++) {
       const ti = routes.splice(Math.floor(Math.random() * routes.length), 1)[0];
-      const len = traceLen(traces[ti]), tail = rand(46, 78), cycle = len + tail + rand(140, 300);
-      pulses.push({ ti, len, tail, cycle, dist: rand(0, cycle), speed: rand(65, 100), color: i % 4 ? colAccent : colCyan });
+      const path = i % 3 ? traces[ti] : traces[ti].slice().reverse();
+      const len = traceLen(path), tail = rand(64, 104), cycle = len + tail + rand(30, 90);
+      pulses.push({ ti, path, len, tail, cycle, dist: rand(0, cycle), speed: rand(220, 360), color: i % 3 ? colAccent : colCyan });
     }
     // Etched copper, pads and components are painted once, not on every frame.
     circuitBoard = document.createElement('canvas');
@@ -180,11 +181,11 @@
       const { x, y } = chips[i];
       board.strokeStyle = hexToRgba(colCyan, 0.36); board.lineWidth = 2;
       board.beginPath();
-      for (let pin = -20; pin <= 20; pin += 8) {
+      for (let pin = -28; pin <= 28; pin += 8) {
         board.moveTo(x - 47, y + pin); board.lineTo(x - 40, y + pin);
         board.moveTo(x + 40, y + pin); board.lineTo(x + 47, y + pin);
       }
-      for (let pin = -12; pin <= 12; pin += 8) {
+      for (let pin = -20; pin <= 20; pin += 8) {
         board.moveTo(x + pin, y - 39); board.lineTo(x + pin, y - 32);
         board.moveTo(x + pin, y + 32); board.lineTo(x + pin, y + 39);
       }
@@ -214,7 +215,7 @@
   }
   function drawPulse(pl) {
     if (pl.dist > pl.len + pl.tail) return;
-    const pts = traces[pl.ti];
+    const pts = pl.path;
     ctx.shadowColor = pl.color; ctx.shadowBlur = 7;
     ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     // Draw the tail along the path itself so it stays on the copper at corners.

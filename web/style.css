@@ -1121,10 +1121,9 @@ body {
 
 /* ── Chat overlay ────────────────────────────────────────────────────────── */
 
-/* ── Chat: docked side panel ─────────────────────────────────────────────── */
+/* ── Chat: side panel ────────────────────────────────────────────────────── */
 
-/* Docked side panel: a flex sibling of #main inside #body (no overlay) so you
-   can read a mail / work a dashboard AND chat side by side. */
+/* Fixed overlay over the current app or dashboard. */
 #chat-drawer {
   position: fixed;
   top: 0;
@@ -1142,6 +1141,49 @@ body {
   display: none;
 }
 #chat-drawer.open { display: flex; }
+
+/* Tinted glass for atmospheric dark themes; unsupported browsers stay opaque. */
+@supports (background: color-mix(in srgb, #000 25%, transparent)) {
+  @supports (backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px)) {
+    :root[data-chat-surface="glass"] #chat-drawer {
+      background: color-mix(in srgb, var(--bg1) 25%, transparent);
+      -webkit-backdrop-filter: blur(2px);
+      backdrop-filter: blur(2px);
+      --text3: var(--text2);
+      --chat-accent: color-mix(in srgb, var(--accent) 50%, var(--text));
+    }
+    :root[data-chat-surface="glass"] :is(#chat-header, #chat-input-area, #chat-scope, #chat-delivery-status) {
+      background: var(--bg1);
+    }
+    :root[data-chat-surface="glass"] .chat-msg:is(.user, .assistant) {
+      background: color-mix(in srgb, var(--bg1) 92%, transparent);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 13px;
+    }
+    :root[data-chat-surface="glass"] .chat-msg.user {
+      background: color-mix(in srgb, var(--bg3) 92%, transparent);
+      border-color: var(--border2);
+    }
+    :root[data-chat-surface="glass"] .chat-msg.user .chat-msg-content {
+      background: none;
+      border: none;
+      padding: 0;
+    }
+    :root[data-chat-surface="glass"] :is(.chat-progress, .chat-history-sep) {
+      background: var(--bg1);
+      border-radius: var(--radius);
+      padding: 4px 8px;
+    }
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root[data-theme] #chat-drawer {
+    background: var(--bg1);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
 #chat-resize-handle {
   position: absolute;
   left: 0;
@@ -1291,7 +1333,7 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.chat-msg.user .chat-msg-role      { color: var(--accent); }
+.chat-msg.user .chat-msg-role      { color: var(--chat-accent, var(--accent)); }
 .chat-msg.assistant .chat-msg-role { color: var(--text3); }
 
 .chat-msg-time {
@@ -1318,6 +1360,7 @@ body {
 /* Markdown */
 .chat-msg-content p { margin-bottom: 7px; }
 .chat-msg-content p:last-child { margin-bottom: 0; }
+.chat-msg-content a { color: var(--chat-accent, var(--accent)); }
 .chat-msg-content code {
   font-family: var(--mono);
   font-size: 12px;

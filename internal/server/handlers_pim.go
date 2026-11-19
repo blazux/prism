@@ -7,6 +7,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -146,6 +147,9 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
+	eventScope := s.pimScopeFor(r)
+	w, finishEvent := s.observeDataMutation(w, r, "notes", &eventScope)
+	defer finishEvent()
 	noteSession := ""
 	if (r.Method == http.MethodPost || r.Method == http.MethodDelete) && r.URL.Query().Get("session") != "" {
 		var ok bool
@@ -179,6 +183,16 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if id := r.URL.Query().Get("id"); id != "" {
+			for _, note := range out {
+				if note["id"] == id {
+					writeJSON(w, map[string]interface{}{"note": note, "source": prov.Kind()})
+					return
+				}
+			}
+			writeErr(w, http.StatusNotFound, "Note not found or unavailable.")
+			return
+		}
 		writeJSON(w, map[string]interface{}{"notes": out, "source": prov.Kind()})
 	case "POST":
 		var b struct {
@@ -195,6 +209,7 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 		// Editing a shared group note: allowed for its owner or a group admin only.
 		if b.Scope == "group" {
 			gscope, gid, ok := s.pimGroupScopeFor(r)
+			eventScope = gscope
 			if !ok {
 				http.Error(w, "not in a group", 400)
 				return
@@ -239,6 +254,7 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 	case "DELETE":
 		if r.URL.Query().Get("scope") == "group" {
 			gscope, gid, ok := s.pimGroupScopeFor(r)
+			eventScope = gscope
 			if !ok {
 				http.Error(w, "not in a group", 400)
 				return
@@ -288,6 +304,8 @@ func (s *Server) handleNoteShare(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not in a group", 400)
 		return
 	}
+	w, finishEvent := s.observeDataMutation(w, r, "notes", &gscope)
+	defer finishEvent()
 	u := currentUser(r)
 	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 	if id == 0 {
@@ -391,10 +409,13 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
+	eventScope := s.pimScopeFor(r)
+	w, finishEvent := s.observeDataMutation(w, r, "tasks", &eventScope)
+	defer finishEvent()
 	prov := tasks.ProviderFor(r.Context(), s.userStore(r), s.pimScopeFor(r))
 	switch r.Method {
 	case "GET":
-		items, err := prov.List(r.Context(), r.URL.Query().Get("include_done") == "true")
+		items, err := prov.List(r.Context(), r.URL.Query().Get("include_done") == "true" || r.URL.Query().Get("id") != "")
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -405,6 +426,16 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		// Vox applies the same owner/standard scope to its queue as its archive.
 		if u := currentUser(r); u != nil {
 			items = append(s.voxPendingCallTasks(r.Context(), u), items...)
+		}
+		if id := r.URL.Query().Get("id"); id != "" {
+			for _, item := range items {
+				if item.ID == id {
+					writeJSON(w, map[string]interface{}{"task": item, "source": prov.Kind()})
+					return
+				}
+			}
+			writeErr(w, http.StatusNotFound, "Task not found or unavailable.")
+			return
 		}
 		items, err = tasks.Filter(items, r.URL.Query().Get("query"), r.URL.Query().Get("filter"), time.Now().In(timeprefs.Location(r.Context())))
 		if err != nil {
@@ -500,9 +531,25 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
+	eventScope := s.pimScopeFor(r)
+	w, finishEvent := s.observeDataMutation(w, r, "calendar", &eventScope)
+	defer finishEvent()
 	prov := calendar.ProviderFor(r.Context(), s.userStore(r), s.pimScopeFor(r))
 	switch r.Method {
 	case "GET":
+		if id := r.URL.Query().Get("id"); id != "" {
+			item, err := calendar.Get(r.Context(), prov, id)
+			if err != nil {
+				status := http.StatusBadGateway
+				if errors.Is(err, calendar.ErrNotFound) {
+					status = http.StatusNotFound
+				}
+				writeErr(w, status, "Could not open event: "+err.Error())
+				return
+			}
+			writeJSON(w, map[string]interface{}{"event": item, "source": prov.Kind()})
+			return
+		}
 		items, err := prov.List(r.Context(),
 			parsePIMTime(r.URL.Query().Get("from"), timeprefs.Location(r.Context())), parsePIMTime(r.URL.Query().Get("to"), timeprefs.Location(r.Context())))
 		if err != nil {

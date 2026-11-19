@@ -436,3 +436,134 @@ web comparés au checkout sur les quatre instances. Le site et les deux démos
 répondent également en HTTPS. Les images précédentes et les sauvegardes des
 bases sont conservées pour permettre un retour arrière. Aucun appel de génération
 n'a été nécessaire pour ces contrôles de déploiement.
+
+## Capacités retenues après les optimisations — 18 novembre 2026
+
+L'utilisateur a retenu les propositions 1, 3 et 4. Le premier chantier est
+réduit à la reprise explicite après interruption : fermer un onglet ou changer
+de workspace n'interrompt déjà pas le travail. Aucun moteur de workflow, nouvel
+outil modèle ou journal de checkpoints n'est ajouté.
+
+- Reprise : Activity liste les conversations personnelles interrompues et ouvre
+  leur chat. Resume envoie un tour ordinaire sans écraser le brouillon séparé.
+  Les appels d'outils sans résultat sauvegardé reçoivent un résultat synthétique
+  « état inconnu » dans le contexte, sans modifier l'archive ni réexécuter
+  l'action. La frontière de compaction conserve ensemble les lots d'outils et
+  leurs notes intercalées, y compris quand leurs IDs ne sont plus croissants.
+- Références : des URL ordinaires ouvrent un email, une note, une tâche, un
+  événement ou une conversation existante. Les applications résolvent l'objet
+  dans les sources et droits du compte courant ; le lien ne transporte ni
+  identité ni secret. Les liens d'applications passent par leur protocole
+  d'éditeur pour préserver les modifications non enregistrées.
+- Réactivité : des signaux d'invalidation nommés complètent `prismOnData`.
+  Le dashboard réutilise son WebSocket ; scripts et prévisualisations autonomes
+  peuvent écouter en SSE. Les mutations natives publient après succès ; les
+  outils personnalisés publient explicitement après sauvegarde. Le consommateur
+  relit sa source autorisée, sans tour de modèle imposé. Les signaux ne portent
+  aucun enregistrement ; les droits personnels/de groupe sont revérifiés.
+
+Limites : reprise volontaire à partir de l'historique, pas d'exécution exactement
+une fois ni de restauration des processus. Les pixels d'images ne sont pas
+réhydratés au rechargement, même si leurs chemins restent dans la conversation.
+Les événements ne sont pas une archive durable : connexion et reconnexion
+invalident l'état local et demandent une nouvelle lecture. Un fichier partagé
+conserve ses propres droits ; un signal de groupe ne les remplace pas.
+
+Validation de cette passe : `go test -race ./...` sur PostgreSQL/pgvector
+jetable, `go vet ./...`, 37 suites JavaScript et les 13 parcours Chromium de
+la CI réussis. Les nouveaux parcours couvrent mono/multi, reprise volontaire
+et brouillon séparé, liens chat/widget `srcdoc`, sauvegarde échouée ou frappe
+pendant sauvegarde, annulation de sortie, huit widgets sur un seul WebSocket
+et rafraîchissement après reconnexion. Les tests Go couvrent aussi compaction
+et rechargement des lots incomplets, adaptateurs de modèle stricts, droits
+des objets, occurrences CalDAV et révocation des notifications. Ils ne
+mesurent pas la qualité de décision d'un modèle après reprise.
+
+Le parcours de partage des notes a révélé une requête `ShareNote` avec sept
+placeholders pour six valeurs : correction incluse et exercée sur la base
+jetable. Les deux autres régressions corrigées pendant la revue concernent
+le rafraîchissement des tâches après `cron` et l'absence de callback pour les
+canaux mono Slack/webhooks sans propriétaire. Aucun commit, redémarrage ni
+changement aux instances réelles pendant cette passe.
+
+### Installation locale et démos des trois capacités
+
+À la demande de l'utilisateur, les serveurs mono/multi locaux et les deux
+démos ont été recréés avec l'image commune
+`sha256:a1134ed76ccb257994976fee3f1fed2a59e221a34fec218b10cf46fb0810a465`.
+Les configurations, montages, ports, réseaux et limites correspondent aux
+conteneurs précédents. Les démos conservent leur image épinglée dans leurs
+fichiers d'environnement ; les alias d'image locaux sont actualisés.
+
+Les contrôles d'activité précédaient chaque remplacement. Les quatre bases et
+les paramètres précédents sont sauvegardés, et les anciennes images gardées.
+Après remplacement, 17 fichiers web correspondent exactement au checkout sur
+chaque instance ; le flux de notifications authentifié, l'aide embarquée et le
+refus des API privées anonymes sont vérifiés. Les trois sites HTTPS répondent,
+sans erreur fatale de démarrage ni redémarrage automatique des serveurs observé.
+Les conteneurs annexes, dont le site, les workspaces, bases et modèles, ont
+conservé leurs identifiants et dates de démarrage. Aucun message de test envoyé
+aux agents. Aucun commit ni push pendant ce déploiement.
+
+Preuves et sauvegardes privées locales :
+`/tmp/prism-features-deploy-20261119-024134`. Sauvegardes et vérification des
+démos sur le VPS : `/root/prism-features-deploy-20261119-024134`.
+
+### Confort du chat et nouvelle installation
+
+Le chat, la Room et la supervision téléphonique affichent 163 raccourcis sous
+forme de 76 emoji, sans modifier les messages envoyés ou conservés. Les zones
+de code et les liens restent littéraux ; les infobulles du sélecteur indiquent
+les noms disponibles. Neuf thèmes sombres utilisent un chat translucide avec
+flou ; les préférences de transparence réduite ou de contraste renforcé gardent
+un fond opaque. Contrastes vérifiés en navigateur sur les 22 thèmes, mobile et
+préférences d'accessibilité compris. Les 38 suites JavaScript et les 13 parcours
+Chromium passent. La sauvegarde lente d'une note a permis de reproduire puis
+corriger une course d'ouverture de lien ; le test force désormais ce délai et
+utilise une attente bornée.
+
+Les quatre serveurs ont ensuite été recréés à la demande de l'utilisateur avec
+`sha256:6f01741b1b3f13662e262a2f4d6c95a9fe1a8f4f7ef37464367d6934a1bccd3d`.
+Les contrôles vérifient 22 fichiers web et l'aide embarquée, les accès privés,
+les notifications et les démos HTTPS. Paramètres, données et services annexes
+conservés ; anciennes images et sauvegardes gardées. Preuves privées locales :
+`/tmp/prism-comfort-deploy-20261119-033129`, et sur le VPS :
+`/root/prism-comfort-deploy-20261119-033129`. Aucun commit ni push Git.
+
+### Correction de la visibilité du fond de chat
+
+Retour utilisateur sur Cyberpunk : la feuille de style était bien déployée,
+mais le voile à 80 % et le flou de 14 px effaçaient visuellement le circuit.
+Les contrôles initiaux d'alpha et de contraste ne vérifiaient pas suffisamment
+la perception du décor. Le panneau laisse maintenant passer le fond avec une
+teinte de 25 % et un flou de 2 px ; les cartes complètes des messages portent
+une surface à 92 %, et les barres restent opaques. L'état glass/solid est défini
+par le thème et se réinitialise aussi lors des prévisualisations personnalisées.
+
+Validation : 22 thèmes et 440 mesures de contraste composé (minimum 5,27:1),
+préférences d'accessibilité, mobile, comparaison pixel sur un même circuit figé,
+38 suites JavaScript et cinq parcours navigateur concernés. Preuves visuelles :
+`/tmp/prism-chat-glass-v2-*`. Les quatre serveurs ont été recréés avec
+`sha256:35da893232f7835eb582b2f1aee0bb876b494642b587a6eb2df9df248a64e0bf`.
+Les fichiers servis sur les domaines HTTPS correspondent au checkout. Comptes,
+conversations, configurations et services annexes conservés. Sauvegardes et
+contrôles : `/tmp/prism-glass-deploy-20261119-034650` en local et
+`/root/prism-glass-deploy-20261119-034650` sur le VPS. Aucun commit ni push Git.
+
+### Circuit Cyberpunk plus actif
+
+Le fond Cyberpunk comporte davantage de composants, de pistes et de signaux,
+avec des impulsions circulant dans les deux sens à 220–360 px/s. À 1440 × 1000,
+le circuit passe de 120 à 280 pistes et de 16 à 55 impulsions ; la vitesse
+moyenne mesurée sur le même échantillon passe de 84 à 292 px/s. Le décor fixe
+reste mis en cache. Les autres animations ne changent pas.
+
+Validation : 38 suites JavaScript, parcours navigateur des thèmes, géométrie
+mobile et 4K, vitesse équivalente à 60/120/144 Hz, pause des onglets masqués,
+intensité zéro et réduction du mouvement. Les quatre serveurs utilisent l'image
+`sha256:541722c84a030b6a4b530ad8c4f1fab14c5c292438596fece07f0db82bcd5c74`.
+Les 23 fichiers web, dont le script d'animation, correspondent au checkout ;
+les domaines HTTPS des démos servent la nouvelle version. Configurations et
+comptes conservés, bases sauvegardées, anciennes images gardées. Contrôles et
+sauvegardes privés : `/tmp/prism-circuit-deploy-20261119-035941` en local et
+`/root/prism-circuit-deploy-20261119-035941` sur le VPS. Aucun commit ni push Git.

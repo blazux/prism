@@ -67,6 +67,9 @@ func (s *Server) capabilityRequest(r *http.Request, uid int64, session string) (
 }
 func groupCapabilityPath(r *http.Request) bool {
 	p := r.URL.Path
+	if p == "/api/data-events" {
+		return r.Method == http.MethodGet || r.Method == http.MethodPost
+	}
 	if strings.HasPrefix(p, "/api/builtin/") || strings.HasPrefix(p, "/api/tool/") || p == "/api/chat" || p == "/api/notify" || p == "/api/webex/send" {
 		return r.Method == http.MethodPost
 	}

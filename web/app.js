@@ -148,7 +148,7 @@ function connect() {
   const socket = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(currentSessionID)}`)
   ws = socket
 
-  ws.onopen  = () => { if (ws !== socket) return; closeSecretDialog(); secretRequestID = null; clearChat(); batchLoading = true; send({ type: 'approval_mode', content: approvalMode }); if (currentContext) send({ type: 'set_context', content: currentContext }); if (pendingChats.has(currentSessionID)) send({type:'chat_request_status',requestId:pendingChats.get(currentSessionID).payload.requestId}); renderChatStatus() }
+  ws.onopen  = () => { if (ws !== socket) return; notifyDataChanged({topic:'*',reason:'reconnected'}); closeSecretDialog(); secretRequestID = null; clearChat(); batchLoading = true; send({ type: 'approval_mode', content: approvalMode }); if (currentContext) send({ type: 'set_context', content: currentContext }); if (pendingChats.has(currentSessionID)) send({type:'chat_request_status',requestId:pendingChats.get(currentSessionID).payload.requestId}); renderChatStatus() }
   ws.onclose = () => { if (ws !== socket) return; setContainerBadge('unknown'); renderChatStatus(); setTimeout(() => { if (ws === socket) connect() }, 2000) }
   ws.onerror = () => {}
   ws.onmessage = (e) => {
@@ -169,19 +169,25 @@ const PIM_TOOL_APP = { email:'email', calendar: 'calendar', event: 'calendar', e
 const pendingPimTools = {}
 function trackPimTool(msg) {
   if(msg.tool==='email'){let args=msg.input||{};if(typeof args==='string'){try{args=JSON.parse(args)}catch(_){args={}}}if(['list','read','search','folders','rules','rule_preview'].includes(args.action))return;}
-  const app = PIM_TOOL_APP[msg.tool]; if (app) pendingPimTools[msg.id] = app }
+  const app = PIM_TOOL_APP[msg.tool]; if (app) pendingPimTools[msg.id] = {app, native: ['note','notes','task','tasks','calendar','event','events'].includes(msg.tool)} }
 function maybeRefreshApp(msg) {
-  // File/custom tools can also edit a connected notes vault. Refresh the open
-  // Notes app after any completed tool, not only the dedicated note tool.
-  const app = pendingPimTools[msg.id] || (currentView?.type === 'app' && currentView.name === 'notes' ? 'notes' : null)
-  if (!app) return
+  const tracked = pendingPimTools[msg.id]
   delete pendingPimTools[msg.id]
-  if (currentView?.type === 'app' && currentView.name === app) {
-    document.getElementById('app-frame')?.contentWindow?.postMessage({ type: 'data-changed', app }, '*')
+  // Native committed writes arrive from the server for all authorized browsers.
+  if (tracked?.native) return
+  // Retain the legacy refresh for custom/file tools that may edit a notes vault.
+  const app = tracked?.app || (currentView?.type === 'app' && currentView.name === 'notes' ? 'notes' : null)
+  if (app) notifyDataChanged({topic: app, reason: 'tool_result'})
+}
+
+function notifyDataChanged(change) {
+  const topic = change.topic || change.app || '*'
+  const app = ['notes', 'tasks', 'calendar', 'email'].includes(topic) ? topic : undefined
+  const message = {...change, type: 'data-changed', topic, app}
+  if (currentView?.type === 'app' && (topic === '*' || currentView.name === app)) {
+    document.getElementById('app-frame')?.contentWindow?.postMessage(message, location.origin)
   }
-  // Also notify board widgets so a notes/tasks/calendar widget refreshes on a real
-  // change instead of forcing a blind setInterval poll (prismOnData listens for it).
-  document.querySelectorAll('.widget-body iframe').forEach(f => f.contentWindow?.postMessage({ type: 'data-changed', app }, '*'))
+  document.querySelectorAll('.widget-body iframe').forEach(frame => frame.contentWindow?.postMessage(message, '*'))
 }
 
 // Only the currently displayed built-in app can answer this browser's editor RPC.
@@ -242,10 +248,11 @@ function handleServerMsg(msg) {
       loadSessions()
       setStreaming(['running','waiting_for_input','waiting_for_approval'].includes(msg.status))
       renderChatStatus()
-      if (msg.status === 'interrupted') appendError('The server restarted during this task. Review the results before asking to continue.')
+      if (msg.status === 'interrupted') appendError('The server stopped during this task. Review the saved results, then choose Resume or send a follow-up. An action without a saved result may already have taken place.')
       if (msg.status === 'failed') appendError('The task failed. Review the error above before continuing.')
       if (msg.status === 'timed_out') appendError('The task reached its time limit. Review the results before continuing.')
       break
+    case 'data_changed': notifyDataChanged(msg); break
     case 'editor_request': requestActiveEditor(msg); break
     case 'stream':          appendStream(msg.content); break
     case 'stream_end':      finalizeStream(); break
@@ -614,8 +621,19 @@ function renderChatStatus() {
     retry.onclick = () => { if (send(pending.payload)) { pending.uncertain = false; renderChatStatus() } }
     el.append(' ', retry)
   }
+  if (activeRunStatus === 'interrupted' && connected && !pending && !isStreaming) {
+    const resume = document.createElement('button'); resume.className = 'btn'; resume.textContent = 'Resume'
+    resume.title = 'Continue from the saved conversation'
+    resume.onclick = resumeInterruptedChat
+    el.append(' ', resume)
+  }
   const input = document.getElementById('chat-input')
-  if (input) input.readOnly = !!pending && !pending.widget
+  if (input) input.readOnly = !!pending && !pending.widget && !pending.preserveDraft
+}
+
+function resumeInterruptedChat() {
+  if (activeRunStatus !== 'interrupted' || isStreaming || pendingChats.has(currentSessionID)) return
+  sendChat({continuation: true, text: 'Continue.'})
 }
 
 function replyToWidgetChat(widget, status, error) {
@@ -642,7 +660,7 @@ function receiveChatReceipt(msg) {
   replyToWidgetChat(pending.widget, 'accepted')
   if (!msg.replayed) appendUserMessage(pending.payload.content, pending.payload.images, pending.payload.files)
   const input = document.getElementById('chat-input')
-  if (!pending.widget && input.value.trim() === pending.payload.content) input.value = ''
+  if (!pending.widget && !pending.preserveDraft && input.value.trim() === pending.payload.content) input.value = ''
   autoResizeTextarea(input)
   // A previously started upload may have finished while waiting for the receipt.
   // Clear only the attachments actually included in the accepted request.
@@ -685,21 +703,22 @@ function receiveChatHistory(msg) {
 }
 
 function sendChat(widgetRequest) {
-  // onclick passes an event; only the dashboard bridge supplies a widget request.
+  // Widget and continuation messages preserve the user's separate draft.
   const widget = widgetRequest?.widget
+  const preserveDraft = !!widget || widgetRequest?.continuation === true
   const input = document.getElementById('chat-input')
-  const text = widget ? widgetRequest.text.trim() : input.value.trim()
+  const text = preserveDraft ? widgetRequest.text.trim() : input.value.trim()
   if (isStreaming || pendingChats.has(currentSessionID)) {
     if (widget) replyToWidgetChat(widget, 'rejected', 'The agent is busy. Wait for the current message to finish before sending again.')
     return
   }
-  if (!text && (widget || (!pendingImages.length && !pendingFiles.length))) {
+  if (!text && (preserveDraft || (!pendingImages.length && !pendingFiles.length))) {
     if (widget) replyToWidgetChat(widget, 'rejected', 'Enter a message first.')
     return
   }
 
-  const selectedImages = widget ? [] : pendingImages.slice()
-  const selectedFiles = widget ? [] : pendingFiles.slice()
+  const selectedImages = preserveDraft ? [] : pendingImages.slice()
+  const selectedFiles = preserveDraft ? [] : pendingFiles.slice()
   const images = selectedImages.map(image => image.data)
   const imageNames = selectedImages.map(image => image.name)
   const requestId = crypto.randomUUID?.() || Array.from(crypto.getRandomValues(new Uint8Array(16)), n=>n.toString(16).padStart(2,'0')).join('')
@@ -710,7 +729,7 @@ function sendChat(widgetRequest) {
     return
   }
 
-  pendingChats.set(currentSessionID, {payload:request,images:selectedImages,files:selectedFiles,widget})
+  pendingChats.set(currentSessionID, {payload:request,images:selectedImages,files:selectedFiles,widget,preserveDraft})
   renderChatStatus()
 }
 
@@ -787,7 +806,7 @@ function appendUserMessage(text, images, files) {
       '</div>'
   }
   const timeStr = fmtTime(new Date())
-  div.innerHTML = `<div class="chat-msg-role">${userChip()} You <span class="chat-msg-time">${timeStr}</span></div>${imagesHtml}${filesHtml}<div class="chat-msg-content">${escHtml(text)}</div>`
+  div.innerHTML = `<div class="chat-msg-role">${userChip()} You <span class="chat-msg-time">${timeStr}</span></div>${imagesHtml}${filesHtml}<div class="chat-msg-content">${escHtml(window.PrismSmileys?.text(text) ?? text)}</div>`
   msgs.appendChild(div)
   prepareChatImages(div)
   scrollChat(true) // the user just sent this — always jump to it
@@ -1043,7 +1062,7 @@ function restoreChatHistory(messages) {
       responseAttachments = []
       const div = document.createElement('div')
       div.className = 'chat-msg user'
-      div.innerHTML = `<div class="chat-msg-role">${userChip()} You${timeBadge}</div><div class="chat-msg-content">${escHtml(m.content)}</div>`
+      div.innerHTML = `<div class="chat-msg-role">${userChip()} You${timeBadge}</div><div class="chat-msg-content">${escHtml(window.PrismSmileys?.text(m.content) ?? m.content)}</div>`
       msgs.appendChild(div)
     } else if (m.role === 'assistant' && m.content) {
       const div = document.createElement('div')
@@ -1476,6 +1495,8 @@ function setView(view) {
     // Global apps → chat is the global assistant.
     gotoSession(ASSISTANT)
     const params = new URLSearchParams({ session: ASSISTANT })
+    if (['email', 'notes', 'tasks', 'calendar'].includes(view.name) && typeof view.id === 'string') params.set('id', view.id)
+    if (view.name === 'email' && typeof view.folder === 'string') params.set('folder', view.folder)
     if (view.name === 'telephony') {
       if (['chat', 'logs', 'outbound', 'settings'].includes(view.tab)) params.set('tab', view.tab)
       if (view.group) params.set('group', view.group)
@@ -1510,6 +1531,44 @@ function setView(view) {
     ])
   }
 }
+
+let referenceNavigation = 0
+async function openPrismReference(view) {
+  const generation = ++referenceNavigation, previousView = currentView
+  const frame = document.getElementById('app-frame')
+  if (view.type === 'app' && currentView?.type === 'app' && view.name === currentView.name && frame?.contentWindow === activeEditorSource) {
+    frame.contentWindow.postMessage({type:'open-reference-object',href:window.PrismLinks.href(view)},location.origin)
+    return true
+  }
+  if (currentView?.type === 'app') {
+    try {
+      const leave = frame?.contentWindow?.PrismLinks?.beforeLeave
+      if (leave && !await leave()) return false
+    } catch (_) {
+      showToast({title:'Open link',message:'Could not save or close the current editor. Your changes are still here.',level:'error'})
+      return false
+    }
+    if (generation !== referenceNavigation || previousView !== currentView) return true
+  }
+  if (view.type === 'board') {
+    const id = personalSessionID(view.workspace)
+    let known = false
+    try {
+      const response = await fetch('/api/sessions?includeSystem=1', {cache:'no-store'})
+      if (response.ok) known = ((await response.json()).sessions || []).some(session => session.id === id)
+    } catch (_) {}
+    if (generation !== referenceNavigation || previousView !== currentView) return true
+    if (!known) {
+      showToast({title:'Workspace',message:'This workspace is unavailable.',level:'error'})
+      return false
+    }
+    view = {...view, workspace: id}
+  }
+  setView(view)
+  if (view.chat === 'open' && !chatOpen) toggleChat()
+  return true
+}
+window.PrismLinks?.bind(openPrismReference)
 
 // Tell the agent which workspace it's looking at (id + existing widgets) so
 // "build a dashboard here" / "add a widget" target this workspace. Re-posted
@@ -2235,6 +2294,8 @@ function renderMarkdown(text) {
 
   if (!text) return result
 
+  text = window.PrismSmileys?.text(text) ?? text
+
   // A missing parser or sanitizer must still leave the reply readable and inert.
   const plainHtml = escHtml(text).replace(/\n/g, '<br>')
   const markdown = window.marked
@@ -2345,10 +2406,12 @@ function buildEmojiPicker() {
 
 function fillEmojiGrid(grid, emojis) {
   grid.innerHTML = ''
+  const shortcuts = Object.entries(window.PrismSmileys?.shortcuts || {})
   emojis.forEach(emoji => {
     const btn = document.createElement('button')
     btn.className = 'emoji-item'
     btn.textContent = emoji
+    btn.title = shortcuts.filter(([alias, value]) => value === emoji && /^:[\w+-]+:$/.test(alias)).slice(0, 3).map(([alias]) => alias).join(' ') || emoji
     btn.onclick = () => insertEmoji(emoji)
     grid.appendChild(btn)
   })
@@ -2551,6 +2614,13 @@ window.addEventListener('message', e => {
     clearTimeout(pending.timer); pendingEditorRequests.delete(d.id)
     const active = document.getElementById('app-frame')?.contentWindow === e.source && currentView?.type === 'app'
     send({type:'editor_response', id:d.id, data:active ? d.result : {error:'The active app changed. Read the editor again.'}})
+  } else if (d.type === 'open-reference' && typeof d.href === 'string') {
+    const ownedFrame = document.getElementById('app-frame')?.contentWindow === e.source ||
+      [...widgets.values()].some(rec => rec.el?.querySelector('.widget-body iframe')?.contentWindow === e.source)
+    if (ownedFrame) {
+      const view = window.PrismLinks?.parse(d.href)
+      if (view) openPrismReference(view)
+    }
   } else if (d.type === 'openFile' && d.path) {
     send({ type: 'file_open', path: d.path.replace(/^\/workspace\//, '') })
   } else if (d.type === 'open-settings' && e.origin === location.origin && e.source === document.getElementById('app-frame').contentWindow) {
@@ -2690,7 +2760,10 @@ async function initApp() {
   updateAdminLink()
   await loadSessions()
   const requestedApp = new URLSearchParams(location.search)
-  if (requestedApp.get('view') === 'settings') {
+  const reference = window.PrismLinks?.parse(location.href)
+  if (reference) {
+    if (!await openPrismReference(reference)) setView({type:'board',workspace:lastWorkspace})
+  } else if (requestedApp.get('view') === 'settings') {
     setView({ type: 'settings', tab: requestedApp.get('tab') || 'profile' })
     if (requestedApp.get('chat') === 'open' && !chatOpen) toggleChat()
   } else if (requestedApp.get('app') === 'telephony' && voxWorkspaceAvailable) {

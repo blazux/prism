@@ -24,6 +24,12 @@ is hidden. With reduced motion enabled in your system or browser, animated
 backgrounds become still. Theme changes also reach Prism's apps and widgets that
 use its theme tokens.
 
+Midnight, Rosé Pine, Tech, Cyberpunk, Matrix, Synthwave, Dracula, Amber Terminal
+and Arcade show the background through the chat, between the message cards.
+The header and message composer are opaque. Other themes use an opaque panel.
+A system or browser preference for reduced transparency or higher contrast
+restores an opaque chat background.
+
 ## Create a custom theme
 
 Open **Create a custom theme**. Use **Use current theme** to copy its palette,
@@ -54,6 +60,30 @@ With **Window snapping**, dragging or resizing a widget window aligns it with
 nearby windows and displays guides. Hold **Alt** to bypass snapping temporarily.
 Use **Tidy up** in the dock or command palette to arrange all open windows in a
 uniform grid.
+
+## Emoji shortcuts in chat
+
+Chat messages display familiar emoticons and named shortcuts as emoji after
+sending. This also works in Rooms and the Telephony supervision chat.
+
+| Shortcut | Emoji |
+| --- | --- |
+| `:)` or `:-)` | 🙂 |
+| `:D` or `:-D` | 😃 |
+| `;)` | 😉 |
+| `:P` | 😛 |
+| `:'(` | 😢 |
+| `<3`, `:heart:` or `:coeur:` | ❤️ |
+| `:thumbsup:` or `:+1:` | 👍 |
+| `:thumbsdown:` or `:-1:` | 👎 |
+| `:clap:` or `:bravo:` | 👏 |
+| `:thinking:` | 🤔 |
+| `:joy:` or `:rire:` | 😂 |
+| `:tada:` | 🎉 |
+
+Separate shortcuts from surrounding words. Code, links and email addresses
+keep their literal text. You can also insert emoji with the smiley button;
+hover over an emoji to see its available named shortcuts.
 
 ## Open the command palette
 

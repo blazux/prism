@@ -23,6 +23,15 @@ already received and reports the interruption. Tool calls from an incomplete
 model response are not executed. Review the partial reply before asking to
 continue; completed actions from earlier model calls are not undone.
 
+If the server stops while a tool is running, its saved history may contain the
+request without its result. On the next turn, the agent receives an explicit
+unknown-outcome notice for that call. The action may have completed or may still
+be running; it must check the real state before repeating it. This notice does
+not replace the stored archive, and restarting Prism does not replay tool calls
+automatically. Uploaded files remain in the workspace; their saved paths remain
+available in the conversation, even when image pixels are no longer in the
+model's active context.
+
 ## Reading earlier exchanges
 
 The chat initially loads the newest 100 archive rows. **Load older messages**
