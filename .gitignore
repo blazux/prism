@@ -29,3 +29,15 @@ MEMORY.md
 .prism-private/
 .secret_key
 .secret-key-*
+
+# Private work notes, reports and instance-specific operations
+/docs/cloud-readiness.md
+/docs/plans/
+/docs/reviews/
+/docs/internal/
+/deploy/demo/
+/eval/prompt-footprint.md
+/eval/prompt-behavior-*.md
+/eval/prompt-behavior-*.json
+/eval/command-output/results/
+/.local-notes/
