@@ -78,7 +78,9 @@ test('thinking and streaming indicators remain available without dependencies', 
 test('dashboard dependencies and every KaTeX font are local verified distribution files', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8')
   const refs = [...html.matchAll(/<(?:script|link)\b[^>]*(?:src|href)="([^"]+)"/g)].map(match => match[1])
-  assert.ok(refs.length > 20)
+  for (const required of ['/vendor/marked/marked.min.js', '/vendor/purify.min.js', '/vendor/katex/katex.min.js', '/editor-loader.js']) {
+    assert.ok(refs.includes(required), `missing dashboard dependency: ${required}`)
+  }
   for (const ref of refs) {
     assert.ok(ref.startsWith('/'), `external dashboard dependency: ${ref}`)
     assert.ok(fs.statSync(path.join(root, ref)).isFile(), `missing dependency: ${ref}`)

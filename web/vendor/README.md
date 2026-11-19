@@ -11,7 +11,8 @@ manager or build step is required to serve them.
 
 The files are unmodified upstream distributions. Each library directory retains
 its upstream license. KaTeX includes every font referenced by its CSS. CodeMirror
-includes its core, Dracula theme, and the ten modes loaded by `index.html`.
+includes its core, Dracula theme, and the ten modes loaded on demand by
+`editor-loader.js` when a file is opened.
 
 `ui-dependencies.json` records the exact registry metadata URL, tarball integrity,
 upstream asset path, size, and SHA-256 for each copied file. Tarball SHA-512 values

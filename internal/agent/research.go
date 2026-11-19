@@ -143,20 +143,11 @@ func (e *ToolExecutor) chatOnce(ctx context.Context, system, user string, temp f
 		Stream:   true,
 		Options:  ollama.Options{Temperature: temp},
 	}
-	ch := make(chan ollama.StreamEvent, 100)
-	go func() {
-		e.backend.Chat(ctx, req, ch)
-		close(ch)
-	}()
-
-	var sb strings.Builder
-	for ev := range ch {
-		if ev.Err != nil {
-			return "", ev.Err
-		}
-		sb.WriteString(ev.Content)
+	result, err := collectModelStream(ctx, e.backend, req, nil)
+	if err != nil {
+		return "", err
 	}
-	return strings.TrimSpace(stripThinkingBlocks(sb.String())), nil
+	return strings.TrimSpace(stripThinkingBlocks(result.Content)), nil
 }
 
 // drProgress streams each step into the chat (not dashboard notifications, which

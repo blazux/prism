@@ -382,3 +382,57 @@ Aucun commit ni push.
 - Les images serveur et workspace v1.0.0/latest ont chacune les mêmes digests et les plateformes AMD64/ARM64. Test natif amd64 supplémentaire du couple exact : auth/API/secret chiffré/custom Python/fichiers/archive/restart validés ; Go 1.26.11 lu dans le binaire réellement téléchargé. Aucun modèle réel, aucun changement aux instances de production, nettoyage complet.
 - Preuves : `/tmp/prism-v1-stable-publication.json`, `/tmp/prism-v1-release-final-e866.json`, `/tmp/prism-v1-tag-e866-hub.json`, `/tmp/prism-v1-stable-pair-smoke/aggregate.json`, `/tmp/prism-v1-go11-checks/aggregate.json`.
 - Suite demandée par l'utilisateur : même genre de revue produit/philosophie/interface/backend/architecture pour PrismVox, après cette publication.
+
+## Optimisations transparentes — 18 novembre 2026
+
+Après les correctifs de la revue, publiés dans `2718750`, cette passe conserve
+les outils, leurs schémas, les instructions et les contenus envoyés au modèle.
+Les nouvelles fonctionnalités restent à évaluer séparément.
+
+- Documents utilise une seule implémentation JS/CSS dans Settings et sur
+  `/rag.html`. Chaque instance garde ses propres requêtes et contrôles de
+  concurrence ; quitter l'onglet détruit ses abonnements et minuteries.
+- CodeMirror, ses dix modes et ses styles sont chargés au premier fichier.
+  Un éditeur texte permet de travailler et sauvegarder pendant le chargement
+  ou son échec. Réouverture, changement de fichier et reprise du chargement
+  préservent les modifications. Le démarrage évite douze requêtes nettes et
+  573 791 octets bruts ; ce n'est pas une mesure de latence réseau réelle.
+- Les lectures indépendantes d'identité, ainsi que sessions/téléphonie,
+  démarrent en parallèle. Un échec isolé ne supprime pas les autres résultats ;
+  les protections contre les réponses de sessions périmées restent actives.
+- Le cache du moteur porte uniquement sur le préfixe statique des instructions.
+  Sa clé inclut nom, session, personnalité et profil. Les droits, catalogues,
+  connexions, connaissances et vues restent relus à chaque appel. Le JSON des
+  outils déjà sérialisé est réutilisé pour les mesures de consommation.
+- Chat, recherche et compaction partagent la collecte des événements modèle,
+  en conservant leurs politiques distinctes pour texte partiel, erreur et fin
+  de génération. Images, raisonnement, outils et blocs opaques restent conservés.
+- L'ancien `MaybeSummarize`, sans appel, et son helper privé sont supprimés.
+  La lecture/correction des résumés historiques et la compaction active restent
+  compatibles. Aucun changement de stockage des résultats longs.
+
+Validation : suite Go avec détecteur de courses et PostgreSQL jetable, `go vet`,
+34 suites Node et dix parcours Chromium isolés réussis. Les parcours Documents,
+éditeur et Markdown rejoignent la CI. Les requêtes Go et JSON comparées aux
+fonctions originales sont strictement identiques sur douze cas : trois profils,
+chat/voix, rappel présent/absent, avec outils et images, cache froid puis chaud.
+
+Microbenchmark du seul assemblage du prompt guidé : moyenne de 35,3 à 3,34 µs,
+197,6 à 33 ko alloués et 31 à 5 allocations. Ce résultat mesure du travail CPU
+interne ; il ne démontre aucun gain de génération, de préremplissage ou de qualité
+du modèle. Les données live ne sont pas mises en cache faute d'invalidation
+fiable des changements externes.
+
+### Installation locale et démos
+
+Les deux serveurs locaux et les deux démos du VPS ont été recréés avec la même
+image, `sha256:28fa8d21ec335c4b5d7526ea63324c7fd588ea25cd0a39718384d3429d9fc330`.
+Leurs configurations, volumes, conversations et connexions ont été conservés.
+Les contrôles d'activité précédaient chaque remplacement ; les autres services
+ont gardé leurs conteneurs et leurs dates de démarrage.
+
+Après installation : API authentifiées, refus des accès anonymes et neuf fichiers
+web comparés au checkout sur les quatre instances. Le site et les deux démos
+répondent également en HTTPS. Les images précédentes et les sauvegardes des
+bases sont conservées pour permettre un retour arrière. Aucun appel de génération
+n'a été nécessaire pour ces contrôles de déploiement.

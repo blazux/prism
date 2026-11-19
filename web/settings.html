@@ -12,6 +12,8 @@
 <link rel="stylesheet" href="/theme-gallery.css">
 <script src="/modal.js"></script>
 <script src="/resources.js"></script>
+<script src="/documents.js"></script>
+<link rel="stylesheet" href="/documents.css">
 <script src="/ai-settings.js"></script>
 <link rel="stylesheet" href="/ai-settings.css">
 <style>
@@ -176,192 +178,6 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
   .appe-row > label { width: 100%; }
 }
 
-#rag-tab {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
-#rag-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  background: var(--bg1);
-  overflow: hidden;
-}
-#rag-sidebar-header {
-  padding: 14px 16px 10px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-}
-#rag-sidebar-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text3);
-}
-#new-collection-btn {
-  background: none;
-  border: 1px solid var(--border2);
-  color: var(--text3);
-  font-size: 16px;
-  line-height: 1;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: color 0.1s, border-color 0.1s;
-}
-#new-collection-btn:hover { color: var(--accent); border-color: var(--accent); }
-#collections-list { flex: 1; overflow-y: auto; padding: 6px 0; }
-.collection-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 7px 16px;
-  cursor: pointer;
-  transition: background 0.1s;
-  gap: 8px;
-}
-.collection-item:hover { background: var(--bg2); }
-.collection-item.active { background: var(--bg3); }
-.collection-name { font-size: 13px; color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.collection-count { font-size: 10.5px; color: var(--text3); flex-shrink: 0; }
-.collection-del {
-  background: none; border: none; color: var(--text3); font-size: 13px;
-  cursor: pointer; padding: 2px 4px; border-radius: 3px;
-  opacity: 0; transition: opacity 0.1s, color 0.1s; flex-shrink: 0;
-}
-.collection-item:hover .collection-del { opacity: 1; }
-.collection-del:hover { color: var(--red); }
-#rag-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-}
-#rag-content-header {
-  padding: 16px 24px 12px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  gap: 12px;
-}
-#upload-zone {
-  border: 2px dashed var(--border2);
-  border-radius: 10px;
-  margin: 16px 24px 0;
-  padding: 24px 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  flex-shrink: 0;
-}
-#upload-zone:hover, #upload-zone.drag-over { border-color: var(--accent); background: rgba(107,138,253,0.04); }
-#upload-zone.uploading { pointer-events: none; opacity: 0.6; }
-#upload-icon { font-size: 24px; margin-bottom: 6px; opacity: 0.5; }
-#upload-label { font-size: 13px; color: var(--text2); margin-bottom: 4px; }
-#upload-hint { font-size: 11.5px; color: var(--text3); }
-#upload-input { display: none; }
-#upload-progress { display: none; margin: 10px 24px 0; font-size: 12px; color: var(--text3); text-align: center; }
-#upload-progress.visible { display: block; }
-#docs-area { flex: 1; overflow-y: auto; padding: 16px 24px 24px; min-height: 0; }
-#docs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-#docs-table th {
-  text-align: left; font-size: 10.5px; font-weight: 700;
-  letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3);
-  padding: 6px 10px; border-bottom: 1px solid var(--border);
-}
-#docs-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); color: var(--text2); vertical-align: middle; }
-#docs-table td:first-child { color: var(--text); font-family: var(--mono); font-size: 11.5px; }
-#docs-table tr:last-child td { border-bottom: none; }
-#docs-table tr:hover td { background: var(--bg2); }
-.doc-del-btn {
-  background: none; border: none; color: var(--text3); cursor: pointer;
-  font-size: 13px; padding: 3px 6px; border-radius: 4px;
-  transition: color 0.1s, background 0.1s;
-}
-.doc-del-btn:hover { color: var(--red); background: rgba(224,108,117,0.1); }
-#no-collection-msg {
-  display: flex; align-items: center; justify-content: center;
-  flex-direction: column; gap: 10px; color: var(--text3); font-size: 13px;
-  padding: 40px 0; flex: 1;
-}
-#no-collection-msg .icon { font-size: 36px; opacity: 0.2; }
-
-/* ── Modal ────────────────────────────────────────────────────────────────── */
-#modal-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-  backdrop-filter: blur(3px); z-index: 100;
-  display: none; align-items: center; justify-content: center;
-}
-#modal-overlay.visible { display: flex; }
-#modal {
-  background: var(--bg1); border: 1px solid var(--border2);
-  border-radius: 10px; padding: 24px; width: 340px;
-  display: flex; flex-direction: column; gap: 14px;
-}
-#modal h3 { font-size: 13px; font-weight: 700; color: var(--text); margin: 0; }
-#modal input {
-  background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius);
-  color: var(--text); font-size: 13px; font-family: var(--sans);
-  padding: 8px 12px; outline: none; width: 100%; box-sizing: border-box;
-  transition: border-color 0.15s;
-}
-#modal input:focus { border-color: var(--accent); }
-#modal textarea {
-  background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius);
-  color: var(--text); font-size: 13px; font-family: var(--sans);
-  padding: 8px 12px; outline: none; width: 100%; box-sizing: border-box;
-  resize: vertical; min-height: 62px; line-height: 1.45;
-  transition: border-color 0.15s;
-}
-#modal textarea:focus { border-color: var(--accent); }
-#modal label {
-  font-size: 11.5px; color: var(--text3); display: block; margin-bottom: 5px;
-}
-#modal-hint { font-size: 11.5px; color: var(--text3); margin-top: -6px; }
-
-/* Une collection sans description est invisible pour l'agent : le bloc
-   « ## Knowledge Base (RAG) » du prompt système ne peut alors afficher que
-   « (12 docs, 340 chunks) », ce qui ne lui dit jamais QUAND chercher dedans. */
-#desc-input.missing { border-bottom-color: var(--yellow, #d9a441); }
-#desc-warn {
-  font-size: 11px; color: var(--yellow, #d9a441);
-  display: flex; align-items: center; gap: 5px; margin-top: 2px;
-}
-
-/* Cible de l'upload : la collection se choisit ici, plus besoin de passer par la sidebar. */
-#upload-target {
-  display: flex; align-items: center; gap: 8px;
-  margin: 16px 24px 0; font-size: 12px; color: var(--text3);
-}
-#upload-target select {
-  flex: 1; min-width: 0;
-  background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius);
-  color: var(--text); font-size: 12.5px; font-family: var(--sans);
-  padding: 6px 10px; outline: none; cursor: pointer;
-}
-#upload-target select:focus { border-color: var(--accent); }
-#upload-target button {
-  background: var(--bg3); border: 1px solid var(--border2); color: var(--text2);
-  font-size: 12px; font-family: var(--sans); padding: 6px 12px;
-  border-radius: var(--radius); cursor: pointer; white-space: nowrap;
-  transition: color 0.1s, border-color 0.1s;
-}
-#upload-target button:hover { color: var(--accent); border-color: var(--accent); }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .btn {
   background: var(--bg3); border: 1px solid var(--border2); color: var(--text2);
@@ -489,29 +305,6 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
   </div>
 </div>
 
-<!-- New collection modal -->
-<div id="modal-overlay" onclick="closeModal(event)">
-  <div id="modal">
-    <h3>New collection</h3>
-    <div>
-      <label for="modal-input">Name</label>
-      <input id="modal-input" type="text" placeholder="e.g. my-docs" maxlength="60"
-             onkeydown="if(event.key==='Enter')document.getElementById('modal-desc').focus()">
-      <div id="modal-hint">Letters, numbers, hyphens. Will be lowercased.</div>
-    </div>
-    <div>
-      <label for="modal-desc">Description — tells the agent when to search this collection</label>
-      <textarea id="modal-desc" maxlength="300" rows="3"
-                placeholder="e.g. Internal API documentation: endpoints, authentication, error codes."
-                onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))createCollection()"></textarea>
-    </div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="createCollection()">Create</button>
-    </div>
-  </div>
-</div>
-
 <div id="toast"></div>
 
 <script>
@@ -593,6 +386,7 @@ async function switchTab(tab) {
 }
 
 function renderTab(tab) {
+  documentsView?.destroy(); documentsView = null
   const content = document.getElementById('settings-content')
   if (tab !== 'appearance' && content.querySelector('.appearance-content') && document.documentElement.dataset.theme === 'custom-preview') {
     PrismTheme.applyTheme(PrismTheme.getThemeId())
@@ -2359,19 +2153,6 @@ async function renderEmailTab(container) {
 
 // ── RAG tab ───────────────────────────────────────────────────────────────────
 
-let currentCollection = null
-let collections = []
-let documentsRequestVersion = 0, collectionsRequestVersion = 0, displayedDocuments = null
-async function requireRAGSuccess(response) {
-  if (!response.ok) {
-    const raw = await response.text()
-    let message = raw.trim()
-    try { const data = JSON.parse(raw); message = data.error || data.message || message } catch (_) {}
-    throw new Error(message || 'Request failed (' + response.status + ')')
-  }
-  return response
-}
-
 async function renderNotesTab(container) {
   const wrap = document.createElement('div')
   wrap.style.cssText = 'max-width:640px'
@@ -2859,391 +2640,23 @@ let RAG_MANAGE = true // false whenever the scope is a group (managed in Admin c
 let RAG_SCOPED = true // false only: multi-user mode + no group (no RAG/MCP at all)
 let MULTI_USER = false
 async function computeRagManage() {
-  // Settings manages only a PERSONAL scope (user in no group). Any group scope —
-  // member OR admin, including the global admin — is read-only here; group RAG/MCP
-  // is configured in the Admin console, so there is a single place to manage it.
-  // In MULTI_USER mode there is no personal scope at all: a groupless user gets
-  // neither manage nor read access (RAG_SCOPED=false), instead of the old
-  // personal-fallback scope.
   try {
-    const me = await settingsFetch('/api/me').then(r => r.json())
-    MULTI_USER = !!me.multiUser
-    if (!me.authenticated) { RAG_MANAGE = false; RAG_SCOPED = false; return }
-    const my = await settingsFetch('/api/my/groups').then(r => r.json())
-    const inGroup = (my.groups || []).length > 0
-    RAG_SCOPED = inGroup || !MULTI_USER
-    RAG_MANAGE = !MULTI_USER && !inGroup
+    const scope = await PrismDocuments.permissions(settingsFetch)
+    MULTI_USER = scope.multiUser
+    RAG_MANAGE = scope.manage
+    RAG_SCOPED = scope.scoped
   } catch { RAG_MANAGE = false; RAG_SCOPED = false }
 }
 
+let documentsView = null
 async function renderRAGTab(container) {
   await computeRagManage()
-  // Check RAG status first
-  try {
-    const res = await settingsFetch('/api/rag/status')
-    const data = await res.json()
-    if (!data.ready) {
-      const msg = document.createElement('div')
-      msg.style.cssText = 'padding:40px 24px;color:var(--text3);font-size:13px'
-      msg.textContent = 'RAG not ready: ' + (data.status || 'initializing…')
-      container.appendChild(msg)
-      // Update the existing notice instead of clearing the whole tab on each poll.
-      const poll = async () => {
-        if (currentTab !== 'knowledge' || !msg.isConnected) return
-        try {
-          const response = await settingsFetch('/api/rag/status')
-          if (!response.ok) throw new Error('Status unavailable')
-          const next = await response.json()
-          if (currentTab !== 'knowledge' || !msg.isConnected) return
-          if (next.ready) {
-            container.replaceChildren()
-            await renderRAGTab(container)
-            return
-          }
-          const text = 'RAG not ready: ' + (next.status || 'initializing…')
-          if (msg.textContent !== text) msg.textContent = text
-        } catch { /* Keep the current notice during a transient network failure. */ }
-        if (currentTab === 'knowledge' && msg.isConnected) setTimeout(poll, 2000)
-      }
-      setTimeout(poll, 2000)
-      return
-    }
-  } catch { /* ignore, render anyway */ }
-
-  const tab = document.createElement('div')
-  tab.id = 'rag-tab'
-  container.appendChild(tab)
-
-  // Sidebar
-  const sidebar = document.createElement('aside')
-  sidebar.id = 'rag-sidebar'
-  sidebar.innerHTML = `
-    <div id="rag-sidebar-header">
-      <span id="rag-sidebar-title">Collections</span>
-      ${RAG_MANAGE ? '<button id="new-collection-btn" title="New collection" onclick="openModal()">+</button>' : ''}
-    </div>
-    <div id="collections-list"></div>
-    ${RAG_SCOPED
-      ? (RAG_MANAGE ? '' : '<div style="padding:10px 12px;color:var(--text3);font-size:11.5px">Group knowledge base — managed by your group admin (read-only).</div>')
-      : '<div style="padding:10px 12px;color:var(--text3);font-size:11.5px">You\'re not part of a group yet — ask an admin to add you to one to access shared knowledge.</div>'}`
-  tab.appendChild(sidebar)
-
-  // Content
-  const content = document.createElement('div')
-  content.id = 'rag-content'
-  content.innerHTML = `<div id="no-collection-msg"><div class="icon">${icon('knowledge',40)}</div><div>Select a collection or create a new one</div></div>`
-  tab.appendChild(content)
-
-  if (RAG_SCOPED) await loadCollections()
-}
-
-async function loadCollections() {
-  const version = ++collectionsRequestVersion
-  try {
-    const res = await requireRAGSuccess(await settingsFetch('/api/rag/collections'))
-    const data = await res.json()
-    if (!Array.isArray(data)) throw new Error('Invalid collection list')
-    if (version !== collectionsRequestVersion) return
-    collections = data
-    renderCollections()
-  } catch(e) { if (version === collectionsRequestVersion) showToast('Could not load collections: ' + e.message, true) }
-}
-
-function renderCollections() {
-  const el = document.getElementById('collections-list')
-  if (!el) return
-  if (collections.length === 0) {
-    el.innerHTML = '<div style="padding:20px 16px;font-size:12px;color:var(--text3);text-align:center">No collections</div>'
-    return
-  }
-  el.innerHTML = ''
-  for (const c of collections) {
-    const item = document.createElement('div')
-    item.className = 'collection-item' + (c.name === currentCollection ? ' active' : '')
-    item.innerHTML = `
-      <span class="collection-name">${escHtml(c.name)}</span>
-      <span class="collection-count">${c.doc_count} doc${c.doc_count !== 1 ? 's' : ''}</span>
-      ${RAG_MANAGE ? '<button class="collection-del" title="Delete">✕</button>' : ''}`
-    item.addEventListener('click', () => selectCollection(c.name))
-    item.querySelector('.collection-del')?.addEventListener('click', e => {
-      e.stopPropagation(); deleteCollection(c.name)
-    })
-    el.appendChild(item)
-  }
-}
-
-function selectCollection(name) {
-  documentsRequestVersion++; displayedDocuments = null
-  currentCollection = name
-  renderCollections()
-  renderRAGContent()
-  loadDocuments()
-}
-
-async function deleteCollection(name) {
-  if (!await PrismModal.confirm(`Delete collection "${name}" and all its documents?`, { danger: true })) return
-  try {
-    await requireRAGSuccess(await settingsFetch(`/api/rag/collections?name=${encodeURIComponent(name)}`, { method: 'DELETE' }))
-    if (currentCollection === name) {
-      documentsRequestVersion++; displayedDocuments = null
-      currentCollection = null
-    const content = document.getElementById('rag-content')
-    if (content) content.innerHTML = `<div id="no-collection-msg"><div class="icon">${icon('knowledge',40)}</div><div>Select a collection or create a new one</div></div>`
-    }
-    await loadCollections()
-  } catch (e) { showToast('Could not delete collection: ' + e.message, true) }
-}
-
-// Le <select> de la zone d'upload reflète la collection courante ; le choisir ici
-// revient à la sélectionner dans la sidebar (une seule source de vérité :
-// currentCollection). L'option « + New collection… » ouvre notre modale, pas une
-// boîte de dialogue du navigateur.
-function syncUploadTarget() {
-  const sel = document.getElementById('upload-collection')
-  if (!sel) return
-  sel.innerHTML = collections
-    .map(c => `<option value="${escHtml(c.name)}"${c.name === currentCollection ? ' selected' : ''}>${escHtml(c.name)}</option>`)
-    .join('') + '<option value="__new__">+ New collection…</option>'
-}
-
-function onUploadTargetChange(value) {
-  if (value === '__new__') { openModal(); return }
-  if (value && value !== currentCollection) selectCollection(value)
-}
-
-function renderRAGContent() {
-  const collection = currentCollection
-  const col = collections.find(c => c.name === collection)
-  const desc = col ? (col.description || '') : ''
-  const content = document.getElementById('rag-content')
-  if (!content) return
-  content.innerHTML = `
-    <div id="rag-content-header">
-      <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
-        <span style="font-size:14px;font-weight:600;color:var(--text)">${icon('files',15)} ${escHtml(currentCollection)}</span>
-        ${RAG_MANAGE ? `<input id="desc-input" type="text" value="${escHtml(desc)}"
-               class="${desc ? '' : 'missing'}"
-               placeholder="Description for the agent (e.g. internal API docs…)"
-               style="background:transparent;border:none;border-bottom:1px dashed var(--border2);
-                      color:var(--text3);font-size:11.5px;font-family:var(--sans);
-                      outline:none;padding:2px 0;width:100%">
-             ${desc ? '' : `<div id="desc-warn">${icon('alert-triangle',11)} No description — the agent won't know when to search this collection.</div>`}`
-          : `<span style="color:var(--text3);font-size:11.5px">${escHtml(desc || 'No description')}</span>`}
-      </div>
-    </div>
-    ${RAG_MANAGE ? `<div id="upload-target">
-      <span>Add to</span>
-      <select id="upload-collection" onchange="onUploadTargetChange(this.value)"></select>
-      <button type="button" onclick="openModal()">+ New collection</button>
-    </div>
-    <div id="upload-zone">
-      <div id="upload-icon">${icon('upload',26)}</div>
-      <div id="upload-label">Drop a file here or click to select</div>
-      <div id="upload-hint">PDF, DOCX, TXT, CSV, MD, JSON — max 50 MB</div>
-      <input id="upload-input" type="file" multiple accept=".pdf,.docx,.txt,.csv,.md,.json,.tsv"
-             onchange="uploadFiles(this.files)">
-    </div>` : ''}
-    <div id="upload-progress"></div>
-    <div id="docs-area"><div style="padding:20px;color:var(--text3);font-size:13px">Loading…</div></div>`
-
-  if (RAG_MANAGE) {
-    syncUploadTarget()
-    document.getElementById('upload-zone').addEventListener('click', () => document.getElementById('upload-input').click())
-    const zone = document.getElementById('upload-zone')
-    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over') })
-    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'))
-    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); uploadFiles(e.dataTransfer.files) })
-    const di = document.getElementById('desc-input')
-    di.addEventListener('blur', () => saveDescription(di.value.trim(), collection))
-    di.addEventListener('keydown', e => { if (e.key === 'Enter') di.blur() })
-  }
-}
-
-async function saveDescription(value, collection = currentCollection) {
-  const col = collections.find(c => c.name === collection)
-  if (!col) return
-  const controls = collection === currentCollection ? [document.getElementById('desc-input')].filter(Boolean) : []
-  try {
-    await requireRAGSuccess(await settingsFetch('/api/rag/collections', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: collection, description: value })
-    }, controls))
-    col.description = value
-  } catch (e) { showToast('Could not save description: ' + e.message, true) }
-}
-
-async function loadDocuments() {
-  const collection = currentCollection, area = document.getElementById('docs-area')
-  if (!collection || !area) return
-  const version = ++documentsRequestVersion
-  displayedDocuments = null
-  area.querySelectorAll('.doc-del-btn').forEach(button => button.disabled = true)
-  try {
-    const res = await requireRAGSuccess(await settingsFetch(`/api/rag/documents?collection=${encodeURIComponent(collection)}`))
-    const docs = await res.json()
-    if (version !== documentsRequestVersion || collection !== currentCollection || area !== document.getElementById('docs-area')) return
-    if (!Array.isArray(docs)) throw new Error('Invalid document list')
-    displayedDocuments = { collection, area, ids: new Set(docs.map(doc => Number(doc.id))), deleting: new Set() }
-    renderDocuments(docs)
-  } catch(e) {
-    if (version !== documentsRequestVersion || collection !== currentCollection || area !== document.getElementById('docs-area')) return
-    showToast('Failed to load documents: ' + e.message, true)
-    if (!area.querySelectorAll('.doc-del-btn').length) area.textContent = 'Could not load documents. Select the collection to retry.'
-  }
-}
-
-function renderDocuments(docs) {
-  const area = document.getElementById('docs-area')
-  if (!area) return
-  if (docs.length === 0) {
-    area.innerHTML = '<div style="padding:24px 0;text-align:center;font-size:13px;color:var(--text3)">No documents in this collection.<br>Drop a file in the zone above.</div>'
-    return
-  }
-  area.innerHTML = `
-    <table id="docs-table">
-      <thead><tr><th>File</th><th>Size</th><th>Chunks</th><th>Updated</th><th></th></tr></thead>
-      <tbody>${docs.map(d => `
-        <tr>
-          <td>${escHtml(d.filename)}</td>
-          <td>${fmtSize(d.size_bytes)}</td>
-          <td>${d.chunk_count}</td>
-          <td>${fmtDate(d.updated_at)}</td>
-          <td>${RAG_MANAGE ? `<button class="doc-del-btn" title="Delete" data-id="${d.id}">✕</button>` : ''}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>`
-  const snapshot = displayedDocuments
-  area.querySelectorAll('.doc-del-btn').forEach(btn => {
-    btn.addEventListener('click', () => deleteDocument(Number(btn.dataset.id), snapshot))
+  if (!container.isConnected) return
+  documentsView = PrismDocuments.mount(container, {
+    request: settingsFetch, toast: showToast, icon,
+    manage: RAG_MANAGE, scoped: RAG_SCOPED
   })
-}
-
-async function deleteDocument(id, snapshot = displayedDocuments) {
-  if (!snapshot || snapshot !== displayedDocuments || snapshot.collection !== currentCollection ||
-      snapshot.area !== document.getElementById('docs-area') || !snapshot.ids.has(id) || snapshot.deleting.has(id)) return
-  snapshot.deleting.add(id)
-  const button = [...snapshot.area.querySelectorAll('.doc-del-btn')].find(btn => Number(btn.dataset.id) === id)
-  if (button) button.disabled = true
-  try {
-    await requireRAGSuccess(await settingsFetch(`/api/rag/document?id=${encodeURIComponent(id)}`, { method: 'DELETE' }))
-    if (snapshot === displayedDocuments) await loadDocuments()
-    await loadCollections()
-  } catch (e) { showToast('Could not delete document: ' + e.message, true) }
-  finally {
-    snapshot.deleting.delete(id)
-    if (snapshot === displayedDocuments && button) button.disabled = false
-  }
-}
-
-// L'upload est un POST synchrone qui parse, embedde et écrit avant de répondre —
-// des minutes sur un gros manuel. On interroge /api/rag/upload/progress pendant
-// que le POST est en vol pour dire où on en est.
-function fmtETA(s) { if (!s || s < 1) return ''; if (s < 60) return `~${s}s left`
-  const m = Math.floor(s / 60); return `~${m}m${s % 60 ? ' ' + (s % 60) + 's' : ''} left` }
-
-async function pollIngestProgress(collection, filename, progress, stop) {
-  while (!stop.done) {
-    await new Promise(r => setTimeout(r, 700))
-    if (stop.done) return
-    let d
-    try {
-      const res = await settingsFetch('/api/rag/upload/progress'
-        + `?collection=${encodeURIComponent(collection)}&filename=${encodeURIComponent(filename)}`)
-      d = await res.json()
-    } catch (_) { continue }
-    if (!d || !d.found) continue
-    if (d.stage === 'parsing') progress.textContent = `Parsing ${filename}…`
-    else if (d.stage === 'embedding') {
-      progress.textContent = d.done
-        ? `Indexing ${d.done}/${d.total} chunks (${Math.round(d.rate)}/s) ${fmtETA(d.etaSecs)}`
-        : `Indexing ${d.total} chunks…`
-    } else if (d.stage === 'storing') progress.textContent = `Saving ${d.total} chunks…`
-    else if (d.stage === 'failed') { progress.textContent = `Failed: ${d.error || 'unknown error'}`; return }
-    else if (d.stage === 'done') { progress.textContent = `${d.total} chunks indexed ✓`; return }
-  }
-}
-
-async function uploadFiles(files) {
-  if (!files || files.length === 0) return
-  const sel = document.getElementById('upload-collection')
-  if (sel && sel.value && sel.value !== '__new__' && sel.value !== currentCollection) {
-    selectCollection(sel.value)   // l'utilisateur a changé de cible sans quitter la zone
-  }
-  if (!currentCollection) { showToast('Select a collection first', true); return }
-  const collection = currentCollection, input = document.getElementById('upload-input')
-  const zone = document.getElementById('upload-zone')
-  const progress = document.getElementById('upload-progress')
-  zone.classList.add('uploading'); progress.classList.add('visible')
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i]
-    progress.textContent = `Uploading ${i+1}/${files.length}: ${file.name}…`
-    try {
-      const form = new FormData()
-      form.append('file', file); form.append('collection', collection)
-      const stop = { done: false }
-      pollIngestProgress(collection, file.name, progress, stop)
-      let res
-      try { res = await settingsFetch('/api/rag/upload', { method: 'POST', body: form }) }
-      finally { stop.done = true }
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || res.statusText)
-      showToast(`✓ ${file.name} — ${data.chunks} chunks indexed`)
-    } catch(e) { showToast(`Error ${file.name}: ${e.message}`, true) }
-  }
-  zone.classList.remove('uploading'); progress.classList.remove('visible'); progress.textContent = ''
-  input.value = ''
-  if (currentCollection === collection) await loadDocuments()
-  await loadCollections()
-}
-
-// ── Modal ─────────────────────────────────────────────────────────────────────
-
-function openModal() {
-  document.getElementById('modal-overlay').classList.add('visible')
-  setTimeout(() => document.getElementById('modal-input').focus(), 50)
-}
-function closeModal(e) {
-  if (e && e.target !== document.getElementById('modal-overlay')) return
-  document.getElementById('modal-overlay').classList.remove('visible')
-  document.getElementById('modal-input').value = ''
-  document.getElementById('modal-desc').value = ''
-  syncUploadTarget()   // le <select> avait pu basculer sur « + New collection… »
-}
-async function createCollection() {
-  const input = document.getElementById('modal-input')
-  const descEl = document.getElementById('modal-desc')
-  const name = input.value.trim().toLowerCase().replace(/[^a-z0-9\-_]/g,'-').replace(/-+/g,'-')
-  if (!name) { input.focus(); return }
-  const description = descEl.value.trim()
-
-  // Persist the collection (and its description) so it survives with zero documents.
-  // The description is what the agent reads to decide when to search here — see the
-  // "## Knowledge Base (RAG)" block built in internal/server/ws.go.
-  try {
-    await requireRAGSuccess(await settingsFetch('/api/rag/collections', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, description }),
-    }))
-  } catch (e) { showToast('Could not create collection: ' + e.message, true); return }
-  document.getElementById('modal-overlay').classList.remove('visible')
-  input.value = ''; descEl.value = ''
-  if (!collections.find(c => c.name === name)) {
-    collections.push({ name, description, doc_count: 0, chunk_count: 0 })
-    renderCollections()
-  }
-  selectCollection(name)
-}
-
-// ── Utils ─────────────────────────────────────────────────────────────────────
-
-function fmtSize(b) {
-  if (b < 1024) return b + ' B'
-  if (b < 1048576) return (b/1024).toFixed(1) + ' KB'
-  return (b/1048576).toFixed(1) + ' MB'
-}
-function fmtDate(iso) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric' })
+  return documentsView.ready
 }
 
 let toastTimer = null
@@ -3253,10 +2666,6 @@ function showToast(msg, isError = false) {
   if (toastTimer) clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { t.className = '' }, 3500)
 }
-
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') document.getElementById('modal-overlay').classList.remove('visible')
-})
 
 settingsFetch('/api/auth').then(r => r.json()).then(d => {
   if (!d.authenticated) { window.top.location.href = '/'; return }

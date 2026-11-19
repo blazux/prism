@@ -896,6 +896,30 @@ body {
   line-height: 1.6;
   background: #282a36;
 }
+#editor-plain {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 0;
+  outline: none;
+  background: var(--bg1);
+  color: var(--text);
+  font: 13px/1.6 var(--mono);
+  tab-size: 2;
+  white-space: pre;
+}
+#editor-retry-btn {
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  background: var(--bg3);
+  color: var(--text);
+  font: 11px var(--sans);
+  cursor: pointer;
+}
 
 /* ── Config button ───────────────────────────────────────────────────────── */
 

@@ -2,10 +2,10 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
-const source = fs.readFileSync(require('node:path').join(__dirname, '../settings.html'), 'utf8');
+const source = fs.readFileSync(require('node:path').join(__dirname, '../documents.js'), 'utf8');
 const start = source.indexOf('async function renderRAGTab(container) {');
 const end = source.indexOf("  const tab = document.createElement('div')", start);
-const statusOnly = source.slice(start, end) + '\n}';
+const statusOnly = source.slice(start, end).replace(/^    /gm,'') + '\n}';
 test('Knowledge polls a stable notice, stops when detached, and renders once ready', async () => {
  const timers = [], notices = [];
  let ready = false, requests = 0, writes = 0, replacements = 0;
@@ -13,9 +13,9 @@ test('Knowledge polls a stable notice, stops when detached, and renders once rea
   appendChild(node) { notices.push(node); },
   replaceChildren() { replacements++; notices.forEach(n => n.isConnected = false); }
  };
- const ctx = {currentTab:'knowledge', computeRagManage:async()=>{},
-  settingsFetch:async()=> {requests++; return {ok:true,json:async()=>({ready,status:'configuration failed'})};},
-  setTimeout:f=>timers.push(f),
+ const ctx = {active:()=>true,
+  request:async()=> {requests++; return {ok:true,json:async()=>({ready,status:'configuration failed'})};},
+  later:f=>timers.push(f),
   document:{createElement:()=>({style:{},isConnected:true,set textContent(v){writes++;this.text=v;},get textContent(){return this.text;}})}
  };
  vm.createContext(ctx);vm.runInContext(statusOnly,ctx);

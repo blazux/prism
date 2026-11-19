@@ -51,7 +51,17 @@ jobs:
         timeout-minutes: 5
         run: |
           export NODE_PATH="$RUNNER_TEMP/prism-browser/node_modules"
-          for test in web/tests/response-attachments-browser.cjs web/tests/teams-admin-browser.cjs web/tests/telephony-app-browser.cjs web/tests/conversation-settings-browser.cjs web/tests/theme-gallery-browser.cjs web/tests/theme-controls-browser.cjs web/tests/theme-effects-browser.cjs; do
+          for test in \
+            web/tests/response-attachments-browser.cjs \
+            web/tests/teams-admin-browser.cjs \
+            web/tests/telephony-app-browser.cjs \
+            web/tests/conversation-settings-browser.cjs \
+            web/tests/theme-gallery-browser.cjs \
+            web/tests/theme-controls-browser.cjs \
+            web/tests/theme-effects-browser.cjs \
+            web/tests/markdown-rendering-browser.cjs \
+            web/tests/file-editor-browser.cjs \
+            web/tests/documents-browser.cjs; do
             echo "::group::$test"
             if node "$test" > "$RUNNER_TEMP/prism-browser-test.log" 2>&1; then
               cat "$RUNNER_TEMP/prism-browser-test.log"

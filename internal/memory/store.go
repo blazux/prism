@@ -5,11 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
-
-	"prism/internal/ollama"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -793,8 +790,8 @@ func (s *Store) ClearHistory(ctx context.Context, sessionID string) error {
 // context the previous one was working with: the compaction note that stands
 // in for the older messages, and the conversation_history row id from which
 // the stored messages are replayed verbatim (rows before it are covered by
-// the note). The rows themselves are left untouched — the UI transcript and
-// MaybeSummarize's long-term memory keep working on the full history.
+// the note). The rows themselves are left untouched so the UI transcript and
+// archive readers keep working on the full history.
 type LiveCompaction struct {
 	Summary  string `json:"summary"`
 	BeforeID int64  `json:"before_id"`
@@ -840,7 +837,8 @@ func (s *Store) AdvanceLiveCompaction(ctx context.Context, sessionID string, lc 
 	return err
 }
 
-// GetSummary returns the accumulated conversation summary for a session.
+// GetSummary reads the legacy conversation summary retained for compatibility.
+// Active compaction writes a separate LiveCompaction record without deleting rows.
 func (s *Store) GetSummary(ctx context.Context, sessionID string) string {
 	var value string
 	_ = s.pool.QueryRow(ctx, `SELECT value FROM agent_config WHERE key = $1`, summaryKey(sessionID)).Scan(&value)
@@ -850,178 +848,6 @@ func (s *Store) GetSummary(ctx context.Context, sessionID string) string {
 func (s *Store) CorrectSummary(ctx context.Context, session, original, summary string) (bool, error) {
 	r, err := s.pool.Exec(ctx, `UPDATE agent_config SET value=$3,updated_at=NOW() WHERE key=$1 AND value=$2`, summaryKey(session), original, summary)
 	return r.RowsAffected() == 1, err
-}
-
-// MaybeSummarize summarizes old history if user+assistant message count exceeds maxMessages.
-// It keeps the keepRecent most recent messages and summarizes the rest.
-// Runs the LLM call with the provided client and model.
-func (s *Store) MaybeSummarize(ctx context.Context, sessionID string, ollamaClient ollama.Backend, model string, maxMessages, keepRecent int) {
-	var count int
-	if err := s.pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM conversation_history
-		WHERE session_id = $1 AND role IN ('user', 'assistant')
-	`, sessionID).Scan(&count); err != nil || count <= maxMessages {
-		return
-	}
-
-	// Fetch all messages oldest-first
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, role, content FROM conversation_history
-		WHERE session_id = $1
-		ORDER BY id ASC
-	`, sessionID)
-	if err != nil {
-		log.Printf("[memory] MaybeSummarize query: %v", err)
-		return
-	}
-
-	type row struct {
-		id      int64
-		role    string
-		content string
-	}
-	var msgs []row
-	for rows.Next() {
-		var m row
-		if err := rows.Scan(&m.id, &m.role, &m.content); err != nil {
-			rows.Close()
-			log.Printf("[memory] MaybeSummarize scan: %v", err)
-			return
-		}
-		msgs = append(msgs, m)
-	}
-	rows.Close()
-
-	if len(msgs) <= keepRecent {
-		return
-	}
-
-	toSummarize := msgs[:len(msgs)-keepRecent]
-
-	// Consolidation prompt: instead of appending a fresh summary to the old one
-	// (which lets obsolete facts pile up forever), we feed the existing running
-	// summary back in and ask the model to rewrite a single, up-to-date summary
-	// that reflects the CURRENT state — dropping anything later messages have
-	// undone. This keeps the summary bounded and reconciled with reality.
-	existing := s.GetSummary(ctx, sessionID)
-
-	var sb strings.Builder
-	sb.WriteString("You maintain a running summary of an ongoing conversation between a user and an AI assistant. ")
-	sb.WriteString("Produce an updated, self-contained summary that reflects the CURRENT state of things.\n\n")
-	sb.WriteString("Rules:\n")
-	sb.WriteString("- Integrate the new messages into the existing summary. Do NOT simply append them.\n")
-	sb.WriteString("- If newer messages show something was undone, deleted, renamed, completed or changed, UPDATE or REMOVE the now-obsolete fact. The summary must describe what is true now, not the full history.\n")
-	sb.WriteString("- Preserve durable facts, decisions, user preferences and still-pending tasks.\n")
-	sb.WriteString("- Stay concise and factual. Output ONLY the summary text, with no preamble or commentary.\n\n")
-	if existing != "" {
-		sb.WriteString("=== Current running summary ===\n")
-		sb.WriteString(existing)
-		sb.WriteString("\n\n")
-	}
-	sb.WriteString("=== New messages to integrate ===\n")
-	for _, m := range toSummarize {
-		if m.role == "tool" || m.role == "error" {
-			continue
-		}
-		sb.WriteString(m.role)
-		sb.WriteString(": ")
-		content := m.content
-		if len(content) > 600 {
-			content = content[:600] + "..."
-		}
-		sb.WriteString(content)
-		sb.WriteString("\n")
-	}
-
-	ch := make(chan ollama.StreamEvent, 200)
-	req := ollama.ChatRequest{
-		Model: model,
-		Messages: []ollama.Message{
-			{Role: "user", Content: sb.String()},
-		},
-	}
-	go func() {
-		ollamaClient.Chat(ctx, req, ch)
-		close(ch)
-	}()
-
-	var summary strings.Builder
-	for ev := range ch {
-		if ev.Err != nil {
-			log.Printf("[memory] summarize LLM error: %v", ev.Err)
-			return
-		}
-		summary.WriteString(ev.Content)
-	}
-	summaryText := stripThinking(strings.TrimSpace(summary.String()))
-	if summaryText == "" {
-		return
-	}
-
-	// Collect IDs to delete
-	ids := make([]int64, len(toSummarize))
-	for i, m := range toSummarize {
-		ids[i] = m.id
-	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		log.Printf("[memory] summarize begin tx: %v", err)
-		return
-	}
-	defer tx.Rollback(ctx)
-
-	deleted, err := tx.Exec(ctx, `DELETE FROM conversation_history WHERE id = ANY($1)`, ids)
-	if err != nil {
-		log.Printf("[memory] summarize delete: %v", err)
-		return
-	}
-	// A reset/deletion or another summarizer won while the model was running.
-	// Never resurrect that old context after its source rows have disappeared.
-	if deleted.RowsAffected() != int64(len(ids)) {
-		return
-	}
-
-	// Replace (not append): the consolidation prompt already folded the previous
-	// summary into summaryText, so the stored summary stays bounded and current.
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO agent_config (key, value, updated_at)
-		VALUES ($1, $2, NOW())
-		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-	`, summaryKey(sessionID), summaryText); err != nil {
-		log.Printf("[memory] summarize upsert summary: %v", err)
-		return
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		log.Printf("[memory] summarize commit: %v", err)
-		return
-	}
-
-	log.Printf("[memory] summarized %d messages for session %q", len(toSummarize), sessionID)
-}
-
-// stripThinking removes <think>…</think> (and <thinking>/<thought>) blocks from
-// a model's output, so reasoning a model inlines into content never leaks into a
-// stored summary. Mirrors the agent's stripThinkingBlocks. Unclosed tags drop
-// everything from the opening tag onward.
-func stripThinking(s string) string {
-	for _, tag := range []string{"think", "thinking", "thought"} {
-		open, close := "<"+tag+">", "</"+tag+">"
-		for {
-			start := strings.Index(s, open)
-			if start < 0 {
-				break
-			}
-			end := strings.Index(s[start:], close)
-			if end < 0 {
-				s = s[:start] // unclosed: drop the trailing reasoning
-				break
-			}
-			s = s[:start] + s[start+end+len(close):]
-		}
-	}
-	return strings.TrimSpace(s)
 }
 
 func summaryKey(sessionID string) string {

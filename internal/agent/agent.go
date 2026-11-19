@@ -83,6 +83,9 @@ const historyTruncatedNote = "[Older messages in this conversation were not repl
 // see effectiveHistoryBudget below.
 
 type Agent struct {
+	promptCacheMu        sync.Mutex
+	promptCacheKey       systemPromptPrefixKey
+	promptCache          string
 	location             *time.Location
 	ollama               ollama.Backend
 	executor             *ToolExecutor
@@ -969,36 +972,25 @@ func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Messa
 		NoThinking: true,
 		Options:    ollama.Options{NumPredict: 1000},
 	}
-	ch := make(chan ollama.StreamEvent, 20)
-	go func() {
-		a.ollama.Chat(sctx, req, ch)
-		close(ch)
-	}()
-
-	var out strings.Builder
-	var firstErr error
+	var validationErr error
 	completed := false
-	for ev := range ch {
-		if ev.Err != nil {
-			if firstErr == nil {
-				firstErr = ev.Err
-			}
-			continue
-		}
-		out.WriteString(ev.Content)
-		if len(ev.ToolCalls) > 0 && firstErr == nil {
-			firstErr = errors.New("summarization returned unexpected tool calls")
+	result, firstErr := collectModelStream(sctx, a.ollama, req, func(ev ollama.StreamEvent) {
+		if len(ev.ToolCalls) > 0 && validationErr == nil {
+			validationErr = errors.New("summarization returned unexpected tool calls")
 		}
 		if ev.Done {
 			switch ev.DoneReason {
 			case "stop", "end_turn", "stop_sequence":
 				completed = true
 			default:
-				if firstErr == nil {
-					firstErr = fmt.Errorf("summarization did not finish successfully (%q)", ev.DoneReason)
+				if validationErr == nil {
+					validationErr = fmt.Errorf("summarization did not finish successfully (%q)", ev.DoneReason)
 				}
 			}
 		}
+	})
+	if validationErr != nil {
+		firstErr = validationErr
 	}
 	if firstErr == nil {
 		firstErr = sctx.Err()
@@ -1015,7 +1007,7 @@ func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Messa
 	if !completed {
 		return "", errors.New("summarization ended without a successful terminal event")
 	}
-	summary := strings.TrimSpace(stripThinkingBlocks(out.String()))
+	summary := strings.TrimSpace(stripThinkingBlocks(result.Content))
 	if summary == "" {
 		return "", errors.New("model returned an empty summary")
 	}
@@ -1162,44 +1154,15 @@ func (a *Agent) buildSystemPromptWithCachePrefix(ctx context.Context, learningsC
 		return a.buildVoiceSystemPrompt(ctx, learningsCtx, persona)
 	}
 
-	if a.agentName != "" {
-		sb.WriteString("Your name is ")
-		sb.WriteString(a.agentName)
-		sb.WriteString(".\n\n")
-	}
-	// Every place in this prompt that says "session=SESSION_ID" (widget JS, cron
-	// scripts, /api/notes etc.) means THIS value, verbatim — never invent one, and
-	// never reuse a value from a past turn or a different board.
-	if a.sessionID != "" {
-		sb.WriteString("Your session id is `")
-		sb.WriteString(a.sessionID)
-		sb.WriteString("`. Wherever these instructions say SESSION_ID, use this exact string.\n\n")
-	}
-	// The role always comes first, whatever the persona says — see systemPromptRole.
-	// A persona describes how the agent talks; it must not be able to remove what it is.
-	sb.WriteString(systemPromptRole)
-	sb.WriteString(systemPromptDecision)
-	if strings.TrimSpace(persona) != "" {
-		sb.WriteString("\n\n")
-		sb.WriteString(persona)
-	}
-	lean := a.leanPrompt()
-	minimal := a.promptProfile() == "minimal"
-	if minimal {
-		sb.WriteString(systemPromptMinimal)
-		sb.WriteString(minimalSafetyPrompt())
-	} else {
-		sb.WriteString(systemPromptCoreFor(lean))
-		if lean {
-			sb.WriteString(systemPromptRetryLean)
-		} else {
-			sb.WriteString(systemPromptRetryGuided)
-		}
-		sb.WriteString(systemPromptCoreTailFor(lean))
-	}
-	// Everything above is stable during the tool loop. Live context and late
-	// turn guidance below may change between requests.
-	cachePrefixBytes := sb.Len()
+	profile := a.promptProfile()
+	prefix := a.cachedSystemPromptPrefix(systemPromptPrefixKey{
+		name: a.agentName, session: a.sessionID, persona: persona, profile: profile,
+	})
+	sb.Grow(len(prefix) + 1024)
+	sb.WriteString(prefix)
+	lean := profile != "guided"
+	minimal := profile == "minimal"
+	cachePrefixBytes := len(prefix)
 
 	// Channel guidance: the "telegram" session is the user texting from their phone.
 	if a.sessionID == telegramSessionID {
@@ -1899,11 +1862,10 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 	var measured *ollama.Usage
 	complete := false
 	defer func() {
-		raw, _ := json.Marshal(tools)
 		a.histMu.Lock()
-		a.contextOverheadChars = len(prompt) + len(raw)
+		a.contextOverheadChars = len(prompt) + len(toolJSON)
 		if measured != nil && measured.InputTokens != nil && *measured.InputTokens > 0 && imageBytes == 0 {
-			totalBytes := len(prompt) + len(raw) + historyContentBytes + toolArgumentBytes
+			totalBytes := len(prompt) + len(toolJSON) + historyContentBytes + toolArgumentBytes
 			ratio := float64(totalBytes) / float64(*measured.InputTokens)
 			if ratio < 1 {
 				ratio = 1
@@ -1916,7 +1878,7 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 		a.histMu.Unlock()
 		record := &ModelUsage{
 			TaskID: taskIDFromContext(ctx), Scope: scope, Model: a.model, Profile: a.promptProfile(),
-			DurationMS: time.Since(started).Milliseconds(), SystemBytes: len(prompt), ToolBytes: len(raw),
+			DurationMS: time.Since(started).Milliseconds(), SystemBytes: len(prompt), ToolBytes: len(toolJSON),
 			MessageCount: len(messages), HistoryContentBytes: historyContentBytes,
 			HistoryToolResultBytes: toolResultBytes, HistoryToolArgumentBytes: toolArgumentBytes,
 			HistoryImageBytes: imageBytes, Complete: complete, Usage: measured,
@@ -1933,43 +1895,8 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 			cancel()
 		}
 	}()
-	ch := make(chan ollama.StreamEvent, 100)
-	go func() {
-		a.ollama.Chat(ctx, req, ch)
-		close(ch)
-	}()
-
-	var contentBuilder strings.Builder
-	var toolCalls []ollama.ToolCall
-	var providerBlocks []json.RawMessage
 	var inThinking bool
-	var doneReason string
-
-	for ev := range ch {
-		if ev.Usage != nil {
-			measured = ev.Usage
-		}
-		if ev.Done {
-			complete = ev.DoneReason != "interrupted"
-		}
-
-		if err := ctx.Err(); err != nil {
-			// Ignore late chunks after cancellation; they must not repopulate a
-			// cleared conversation. Text received earlier remains a partial reply.
-			if inThinking {
-				events <- Event{Type: "stream", Content: "</think>"}
-			}
-			return contentBuilder.String(), nil, nil, "", err
-		}
-		if ev.Err != nil {
-			if inThinking {
-				events <- Event{Type: "stream", Content: "</think>"}
-			}
-			return contentBuilder.String(), nil, nil, "", ev.Err
-		}
-		if ev.DoneReason != "" {
-			doneReason = ev.DoneReason
-		}
+	result, streamErr := collectModelStream(ctx, a.ollama, req, func(ev ollama.StreamEvent) {
 		if ev.Thinking != "" {
 			if !inThinking {
 				events <- Event{Type: "stream", Content: "<think>"}
@@ -1982,21 +1909,17 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 				events <- Event{Type: "stream", Content: "</think>"}
 				inThinking = false
 			}
-			contentBuilder.WriteString(ev.Content)
 			events <- Event{Type: "stream", Content: ev.Content}
 		}
-		if len(ev.ToolCalls) > 0 {
-			toolCalls = append(toolCalls, ev.ToolCalls...)
-		}
-		if len(ev.ProviderBlocks) > 0 {
-			providerBlocks = ev.ProviderBlocks
-		}
-	}
+	})
+	measured, complete = result.Usage, result.Complete
 	if inThinking {
 		events <- Event{Type: "stream", Content: "</think>"}
 	}
-
-	content := contentBuilder.String()
+	if streamErr != nil {
+		return result.Content, nil, nil, "", streamErr
+	}
+	content, toolCalls, providerBlocks, doneReason := result.Content, result.ToolCalls, result.ProviderBlocks, result.DoneReason
 	log.Printf("[agent] iter response: session=%s model=%q backend=%T content=%q tool_calls=%d done_reason=%q", a.sessionID, a.model, a.ollama, truncate(content, 120), len(toolCalls), doneReason)
 	for i, tc := range toolCalls {
 		log.Printf("[agent]   tool[%d] %s %s", i, tc.Function.Name, truncate(string(redactToolArgs(tc.Function.Arguments)), 200))

@@ -108,11 +108,6 @@ const root=path.resolve(__dirname,'..');
   assert.equal(await page.getByText('Context ·').count(),0);
   assert.equal(reads.filter(p=>p.startsWith('/api/chat/context')).length,contextsBeforeSettings);
   assert(reads.includes('/api/memory'));
-  await page.evaluate(async()=>{
-    const progress=document.createElement('span');window.fixtureProgress=progress;
-    await pollIngestProgress('manual','readme.txt',progress,{done:false});
-  });
-  assert(reads.includes('/api/rag/upload/progress?collection=manual&filename=readme.txt'));
 
   const memory=page.locator('details.memory-card');await memory.locator('summary').click();
   await memory.locator('textarea').fill('Corrected fact');

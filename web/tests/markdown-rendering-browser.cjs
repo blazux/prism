@@ -5,7 +5,7 @@ const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8')
 const rendering = source.slice(source.indexOf('function renderMarkdown('), source.indexOf('// ─── Emoji picker'))
 const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8')
 const assets = [...index.matchAll(/<(?:script|link)\b[^>]*(?:src|href)="([^\"]+)"[^>]*>(?:<\/script>)?/g)]
-  .filter(match => /^\/vendor\/(?:katex|marked|purify|codemirror)/.test(match[1])).map(match => match[0]).join('\n')
+  .filter(match => /^\/vendor\/(?:katex|marked|purify)/.test(match[1]) || match[1] === '/editor-loader.js').map(match => match[0]).join('\n')
 
 ;(async () => {
   const executablePath = process.env.CHROMIUM_EXECUTABLE_PATH || process.env.CHROMIUM_EXECUTABLE
@@ -23,10 +23,12 @@ const assets = [...index.matchAll(/<(?:script|link)\b[^>]*(?:src|href)="([^\"]+)
       return route.fulfill({status: 404, body: ''})
     })
     await page.goto(origin)
-    await page.evaluate(() => {
+    assert.equal(await page.evaluate(() => typeof window.CodeMirror), 'undefined')
+    await page.evaluate(async () => {
       window.originalLibraries = {marked, DOMPurify, katex}
       result.innerHTML = renderMarkdown('# Title\n\n**Strong**\n\n[Docs](https://example.com/docs)\n\n```html\n<img src=x onerror="window.xss=1">\n```\n\n$x^2$\n\n$$x+y$$')
       const modes = ['javascript', 'python', 'go', 'css', 'xml', 'htmlmixed', 'markdown', 'shell', 'yaml', 'toml']
+      await PrismCodeEditor.load()
       const editor = CodeMirror(document.getElementById('editor'), {value: 'hello', theme: 'dracula'})
       for (const mode of modes) {
         if (!CodeMirror.modes[mode]) throw new Error('Missing editor mode: ' + mode)

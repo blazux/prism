@@ -28,18 +28,22 @@ let AGENT_NAME = 'Agent'
 // Apps disabled platform-wide by the global admin (Admin → Platform).
 let DISABLED_APPS = new Set()
 async function loadIdentity() {
-  try { const p = await fetch('/api/profile').then(r => r.json()); ME.uid = p.userId ?? ''; ME.name = p.displayName || p.email || 'You' } catch (_) {}
-  // Global admin, or admin of any group. This only decides what the UI offers:
-  // /api/terminal and /api/exec check the role themselves.
-  try { const identity = await fetch('/api/me').then(r => r.json()); ME.isAdmin = !!identity.isAdmin; ME.terminalAvailable = identity.terminalAvailable !== false; WIDGET_HOSTING = identity.widgetHosting || null } catch (_) {}
-  try { AGENT_NAME = (await fetch('/api/agent/name', { cache: 'no-store' }).then(r => r.json())).name || 'Agent' } catch (_) {}
-  try { DISABLED_APPS = new Set((await fetch('/api/platform').then(r => r.json())).disabledApps || []) } catch (_) {}
-  // /api/my/groups returns two shapes: {groupId,groupName} for a member,
-  // {id,name} for a global admin (ListGroups). Normalize to one.
-  try {
-    const raw = (await fetch('/api/my/groups').then(r => r.json())).groups || []
-    MY_GROUPS = raw.map(g => ({ groupId: g.groupId ?? g.id, groupName: g.groupName ?? g.name }))
-  } catch (_) {}
+  await Promise.allSettled([
+    fetch('/api/profile').then(r => r.json()).then(p => {
+      ME.uid = p.userId ?? ''; ME.name = p.displayName || p.email || 'You'
+    }),
+    // This only decides what the UI offers; the endpoints enforce permissions.
+    fetch('/api/me').then(r => r.json()).then(identity => {
+      ME.isAdmin = !!identity.isAdmin; ME.terminalAvailable = identity.terminalAvailable !== false
+      WIDGET_HOSTING = identity.widgetHosting || null
+    }),
+    fetch('/api/agent/name', { cache: 'no-store' }).then(r => r.json()).then(d => { AGENT_NAME = d.name || 'Agent' }),
+    fetch('/api/platform').then(r => r.json()).then(d => { DISABLED_APPS = new Set(d.disabledApps || []) }),
+    fetch('/api/my/groups').then(r => r.json()).then(d => {
+      // Members receive groupId/groupName; global admins receive id/name.
+      MY_GROUPS = (d.groups || []).map(g => ({ groupId: g.groupId ?? g.id, groupName: g.groupName ?? g.name }))
+    })
+  ])
   refreshShareAffordances()
 }
 
@@ -1522,7 +1526,9 @@ let sessionLoadGeneration = 0
 async function loadSessions() {
   const generation = ++sessionLoadGeneration
   try {
-    const res = await fetch('/api/sessions', { cache: 'no-store' })
+    const sessions = fetch('/api/sessions', { cache: 'no-store' })
+    const availability = fetch('/api/vox-workspace').then(r => r.json()).then(d => !!d.available).catch(() => false)
+    const res = await sessions
     if (!res.ok) return
     const data = await res.json()
     if (generation !== sessionLoadGeneration) return
@@ -1535,8 +1541,7 @@ async function loadSessions() {
       setChatAgentLabel(boardName(lastWorkspace))
     }
     // A slow telephony availability check must not hold back workspace status.
-    let voxAvailable = false
-    try{voxAvailable=!!(await fetch('/api/vox-workspace').then(r=>r.json())).available}catch{}
+    const voxAvailable = await availability
     if (generation !== sessionLoadGeneration) return
     voxWorkspaceAvailable = voxAvailable
     applyDisabledApps()
@@ -2369,6 +2374,7 @@ function insertEmoji(emoji) {
 
 let editorPath = null
 let cmEditor = null
+let editorGeneration = 0
 
 const EXT_MODE = {
   js: 'javascript', mjs: 'javascript', cjs: 'javascript',
@@ -2414,36 +2420,105 @@ function initCodeMirror() {
   })
 }
 
+function showCodeEditor(content, focus, selection) {
+  initCodeMirror()
+  document.getElementById('editor-plain').style.display = 'none'
+  document.getElementById('editor-codemirror').style.display = ''
+  cmEditor.setOption('mode', editorMode(editorPath))
+  cmEditor.setValue(content)
+  cmEditor.clearHistory()
+  if (selection) {
+    cmEditor.setSelection(cmEditor.posFromIndex(selection.start), cmEditor.posFromIndex(selection.end))
+    cmEditor.scrollTo(selection.left, selection.top)
+  }
+  const generation = editorGeneration
+  setTimeout(() => {
+    if (!editorPath || generation !== editorGeneration) return
+    cmEditor.refresh()
+    if (focus) cmEditor.focus()
+  }, 50)
+}
+
+async function loadCodeEditor(generation) {
+  try {
+    await window.PrismCodeEditor.load()
+    if (!editorPath || generation !== editorGeneration) return
+    const plain = document.getElementById('editor-plain')
+    showCodeEditor(plain.value, document.activeElement === plain, {
+      start: plain.selectionStart, end: plain.selectionEnd, left: plain.scrollLeft, top: plain.scrollTop,
+    })
+    const status = document.getElementById('editor-status')
+    if (status.textContent === 'Loading editor…') status.textContent = ''
+    document.getElementById('editor-retry-btn').style.display = 'none'
+  } catch (_) {
+    if (!editorPath || generation !== editorGeneration) return
+    document.getElementById('editor-status').textContent = 'Syntax highlighting unavailable.'
+    document.getElementById('editor-retry-btn').style.display = ''
+  }
+}
+
 function openEditor(path, content) {
+  const generation = ++editorGeneration
   editorPath = path
   document.getElementById('editor-filename').textContent = path
   document.getElementById('editor-status').textContent = ''
   document.getElementById('editor-overlay').classList.add('visible')
   document.getElementById('editor-panel').classList.add('open')
-
-  initCodeMirror()
-  cmEditor.setOption('mode', editorMode(path))
-  cmEditor.setValue(content)
-  cmEditor.clearHistory()
-  setTimeout(() => { cmEditor.refresh(); cmEditor.focus() }, 50)
+  document.getElementById('editor-retry-btn').style.display = 'none'
+  if (cmEditor) {
+    showCodeEditor(content, true)
+  } else {
+    const plain = document.getElementById('editor-plain')
+    document.getElementById('editor-codemirror').style.display = 'none'
+    plain.value = content
+    plain.style.display = ''
+    plain.focus()
+    document.getElementById('editor-status').textContent = 'Loading editor…'
+    loadCodeEditor(generation)
+  }
 }
 
 window.closeEditor = function() {
+  editorGeneration++
   editorPath = null
   document.getElementById('editor-overlay').classList.remove('visible')
   document.getElementById('editor-panel').classList.remove('open')
 }
 
 window.editorSave = function() {
-  if (!editorPath || !cmEditor) return
-  send({ type: 'file_save', path: editorPath, data: { content: cmEditor.getValue() } })
+  if (!editorPath) return
+  const content = cmEditor ? cmEditor.getValue() : document.getElementById('editor-plain').value
+  send({ type: 'file_save', path: editorPath, data: { content } })
+}
+
+window.retryEditor = function() {
+  if (!editorPath || cmEditor) return
+  document.getElementById('editor-retry-btn').style.display = 'none'
+  document.getElementById('editor-status').textContent = 'Loading editor…'
+  loadCodeEditor(editorGeneration)
+}
+
+window.editorPlainKey = function(event) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    editorSave()
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeEditor()
+  } else if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault()
+    const plain = event.target
+    plain.setRangeText('  ', plain.selectionStart, plain.selectionEnd, 'end')
+  }
 }
 
 function editorOnSaved(path) {
   if (editorPath !== path) return
   const el = document.getElementById('editor-status')
   el.textContent = '✓ Saved'
-  setTimeout(() => { el.textContent = '' }, 2500)
+  const generation = editorGeneration
+  setTimeout(() => { if (generation === editorGeneration && el.textContent === '✓ Saved') el.textContent = '' }, 2500)
 }
 
 // Listen for postMessage calls from widget iframes (Dashboard API)
