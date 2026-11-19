@@ -27,6 +27,8 @@ import (
 // container), so overlapping `git add`/`commit` would race the index.
 var workspaceGitMu sync.Mutex
 
+const workspaceGitAddAll = "add -A -- . ':(exclude).secret_key' ':(exclude).secret-key-*' ':(exclude).prism-command-output/**'"
+
 // Files that must never enter history: transient (screenshots, logs, browser
 // session state), regenerable caches (multi-MB blobs refreshed periodically —
 // committing each refresh would bloat the repo for nothing), generated (pycache),
@@ -46,6 +48,7 @@ __pycache__/
 *.pyc
 .secret_key
 .secret-key-*
+.prism-command-output/
 .env
 .env.*
 *.key
@@ -99,7 +102,7 @@ func (e *ToolExecutor) initWorkspaceRepo(ctx context.Context) bool {
 	if !e.protectWorkspaceKey(ctx) {
 		return false
 	}
-	if _, err := e.git(ctx, "add -A -- . ':(exclude).secret_key' ':(exclude).secret-key-*'", 120*time.Second); err != nil {
+	if _, err := e.git(ctx, workspaceGitAddAll, 120*time.Second); err != nil {
 		log.Printf("[workspace-git] baseline add failed: %v", err)
 		return false
 	}
@@ -127,7 +130,7 @@ func (e *ToolExecutor) CommitWorkspace(ctx context.Context, turnMsg string) {
 	if !e.protectWorkspaceKey(ctx) {
 		return
 	}
-	if _, err := e.git(ctx, "add -A -- . ':(exclude).secret_key' ':(exclude).secret-key-*'", 120*time.Second); err != nil {
+	if _, err := e.git(ctx, workspaceGitAddAll, 120*time.Second); err != nil {
 		log.Printf("[workspace-git] add failed: %v", err)
 		return
 	}
@@ -185,10 +188,17 @@ func (e *ToolExecutor) workspaceRestore(ctx context.Context, commit, path string
 	}
 	workspaceGitMu.Lock()
 	defer workspaceGitMu.Unlock()
+	if !e.protectWorkspaceKey(ctx) {
+		return "", fmt.Errorf("workspace history exclusions could not be applied")
+	}
 	if _, err := e.git(ctx, fmt.Sprintf("checkout %s -- %s", shellEscape(commit), shellEscape(path)), 30*time.Second); err != nil {
 		return "", fmt.Errorf("couldn't restore %q from %s — check the hash/path with workspace_history: %w", path, commit, err)
 	}
-	e.git(ctx, "add -A", 60*time.Second)
+	// A historical tree may itself contain files that must not be staged now.
+	if !e.protectWorkspaceKey(ctx) {
+		return "", fmt.Errorf("files restored, but workspace history exclusions failed; no snapshot was committed")
+	}
+	e.git(ctx, workspaceGitAddAll, 60*time.Second)
 	e.git(ctx, "commit -q -m "+shellEscape(fmt.Sprintf("restore %s from %s", path, commit)), 30*time.Second)
 	return fmt.Sprintf("Restored %s from commit %s. The state you're replacing is still in history if you need it back.", path, commit), nil
 }
@@ -196,12 +206,12 @@ func (e *ToolExecutor) workspaceRestore(ctx context.Context, commit, path string
 // Keep mandatory exclusions separate from a user's .gitignore, and untrack the
 // live key without deleting it or rewriting earlier commits.
 func (e *ToolExecutor) protectWorkspaceKey(ctx context.Context) bool {
-	const command = "cd /workspace && mkdir -p .git/info && (grep -qxF '/.secret_key' .git/info/exclude 2>/dev/null || printf '\n/.secret_key\n/.secret-key-*\n' >> .git/info/exclude)"
+	const command = "cd /workspace && mkdir -p .git/info && (grep -qxF '/.secret_key' .git/info/exclude 2>/dev/null || printf '\n/.secret_key\n/.secret-key-*\n' >> .git/info/exclude) && (grep -qxF '/.prism-command-output/' .git/info/exclude 2>/dev/null || printf '\n/.prism-command-output/\n' >> .git/info/exclude)"
 	if _, err := e.docker.Exec(ctx, command, 15*time.Second); err != nil {
 		log.Printf("[workspace-git] key exclusion failed: %v", err)
 		return false
 	}
-	if _, err := e.git(ctx, "rm --cached --ignore-unmatch -- .secret_key", 15*time.Second); err != nil {
+	if _, err := e.git(ctx, "rm -r --cached --ignore-unmatch -- .secret_key .prism-command-output", 15*time.Second); err != nil {
 		log.Printf("[workspace-git] key untracking failed: %v", err)
 		return false
 	}

@@ -72,6 +72,20 @@ func TestWorkspaceKeyUntrackedButPreserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	run("add", ".secret_key")
+	cachePath := filepath.Join(commandOutputDirectory, commandOutputName("fixture", "go test", "stdout", ""))
+	if err := os.MkdirAll(filepath.Join(dir, commandOutputDirectory), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, cachePath), []byte("transient recovery output"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "-f", cachePath)
+	if err := os.WriteFile(filepath.Join(dir, "watched.txt"), []byte("version one"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "watched.txt")
+	run("-c", "user.name=Fixture", "-c", "user.email=fixture@local", "commit", "-q", "-m", "legacy snapshot with transient files")
+	legacy := strings.TrimSpace(run("rev-parse", "HEAD"))
 	// Fake only the Docker transport; execute real Git in the temporary workspace.
 	script := `#!/usr/bin/python3
 import base64,json,os,subprocess,sys
@@ -92,12 +106,38 @@ sys.exit(result.returncode)
 	}
 	// Even an explicit inclusion in a hand-written .gitignore cannot override
 	// the mandatory exclusion from Prism's own staging command.
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("!/.secret_key\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("!/.secret_key\n!/.prism-command-output/\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "watched.txt"), []byte("version one"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	e.CommitWorkspace(context.Background(), "fixture")
+	first := strings.TrimSpace(run("rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(dir, "watched.txt"), []byte("version two"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	e.CommitWorkspace(context.Background(), "fixture update")
+	// A restore also commits. A manually staged recovery file must not enter
+	// that snapshot even when the workspace has a custom inclusion rule.
+	run("add", "-f", cachePath)
+	if _, err := e.workspaceRestore(context.Background(), first, "watched.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "watched.txt")); err != nil || string(data) != "version one" {
+		t.Fatal("workspace restore failed")
+	}
+	if _, err := e.workspaceRestore(context.Background(), legacy, "."); err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(run("ls-files"), ".secret_key") {
 		t.Fatal("key still tracked")
+	}
+	if strings.Contains(run("ls-files"), commandOutputDirectory) {
+		t.Fatal("recovery cache entered workspace history")
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, cachePath)); err != nil || string(data) != "transient recovery output" {
+		t.Fatal("live recovery file changed")
 	}
 	data, err := os.ReadFile(filepath.Join(dir, ".secret_key"))
 	if err != nil || string(data) != "fixture only" {

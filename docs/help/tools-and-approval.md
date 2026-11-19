@@ -79,3 +79,34 @@ an admin can see what was refused and why.
 ### Group tool access
 
 In shared mode a group admin can tighten the global policy for their own group from the admin console → **Group tool access**: a tool that is open platform-wide can be restricted to that group's admins. It only ever tightens — a tool locked globally stays admin-only, and a group admin cannot loosen it.
+
+## Compact command output
+
+An operator can enable experimental test-output compaction with
+`PRISM_COMPACT_COMMAND_OUTPUT=1` in the server environment. With Docker Compose,
+set it in `.env` and recreate `prism-server`. It is disabled by default.
+
+When `exec_command` returns recognized Go test text or Node TAP output, quiet
+successful tests can be replaced by counters. Failures and other diagnostics
+remain in the result. The command and its error status are unchanged. Unknown
+formats, JSON, code, shell pipelines and file reads use the usual output limits.
+Programmatic `exec_command` calls through `prismTool()` receive the original
+stdout rather than the chat-oriented preview.
+
+A compacted result includes the path of a complete recovery copy in
+`/workspace/.prism-command-output/`. The agent can open it with `read_file` or
+inspect a particular section with `exec_command`. It contains the original
+stdout and any execution error supplied to Prism. If Prism cannot save that
+copy, it returns the usual preview instead of applying compaction.
+
+Recovery files follow the workspace's ordinary file permissions and sharing
+scope; they are not private storage between users or boards. They are excluded
+from Prism's automatic workspace snapshots. The cache keeps at most 32 files
+per session and 128 across the workspace, with a maximum of 2 MiB per file.
+Older files can be removed as new results arrive. Clearing a chat does not
+remove these files. The conversation keeps its saved compacted result even
+after the recovery file has expired or compaction has been disabled.
+
+The `command_output` usage events report before/after byte counts and the
+selected filter without recording commands or result content in those events.
+These counts are not token usage or a monetary saving.
