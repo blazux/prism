@@ -17,3 +17,15 @@ node_modules
 prism
 docker-compose.override.yml
 docker-compose.mu.yml
+
+# Private work notes, reports and instance-specific operations
+docs/cloud-readiness.md
+docs/plans
+docs/reviews
+docs/internal
+deploy/demo
+eval/prompt-footprint.md
+eval/prompt-behavior-*.md
+eval/prompt-behavior-*.json
+eval/command-output/results
+.local-notes

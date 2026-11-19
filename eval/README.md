@@ -166,14 +166,14 @@ overflowed the context) is worth more than a synthetic one.
 
 Every failed tool call is also audited server-side as usage kind `audit`,
 item `tool_error` (with the tool name and the first line of the error), next
-to `tool_denied`. The top of that table is the roadmap for agent-comfort
-work: fix what actually trips the model, not what we assume does.
+to `tool_denied`. Use these entries to identify recurring tool failures.
 
 ## Offline prompt size audit
 
-See [prompt-footprint.md](prompt-footprint.md) for the reproducible Guided/Standard
-baseline, current usage-counter limitations and the protocol for comparing Minimal.
-The diagnostic makes no model calls and does not require a running instance.
+Run `go test ./internal/agent -run '^TestPromptFootprint$' -v` to compare
+prompt and tool-schema sizes across profiles. This diagnostic makes no model
+calls and does not require a running instance. Keep generated reports outside
+the public checkout.
 
 ## Comparing prompt profiles and provider usage
 

@@ -1,8 +1,0 @@
-[Unit]
-Description=Renew Prism demonstration TLS certificates
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/opt/certbot/bin/certbot renew --non-interactive --config-dir /etc/letsencrypt-lastserver --work-dir /var/lib/letsencrypt-lastserver --logs-dir /var/log/letsencrypt-lastserver --cert-name prism-demo
