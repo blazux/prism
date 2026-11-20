@@ -17,6 +17,7 @@ node_modules
 prism
 docker-compose.override.yml
 docker-compose.mu.yml
+docker-compose.traefik-mu.yml
 
 # Private work notes, reports and instance-specific operations
 docs/cloud-readiness.md

@@ -3,6 +3,47 @@
 Prism's Docker tools keep the same names and parameters. The deployment chooses
 where services run; use the URLs returned by the tools rather than guessing.
 
+## Installation and execution are separate
+
+The standard installation uses one `docker-compose.yml` in both personal and
+multi-user mode. `MULTI_USER` controls accounts and groups; `DOCKER_MODE` selects
+the daemon used by the agent's Docker tools. Neither chooses the AI provider.
+The `workspace` service runs code and custom tools; the conversation loop runs
+in `prism-server`. The GPU workspace variant provides PyTorch/CUDA for executed
+code, not a server for the configured chat model.
+
+Installation commands belong in a terminal on the Docker host, from the clone's
+root directory. That directory is distinct from the agent's `/workspace` volume.
+Use the installation's existing project, files and environment options. The
+repository README describes published-image and local-build commands; do not
+infer the active installation from files visible inside `/workspace`.
+
+The normal CPU installation starts with `docker compose pull`, followed by
+`docker compose up -d --no-build`. These commands use published images: `:latest`
+tracks stable releases, while the pipeline publishes `main` builds as
+`:unstable`. To run source changes from the checkout, use
+`docker compose up -d --build`; `git pull` alone does not deploy them.
+
+`WORKSPACE` selects the execution image, not the installation mode. Unset or
+empty uses the published CPU workspace, available for AMD64 and ARM64.
+`WORKSPACE=gpu` selects `Dockerfile.agent.gpu` and a separate local
+`blazux/prism-workspace:gpu` tag. Other values, including `cpu` and `false`, are
+unsupported.
+
+A GPU workspace needs a compatible NVIDIA GPU and driver on the Docker host,
+NVIDIA Container Toolkit configured for Docker, and a local
+`docker-compose.override.yml` that grants the workspace NVIDIA devices and sets
+`pull_policy: build`. Merge this configuration into existing overrides; do not
+overwrite them. The README provides the complete fragment. With that policy,
+`docker compose up -d` builds the GPU workspace locally. For updates with a
+published server, pull `prism-server postgres searxng traefik` explicitly before
+`up -d`, rather than attempting to pull the local GPU tag. If the installation
+uses explicit `-f` options, include its GPU override in every command.
+
+Let active agent tasks finish and back up persistent data before updating.
+Restarting the server interrupts its tasks. `docker compose down -v` deletes
+volumes and is not an update procedure.
+
 ## Host (default)
 
 DOCKER_MODE=host preserves the existing behavior: services run on the host
@@ -16,20 +57,21 @@ and origin for assets, redirects, nested iframes and WebSockets. Bare `localhost
 and `127.0.0.1` still refer to the workspace itself. Scripts and custom tools can
 continue using the internal container URL returned by the Docker tool.
 
+In a user's browser, `*.localhost` points to the machine running that browser.
+These links therefore work locally when Docker and the browser share a machine
+and Traefik listens on port 80. A remote installation requires reachable
+service URLs and matching reverse-proxy configuration; do not present
+`*.localhost` as the remote server's address.
+
 The proxy must share a Docker network with the workspace and the service. This
 is already true in the default Compose installation. A custom deployment should
 give its proxy the `traefik` network alias. Services launched by Prism set
 `traefik.docker.network` to their workspace network so a shared proxy does not
 choose another project's default network.
 
-For the side-by-side mono/multi recipe (`docker-compose.mu.yml`), the primary
-proxy can join the secondary project's network using the optional
-`docker-compose.traefik-mu.yml` overlay. Apply it to the primary deployment after
-the secondary network exists, and keep it when recreating that proxy. Existing
-secondary services may need the matching `traefik.docker.network` label when
-recreated. Compose-defined services still need their usual Traefik labels and a
-network shared with the proxy. Prism never connects networks automatically from
-an agent tool call.
+Compose-defined services need their usual Traefik labels and a network shared
+with the proxy. Prism never connects networks automatically from an agent tool
+call.
 
 This browser routing applies only to the host Docker backend. Docker inside the
 workspace and hosted/Cloud execution keep their existing service URLs and access

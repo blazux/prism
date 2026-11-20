@@ -37,7 +37,13 @@ Is this a great idea? Probably. Does it make you slightly nervous? It should. Th
 
 See the [installation guide](https://www.thelastserver.com/docs/installation/) for detailed setup instructions and links to the configuration reference.
 
-Docker + Docker Compose are the only host requirements. Use a local model server or an API provider; the AI connection is configured in the interface.
+Install Git and Docker with the Compose v2 plugin. The standard images support
+Linux AMD64 and ARM64. You can use a local model server or an API provider;
+you will connect it in Prism's interface after startup.
+
+Run the following commands in a terminal **on the Docker host**.
+The default stack needs host ports **48080** for Prism and
+**80** for the service proxy to be available.
 
 **1. Install.**
 
@@ -47,35 +53,41 @@ cd prism
 cp .env.example .env
 ```
 
-Set `PRISM_TOKEN` in `.env` to protect access to your dashboard, and choose your timezone in **Settings → Profile** after starting Prism. The remaining values in `.env.example` can stay as they are for the standard Docker Compose installation. You do not need to configure models or AI keys in this file.
+Open `.env`, find the commented `# PRISM_TOKEN=change-me` line, remove its leading
+`#` and replace `change-me` with a long, private token. This will be your personal
+dashboard login.
+
+Choose the installation mode **before starting for the first time**:
+
+- **Personal:** leave `MULTI_USER` commented out.
+- **Shared:** uncomment `MULTI_USER=1`. You will create the first administrator
+  account when you open Prism; see [Personal, or shared](#personal-or-shared).
+
+Keep the remaining defaults for a standard installation. Models and AI keys can
+be configured in the interface.
 
 **2. Start Prism.**
 
-```bash
-docker compose up -d
-```
-
-On ARM64 hosts, build the server from source if the published server image does
-not support your architecture:
+From the `prism` directory created above:
 
 ```bash
-docker compose build prism-server
+docker compose pull
 docker compose up -d --no-build
 ```
 
-ProtonMail Bridge is excluded from the default stack because its upstream image
-currently supports AMD64 only. If you need Proton Mail on a supported host, see
-[the setup guide](docs/help/protonmail-bridge.md) and start the optional service:
+This starts the published server and execution workspace, PostgreSQL, SearXNG
+and Traefik. To compile your checkout instead, use the
+[local-build instructions](#docker-installation-and-updates).
 
-```bash
-docker compose --profile protonmail up -d protonmail-bridge
-```
-
-PostgreSQL (pgvector), SearXNG and Traefik are included. Open [http://localhost:48080](http://localhost:48080) and sign in with your token.
+On the Docker host, open [http://localhost:48080](http://localhost:48080).
+In personal mode, sign in with your token. In shared mode, create the first
+administrator account. If Docker runs on another machine, use that machine's
+address or your configured reverse-proxy URL: `localhost` in your browser refers
+to the machine running the browser.
 
 **3. Connect your first model.**
 
-Open **Settings → AI provider**:
+Open **Settings → AI provider**, or **Admin → AI provider** in shared mode:
 
 1. Select a source or click **+ Add a source**. Choose **OpenAI**, **Anthropic**, **Ollama** or **Other compatible** (vLLM, SGLang, llama.cpp…). OpenAI and Anthropic have preset URLs; for a local or compatible server, enter its URL and a key if required.
 2. Click **Connect**, then choose a model that supports tool calling. Choosing it saves automatically. Local models must already be installed on your model server.
@@ -83,7 +95,8 @@ Open **Settings → AI provider**:
 
 For Ollama running on the Docker host, use `http://host-gateway:11434`; for an OpenAI-compatible server, include `/v1` in its URL. `localhost` inside the Prism container refers to that container, not your host.
 
-In multi-user mode, AI configuration belongs in **Admin → AI provider**, managed by the global administrator.
+Choose your timezone in **Settings → Profile**. For document search, configure
+an embedding model too; see [Choosing your backend](#choosing-your-backend).
 
 ### Optional local Notes vault
 
@@ -115,6 +128,127 @@ Click **Save changes** to apply embedding settings automatically, without restar
 Changing the embedding model or endpoint requires confirming the index rebuild in the form. Prism rebuilds from stored text; there is no need to upload your documents again. The agent can guide you through this too.
 
 The `.env` AI settings remain available as server defaults for existing installations. The interface takes precedence once saved; **Use server settings** restores those defaults.
+
+---
+
+## Docker installation and updates
+
+The standard installation uses **one `docker-compose.yml`** for both personal
+and shared mode. The Dockerfiles build images; they are not extra stacks to
+start. You do not need to open or edit them to run published images.
+
+| File | Purpose |
+|---|---|
+| `docker-compose.yml` | Starts the server, execution workspace, database, search engine and service proxy. Proton Mail Bridge is optional. |
+| `Dockerfile` | Builds the Prism server and its web interface. |
+| `Dockerfile.agent` | Builds the CPU execution workspace: languages, packages, browser and cron. Its published image is `blazux/prism-workspace:latest`. |
+| `Dockerfile.agent.gpu` | Builds a local `blazux/prism-workspace:gpu` image with PyTorch/CUDA for code that uses a GPU. See the NVIDIA setup below. |
+| `Dockerfile.protonmail-bridge` | Builds the optional Proton Mail Bridge service. See its [setup guide](docs/help/protonmail-bridge.md). |
+
+The name `agent` in a Dockerfile refers to its **execution workspace**. The
+agent's conversation loop runs in `prism-server`. Your chat model runs at the AI
+provider you configure; a GPU workspace does not move or accelerate that model.
+
+Run installation commands on the Docker host, from the repository root. If your
+deployment uses explicit project names, Compose files or environment files,
+keep the same `-p`, `-f` and `--env-file` options for every operation.
+
+### Published images
+
+The default `:latest` tags follow stable releases. The pipeline publishes builds
+from `main` under `:unstable`; pulling `:latest` does not deploy every commit on
+`main`. To run your current checkout, use the local-build procedure below.
+
+Before updating, let active agent tasks finish and back up the database,
+workspace and server-private volumes. Recreating the server interrupts its
+running tasks.
+
+Update the standard CPU installation:
+
+```bash
+git pull --ff-only
+docker compose pull
+docker compose up -d --no-build
+```
+
+### Build from source
+
+To build and run the source code in your checkout:
+
+```bash
+docker compose up -d --build
+```
+
+After a later `git pull --ff-only`, repeat this build command. `git pull` alone
+does not replace running images. Local builds use the image names declared in
+Compose; a later `docker compose pull` can replace them with published images.
+
+### Optional NVIDIA workspace
+
+Use this variant when the **code executed by the agent** needs PyTorch/CUDA.
+It does not move or accelerate your configured chat model. The Docker host
+needs a compatible NVIDIA GPU, driver and NVIDIA Container Toolkit configured
+for Docker.
+
+Set `WORKSPACE=gpu` in `.env`. Leave `WORKSPACE` unset or empty for the standard
+CPU workspace; values such as `cpu` or `false` are not supported and will make
+the build fail on a missing Dockerfile. The GPU workspace is built locally under
+`blazux/prism-workspace:gpu`. Its first build downloads the NVIDIA base image
+and installs the workspace packages, requiring additional time and disk space.
+See [Docker's GPU setup guide](https://docs.docker.com/compose/how-tos/gpu-support/)
+for host prerequisites.
+
+In the repository root, create a local `docker-compose.override.yml` containing
+the following. If this file already exists, merge these keys into its existing
+`services.workspace` section, preserving its other services and settings.
+**Do not replace an existing override with this fragment.**
+
+```yaml
+services:
+  workspace:
+    pull_policy: build
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+The override is ignored by Git and loaded automatically by `docker compose`
+with the standard filenames. If you normally pass `-f`, include this override
+explicitly as well. Keep the same files, project and environment options for
+every command.
+
+Start the installation, allowing Compose to build the GPU workspace:
+
+```bash
+docker compose up -d
+```
+
+To update it while keeping a published Prism server, pull only the published
+services, then start Compose again to rebuild the GPU workspace:
+
+```bash
+git pull --ff-only
+docker compose pull prism-server postgres searxng traefik
+docker compose up -d
+```
+
+For a server built from your checkout instead, use `docker compose up -d --build`.
+The `pull_policy: build` setting ensures that workspace startup uses a local
+build rather than requesting a `:gpu` image from Docker Hub.
+
+### Optional Proton Mail Bridge
+
+Bridge is enabled separately with the `protonmail` profile and currently
+requires an AMD64 host. Follow the [Bridge setup guide](docs/help/protonmail-bridge.md)
+to sign in to Proton, start the permanent service and connect Prism with the
+generated mail-client credentials.
+
+See [the upgrade guide](docs/UPGRADING.md) for persistence and compatibility
+details. `docker compose down -v` deletes volumes; it is not an update command.
 
 ---
 
@@ -151,9 +285,15 @@ When the agent calls `docker_run`, Prism:
 2. Adds Traefik labels so the container is routed via `http://<name>.localhost/`
 3. Strips `X-Frame-Options` so the service can be embedded as an iframe from the dashboard
 
-**Why `*.localhost`?** Chrome and Firefox resolve `anything.localhost` to `127.0.0.1` natively — no DNS server, no `/etc/hosts` entries, no configuration. The service runs at the root path `/`, so SPAs, Vue Router, socket.io and anything else work exactly as if you'd accessed it directly, with none of the subdirectory-proxy headaches.
+Chrome and Firefox resolve `anything.localhost` to `127.0.0.1`. These service
+URLs work when the browser and Docker run on the same machine, with Traefik on
+port 80. A remote installation needs reachable service URLs and matching
+reverse-proxy configuration; `*.localhost` in a visitor's browser will not point
+at your server. Services are served at `/`, which supports applications using
+root-relative routes, assets and WebSockets.
 
-**Why Traefik?** It watches the Docker socket and configures routes automatically when containers appear or disappear. The agent doesn't need to know about it — `docker_run` handles everything.
+Traefik watches the Docker socket and updates routes when containers appear or
+disappear. `docker_run` configures the service's routing labels automatically.
 
 To embed a service the agent has started, a widget uses a plain iframe:
 
@@ -291,7 +431,7 @@ The `.env` file supplies installation settings and optional AI defaults. Docker 
 | `TZ` | Default timezone; personal override in Settings → Profile | `UTC` |
 | `SEARXNG_URL` | SearXNG for web search; remove to disable | `http://searxng:8080` |
 | `POSTGRES_URL` | PostgreSQL connection string | bundled service |
-| `WORKSPACE` | `gpu` for the CUDA workspace image (~20 GB) | ubuntu base |
+| `WORKSPACE` | `gpu` for a [local CUDA workspace build](#optional-nvidia-workspace); leave empty for the published CPU image | empty |
 | `SERVICE_PORT_START` / `_END` | Host port range for agent-launched containers | `20000–20999` |
 | `AGENT_CONTAINER`, `WORKSPACE_DIR`, `PLUGIN_DIR` | Internal Docker plumbing — leave alone | set |
 
@@ -308,7 +448,7 @@ The `.env` file supplies installation settings and optional AI defaults. Docker 
 - **"Iteration limit reached".** The agent hit its per-message cap on a long task — not a bug, a budget. Raise it in **Settings → Agent → Turn budget** (default 75, up to 500), or just say "continue".
 - **Widget previews look wrong / the agent says it can't see.** Choose a vision-capable model and set **Vision support → Supports images** in **AI provider → Model settings…**. Ask the agent for help with your model's capabilities.
 - **You changed the embedding model.** Test it in **AI provider**, confirm the index rebuild, then click **Save changes**. Prism applies it automatically. Document search is temporarily unavailable during rebuilding; a failed rebuild retains the original index. Correct the configuration and save again to retry. Do not delete your volumes.
-- **Upgrading.** `docker compose pull && docker compose up -d` (or `--build` if you build locally). Schema migrations run at start, nothing to do — [docs/UPGRADING.md](docs/UPGRADING.md) is the contract.
+- **Upgrading.** Follow the [published-image or local-build commands](#docker-installation-and-updates) for your installation. Schema migrations run at startup; preserve your volumes and use the [upgrade guide](docs/UPGRADING.md) for compatibility details.
 - **Timezone.** Choose an IANA name in **Settings → Profile** (for example `America/Martinique` or `Europe/Paris`), or use the browser timezone button. It applies without restarting. `TZ` remains the deployment fallback. New/rescheduled cron jobs capture your preference; existing jobs keep their timezone. Calendar/task forms display browser-local time.
 
 For daily use, just ask the agent — its built-in documentation also lives in [docs/help/](docs/help/).

@@ -34,6 +34,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Check Docker installation and workspace startup
+        run: python3 -m unittest discover -s scripts/tests -v
       - run: go vet ./...
       - name: Prepare pgvector for isolated test schemas
         run: psql "$PRISM_TEST_SECRETS_URL" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;'

@@ -3,10 +3,8 @@ name: prism
 services:
   prism-server:
     image: blazux/prism:latest
-    # Without this, `docker compose build` has nothing to do for this service —
-    # `up`/`pull` silently keep whatever blazux/prism:latest was last pulled,
-    # so a `git pull` here never actually reaches the running container. Lived
-    # this: hours of "the fix isn't taking" chasing a stale image, not a bug.
+    # Published images: compose pull, then up -d --no-build.
+    # Build this checkout: compose up -d --build. See the README.
     build:
       context: .
       dockerfile: Dockerfile
@@ -19,7 +17,6 @@ services:
       # Optional host vault: set NOTES_VAULT_PATH in .env, then select /vault
       # in Settings → Notes. Unset = a managed volume, no host folder exposed.
       - ${NOTES_VAULT_PATH:-notes-vault}:/vault
-      # LLM_BACKEND=anthropic without an API key runs on your Claude subscription:
     environment:
       - OLLAMA_URL=${OLLAMA_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
@@ -28,6 +25,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_REASONING_EFFORT=${OPENAI_REASONING_EFFORT-medium}
       # Claude, with LLM_BACKEND=anthropic. Needs a console API key — a Pro/Max
       # subscription token does not work (see the README).
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
@@ -54,6 +52,8 @@ services:
       - SEARXNG_URL=${SEARXNG_URL}
       - PRISM_TOKEN=${PRISM_TOKEN:-}
       - DOCKER_MODE=${DOCKER_MODE:-host}
+      - SERVICE_PORT_START=${SERVICE_PORT_START:-20000}
+      - SERVICE_PORT_END=${SERVICE_PORT_END:-20999}
       - WORKSPACE_DOCKER_SOCKET=${WORKSPACE_DOCKER_SOCKET:-unix:///run/user/1000/docker.sock}
       - WORKSPACE_DOCKER_USER=${WORKSPACE_DOCKER_USER:-1000}
       - AGENT_CONTAINER=${AGENT_CONTAINER}
@@ -96,15 +96,15 @@ services:
 
   # Agent workspace container — the AI executes code here
   workspace:
-    image: blazux/prism-workspace:latest
-    # See the prism-server build: comment — same reason. Uses Dockerfile.agent,
-    # or Dockerfile.agent.gpu when WORKSPACE=gpu is set.
-    # A GPU host also needs its own `deploy.resources.reservations.devices`
-    # (nvidia) block — add it via a local, untracked docker-compose.override.yml
-    # rather than here, since most deployments have no GPU on this box at all.
+    image: blazux/prism-workspace:${WORKSPACE:-latest}
+    # Dockerfile.agent builds the execution workspace, not the chat model.
+    # Leave WORKSPACE unset for the published CPU image. WORKSPACE=gpu builds
+    # Dockerfile.agent.gpu under a separate :gpu tag. Other values are unsupported.
+    # GPU access and local-build policy belong in docker-compose.override.yml;
+    # see the README's optional NVIDIA workspace setup.
     build:
       context: .
-      dockerfile: Dockerfile.agent${WORKSPACE:+.gpu}
+      dockerfile: Dockerfile.agent${WORKSPACE:+.${WORKSPACE}}
     container_name: prism-workspace
     volumes:
       - workspace:/workspace
@@ -126,13 +126,6 @@ services:
       # injects, rather than replacing it.
       - NO_PROXY=prism-server,prism-svc-*,localhost,127.0.0.1,${NO_PROXY:-}
       - no_proxy=prism-server,prism-svc-*,localhost,127.0.0.1,${no_proxy:-}
-    command: >
-      sh -c "
-        [ -f /workspace/.apt-packages ] && apt-get update -qq && xargs apt-get install -y < /workspace/.apt-packages;
-        [ -f /workspace/.pip-packages ] && pip3 install -q $(cat /workspace/.pip-packages);
-        [ -f /workspace/.crontab ] && crontab /workspace/.crontab;
-        cron && tail -f /dev/null
-      "
     restart: unless-stopped
 
   postgres:

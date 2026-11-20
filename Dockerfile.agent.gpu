@@ -51,4 +51,5 @@ RUN ln -s data /workspace/widget_data
 
 WORKDIR /workspace
 
-CMD ["sh", "-c", "[ -f /workspace/.apt-packages ] && apt-get update -qq && xargs apt-get install -y < /workspace/.apt-packages; [ -f /workspace/.pip-packages ] && pip install -q $(cat /workspace/.pip-packages); [ -f /workspace/.crontab ] && crontab /workspace/.crontab; cron && tail -f /dev/null"]
+COPY --chmod=755 scripts/workspace-start.sh /usr/local/bin/prism-workspace-start
+CMD ["/usr/local/bin/prism-workspace-start", "python"]
