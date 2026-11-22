@@ -35,10 +35,19 @@ func TestVoiceCallerToolBoundary(t *testing.T) {
 					t.Errorf("%s cannot use %s", role, tool)
 				}
 			}
-			for _, tool := range []string{"exec_command", "secrets", "pim_source", "agent_settings", "place_call", "list_calls", "cancel_call"} {
+			for _, tool := range []string{"exec_command", "secrets", "pim_source", "agent_settings"} {
 				if !cc.HiddenTools[tool] || cc.Guard(tool, nil) == nil {
 					t.Errorf("%s exposes forbidden phone tool %s", role, tool)
 				}
+			}
+			for _, tool := range []string{"place_call", "list_calls", "cancel_call"} {
+				allowed := role == memory.RoleGlobalAdmin
+				if (cc.Guard(tool, nil) == nil) != allowed || cc.HiddenTools[tool] == allowed {
+					t.Errorf("%s voice permission changed for %s", role, tool)
+				}
+			}
+			if cc.HiddenTools["call_history"] || cc.Guard("call_history", nil) != nil {
+				t.Error("known caller lost the scoped call archive")
 			}
 			for _, action := range []string{"config", "setup", " CONFIG ", "rule_save", "rules_apply", "delete_folder"} {
 				if cc.Guard("email", map[string]any{"action": action}) == nil {

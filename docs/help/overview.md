@@ -40,4 +40,5 @@ it will walk you through it.
 ## Phone calls
 
 Connect PrismVox to answer and place phone calls. See [Telephony with PrismVox](telephony.md)
-for model routing and the four sections in **Admin → Telephony**.
+for model routing, connection checks and configuration in **Settings → Telephony**
+(personal mode) or **Admin → Telephony** (shared mode).

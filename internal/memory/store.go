@@ -249,6 +249,24 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS notifications_session_idx ON notifications(session_id, id DESC)`,
+		`CREATE TABLE IF NOT EXISTS vox_call_missions (
+			gateway_key TEXT NOT NULL,
+			task_id BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			prism_instance TEXT NOT NULL,
+			owner_id BIGINT,
+			group_id BIGINT NOT NULL DEFAULT 0,
+			session_existed BOOLEAN NOT NULL DEFAULT FALSE,
+			phone_number TEXT NOT NULL,
+			contact_name TEXT NOT NULL DEFAULT '',
+			mission TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			finished_at TIMESTAMPTZ,
+			status TEXT NOT NULL DEFAULT 'pending',
+			PRIMARY KEY(gateway_key, task_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS vox_call_missions_pending_idx ON vox_call_missions(gateway_key, checked_at) WHERE finished_at IS NULL`,
 		`CREATE TABLE IF NOT EXISTS secrets (
 			name       TEXT PRIMARY KEY,
 			value      TEXT NOT NULL,
@@ -645,6 +663,9 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM vox_call_missions WHERE session_id = $1`, id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM conversation_history WHERE session_id = $1`, id); err != nil {
 		return err
 	}

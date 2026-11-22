@@ -44,6 +44,21 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		models = kept
 	}
 	models = s.filterModelsForUser(ctx, u, models)
+	aliases := map[string]string{}
+	if r.URL.Query().Get("qualified") == "1" {
+		for i, model := range models {
+			if strings.Contains(model, "::") {
+				continue
+			}
+			for _, source := range ai.cfg.AISources {
+				if source.ID == ai.cfg.AIDefaultSource && source.Model == model {
+					models[i] = source.ID + "::" + model
+					aliases[model] = models[i]
+					break
+				}
+			}
+		}
+	}
 	labels := map[string]string{}
 	for _, m := range models {
 		if id, raw, ok := strings.Cut(m, "::"); ok {
@@ -55,7 +70,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"models": models, "labels": labels})
+	json.NewEncoder(w).Encode(map[string]interface{}{"models": models, "labels": labels, "aliases": aliases})
 }
 
 func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +284,7 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 		executor.SetChatBlind(!ai.cfg.ChatVision)
 	}
 	executor.SetVoxScope(s.voxScopeHeader(context.Background(), sessionID))
-	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
+	s.configureVoxExecutor(executor, sessionID) // enables place_call when docked
 	executor.SetRAGProvider(s.acquireRAG)
 	executor.SetMCPManager(s.mcpMgr, func() { s.broadcastMCP(sessionID) })
 

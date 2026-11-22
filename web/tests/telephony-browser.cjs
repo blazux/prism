@@ -12,7 +12,7 @@ const head=constant(fs.readFileSync(base+'/internal/server/admin_console_page.go
  const page=await browser.newPage({viewport:{width:1100,height:900}}),writes=[],errors=[];
  page.on('pageerror',e=>errors.push(e.message));
  const init=`const $=id=>document.getElementById(id); const esc=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'); const jget=async url=>(await fetch(url)).json();`;
- const html='<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css">'+'<link rel="stylesheet" href="/admin-console.css">'+'</head><body><main id="adm-main">'+pane.replace('class="pane"','class="pane active"')+'</main><script>'+init+script+'\nloadPhoneCfg();</script></body></html>';
+ const html='<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css">'+'<link rel="stylesheet" href="/admin-console.css">'+'</head><body><main id="adm-main">'+pane.replace('class="pane"','class="pane active"')+'</main><script>'+init+script+'\nsetTelRuntimeAvailable(true);loadPhoneCfg();showTelPage("advanced");</script></body></html>';
  await page.route('**/*',route=>{
   const r=route.request(),u=new URL(r.url());assert.equal(u.hostname,'fixture.invalid');
   if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
@@ -21,22 +21,25 @@ const head=constant(fs.readFileSync(base+'/internal/server/admin_console_page.go
   return route.fulfill({contentType:'application/json',body:JSON.stringify(u.pathname==='/api/vox/config'?{llm_model_standard:'fast',llm_model_oncall:'capable',outbound_system_prompt:'Outbound fixture',transfer_dialog_turns:'3'}:{})});
  });
  await page.goto('http://fixture.invalid/');
- await page.locator('#cf-llm_model_standard').waitFor();
+ await page.locator('.tel-section > summary').filter({hasText:'Legacy model endpoint'}).click();await page.locator('#cf-llm_model_standard').waitFor();
  assert.equal(await page.locator('#cf-llm_model_oncall').count(),0);
  assert.equal(await page.locator('#tel-model').count(),1);
  await page.locator('#cf-llm_model_standard').fill('new-fast');
  await page.getByText('Save PrismVox model',{exact:true}).click();
  await page.locator('#tel-imsg').filter({hasText:'Saved'}).waitFor();
  assert.deepEqual(Object.keys(writes[0].values).sort(),['llm_model_standard','llm_url_standard']);
- await page.getByText('Save outbound instructions',{exact:true}).click();
+ await page.locator('[data-tel-tab=agent]').click();await page.getByText('Save outbound instructions',{exact:true}).click();
  await page.locator('#tel-omsg').filter({hasText:'Saved'}).waitFor();
  assert.deepEqual(Object.keys(writes[1].values).sort(),['outbound_system_prompt']);
  for(const width of [1100,390]){
   await page.setViewportSize({width,height:900});
-  for(const summary of await page.locator('.tel-section > summary').all()){
-   await page.locator('.tel-section').evaluateAll(es=>es.forEach(e=>e.open=false));
-   await summary.click();
-   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),await summary.textContent()+' overflow '+width);
+  for(const name of ['connection','agent','access','advanced']){
+   await page.locator('[data-tel-tab='+name+']').click();
+   for(const summary of await page.locator('.tel-page:not([hidden]) .tel-section > summary').all()){
+    if(!await summary.isVisible())continue;
+    await summary.click();
+   }
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),name+' overflow '+width);
   }
  }
  await page.locator('.tel-section').evaluateAll(es=>es.forEach((e,i)=>e.open=i===0));

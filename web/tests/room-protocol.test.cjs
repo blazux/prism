@@ -20,7 +20,7 @@ function roomClient({network=false} = {}) {
     }
     return nodes.get(id);
   };
-  const sockets = [], toasts = [], timers = new Map();
+  const sockets = [], toasts = [], timers = new Map(), listeners = new Map();
   let timerID = 0, requestID = 0;
   class RoomSocket {
     constructor(url){this.url=url;this.readyState=0;this.frames=[];sockets.push(this);}
@@ -32,7 +32,8 @@ function roomClient({network=false} = {}) {
   const context = {
     document:{getElementById:element,querySelector:()=>null,addEventListener(){}},
     navigator:{language:'fr'}, Date, Map, Set, JSON, console,
-    location:{protocol:'http:',host:'fixture.test'},WebSocket:RoomSocket,
+    location:{protocol:'http:',host:'fixture.test',origin:'http://fixture.test',search:''},WebSocket:RoomSocket,
+    parent:{postMessage(){}},addEventListener:(name,handler)=>listeners.set(name,handler),
     crypto:{randomUUID:()=>`room-client-request-${++requestID}`},
     setTimeout:network ? fn=>{timers.set(++timerID,fn);return timerID;} : setTimeout,
     clearTimeout:network ? id=>timers.delete(id) : clearTimeout,
@@ -47,7 +48,7 @@ function roomClient({network=false} = {}) {
   // This test drives the real frame handler and render functions. The browser
   // fixture checks DOM updates; here only the full-list DOM rebuild is stubbed.
   vm.runInContext('renderAll = () => {}; renderTyping = () => {}; ME = {uid:1,name:"Vincent"}', context);
-  return {context,element,sockets,toasts,read:expression=>vm.runInContext(expression,context),
+  return {context,element,sockets,toasts,dispatch:(name,event)=>listeners.get(name)?.(event),read:expression=>vm.runInContext(expression,context),
     async runTimers(){const callbacks=[...timers.values()];timers.clear();for(const fn of callbacks)fn();await Promise.resolve();}};
 }
 const question = {id:1,groupId:1,authorId:1,authorName:'Vincent',content:'@assistant salut',isAgent:false,createdAt:'2026-10-26T23:45:00-04:00'};
@@ -193,4 +194,15 @@ test('a socket send exception keeps the draft and retries its existing identifie
   assert.equal(sockets[1].frames[0].requestId,requestID);
   await sockets[1].deliver({type:'room_receipt',groupId:1,requestId:requestID,status:'accepted',message:question});
   assert.equal(element('box').value,'');
+});
+
+test('cross-app Room draft requires the selected group and parent, and never sends',()=>{
+ const fixture=roomClient(),{context:c,element,read,dispatch,sockets}=fixture;
+ c.connect('2');
+ const event={origin:c.location.origin,source:c.parent,data:{type:'room-draft',group:2,text:'Review call #8'}};
+ dispatch('message',{...event,origin:'https://untrusted.test'});assert.equal(element('box').value,'');
+ dispatch('message',{...event,data:{...event.data,group:3}});assert.equal(element('box').value,'');
+ dispatch('message',event);assert.equal(element('box').value,'@agent Review call #8');
+ assert.equal(sockets[0].frames.length,0);assert.equal(read('pendingMessages.size'),0);
+ dispatch('message',{...event,data:{...event.data,text:'Replace existing draft'}});assert.equal(element('box').value,'@agent Review call #8');
 });

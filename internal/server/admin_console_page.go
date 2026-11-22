@@ -585,14 +585,14 @@ async function init(){
  const nav=$('adm-nav');const items=[];const head=t=>['',t];
  if(isGA&&ME.multiUser!==false){items.push(head('Deployment'),['users','Users'],['groups','Groups'],['tools','Tools'],['ai','AI provider'],['platform','Platform'],['usage','Usage'],['logs','Logs']);}
  let DOCKED=false;try{DOCKED=!!(await fetch('/api/platform').then(r=>r.json())).voxDocked;}catch(e){}
- if(isGA&&DOCKED&&ME.multiUser!==false)items.push(['telephony','Telephony']);
- if(DOCKED&&ME.multiUser===false&&location.hash.slice(1)==='telephony'){location.replace('/settings.html#telephony');return;}
+ if(isGA&&ME.multiUser!==false)items.push(['telephony','Telephony']);
+ if(ME.multiUser===false&&location.hash.slice(1)==='telephony'){location.replace('/settings.html#telephony');return;}
 
  if(adminGroups().length){items.push(head('Your groups'),['agent','Shared agent'],['rag','Knowledge'],['mcp','External tools (MCP)'],['secrets','Secrets'],['access','Tool access']);}
  const panes=items.filter(([p])=>p);
  if(!panes.length){$('adm-content').innerHTML='<p style="color:var(--text3)">You have no admin access.</p>';return;}
  nav.innerHTML=items.map(([p,l])=>p?'<div class="nav-item" data-pane="'+p+'">'+l+'</div>':'<div class="nav-head">'+l+'</div>').join('');
- nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=async()=>{const p=el.dataset.pane;if(PrismSettingsState.dirty()){if(!await PrismModal.confirm('Leave this section without saving your edits?'))return;PrismSettingsState.clear();}show(p);
+ nav.querySelectorAll('.nav-item').forEach(el=>el.onclick=async()=>{const p=el.dataset.pane;if(PrismSettingsState.dirty()||window.PrismTelephonyDirty?.()){if(!await PrismModal.confirm('Leave this section without saving your edits?'))return;PrismSettingsState.clear();window.PrismTelephonyDiscard?.();}show(p);
   if(p==='ai')renderAITab($('admin-ai-settings'),{admin:true});if(p==='users')loadUsers();if(p==='groups'){loadUsers().then(loadGroups);}if(p==='tools')loadTools();if(p==='platform')loadPlatform();if(p==='usage')loadUsage();if(p==='logs')loadLogs();if(p==='telephony')loadTelephony();if(p==='agent'){loadAgent();loadWebex();loadTeams();}if(p==='rag')loadGroupRAG();if(p==='mcp')loadGroupMCP();if(p==='secrets')loadGroupSecrets();if(p==='access')loadAccess();});
  $('ag-group').onchange=()=>{loadAgent();loadWebex();loadTeams();}; if($('rg-group'))$('rg-group').onchange=loadGroupRAG; if($('mc-group'))$('mc-group').onchange=loadGroupMCP; if($('gs-group'))$('gs-group').onchange=loadGroupSecrets; $('ac-group').onchange=loadAccess;
  $('ag-model').innerHTML='<option value="">(server default)</option>'+MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');

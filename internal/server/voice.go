@@ -52,6 +52,10 @@ var voiceKnownAllowedTools = union(map[string]bool{
 	"task":           true,
 	"calendar":       true,
 	"email":          true,
+	"call_history":   true,
+	"place_call":     true,
+	"list_calls":     true,
+	"cancel_call":    true,
 }, voiceTelephonyTools)
 
 // callerContextForVoice composes the phone's capability boundary with the real
@@ -174,6 +178,13 @@ Ne divulgue jamais d'informations personnelles ou internes. Reste courtoise, br�
 // to assert, via query params, which channel it speaks for.
 func isServiceIdentity(u *memory.User) bool {
 	return u != nil && u.ID == 0 && u.Email == serviceUser.Email
+}
+
+// Voice settings, caller lookup and switchboard knowledge belong to the whole
+// installation. Group administration and operational archive access do not grant
+// these rights. Vox's existing service identity remains a global administrator.
+func (s *Server) canManageVoiceInstallation(u *memory.User) bool {
+	return u != nil && (!s.cfg.MultiUser || u.IsGlobalAdmin())
 }
 
 // voiceGuard denies every tool outside the given allow-list.
@@ -402,8 +413,8 @@ func (s *Server) voiceModel(ctx context.Context, fallback string) string {
 // phone conversations. Partial updates preserve fields older clients omit.
 func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	if u == nil || !s.isAdminUser(r.Context(), u) {
-		writeErr(w, http.StatusForbidden, "admin only")
+	if !s.canManageVoiceInstallation(u) {
+		writeErr(w, http.StatusForbidden, "global admin only")
 		return
 	}
 	ms := s.store()
@@ -418,7 +429,7 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 		// Docked, the switchboard runs on Vox with Vox's prompt, so that is the one
 		// to show and edit — anything else would be a form that changes nothing.
 		persona := s.voicePersonality(r.Context())
-		if s.cfg.VoxURL != "" {
+		if s.voxURL() != "" {
 			s.migrateVoicePersonaToVox(r.Context())
 			if p, err := s.voxSystemPrompt(r.Context()); err == nil {
 				persona = p
@@ -430,7 +441,7 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 			"personality":        persona,
 			"defaultPersonality": defaultVoicePersonality,
 			"ragScope":           rawScope, // "" = isolated (callers read nothing)
-			"voxDocked":          s.cfg.VoxURL != "",
+			"voxDocked":          s.voxURL() != "",
 			"model":              s.voiceModel(r.Context(), ""),
 		})
 
@@ -444,10 +455,6 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if b.Model != nil {
-			if s.cfg.MultiUser && !u.IsGlobalAdmin() {
-				writeErr(w, http.StatusForbidden, "the voice model is managed by a global administrator")
-				return
-			}
 			model := strings.TrimSpace(*b.Model)
 			if len(model) > 256 || strings.ContainsAny(model, "\r\n\t") {
 				writeErr(w, http.StatusBadRequest, "invalid voice model")
@@ -479,7 +486,7 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if b.Personality != nil {
 			persona := strings.TrimSpace(*b.Personality)
-			if s.cfg.VoxURL != "" {
+			if s.voxURL() != "" {
 				if err := s.setVoxSystemPrompt(r.Context(), persona); err != nil {
 					writeErr(w, http.StatusBadGateway, "the phone stack did not accept the change: "+err.Error())
 					return
@@ -521,7 +528,7 @@ func (s *Server) handleVoiceConfig(w http.ResponseWriter, r *http.Request) {
 // this file).
 func (s *Server) handleVoiceCaller(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	if u == nil || !s.isAdminUser(r.Context(), u) {
+	if !s.canManageVoiceInstallation(u) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -553,7 +560,7 @@ func (s *Server) handleVoiceCaller(w http.ResponseWriter, r *http.Request) {
 // prompt, or the switchboard will offer to put a caller through to a supplier.
 func (s *Server) handleVoiceDirectory(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	if u == nil || !s.isAdminUser(r.Context(), u) {
+	if !s.canManageVoiceInstallation(u) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -631,6 +638,82 @@ func (s *Server) voiceInternalPersonality(ctx context.Context, u *memory.User) s
 // so a wider net just costs time on a line where silence is expensive.
 const voiceSearchLimit = 5
 
+type voiceKnowledgeScope struct {
+	name, origin string
+}
+
+type voiceKnowledgeChoice struct {
+	Value  string `json:"value"`
+	Label  string `json:"label"`
+	Origin string `json:"origin"`
+	Docs   int    `json:"docs"`
+}
+
+// A global operator may explicitly publish switchboard or group knowledge to
+// unknown callers. Personal collections are never part of this catalogue, even
+// when the global administrator knows their stored names.
+func (s *Server) voiceKnowledgeScopes(ctx context.Context) ([]voiceKnowledgeScope, error) {
+	groups, err := s.store().ListGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scopes := []voiceKnowledgeScope{{name: voiceGuestScope, origin: "switchboard"}}
+	for _, group := range groups {
+		scopes = append(scopes, voiceKnowledgeScope{name: fmt.Sprintf("g%d", group.ID), origin: "group"})
+	}
+	return scopes, nil
+}
+
+func (s *Server) voiceKnowledgeChoices(ctx context.Context) ([]voiceKnowledgeChoice, error) {
+	scopes, err := s.voiceKnowledgeScopes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	choices := []voiceKnowledgeChoice{}
+	for _, scope := range scopes {
+		collections, err := s.ragStore.ListCollections(ctx, scope.name)
+		if err != nil {
+			return nil, err
+		}
+		for _, collection := range collections {
+			if strings.HasPrefix(collection.Name, scope.name+"--") {
+				choices = append(choices, voiceKnowledgeChoice{
+					Value: collection.Name, Label: agent.UnscopeCollection(scope.name, collection.Name),
+					Origin: scope.origin, Docs: collection.DocCount,
+				})
+			}
+		}
+	}
+	return choices, nil
+}
+
+// Validate both writes and saved selections before searching. A deleted group,
+// missing collection or legacy arbitrary name must not expose another scope.
+func (s *Server) voiceKnowledgeCollectionAllowed(ctx context.Context, name string) (bool, error) {
+	if name == "" {
+		return true, nil
+	}
+	scopes, err := s.voiceKnowledgeScopes(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, scope := range scopes {
+		if !strings.HasPrefix(name, scope.name+"--") {
+			continue
+		}
+		collections, err := s.ragStore.ListCollections(ctx, scope.name)
+		if err != nil {
+			return false, err
+		}
+		for _, collection := range collections {
+			if collection.Name == name {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // handleVoiceSearch (POST /api/voice/search {query}) searches the switchboard's
 // reserved knowledge base and returns the matching passages.
 //
@@ -644,7 +727,7 @@ const voiceSearchLimit = 5
 // confident nonsense.
 func (s *Server) handleVoiceSearch(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	if u == nil || !s.isAdminUser(r.Context(), u) {
+	if !s.canManageVoiceInstallation(u) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -670,22 +753,30 @@ func (s *Server) handleVoiceSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	embedding, err := s.ragEmbedder.Embed(r.Context(), strings.TrimSpace(b.Query))
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, "could not embed the question: "+err.Error())
-		return
-	}
-
 	// One collection, the one an admin picked in Telephony. Not "every collection
 	// in a scope": a knowledge base that grows a document because someone uploaded
 	// it nearby is a knowledge base nobody can vouch for, and this one is read out
 	// loud to strangers.
-	chosen, _, _ := ms.GetConfig(r.Context(), cfgVoiceRAGCollection)
+	chosen, _, err := ms.GetConfig(r.Context(), cfgVoiceRAGCollection)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "switchboard knowledge settings unavailable")
+		return
+	}
 	chosen = strings.TrimSpace(chosen)
 	if chosen == "" {
 		// Not an error: no base is a legitimate configuration. The agent is told
 		// plainly so it says it doesn't know, instead of inventing.
 		writeJSON(w, map[string]interface{}{"hits": []any{}, "reason": "no knowledge base configured for the switchboard"})
+		return
+	}
+	allowed, err := s.voiceKnowledgeCollectionAllowed(r.Context(), chosen)
+	if err != nil || !allowed {
+		writeErr(w, http.StatusServiceUnavailable, "switchboard knowledge collection unavailable; select an available collection in Telephony settings")
+		return
+	}
+	embedding, err := s.ragEmbedder.Embed(r.Context(), strings.TrimSpace(b.Query))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "could not embed the question: "+err.Error())
 		return
 	}
 	type hit struct {
@@ -712,14 +803,14 @@ func (s *Server) handleVoiceSearch(w http.ResponseWriter, r *http.Request) {
 // Two origins, deliberately in one list because they are one decision:
 //   - the reserved "voice" scope: isolated, belongs to nobody, safe by
 //     construction — nothing a group owns is exposed by choosing it;
-//   - the collections of groups the caller administers, uploaded the usual way in
-//     RAG, which is how an admin avoids maintaining the same documents twice.
+//   - the collections of the installation's groups, explicitly published by the
+//     global operator without needing to duplicate their documents.
 //
 // They do NOT carry the same consequence, so each option says which it is: what
 // the switchboard reads, an unknown caller can hear.
 func (s *Server) handleVoiceKB(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	if u == nil || !s.isAdminUser(r.Context(), u) {
+	if !s.canManageVoiceInstallation(u) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -737,35 +828,10 @@ func (s *Server) handleVoiceKB(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		chosen, _, _ := ms.GetConfig(r.Context(), cfgVoiceRAGCollection)
-		type choice struct {
-			Value  string `json:"value"`  // stored name, what gets searched
-			Label  string `json:"label"`  // what an admin recognises
-			Origin string `json:"origin"` // "switchboard" | "group"
-			Docs   int    `json:"docs"`
-		}
-		choices := []choice{}
-		add := func(scope, origin string) {
-			cols, err := s.ragStore.ListCollections(r.Context(), scope)
-			if err != nil {
-				return
-			}
-			for _, c := range cols {
-				choices = append(choices, choice{
-					Value:  c.Name,
-					Label:  agent.UnscopeCollection(scope, c.Name),
-					Origin: origin,
-					Docs:   c.DocCount,
-				})
-			}
-		}
-		add(voiceGuestScope, "switchboard")
-		if groups, err := ms.UserGroups(r.Context(), u.ID); err == nil {
-			for _, g := range groups {
-				if !s.isGroupAdminOf(r.Context(), u, g.GroupID) {
-					continue
-				}
-				add(fmt.Sprintf("g%d", g.GroupID), "group")
-			}
+		choices, err := s.voiceKnowledgeChoices(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "knowledge collections unavailable")
+			return
 		}
 		writeJSON(w, map[string]interface{}{"selected": strings.TrimSpace(chosen), "choices": choices})
 
@@ -777,9 +843,19 @@ func (s *Server) handleVoiceKB(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "bad body")
 			return
 		}
+		b.Collection = strings.TrimSpace(b.Collection)
+		allowed, err := s.voiceKnowledgeCollectionAllowed(r.Context(), b.Collection)
+		if err != nil {
+			writeErr(w, http.StatusServiceUnavailable, "knowledge collections unavailable")
+			return
+		}
+		if !allowed {
+			writeErr(w, http.StatusBadRequest, "select an available switchboard or group knowledge collection")
+			return
+		}
 		// "" clears it: no base at all is a legitimate switchboard, and it must be
 		// reachable without deleting anything.
-		if err := ms.SetConfig(r.Context(), cfgVoiceRAGCollection, strings.TrimSpace(b.Collection)); err != nil {
+		if err := ms.SetConfig(r.Context(), cfgVoiceRAGCollection, b.Collection); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}

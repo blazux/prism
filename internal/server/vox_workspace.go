@@ -66,7 +66,7 @@ func (s *Server) voxReadScope(ctx context.Context, u *memory.User, shared bool) 
 	return scope, nil
 }
 func (s *Server) voxScopeHeader(ctx context.Context, session string) string {
-	if s.cfg.VoxURL == "" {
+	if s.voxURL() == "" {
 		return ""
 	}
 	var u *memory.User
@@ -155,24 +155,26 @@ func (s *Server) handleVoxWorkspace(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, map[string]any{"available": s.cfg.VoxURL != "" && allowed, "groups": groups, "multiUser": s.cfg.MultiUser, "admin": u != nil && (!s.cfg.MultiUser || u.IsGlobalAdmin())})
+	writeJSON(w, map[string]any{"available": s.voxURL() != "" && allowed, "groups": groups, "multiUser": s.cfg.MultiUser, "admin": u != nil && (!s.cfg.MultiUser || u.IsGlobalAdmin())})
 }
 
-// The shared agent receives current access facts on every turn, independently
-// of whether it opens prism_help. The recipe uses the existing execution tool.
+// The shared agent receives current archive rights on every turn. Native reads
+// do not require shell access; the HTTP recipe remains an optional alternative.
 func (s *Server) voxGroupArchiveContext(ctx context.Context, groupID int64) string {
-	if s.cfg.VoxURL == "" {
+	if s.voxURL() == "" {
 		return ""
 	}
 	if !s.voxGroupAllowed(ctx, groupID) {
-		return fmt.Sprintf("PrismVox is connected. Reception call archive access is NOT ENABLED for this shared group (id %d). A global administrator can enable the group in Admin → Telephony → App access. Do not claim access or send the user to a personal chat as a workaround. list_calls is an outbound-task queue, not the call archive. Older unclassified calls are only available in the private Administrator archive.", groupID)
+		return fmt.Sprintf("PrismVox is connected. Reception call archive access is NOT ENABLED for this shared group (id %d). A global administrator can enable it in Admin → Telephony → App access. Do not claim access or switch identities as a workaround. list_calls is the outbound mission queue, not the archive. Older unclassified calls remain in the private Administrator archive.", groupID)
 	}
-	if s.buildGroupAgentGuard(ctx, groupID)("exec_command", nil) != nil {
-		return "PrismVox reception archive access is enabled for this group, but exec_command is restricted by its tool policy. An administrator must permit that existing tool under the applicable tool policy for the archive recipe. list_calls reads outbound tasks, not call archives."
+	guard := s.buildGroupAgentGuard(ctx, groupID)
+	if guard("call_history", nil) != nil {
+		if guard("exec_command", nil) == nil {
+			return "PrismVox reception archive access is enabled for this group, but call_history is restricted by tool policy. The scoped HTTP recipe in prism_help(topic=call-history) is available through the permitted exec_command tool. Personal calls and unclassified administrator records remain excluded. list_calls reads outbound missions only."
+		}
+		return "PrismVox reception archive access is enabled for this group, but call_history and the exec_command HTTP fallback are restricted by tool policy. An administrator can review those tool permissions. list_calls reads outbound missions, not the call archive."
 	}
-	return `PrismVox reception call archives are available to this shared group. Use exec_command for this authenticated read:
- curl --fail-with-body -sS --get "$PRISM_URL/api/vox/history" -H "Authorization: Bearer $PRISM_TOKEN" --data-urlencode "limit=20"
-Add query parameters with --data-urlencode: since/until (ISO8601 with timezone), number, direction (inbound/outbound), query, offset, limit (max 50). Results contain the exact matching total and next_offset for the next page. id reads a call's turns; section=tools reads its tool results. Request dates and filters from the user's question. These scoped reads exclude personal calls; older unclassified calls stay in the private Administrator archive. list_calls is only the outbound-task queue; do not use it to test or read call archives. Do not infer that the archive is unavailable just because an outbound tool is restricted. Read prism_help(topic="call-history") for full parameters, pagination, errors and empty-result handling.`
+	return `PrismVox reception call archives are available to this shared group through call_history. Use the dates, number, direction or text filters from the user's question; total is the exact matching count. Follow next_offset to read more summaries; id and section read transcripts or tool results. Personal calls and older unclassified administrator records are excluded. list_calls only reads the outbound mission queue. Read prism_help(topic="call-history") for details and the optional scoped HTTP fallback; shell access is not required for call_history.`
 }
 
 // handleVoxWorkspaceAPI is an allow-list, not the administration proxy. It
@@ -183,7 +185,7 @@ func (s *Server) handleVoxWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "workspace access denied")
 		return
 	}
-	if s.cfg.VoxURL == "" {
+	if s.voxURL() == "" {
 		writeErr(w, 503, "PrismVox is disconnected")
 		return
 	}
@@ -200,15 +202,14 @@ func (s *Server) handleVoxWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 			target = "history"
 		}
 	case "chat":
-		if method == http.MethodPost {
-			target = "chat"
-		}
+		writeErr(w, http.StatusGone, "Ask the Prism assistant or your group's Room. This conversation archive is read-only.")
+		return
 	case "conversation":
 		if method == http.MethodGet {
 			target = "supervision/conversation"
 		}
 	case "context":
-		if method == http.MethodGet || method == http.MethodPost {
+		if method == http.MethodGet {
 			target = "supervision/context"
 		}
 	}
@@ -295,11 +296,12 @@ func (s *Server) handleVoxHistory(w http.ResponseWriter, r *http.Request) {
 	s.forwardVoxScoped(w, r, http.MethodGet, "history", q, nil, scope)
 }
 func (s *Server) forwardVoxScoped(w http.ResponseWriter, r *http.Request, method, path string, q url.Values, body io.Reader, scope map[string]any) {
-	if s.cfg.VoxURL == "" {
+	if s.voxURL() == "" {
 		writeErr(w, 503, "PrismVox is disconnected")
 		return
 	}
-	target := strings.TrimRight(s.cfg.VoxURL, "/") + "/api/" + path + "?" + q.Encode()
+	voxURL, voxUser, voxPassword := s.voxCredentials()
+	target := strings.TrimRight(voxURL, "/") + "/api/" + path + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(r.Context(), method, target, body)
 	if err != nil {
 		writeErr(w, 500, "request failed")
@@ -308,8 +310,8 @@ func (s *Server) forwardVoxScoped(w http.ResponseWriter, r *http.Request, method
 	raw, _ := json.Marshal(scope)
 	req.Header.Set("X-Prism-Scope", string(raw))
 	req.Header.Set("Content-Type", "application/json")
-	if s.cfg.VoxUser != "" {
-		req.SetBasicAuth(s.cfg.VoxUser, s.cfg.VoxPassword)
+	if voxUser != "" {
+		req.SetBasicAuth(voxUser, voxPassword)
 	}
 	// Supervision can make several model calls; do not apply the settings proxy's
 	// thirty-second timeout to a conversation.

@@ -315,6 +315,28 @@ An assistant that can't see your actual life is just a fancy autocomplete. So Pr
 
 Connecting an account is a one-time OAuth click or an app password in **Settings**. Prism never hosts a shared OAuth app — you create your own, because your calendar is nobody's business but yours.
 
+### Telephony with PrismVox
+
+Connect [PrismVox](https://github.com/blazux/PrismVox) from **Settings → Telephony**
+in personal mode, or **Admin → Telephony** as a global administrator in shared
+mode. Enter the phone service address and its console credentials, then the
+Prism address reachable from that service. **Test connection** checks the link
+without placing a call. **Connect** saves the two-way connection; credentials
+remain encrypted on the servers. Existing environment-based installations remain
+supported.
+
+Choose the receptionist/outbound model from your configured Prism sources, or
+retain the Vox deployment model. Recognised callers use their personal Prism
+assistant and permitted resources; other callers use the receptionist's public
+knowledge and tools. Configure the voice, greetings, SIP line, directories and
+access in the same settings area.
+
+The **Telephony** app shows call archives, transcripts, tool results and outbound
+missions. Its contextual actions prepare a question for your normal assistant
+or the selected group's Room. Previous Vox supervision conversations remain
+available as read-only archives. See the [telephony guide](docs/help/telephony.md)
+for phone permissions and agent workflows.
+
 ---
 
 ## Webhooks: let anything talk to the agent

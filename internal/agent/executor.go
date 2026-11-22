@@ -1,12 +1,9 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -77,6 +74,9 @@ type ToolExecutor struct {
 	// base URL and HTTP Basic credentials. Empty voxURL = no telephony stack docked.
 	voxURL, voxUser, voxPassword string
 	voxScope                     string
+	voxProvider                  func() (string, string, string)
+	voxScopeProvider             func() string
+	onCallQueued                 func(context.Context, QueuedCall) error
 }
 
 // ToolGuard authorizes a tool call before it runs. It receives the tool name and
@@ -173,155 +173,21 @@ func (e *ToolExecutor) SetVox(url, user, password string) {
 
 func (e *ToolExecutor) SetVoxScope(scope string) { e.voxScope = scope }
 
+// Providers let an existing conversation follow installation changes without
+// retaining a stale endpoint, secret or authorization scope.
+func (e *ToolExecutor) SetVoxProvider(provider func() (string, string, string)) {
+	e.voxProvider = provider
+}
+func (e *ToolExecutor) SetVoxScopeProvider(provider func() string) { e.voxScopeProvider = provider }
+func (e *ToolExecutor) voxConnection() (string, string, string) {
+	if e.voxProvider != nil {
+		return e.voxProvider()
+	}
+	return e.voxURL, e.voxUser, e.voxPassword
+}
+
 // HasVox reports whether a telephony stack is docked (place_call is usable).
-func (e *ToolExecutor) HasVox() bool { return e.voxURL != "" }
-
-// voxDo calls the docked phone stack's API and returns the raw response body.
-// Shared by the outbound-call tools: the queue lives in Vox, we never mirror it.
-func (e *ToolExecutor) voxDo(tool, method, path string, payload interface{}) ([]byte, error) {
-	if !e.HasVox() {
-		return nil, fmt.Errorf("no telephony stack is available")
-	}
-	var rdr io.Reader
-	if payload != nil {
-		b, _ := json.Marshal(payload)
-		rdr = bytes.NewReader(b)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, e.voxURL+path, rdr)
-	if err != nil {
-		return nil, err
-	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if e.voxScope != "" {
-		req.Header.Set("X-Prism-Scope", e.voxScope)
-	}
-	if e.voxUser != "" {
-		req.SetBasicAuth(e.voxUser, e.voxPassword)
-	}
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("telephony unreachable: %w", err)
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("%s failed (HTTP %d): %s", tool, resp.StatusCode, strings.TrimSpace(string(b)))
-	}
-	return b, nil
-}
-
-// placeCall queues an agent-originated outbound call in Vox. The trigger and the
-// call are decoupled by Vox's own call_tasks queue, so this returns as soon as the
-// task is enqueued — the agent doesn't wait for the callee to pick up.
-func (e *ToolExecutor) placeCall(args map[string]interface{}) (string, error) {
-	phone, _ := args["phone_number"].(string)
-	mission, _ := args["mission"].(string)
-	name, _ := args["contact_name"].(string)
-	phone, mission, name = strings.TrimSpace(phone), strings.TrimSpace(mission), strings.TrimSpace(name)
-	if mission == "" {
-		return "", fmt.Errorf("mission is required")
-	}
-	// "Appelle le plombier" is the whole point of this tool, and a name is what
-	// the user says — never a number. Vox owns the outbound directory, so it does
-	// the lookup: it already refuses an ambiguous name rather than picking someone.
-	if phone == "" {
-		if name == "" {
-			return "", fmt.Errorf("give a contact_name (looked up in the outbound directory) or a phone_number")
-		}
-		return e.placeCallByName(name, mission)
-	}
-	if _, err := e.voxDo("place_call", "POST", "/api/calls", map[string]interface{}{
-		"phone_number": phone, "contact_name": strings.TrimSpace(name), "mission": mission,
-	}); err != nil {
-		return "", err
-	}
-	who := phone
-	if name != "" {
-		who = name + " (" + phone + ")"
-	}
-	return fmt.Sprintf("Outbound call to %s has been queued. It will be placed shortly and I'll be told the outcome.", who), nil
-}
-
-// callTask mirrors the fields of a Vox call_tasks row we actually use.
-type callTask struct {
-	ID            int     `json:"id"`
-	PhoneNumber   string  `json:"phone_number"`
-	ContactName   *string `json:"contact_name"`
-	Mission       string  `json:"mission"`
-	ScheduledAt   *string `json:"scheduled_at"`
-	Status        string  `json:"status"`
-	Attempts      int     `json:"attempts"`
-	MaxAttempts   int     `json:"max_attempts"`
-	ResultSummary *string `json:"result_summary"`
-}
-
-// fetchCallTasks reads the outbound-call queue from Vox.
-func (e *ToolExecutor) fetchCallTasks(limit int) ([]callTask, error) {
-	b, err := e.voxDo("list_calls", "GET", fmt.Sprintf("/api/calls?limit=%d", limit), nil)
-	if err != nil {
-		return nil, err
-	}
-	var out struct {
-		Items []callTask `json:"items"`
-	}
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
-// listCalls shows the agent the outbound-call queue so it can answer "what calls are
-// scheduled?" and, crucially, find the id it needs to cancel one.
-func (e *ToolExecutor) listCalls() (string, error) {
-	items, err := e.fetchCallTasks(25)
-	if err != nil {
-		return "", err
-	}
-	if len(items) == 0 {
-		return "No outbound call is scheduled or has been placed.", nil
-	}
-	var b strings.Builder
-	b.WriteString("Outbound calls (most recent first):\n")
-	for _, t := range items {
-		who := t.PhoneNumber
-		if t.ContactName != nil && *t.ContactName != "" {
-			who = *t.ContactName + " (" + t.PhoneNumber + ")"
-		}
-		fmt.Fprintf(&b, "- id=%d | %s | %s | try %d/%d", t.ID, who, t.Status, t.Attempts, t.MaxAttempts)
-		if t.ScheduledAt != nil && *t.ScheduledAt != "" {
-			fmt.Fprintf(&b, " | scheduled %s", *t.ScheduledAt)
-		}
-		fmt.Fprintf(&b, "\n  mission: %s\n", t.Mission)
-		if t.ResultSummary != nil && *t.ResultSummary != "" {
-			fmt.Fprintf(&b, "  outcome: %s\n", *t.ResultSummary)
-		}
-	}
-	b.WriteString("\nOnly a call still 'pending' can be cancelled (cancel_call).")
-	return b.String(), nil
-}
-
-// cancelCall drops a still-pending outbound call from the queue. Vox refuses to
-// cancel one already being dialled — the line is live, there is nothing to undo.
-func (e *ToolExecutor) cancelCall(args map[string]interface{}) (string, error) {
-	id := 0
-	switch v := args["call_id"].(type) {
-	case float64:
-		id = int(v)
-	case string:
-		id, _ = strconv.Atoi(strings.TrimSpace(v)) //nolint:errcheck
-	}
-	if id <= 0 {
-		return "", fmt.Errorf("call_id is required (use list_calls to find it)")
-	}
-	if _, err := e.voxDo("cancel_call", "DELETE", fmt.Sprintf("/api/calls/%d", id), nil); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("Outbound call #%d has been cancelled — it will not be placed.", id), nil
-}
+func (e *ToolExecutor) HasVox() bool { url, _, _ := e.voxConnection(); return url != "" }
 
 // MCP connections belong to the installation (single-owner) or group (multi).
 // The workspace and personal-memory scope never select the registry.
@@ -779,13 +645,16 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 	// Outbound calls: queued in, read from and cancelled in the docked Vox stack.
 	switch name {
 	case "place_call":
-		res, err := e.placeCall(args)
+		res, err := e.placeCall(ctx, args)
 		return res, nil, err
 	case "list_calls":
-		res, err := e.listCalls()
+		res, err := e.listCalls(ctx, args)
 		return res, nil, err
 	case "cancel_call":
-		res, err := e.cancelCall(args)
+		res, err := e.cancelCall(ctx, args)
+		return res, nil, err
+	case "call_history":
+		res, err := e.callHistory(ctx, args)
 		return res, nil, err
 	}
 
@@ -1196,85 +1065,6 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, rawArgs json.Ra
 // ─── Existing tools ───────────────────────────────────────────────────────────
 
 // ─── Docker service tools ─────────────────────────────────────────────────────
-
-// placeCallByName queues an outbound call to someone named rather than numbered.
-//
-// The lookup happens in Vox, not here, because Vox owns the outbound directory —
-// and because its resolver already refuses an ambiguous name instead of picking a
-// contact at random. Duplicating that judgement on this side would mean two
-// implementations of "did we mean the right person", which is exactly the kind of
-// question you only want answered once.
-//
-// Note which directory this is: the outbound one, the people Vox CALLS. Transfers
-// resolve against Prism's own users, and the two are deliberately separate — a
-// caller must never be offered a transfer to a supplier.
-func (e *ToolExecutor) placeCallByName(name, mission string) (string, error) {
-	b, err := e.voxDo("place_call", "GET", "/api/contacts", nil)
-	if err != nil {
-		return "", fmt.Errorf("could not read the outbound directory: %w", err)
-	}
-	var contacts []struct {
-		Name        string `json:"name"`
-		PhoneNumber string `json:"phone_number"`
-		Enabled     *bool  `json:"enabled"`
-	}
-	if err := json.Unmarshal(b, &contacts); err != nil {
-		var wrapped struct {
-			Items []struct {
-				Name        string `json:"name"`
-				PhoneNumber string `json:"phone_number"`
-				Enabled     *bool  `json:"enabled"`
-			} `json:"items"`
-		}
-		if err2 := json.Unmarshal(b, &wrapped); err2 != nil {
-			return "", fmt.Errorf("could not read the outbound directory: %w", err)
-		}
-		for _, c := range wrapped.Items {
-			contacts = append(contacts, struct {
-				Name        string `json:"name"`
-				PhoneNumber string `json:"phone_number"`
-				Enabled     *bool  `json:"enabled"`
-			}(c))
-		}
-	}
-
-	want := normalizeContactName(name)
-	var matches []string
-	var phone, matched string
-	for _, c := range contacts {
-		if c.Enabled != nil && !*c.Enabled {
-			continue
-		}
-		n := normalizeContactName(c.Name)
-		if n == want || strings.Contains(" "+n+" ", " "+want+" ") {
-			matches = append(matches, c.Name)
-			phone, matched = c.PhoneNumber, c.Name
-		}
-	}
-	switch {
-	case len(matches) == 0:
-		return "", fmt.Errorf("%q is not in the outbound directory — add them in Telephony, or give a phone number", name)
-	case len(matches) > 1:
-		// Never guess: dialling the wrong person is not a recoverable mistake, it
-		// is a stranger's phone ringing.
-		return "", fmt.Errorf("%q matches several contacts (%s) — say which one", name, strings.Join(matches, ", "))
-	}
-
-	if _, err := e.voxDo("place_call", "POST", "/api/calls", map[string]interface{}{
-		"phone_number": phone, "contact_name": matched, "mission": mission,
-	}); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("Outbound call to %s (%s) has been queued. It will be placed shortly and I'll be told the outcome.", matched, phone), nil
-}
-
-// normalizeContactName lowercases and flattens a name for matching, so "Le
-// Plombier" and "le plombier" are the same person.
-func normalizeContactName(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.NewReplacer("-", " ", "'", " ", "  ", " ").Replace(s)
-	return strings.Join(strings.Fields(s), " ")
-}
 
 // A fresh lease per operation lets an already connected agent follow live RAG
 // changes without retaining an old embedder or writing old-model vectors.

@@ -97,6 +97,8 @@ type Server struct {
 	authMu          sync.Mutex
 	authWindows     map[string]authWindow
 	cfg             Config
+	voxState        atomic.Pointer[voxConnection]
+	voxConfigMu     sync.Mutex
 	docker          *docker.Manager
 	upgrader        websocket.Upgrader
 	clients         map[*Client]struct{}
@@ -184,6 +186,8 @@ func (s *Server) initialize(runtime context.Context) error {
 					s.memStore = ms
 					s.mu.Unlock()
 					s.mcpMgr.SetStore(ms)
+					s.loadVoxConnection(runtime)
+					s.startVoxCallMonitor()
 					log.Printf("[memory] store initialized")
 					s.startEmailRules()
 					s.startChannels() // launch configured messaging bridges (telegram, slack)
@@ -293,6 +297,10 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/voice/directory", s.resourceRoute((*Server).handleVoiceDirectory)) // Vox: who can I transfer to?
 	mux.HandleFunc("/api/voice/search", s.resourceRoute((*Server).handleVoiceSearch))       // Vox: what do we know?
 	mux.HandleFunc("/api/voice/kb", s.resourceRoute((*Server).handleVoiceKB))               // which collection the switchboard reads
+	mux.HandleFunc("/api/vox-connection", s.resourceRoute((*Server).handleVoxConnection))
+	mux.HandleFunc("/api/vox-connection/test", s.resourceRoute((*Server).handleVoxConnectionTest))
+	mux.HandleFunc("/api/voice/capabilities", s.resourceRoute((*Server).handleVoiceCapabilities))
+	mux.HandleFunc("/api/voice/inference/v1/", s.resourceRoute((*Server).handleVoiceInference))
 	mux.HandleFunc("/api/vox/history", s.resourceRoute((*Server).handleVoxHistory))
 	mux.HandleFunc("/api/vox-workspace", s.resourceRoute((*Server).handleVoxWorkspace))
 	mux.HandleFunc("/api/vox-workspace/access", s.resourceRoute((*Server).handleVoxWorkspaceAccess))

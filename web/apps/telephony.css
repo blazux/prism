@@ -91,3 +91,6 @@ td, th { text-align: left; vertical-align: top; padding: 12px 8px; border-bottom
   #outbound { padding: 10px; }
   #callForm { grid-template-columns: minmax(0, 1fr); }
 }
+
+.agent-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--border)}
+.agent-actions .muted{font-size:12px}

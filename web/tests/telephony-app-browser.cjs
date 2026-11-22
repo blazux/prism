@@ -27,6 +27,7 @@ const settings=constant(settingsSource,'telephonySettingsHead')+pane.replace('cl
     if(u.pathname==='/api/auth')data={authenticated:true};
     else if(u.pathname==='/api/me')data={authenticated:true,isAdmin:admin,multiUser:!personal,...(personal?{}:{user:{role:role==='admin'?'global_admin':'user',displayName:'Fixture'}})};
     else if(u.pathname==='/api/platform')data={voxDocked:connected};
+    else if(u.pathname==='/api/vox-connection')data={configured:connected,reachable:connected,authenticated:connected,reverse_connected:connected,url:'http://vox.fixture',user:'fixture',prism_url:'http://fixture.invalid',prism_public_url:'http://fixture.invalid',model:'default'};
     else if(u.pathname==='/api/my/groups')data={groups:[]};
     else if(u.pathname==='/api/admin/groups')data={groups:[{id:2,name:'Betatest'}]};
     else if(u.pathname==='/api/vox-workspace')data={available:connected,admin,multiUser:!personal,groups:[{id:2,name:'Betatest'}]};
@@ -72,19 +73,20 @@ const settings=constant(settingsSource,'telephonySettingsHead')+pane.replace('cl
      for(const width of [1100,390,320]){await page.setViewportSize({width,height:850});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'outbound overflow at '+width);}
      if(role==='admin')await page.screenshot({path:'/tmp/prism-telephony-operations-'+theme+'.png',fullPage:true,animations:'disabled'});
     }
-    await page.getByRole('button',{name:'Supervision',exact:true}).click();assert.equal(await page.locator('#compose').isVisible(),true);
-    await page.locator('#message').focus();await page.keyboard.press('Tab');assert.equal(await page.locator('#send').evaluate(el=>getComputedStyle(el).outlineStyle),'solid');
+    await page.getByRole('button',{name:'Anciennes conversations',exact:true}).click();assert.equal(await page.locator('#compose').isVisible(),false);
+    await page.locator('#messages .trace').waitFor();assert.ok((await page.locator('#messages').textContent()).includes('18 appels'));
+    assert.ok(!requests.includes('/api/vox-workspace/chat'),'connected Telephony started a second agent conversation');
     assert.ok(!requests.includes('/api/voice'),'the operations app fetched configuration');
     await page.setViewportSize({width:1100,height:850});
     if(role==='admin'){
-     await page.goto('http://fixture.invalid/admin#telephony');await page.locator('#tel-persona').waitFor({state:'visible'});
+     await page.goto('http://fixture.invalid/admin#telephony');await page.locator('[data-tel-tab=agent]').waitFor();await page.locator('[data-tel-tab=agent]').click();await page.locator('#tel-persona').waitFor({state:'visible'});
      assert.equal(await page.locator('#adm-nav [data-pane="telephony"]').count(),1);
-     await page.locator('#tel-access summary').click();await page.locator('#tel-access-choices input').waitFor();
+     await page.locator('[data-tel-tab=access]').click();await page.locator('#tel-access summary').click();await page.locator('#tel-access-choices input').waitFor();
     }
     await page.goto('http://fixture.invalid/settings.html#telephony');
     if(personal){
      await page.locator('.nav-item[data-tab="telephony"]').waitFor({state:'visible'});
-     const editor=page.frameLocator('#telephony-settings-frame');await editor.locator('#tel-model').waitFor({state:'visible'});
+     const editor=page.frameLocator('#telephony-settings-frame');await editor.locator('[data-tel-tab=agent]').click();await editor.locator('#tel-model').waitFor({state:'visible'});
      assert.equal(await editor.locator('#adm-nav').count(),0);assert.equal(await editor.locator('#tel-access').isVisible(),false);
      for(const theme of ['prism-dark','prism-light','graphite']){
       await page.evaluate(id=>PrismTheme.applyTheme(id),theme);

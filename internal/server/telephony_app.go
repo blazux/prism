@@ -13,10 +13,6 @@ func (s *Server) handleTelephonySettingsPage(w http.ResponseWriter, r *http.Requ
 		writeErr(w, http.StatusForbidden, "global admin only")
 		return
 	}
-	if s.cfg.VoxURL == "" {
-		writeErr(w, http.StatusServiceUnavailable, "PrismVox is disconnected")
-		return
-	}
 	if s.cfg.MultiUser {
 		http.Redirect(w, r, "/admin#telephony", http.StatusSeeOther)
 		return
@@ -50,8 +46,8 @@ func (s *Server) handleLegacyTelephonyPage(w http.ResponseWriter, r *http.Reques
 const telephonySettingsHead = `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Telephony settings — Prism</title><link rel="stylesheet" href="/style.css">
-<link rel="stylesheet" href="/admin-console.css"><script src="/theme.js"></script><script src="/modal.js"></script>
-</head><body><div id="adm"><main id="adm-main"><div id="adm-content"><p id="page-error" role="alert"></p>`
+<link rel="stylesheet" href="/admin-console.css"><script src="/theme.js"></script><script src="/modal.js"></script><script src="/settings-state.js"></script>
+</head><body><div id="adm"><main id="adm-main"><div id="adm-content"><p id="page-error" role="alert"></p><p id="settings-save-status" class="hint" role="status"></p>`
 
 const telephonySettingsScript = `</div></main></div><script>
 const $=id=>document.getElementById(id);

@@ -79,7 +79,7 @@ func (s *Server) handlePlatform(w http.ResponseWriter, r *http.Request) {
 		"disabledApps": disabled,
 		// Docked with a Prism Vox telephony stack, so the Téléphonie app is
 		// available. Empty VoxURL = standalone Prism, no telephony.
-		"voxDocked": s.cfg.VoxURL != "",
+		"voxDocked": s.voxURL() != "",
 		"capabilities": map[string]bool{
 			"personalHosting": s.cfg.HostedPersonal,
 			"localNotesVault": !s.cfg.HostedPersonal,
@@ -121,7 +121,7 @@ func (s *Server) handleAdminPlatform(w http.ResponseWriter, r *http.Request) {
 		all, _ := ai.chatModels(ctx)
 		apps := make([]string, 0, len(knownApps))
 		for _, app := range knownApps {
-			if app != "telephony" || s.cfg.VoxURL != "" {
+			if app != "telephony" || s.voxURL() != "" {
 				apps = append(apps, app)
 			}
 		}

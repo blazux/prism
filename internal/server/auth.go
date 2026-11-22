@@ -165,6 +165,7 @@ func (s *Server) userFromCookie(r *http.Request, ms *memory.Store) *memory.User 
 }
 
 func (s *Server) withAuth(next http.Handler) http.Handler {
+	next = s.voxConnectionBoundary(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.allowAuthentication(r) {
 			w.Header().Set("Retry-After", "60")
@@ -194,6 +195,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 
 		if s.hostedResolver != nil {
 			s.hostedAuth(next, w, r)
+			return
+		}
+		if s.voxGatewayAuthed(r) {
+			next.ServeHTTP(w, withUser(r, serviceUser))
 			return
 		}
 

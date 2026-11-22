@@ -81,8 +81,8 @@ func TestVoxArchiveAccessFactsAndSignedGroupRead(t *testing.T) {
 	raw, _ := json.Marshal([]int64{group.ID})
 	_ = ms.SetConfig(ctx, voxWorkspaceGroupsKey, string(raw))
 	facts = s.voxGroupArchiveContext(ctx, group.ID)
-	if strings.Contains(facts, "NOT ENABLED") || !strings.Contains(facts, "exec_command") || !strings.Contains(facts, "$PRISM_URL/api/vox/history") || !strings.Contains(facts, "$PRISM_TOKEN") {
-		t.Fatal("authorized group did not receive usable archive recipe")
+	if strings.Contains(facts, "NOT ENABLED") || !strings.Contains(facts, "through call_history") {
+		t.Fatal("authorized group did not receive the native archive reader")
 	}
 	if w := request(group.ID); w.Code != 200 {
 		t.Fatal(w.Body.String())
@@ -94,13 +94,18 @@ func TestVoxArchiveAccessFactsAndSignedGroupRead(t *testing.T) {
 		t.Fatalf("unexpected upstream requests: %d", reached)
 	}
 	_ = ms.SetGroupToolAccess(ctx, group.ID, "exec_command", "admin_only")
-	if !strings.Contains(s.voxGroupArchiveContext(ctx, group.ID), "exec_command is restricted") {
-		t.Fatal("recipe ignores explicit tool restrictions")
+	if !strings.Contains(s.voxGroupArchiveContext(ctx, group.ID), "through call_history") {
+		t.Fatal("native archive reads unnecessarily require shell access")
 	}
 	cc := s.callerContextForGroup(ctx, group.ID)
 	if !cc.HiddenTools["exec_command"] {
 		t.Fatal("blocked execution tool advertised")
 	}
+	_ = ms.SetGroupToolAccess(ctx, group.ID, "call_history", "disabled")
+	if !strings.Contains(s.voxGroupArchiveContext(ctx, group.ID), "call_history and the exec_command HTTP fallback are restricted") {
+		t.Fatal("current archive facts ignore the native reader's tool policy")
+	}
+	_ = ms.SetGroupToolAccess(ctx, group.ID, "call_history", "open")
 	_ = ms.SetToolPolicy(ctx, "list_calls", "open")
 	cc = s.callerContextForGroup(ctx, group.ID)
 	if cc.HiddenTools["list_calls"] || cc.Guard("list_calls", nil) != nil {
@@ -143,7 +148,7 @@ func TestHeadlessGroupPromptIncludesCurrentArchiveAccess(t *testing.T) {
 			}
 		}
 		if enabled {
-			if !strings.Contains(prompt, "$PRISM_URL/api/vox/history") || strings.Contains(prompt, "NOT ENABLED") {
+			if !strings.Contains(prompt, "through call_history") || strings.Contains(prompt, "NOT ENABLED") {
 				t.Error("allowed archive facts missing or stale in the actual model prompt")
 			}
 		} else if !strings.Contains(prompt, "NOT ENABLED") {

@@ -684,12 +684,24 @@ async function init(){
   try { d = await PrismAPI.api('/api/my/groups') } catch(e){ failed = true; PrismAPI.toast('Could not load your groups: ' + e.message) }
   const g = $('group')
   ;(d.groups || []).forEach(x => { const o = document.createElement('option'); o.value = x.id || x.groupId; o.textContent = x.name || x.groupName; g.appendChild(o) })
-  if (g.options.length){ connect(g.value) }
+  if (g.options.length){
+    const requested=new URLSearchParams(location.search).get('group')
+    if(requested && [...g.options].some(option=>option.value===requested))g.value=requested
+    connect(g.value)
+    if(parent!==window)parent.postMessage({type:'room-ready',group:Number(g.value)},location.origin)
+  }
   // A failed read used to claim membership news: "you are not in any group,
   // ask an admin" sent people to open a ticket for a server hiccup.
   else if (failed){ $('log').innerHTML = '<div class="room-empty">Could not load your groups. This is a connection problem, not a missing membership.</div>'; g.style.display = 'none' }
   else { $('log').innerHTML = '<div class="room-empty">You are not in any group yet. Ask an admin to add you.</div>'; g.style.display = 'none' }
 }
+window.addEventListener('message',event=>{
+  if(event.origin!==location.origin || event.source!==parent || event.data?.type!=='room-draft' || Number(event.data.group)!==Number(gid) || typeof event.data.text!=='string')return
+  if($('box').value.trim()){PrismAPI.toast('Your current Room draft is kept.');return}
+  const text=event.data.text.slice(0,15980)
+  $('box').value=/^@agent\b/i.test(text)?text:'@agent '+text
+  draftRevision++;saveRoomDraft();autoGrow();$('send-ic').classList.add('ready');$('box').focus()
+})
 init()
 </script>
 </body>

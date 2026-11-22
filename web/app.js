@@ -19,6 +19,7 @@ let pendingFiles  = [] // {name, text} parsed file attachments waiting to be sen
 // global ASSISTANT session while viewing a global app.
 let lastWorkspace = localStorage.getItem('active-workspace') || localStorage.getItem('active-session') || 'default'
 let currentSessionID = lastWorkspace
+let pendingRoomDraft = null
 
 // Identity for chat avatars: the current user + their personal agent.
 let ME = { uid: '', name: 'You', isAdmin: false, terminalAvailable: true }
@@ -232,6 +233,7 @@ function requestActiveEditor(msg) {
 function handleServerMsg(msg) {
   switch (msg.type) {
     case 'chat_receipt': receiveChatReceipt(msg); break
+    case 'conversation_event': receiveConversationEvent(msg); break
     case 'history_error': historyLoading = false; renderHistoryButton(); appendError(msg.content); break
     case 'run_replay':
       clearChat()
@@ -605,6 +607,7 @@ document.querySelectorAll('.empty-examples span').forEach(el => {
 
 // ─── Chat UI ─────────────────────────────────────────────────────────────────
 
+const conversationEventIDs = new Set()
 const pendingChats = new Map()
 const chatDrafts = new Map()
 let historyBefore = 0, historyLoading = false
@@ -641,6 +644,19 @@ function replyToWidgetChat(widget, status, error) {
   if (widget.id) {
     try { widget.source.postMessage({type:'prism-chat-response',id:widget.id,status,error},widget.origin) } catch (_) {}
   } else if (error) showToast({title:'Widget message',message:error,level:'warning'})
+}
+
+function receiveConversationEvent(msg) {
+  if (msg.session !== currentSessionID || msg.role !== 'assistant' || typeof msg.content !== 'string' || !/^\d+$/.test(String(msg.id))) return
+  const id=String(msg.id),host=document.getElementById('chat-messages')
+  if(conversationEventIDs.has(id)||[...host.querySelectorAll('[data-conversation-id]')].some(node=>node.dataset.conversationId===id))return
+  conversationEventIDs.add(id)
+  const wasAtBottom=chatWasAtBottom(),message=document.createElement('div')
+  message.className='chat-msg assistant';message.dataset.conversationId=id
+  const time=msg.createdAt?fmtTime(new Date(msg.createdAt)):fmtTime(new Date())
+  message.innerHTML='<div class="chat-msg-role">'+agentChip()+' '+escHtml(AGENT_NAME)+' <span class="chat-msg-time">'+escHtml(time)+'</span></div><div class="chat-msg-content">'+renderMarkdown(msg.content)+'</div>'
+  host.append(message);prepareChatImages(message)
+  if(wasAtBottom)scrollChat(true)
 }
 
 function receiveChatReceipt(msg) {
@@ -1039,6 +1055,7 @@ function appendError(text) {
 
 function clearChat() {
   activeRunStatus = 'idle'
+  conversationEventIDs.clear()
   pendingAttachments = []
   document.getElementById('chat-messages').innerHTML = ''
   currentAssistantEl = null
@@ -1065,8 +1082,10 @@ function restoreChatHistory(messages) {
       div.innerHTML = `<div class="chat-msg-role">${userChip()} You${timeBadge}</div><div class="chat-msg-content">${escHtml(window.PrismSmileys?.text(m.content) ?? m.content)}</div>`
       msgs.appendChild(div)
     } else if (m.role === 'assistant' && m.content) {
+      if(m.id && conversationEventIDs.has(String(m.id)))continue
       const div = document.createElement('div')
       div.className = 'chat-msg assistant'
+      if(m.id)div.dataset.conversationId=String(m.id)
       div.innerHTML = `<div class="chat-msg-role">${agentChip()} ${escHtml(AGENT_NAME)}${timeBadge}</div><div class="chat-msg-content">${renderMarkdown(m.content)}</div>`
       msgs.appendChild(div)
       for (const attachment of responseAttachments) div.appendChild(attachment)
@@ -1445,13 +1464,13 @@ function setView(view) {
   // loaded document to announce readiness before routing editor calls to it.
   activeEditorSource = null
   currentView = view
+  if(view.type!=='app'||view.name!=='room')pendingRoomDraft=null
   const dash  = document.getElementById('dashboard')
   const dock  = document.getElementById('widget-dock')
   const frame = document.getElementById('app-frame')
   const title = document.getElementById('view-title')
-  const telephonyView = view.type === 'app' && view.name === 'telephony'
-  document.getElementById('chat-drawer').style.display = telephonyView ? 'none' : ''
-  document.getElementById('chat-fab').style.display = telephonyView ? 'none' : ''
+  document.getElementById('chat-drawer').style.display = ''
+  document.getElementById('chat-fab').style.display = ''
 
   document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'))
 
@@ -1497,6 +1516,7 @@ function setView(view) {
     const params = new URLSearchParams({ session: ASSISTANT })
     if (['email', 'notes', 'tasks', 'calendar'].includes(view.name) && typeof view.id === 'string') params.set('id', view.id)
     if (view.name === 'email' && typeof view.folder === 'string') params.set('folder', view.folder)
+    if (view.name === 'room' && view.group) params.set('group', String(view.group))
     if (view.name === 'telephony') {
       if (['chat', 'logs', 'outbound', 'settings'].includes(view.tab)) params.set('tab', view.tab)
       if (view.group) params.set('group', view.group)
@@ -2620,6 +2640,28 @@ window.addEventListener('message', e => {
     if (ownedFrame) {
       const view = window.PrismLinks?.parse(d.href)
       if (view) openPrismReference(view)
+    }
+  } else if (d.type === 'open-agent-draft' && e.source === document.getElementById('app-frame')?.contentWindow && typeof d.text === 'string') {
+    const text = d.text.slice(0,16000), group = Number(d.group)
+    if (group > 0) {
+      if (!Number.isSafeInteger(group) || !MY_GROUPS.some(g => Number(g.groupId) === group)) {
+        showToast({title:'Room',message:'This group is not available to your account.',level:'error'}); return
+      }
+      if(chatOpen)toggleChat()
+      pendingRoomDraft = {group, text}
+      setView({type:'app',name:'room',group})
+    } else {
+      if (!chatOpen) toggleChat()
+      const input=document.getElementById('chat-input')
+      if (input.value.trim()) { showToast({title:'Chat',message:'Your current draft is still in the chat. Send or clear it before preparing another question.',level:'info'}); return }
+      input.value=text;autoResizeTextarea(input);input.focus()
+    }
+  } else if (d.type === 'room-ready' && e.source === document.getElementById('app-frame')?.contentWindow && currentView?.name === 'room') {
+    if (pendingRoomDraft && Number(d.group) === pendingRoomDraft.group) {
+      e.source.postMessage({type:'room-draft',group:pendingRoomDraft.group,text:pendingRoomDraft.text},location.origin)
+      pendingRoomDraft=null
+    } else if(pendingRoomDraft) {
+      pendingRoomDraft=null;showToast({title:'Room',message:'The requested group could not be opened. No question was sent.',level:'error'})
     }
   } else if (d.type === 'openFile' && d.path) {
     send({ type: 'file_open', path: d.path.replace(/^\/workspace\//, '') })

@@ -168,6 +168,8 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		Tools:        buildToolsWithCachePrefix(req.Tools, req.CacheToolPrefixCount),
 		CacheControl: &cacheControl{Type: "ephemeral"},
 		MaxTokens:    req.Options.NumPredict,
+		TopP:         req.Options.TopP,
+		TopK:         req.Options.TopK,
 		Stream:       true,
 	}
 	// Experimental until the end-to-end cost and quality comparison is done.

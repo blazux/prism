@@ -64,3 +64,25 @@ test('voice cloning follows actual capabilities; unavailable engine is not calle
   if(!backend)assert.match(h.elements['tel-voicehint'].textContent,/status unavailable/);
  }
 });
+
+test('preview passes the selected voice without persisting it',async()=>{
+ const h=harness();h.elements['tel-voice'].value='Preview voice';h.elements['tel-greeting']={value:'Hello fixture'};h.elements['tel-gmsg']={textContent:''};
+ h.ctx.URL={createObjectURL:()=> 'blob:fixture'};h.ctx.Audio=class{play(){return Promise.resolve()}};
+ await h.ctx.previewVoice();
+ assert.equal(h.calls.length,1);assert.equal(h.calls[0].url,'/api/vox/tts/preview');assert.equal(h.calls[0].options.method,'POST');
+ assert.deepEqual(JSON.parse(h.calls[0].options.body),{text:'Hello fixture',voice:'Preview voice'});
+});
+test('voice and config saves acknowledge only their saved controls',async()=>{
+ const h=harness(),snapshots=[];h.elements['tel-persona']={value:'Fixture personality'};h.elements['tel-vmsg']={textContent:''};
+ h.ctx.window.PrismSettingsState={request:async(url,options,controls)=>{snapshots.push(controls);return h.ctx.fetch(url,options)}};
+ await h.ctx.saveTelVoice();
+ assert.equal(snapshots[0].length,1);assert.equal(snapshots[0][0],h.elements['tel-persona']);
+});
+test('connection payload preserves password whitespace',()=>{
+ const h=harness();for(const id of ['vox-url','vox-user','vox-password','vox-prism-url','vox-public-url'])h.elements[id]={value:'  fixture  '};
+ const body=h.ctx.voxConnectionPayload();assert.equal(body.password,'  fixture  ');assert.equal(body.url,'fixture');
+});
+test('cancelling collection deletion also keeps the active knowledge selection',async()=>{
+ const h=harness();h.elements['tel-kbsel']={options:[{text:'Fixture collection (2 docs)'}],selectedIndex:0,value:'Fixture collection'};
+ h.ctx.PrismModal={confirm:async()=>false};await h.ctx.deleteSelectedVoiceKB();assert.equal(h.calls.length,0);assert.equal(h.elements['tel-kbsel'].value,'Fixture collection');
+});

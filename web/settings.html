@@ -347,6 +347,12 @@ PLATFORM.then(d => {
 // Slack is still a deployment-wide single bot, so its card is admin-only —
 // see renderChannelsTab.
 let IS_GLOBAL_ADMIN = false
+let telephonyDirty = false
+window.addEventListener('message', e => {
+  if (e.origin !== location.origin || e.source !== document.getElementById('telephony-settings-frame')?.contentWindow || e.data?.type !== 'prism-telephony-dirty') return
+  telephonyDirty = e.data.dirty === true
+})
+window.addEventListener('beforeunload', e => { if (telephonyDirty) { e.preventDefault(); e.returnValue = '' } })
 const IDENTITY = settingsFetch('/api/me').then(r => r.json()).then(me => {
   // Multi-user: the role lives on me.user. Single-user (legacy) has no user
   // object — the sole user IS the deployment admin, so isAdmin decides.
@@ -357,7 +363,7 @@ const IDENTITY = settingsFetch('/api/me').then(r => r.json()).then(me => {
   return me
 }).catch(() => ({}))
 Promise.all([PLATFORM, IDENTITY]).then(([platform, me]) => {
-  const available = platform.voxDocked === true && me.multiUser === false && IS_GLOBAL_ADMIN
+  const available = me.multiUser === false && IS_GLOBAL_ADMIN
   document.querySelector('.nav-item[data-tab="telephony"]').style.display = available ? '' : 'none'
 })
 window.addEventListener('message', e => {
@@ -373,7 +379,7 @@ requestAnimationFrame(() => renderTab(currentTab))
 
 async function switchTab(tab) {
   const previous=currentTab
-  if(tab!==currentTab && PrismSettingsState.dirty()){if(!await PrismModal.confirm('Leave this section without saving your edits?'))return;if(currentTab!==previous)return;PrismSettingsState.clear()}
+  if(tab!==currentTab && (PrismSettingsState.dirty() || telephonyDirty)){if(!await PrismModal.confirm('Leave this section without saving your edits?'))return;if(currentTab!==previous)return;PrismSettingsState.clear();telephonyDirty=false}
   currentTab = tab
   updateSettingsChatLink()
   const navLink=document.querySelector(`.nav-item[data-tab="${tab}"]`)
@@ -416,7 +422,7 @@ async function renderTelephonyTab(container) {
   if (me.multiUser) {
     const link=document.createElement('a');link.href='/admin#telephony';link.target='_top';link.textContent='Open Admin → Telephony';container.append(link);return
   }
-  if (!IS_GLOBAL_ADMIN || !platform.voxDocked) { container.textContent='PrismVox is not connected.';return }
+  if (!IS_GLOBAL_ADMIN) { container.textContent='Telephony settings require the installation owner.';return }
   const frame=document.createElement('iframe');frame.id='telephony-settings-frame';frame.title='Telephony settings';frame.src='/settings/telephony';
   frame.style.cssText='display:block;width:100%;height:100%;border:0';container.append(frame)
 }

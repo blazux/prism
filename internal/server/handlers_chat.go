@@ -296,7 +296,7 @@ func (s *Server) runHeadlessChatImagesTap(ctx context.Context, sessionID, messag
 	executor.SetLLM(ollamaClient, model)
 	executor.SetChatBlind(!ai.cfg.ChatVision)
 	executor.SetVoxScope(s.voxScopeHeader(context.Background(), sessionID))
-	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
+	s.configureVoxExecutor(executor, sessionID) // enables place_call when docked
 
 	executor.SetRAGProvider(s.acquireRAG)
 	executor.SetSessionID(sessionID)

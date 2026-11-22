@@ -20,7 +20,7 @@ func TestTelephonySettingsRemainOwnerOrGlobalAdminOnly(t *testing.T) {
 		{"group admin", true, "http://vox", "admin", 403},
 		{"member", true, "http://vox", "user", 403},
 		{"personal owner", false, "http://vox", "user", 200},
-		{"disconnected", false, "", "user", 503},
+		{"disconnected", false, "", "user", 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := New(Config{MultiUser: tc.multi, VoxURL: tc.vox})
@@ -29,7 +29,7 @@ func TestTelephonySettingsRemainOwnerOrGlobalAdminOnly(t *testing.T) {
 			if w.Code != tc.status {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 			}
-			if w.Code == 200 && (!strings.Contains(w.Body.String(), `id="tel-model"`) || strings.Contains(w.Body.String(), `id="adm-nav"`)) {
+			if w.Code == 200 && (!strings.Contains(w.Body.String(), `id="tel-model"`) || !strings.Contains(w.Body.String(), `id="tel-connection-form"`) || strings.Contains(w.Body.String(), `id="adm-nav"`)) {
 				t.Fatal("personal settings editor is missing or embeds the admin console")
 			}
 			if w.Code == 303 && w.Header().Get("Location") != "/admin#telephony" {

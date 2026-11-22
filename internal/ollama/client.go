@@ -184,7 +184,9 @@ type ToolFunction struct {
 }
 
 type ToolParameters struct {
-	Type string `json:"type"`
+	// RawSchema preserves nested schemas from external tools through adapters.
+	RawSchema json.RawMessage `json:"-"`
+	Type      string          `json:"type"`
 	// omitempty so a no-parameter tool serializes as {"type":"object"} rather than
 	// {"properties":null,"required":null} — strict OpenAI-compatible validators
 	// (e.g. Mistral's mistral-common) reject the nulls with "None is not of type
@@ -226,24 +228,30 @@ type ChatRequest struct {
 	// backend translates it. Ollama's Think field is set only when the model
 	// reports support for the thinking capability.
 	NoThinking bool `json:"-"`
+	// EnableThinking preserves an explicit provider-facing choice. Nil leaves the
+	// existing model/default policy unchanged; NoThinking still takes precedence.
+	EnableThinking *bool `json:"-"`
 	// ReasoningEffort bounds how much a reasoning model thinks this turn
 	// ("low"/"medium"/"high"/"xhigh" — the accepted set is model-specific).
 	// Wire-neutral: OpenAI receives reasoning_effort; Ollama receives a named
 	// think level only when its model metadata advertises that exact level.
-	// Empty or unsupported = the backend's own default.
+	// Empty or unsupported leaves the backend's default unless EnableThinking
+	// supplies an explicit boolean choice.
 	ReasoningEffort string `json:"-"`
 	// Voice turns prefer silence to an unbounded reasoning default when the
 	// requested effort is unavailable. Other callers retain the model default.
 	NoThinkingIfUnsupported bool `json:"-"`
 	// Think is Ollama's own switch (/api/chat "think": false) for models with a
 	// thinking mode (Qwen3, DeepSeek-R1, gpt-oss…). Omitted → the model's
-	// default; never sent true so models without the mode don't reject it.
+	// default. Explicit choices are translated only for models supporting the mode.
 	Think *bool `json:"think,omitempty"`
 }
 
 type Options struct {
-	Temperature float64 `json:"temperature,omitempty"`
-	NumCtx      int     `json:"num_ctx,omitempty"`
+	Temperature float64  `json:"temperature,omitempty"`
+	TopP        *float64 `json:"top_p,omitempty"`
+	TopK        *int     `json:"top_k,omitempty"`
+	NumCtx      int      `json:"num_ctx,omitempty"`
 	// NumPredict caps the tokens generated for one turn. Left at 0 each backend
 	// applies its own ceiling — for vLLM that is max_model_len minus the prompt,
 	// so a model that loops instead of emitting a stop token keeps generating for
@@ -352,9 +360,9 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 		req.Options.NumCtx = NumCtx
 	}
 	var payload any = req
-	if req.NoThinking || req.ReasoningEffort != "" {
+	if req.NoThinking || req.EnableThinking != nil || req.ReasoningEffort != "" {
 		info := c.modelThinking(ctx, req.Model)
-		if req.NoThinking {
+		if req.NoThinking || (req.EnableThinking != nil && !*req.EnableThinking) {
 			req.Think = nil
 			if info.supported {
 				off := false
@@ -366,6 +374,12 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, out chan<- StreamEve
 				ChatRequest
 				Think string `json:"think"`
 			}{req, req.ReasoningEffort}
+		} else if req.EnableThinking != nil {
+			req.Think = nil
+			if info.supported {
+				req.Think = req.EnableThinking
+			}
+			payload = req
 		} else if req.NoThinkingIfUnsupported && info.supported {
 			off := false
 			req.Think = &off

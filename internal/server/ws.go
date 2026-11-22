@@ -226,7 +226,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	executor.SetLLM(ollamaClient, model)
 	executor.SetChatBlind(!ai.cfg.ChatVision)
 	executor.SetVoxScope(s.voxScopeHeader(context.Background(), sessionID))
-	executor.SetVox(s.cfg.VoxURL, s.cfg.VoxUser, s.cfg.VoxPassword) // enables place_call when docked
+	s.configureVoxExecutor(executor, sessionID) // enables place_call when docked
 	executor.SetRAGProvider(s.acquireRAG)
 	executor.SetSessionID(sessionID)
 	if ms != nil {
@@ -247,6 +247,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if voiceCall {
 		voiceUser = s.resolveVoiceCaller(r.Context(), r.URL.Query().Get("caller"))
 		voiceDir = s.voiceDirectory(r.Context())
+		s.configureVoiceVoxExecutor(executor, voiceUser)
 	}
 
 	var ragScope string

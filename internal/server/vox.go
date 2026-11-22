@@ -51,17 +51,18 @@ func isCallTaskID(id string) bool { return strings.HasPrefix(id, callTaskPrefix)
 // Never fatal: if the phone stack is undocked, slow or down, the user's real tasks
 // must still load. Errors are swallowed and the list simply carries no calls.
 func (s *Server) voxPendingCallTasks(ctx context.Context, u *memory.User) []tasks.Item {
-	if s.cfg.VoxURL == "" {
+	if s.voxURL() == "" {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(s.cfg.VoxURL, "/")+"/api/calls?limit=50", nil)
+	voxURL, voxUser, voxPassword := s.voxCredentials()
+	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(voxURL, "/")+"/api/calls?limit=50", nil)
 	if err != nil {
 		return nil
 	}
-	if s.cfg.VoxUser != "" {
-		req.SetBasicAuth(s.cfg.VoxUser, s.cfg.VoxPassword)
+	if voxUser != "" {
+		req.SetBasicAuth(voxUser, voxPassword)
 	}
 	scope, scopeErr := s.voxReadScope(ctx, u, false)
 	if scopeErr != nil {
@@ -121,7 +122,7 @@ func (s *Server) handleVoxProxy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "admin only")
 		return
 	}
-	if s.cfg.VoxURL == "" {
+	if s.voxURL() == "" {
 		writeErr(w, http.StatusServiceUnavailable, "no telephony stack docked (VOX_URL unset)")
 		return
 	}
@@ -131,7 +132,8 @@ func (s *Server) handleVoxProxy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad path")
 		return
 	}
-	target := strings.TrimRight(s.cfg.VoxURL, "/") + "/api/" + path
+	voxURL, voxUser, voxPassword := s.voxCredentials()
+	target := strings.TrimRight(voxURL, "/") + "/api/" + path
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
@@ -145,8 +147,8 @@ func (s *Server) handleVoxProxy(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set("Content-Type", ct)
 	}
 	// Vox's UI sits behind HTTP Basic; we hold its credentials, the browser doesn't.
-	if s.cfg.VoxUser != "" {
-		req.SetBasicAuth(s.cfg.VoxUser, s.cfg.VoxPassword)
+	if voxUser != "" {
+		req.SetBasicAuth(voxUser, voxPassword)
 	}
 
 	resp, err := voxHTTP.Do(req)
@@ -195,7 +197,7 @@ func (s *Server) setVoxSystemPrompt(ctx context.Context, persona string) error {
 // have their own words pushed over it on the next page load.
 func (s *Server) migrateVoicePersonaToVox(ctx context.Context) {
 	ms := s.store()
-	if ms == nil || s.cfg.VoxURL == "" {
+	if ms == nil || s.voxURL() == "" {
 		return
 	}
 	if done, ok, _ := ms.GetConfig(ctx, cfgVoicePersonaMigrated); ok && done == "1" {
@@ -217,7 +219,7 @@ func (s *Server) migrateVoicePersonaToVox(ctx context.Context) {
 
 // voxJSON performs one authenticated JSON call against Vox's API.
 func (s *Server) voxJSON(ctx context.Context, method, path string, in, out any) error {
-	if s.cfg.VoxURL == "" {
+	if s.voxURL() == "" {
 		return fmt.Errorf("no telephony stack docked")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
@@ -231,15 +233,16 @@ func (s *Server) voxJSON(ctx context.Context, method, path string, in, out any) 
 		}
 		body = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(s.cfg.VoxURL, "/")+path, body)
+	voxURL, voxUser, voxPassword := s.voxCredentials()
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(voxURL, "/")+path, body)
 	if err != nil {
 		return err
 	}
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if s.cfg.VoxUser != "" {
-		req.SetBasicAuth(s.cfg.VoxUser, s.cfg.VoxPassword)
+	if voxUser != "" {
+		req.SetBasicAuth(voxUser, voxPassword)
 	}
 	resp, err := voxHTTP.Do(req)
 	if err != nil {

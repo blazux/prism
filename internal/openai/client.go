@@ -14,6 +14,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -99,16 +100,19 @@ func (c *Client) auth(req *http.Request) {
 // ---- request translation -------------------------------------------------
 
 type chatRequest struct {
-	StreamOptions map[string]bool `json:"stream_options,omitempty"`
-	Model         string          `json:"model"`
-	Messages      []chatMsg       `json:"messages"`
-	Tools         []chatTool      `json:"tools,omitempty"`
-	Stream        bool            `json:"stream"`
-	Temperature   float64         `json:"temperature,omitempty"`
-	MaxTokens     int             `json:"max_tokens,omitempty"`
+	StreamOptions       map[string]bool `json:"stream_options,omitempty"`
+	Model               string          `json:"model"`
+	Messages            []chatMsg       `json:"messages"`
+	Tools               []chatTool      `json:"tools,omitempty"`
+	Stream              bool            `json:"stream"`
+	Temperature         float64         `json:"temperature,omitempty"`
+	MaxTokens           int             `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int             `json:"max_completion_tokens,omitempty"`
 	// Pointer so an explicit 0 (penalty off) still reaches the backend instead of
 	// being dropped by omitempty and silently replaced by the default.
 	PresencePenalty *float64 `json:"presence_penalty,omitempty"`
+	TopP            *float64 `json:"top_p,omitempty"`
+	TopK            *int     `json:"top_k,omitempty"`
 	// Qwen/SGLang convention for turning extended reasoning off. Passes through
 	// LiteLLM unharmed; ignored by backends that don't know it.
 	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
@@ -393,6 +397,8 @@ func (c *Client) postChatWithRetry(ctx context.Context, body []byte) (*http.Resp
 }
 
 func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
+	endpoint, _ := url.Parse(c.baseURL)
+	officialOpenAI := endpoint != nil && endpoint.Scheme == "https" && endpoint.Hostname() == "api.openai.com"
 	payload := chatRequest{
 		StreamOptions: map[string]bool{"include_usage": true},
 		Model:         req.Model,
@@ -400,6 +406,11 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		Stream:        true,
 		Temperature:   req.Options.Temperature,
 		MaxTokens:     req.Options.NumPredict,
+		TopP:          req.Options.TopP,
+	}
+	// top_k is supported by compatible self-hosted endpoints, not OpenAI's API.
+	if !officialOpenAI {
+		payload.TopK = req.Options.TopK
 	}
 	if payload.MaxTokens <= 0 {
 		payload.MaxTokens = defaultMaxTokens
@@ -408,15 +419,33 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	if pp := req.Options.PresencePenalty; pp != 0 {
 		payload.PresencePenalty = &pp
 	}
-	if req.NoThinking {
-		payload.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
-	} else if effort := req.ReasoningEffort; effort != "" {
-		// The caller's choice (Settings › Agent, or a group's shared-agent config).
-		payload.ReasoningEffort = effort
-	} else if reasoningEffort != "" {
-		// Cap reasoning so the model can't spend the whole generation budget
-		// thinking and return empty content. Not set for voice/no-thinking turns.
-		payload.ReasoningEffort = reasoningEffort
+	if req.NoThinking || (req.EnableThinking != nil && !*req.EnableThinking) {
+		// The explicit gateway extension is for compatible servers. A native API
+		// has no such boolean and unknown model capabilities cannot imply "none".
+		if req.EnableThinking == nil || !officialOpenAI {
+			payload.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+		}
+	} else {
+		if req.EnableThinking != nil && !officialOpenAI {
+			payload.ChatTemplateKwargs = map[string]any{"enable_thinking": *req.EnableThinking}
+		}
+		if effort := req.ReasoningEffort; effort != "" {
+			// The caller's choice (Settings › Agent, or a group's shared-agent config).
+			payload.ReasoningEffort = effort
+		} else if reasoningEffort != "" {
+			// Cap reasoning so the model can't spend the whole generation budget
+			// thinking and return empty content. Not set for voice/no-thinking turns.
+			payload.ReasoningEffort = reasoningEffort
+		}
+	}
+	if officialOpenAI && req.EnableThinking != nil {
+		// The phone relay's explicit choice uses the native API contract. Older
+		// callers retain their existing payload and defaults.
+		payload.MaxCompletionTokens, payload.MaxTokens = payload.MaxTokens, 0
+		if payload.ReasoningEffort != "" && payload.ReasoningEffort != "none" {
+			payload.Temperature = 0
+			payload.TopP = nil
+		}
 	}
 	for _, t := range req.Tools {
 		payload.Tools = append(payload.Tools, chatTool{Type: "function", Function: t.Function})

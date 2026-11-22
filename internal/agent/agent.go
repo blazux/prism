@@ -92,6 +92,7 @@ type Agent struct {
 	model                string
 	histMu               sync.Mutex // guards history, toolSeq and historyLoaded (Chat goroutine vs WS read pump: InjectNote, ResetHistory, SetSession)
 	history              []ollama.Message
+	pendingPersisted     []ollama.Message // external facts, merged between turns
 	modelContextTokens   int
 	modelMaxOutputTokens int
 	contextOverheadChars int
@@ -493,6 +494,7 @@ func (a *Agent) ResetHistory() error {
 		}
 	}
 	a.history = []ollama.Message{}
+	a.pendingPersisted = nil
 	a.toolSeq = 0
 	a.historyLoaded = false
 	a.historyGen++
@@ -510,6 +512,7 @@ func (a *Agent) SetSession(sessionID, personality string) {
 	a.loadProfile()
 	a.histMu.Lock()
 	a.history = []ollama.Message{}
+	a.pendingPersisted = nil
 	a.toolSeq = 0
 	a.historyLoaded = false
 	a.historyGen++
@@ -846,6 +849,7 @@ func (a *Agent) compactLiveContextTo(ctx context.Context, events chan<- Event, t
 // Callers must serialize it with turns on this session.
 func (a *Agent) CompactContext(ctx context.Context) error {
 	a.loadHistoryFromDB(ctx)
+	a.mergePersistedMessages()
 	return a.compactLiveContextTo(ctx, nil, a.liveHistoryChars()/2)
 }
 

@@ -25,6 +25,8 @@ type apiRequest struct {
 	CacheControl *cacheControl `json:"cache_control,omitempty"`
 	MaxTokens    int           `json:"max_tokens"`
 	Temperature  *float64      `json:"temperature,omitempty"`
+	TopP         *float64      `json:"top_p,omitempty"`
+	TopK         *int          `json:"top_k,omitempty"`
 	Stream       bool          `json:"stream"`
 }
 

@@ -131,8 +131,8 @@ func (s *Server) integrationsStatusFor(u *memory.User) func(ctx context.Context)
 				sb.WriteString("- Room activity: " + roomActivityHelp + "\n")
 			}
 		}
-		if s.cfg.VoxURL != "" {
-			sb.WriteString("- PrismVox call archive: use exec_command with GET $PRISM_URL/api/vox/history and Bearer $PRISM_TOKEN. Query: since/until (ISO8601 with timezone), number, direction (inbound/outbound), query, offset, limit (max50). Matching total is exact; follow next_offset for more. id reads a call's turns; section=tools reads its tool results. Access is scoped to this identity. Read prism_help(topic=call-history) for parameters, pagination and empty-result handling.\n")
+		if s.voxURL() != "" {
+			sb.WriteString("- PrismVox call archive: use call_history with the requested dates, number, direction or text filters. Matching total is exact; follow next_offset for more summaries. id with section=turns/tools/summary reads a call's details. Access follows this identity, including on recognized phone calls. list_calls reads outbound missions instead. Read prism_help(topic=call-history) for parameters, empty results and the optional server-side HTTP fallback.\n")
 		}
 		row := func(what, state string) { fmt.Fprintf(&sb, "- %s: %s\n", what, state) }
 		if s.cfg.HostedPersonal {
