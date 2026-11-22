@@ -53,9 +53,13 @@ const html=constant(settingsSource,'telephonySettingsHead')+constant(formSource,
   assert.equal(await page.locator('.nav-item[data-tab="telephony"]').isVisible(),true);
   assert.equal(await editor.locator('[data-tel-tab=agent]').isDisabled(),true);
   assert.ok(!requests.includes('/api/vox/config'));
+  assert.equal(await editor.locator('#vox-prism-url').inputValue(),'','the browser origin must not become a Docker callback address');
+  assert.equal(await editor.locator('#vox-public-url').inputValue(),'http://fixture.invalid');
+  assert.equal(await editor.locator('#vox-prism-url').getAttribute('required'),'');
   await editor.locator('#vox-url').fill('http://vox.fixture');await editor.locator('#vox-user').fill('fixture');await editor.locator('#vox-password').fill(' fixture-only ');
   await editor.locator('#vox-test').click();await editor.locator('#vox-connection-status').filter({hasText:'not been saved'}).waitFor();
   assert.equal(writes.filter(write=>write.method==='PUT').length,0);
+  await editor.locator('#vox-prism-url').fill('http://prism.fixture:8080');
   await editor.locator('#vox-save').click();await editor.locator('#vox-connection-status').filter({hasText:'Connection saved.'}).waitFor();
   assert.equal(writes.find(write=>write.path==='/api/vox-connection').body.password,' fixture-only ');
   assert.equal(await editor.locator('#vox-password').inputValue(),'');

@@ -19,7 +19,7 @@ const adminTelephonyPane = `    <div class="pane" data-pane="telephony"><h2>Tele
 <h3>Connect PrismVox</h3>
 <form id="tel-connection-form" oninput="connectionDraftChanged()" onchange="connectionDraftChanged()" onsubmit="event.preventDefault();saveVoxConnection()">
 <div class="tel-connection-fields">
-<label class="wide">PrismVox API URL<input id="vox-url" type="url" placeholder="http://prismvox-ui:8000" autocomplete="url" required></label>
+<label class="wide">PrismVox API URL<input id="vox-url" type="url" placeholder="http://prismvox.example:7860" autocomplete="url" required></label>
 <label>Username<input id="vox-user" autocomplete="username"></label>
 <label>Password<input id="vox-password" type="password" autocomplete="new-password" placeholder="Leave empty to keep the saved password"></label>
 <label class="wide">Prism URL reachable from PrismVox<input id="vox-prism-url" type="url" placeholder="http://prism-server:8080" required></label>
@@ -215,7 +215,7 @@ async function loadVoxConnection(){
   const response=await fetch('/api/vox-connection');
   if(!response.ok)throw new Error(await telephonyResponseError(response,'Could not read the connection'));
   const data=await response.json();VOX_CONNECTION=data;VOX_TESTED_DRAFT=null;
-  for(const key of VOX_CONNECTION_FIELDS)if(key!=='password')$(VOX_CONNECTION_IDS[key]).value=data[key]||((key==='prism_url'||key==='prism_public_url')?location.origin:'');
+  for(const key of VOX_CONNECTION_FIELDS)if(key!=='password')$(VOX_CONNECTION_IDS[key]).value=data[key]||(key==='prism_public_url'?location.origin:'');
   $('vox-password').value='';$('vox-password').placeholder=data.password_configured?'Saved password · leave empty to keep':'Password';
   $('vox-disconnect').hidden=!data.configured;renderVoxHealth(data);
   const available=data.configured===true&&data.reachable===true&&data.authenticated===true;
