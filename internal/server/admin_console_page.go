@@ -524,7 +524,15 @@ async function loadUsage(){const days=$('us-days').value;const d=await jget('/ap
 // Telephony activity (from the docked Vox stack) shown alongside the rest of usage.
 async function loadTelephonyUsage(){
  const box=$('us-tel');if(!box)return;
- const s=await jget('/api/vox/runtime-status');if(!s){box.style.display='none';return;}
+ box.style.display='none';box.innerHTML='';
+ try{
+ const platformResponse=await fetch('/api/platform');
+ if(!platformResponse.ok)throw new Error('Platform status unavailable');
+ const platform=await platformResponse.json();if(!platform.voxDocked)return;
+ const response=await fetch('/api/vox/runtime-status');
+ if(!response.ok)throw new Error('Telephony usage unavailable');
+ const s=await response.json();
+ if(!s||typeof s!=='object'||Array.isArray(s)||s.error)throw new Error('Invalid telephony usage');
  box.style.display='';
  const dur=x=>x==null?'—':(x<60?x+'s':Math.floor(x/60)+'m'+(x%60)+'s');
  const when=t=>{if(!t)return'—';const d=new Date(t);return d.toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});};
@@ -535,6 +543,10 @@ async function loadTelephonyUsage(){
   usCard('avg duration',dur(s.avg_duration_secs))+usCard('% transferred',(s.transfer_pct||0)+'%')+usCard('active',s.active_calls||0)+'</div>';
  html+='<p><a href="/?app=telephony&group=admin&tab=logs" target="_top">Open call history in Telephony →</a></p>';
  box.innerHTML=html;
+ }catch(_){
+ box.style.display='';
+ box.innerHTML='<h3 style="font-size:13px;margin:18px 0 6px">Telephony</h3><p class="hint">Telephony usage is currently unavailable.</p>';
+ }
 }
 async function loadLogs(){const f=$('lg-filter').value.trim();const d=await jget('/api/admin/logs?limit=500&filter='+encodeURIComponent(f));if(!d)return;
  const out=$('lg-out');const atEnd=out.scrollHeight-out.scrollTop-out.clientHeight<40;
