@@ -4,38 +4,185 @@
 
 *Also known as: Probably Runs Interesting Stuff Magically*
 
-**[Documentation](https://www.thelastserver.com/docs/installation/)** · [1.0 release notes](docs/releases/v1.0.0.md)
+**[Get started](#quick-start)** · **[See it in action](#see-it-in-action)** · **[Documentation](https://www.thelastserver.com/docs/installation/)** · [1.0 release notes](docs/releases/v1.0.0.md)
+
+**A self-hosted assistant that uses your apps, writes code, automates work and builds the missing interface.**
 
 Yes, another AI dashboard. Except this one runs on your own hardware, with local models or the AI providers you choose, and has the slightly unsettling property of being able to modify its own environment.
 
-<img src="gui.png" width="700" alt="PRISM dashboard">
+Give it a CSV, a tedious workflow or that small app you've been meaning to write. It can read the data, build the tools, create an interface and hand you the files. Then you can keep using what it made.
 
-<details>
-<summary>More screenshots</summary>
+![An agent-built dashboard alongside the conversation, tool calls and downloadable report files](docs/screenshots/hero-agent-workspace.png)
 
-<img src="example1.png" width="700" alt="Project management dashboard with a task board, Gantt chart, team workload, and documents">
-<img src="chat.png" width="700" alt="Chat with the agent">
-<img src="settings.png" width="700" alt="Agent settings">
-
-</details>
+*An interactive analysis dashboard, visible tool results, and a report and CSV ready to download. The example data is fictional; the paperwork is mercifully optional.*
 
 ---
 
 ## The idea
 
-This started as frustration with tools like [OpenClaw](https://openclaw.ai) and [Hermes](https://hermes-agent.nousresearch.com) — both promising, both Node.js (make of that what you will), and both operating on the same fundamental assumption: the agent lives somewhere in the background, has direct access to your disk, and you talk to it through a chat box that it has absolutely no influence over. Which is fine, until you realize that a truly useful agent should be able to shape its own workspace, not just occupy it.
+This started as frustration while trying tools like [OpenClaw](https://openclaw.ai) and [Hermes](https://hermes-agent.nousresearch.com). I wanted an agent that could shape the place where I work: create a useful interface, wire up the tools behind it, and let me use the result afterwards. Chat is a good place to ask for something. The thing I asked for should probably have somewhere to live.
 
-PRISM is built around a different premise: the agent has actual agency over its environment. It runs code in a sandboxed workspace (not on your host machine — you're welcome), builds interactive widgets and pins them directly to the dashboard it lives in, schedules tasks, searches the web, queries a private knowledge base, and — if it needs a capability it doesn't have — it can define new tools and use them immediately, or connect a remote MCP server and configure it entirely on its own.
+PRISM is built around a different premise: the agent has actual agency over its environment. It runs code in a sandboxed workspace (not on your host machine — you're welcome), builds interactive widgets and pins them directly to the dashboard it lives in, schedules tasks, searches the web, queries a private knowledge base, and — if it needs a capability it doesn't have — it can define new tools and use them immediately, or connect remote MCP servers and use their tools.
 
-You ask it to monitor something, it builds a widget. You ask it to set up a GitHub integration, it connects the MCP server, fetches its auth token, and gets to work. You ask it to remember a document, it indexes it with embeddings and will bring it up when relevant.
+You ask it to monitor something, it builds a widget. You ask it to set up a GitHub integration, it can connect an MCP server, ask for the missing credential securely, and get to work. You ask it to remember a document, it indexes it with embeddings and searches it when needed. Available actions follow your permissions and deployment mode.
 
 Is this a great idea? Probably. Does it make you slightly nervous? It should. That's how you know it's doing something real.
+
+---
+
+## See it in action
+
+[Build an app](#build-the-app-youve-been-putting-off) · [Everyday apps](#deal-with-the-actual-work) · [Code & tools](#give-the-agent-a-toolbox-let-it-make-more-tools) · [Automation](#let-it-work-while-you-do-something-else) · [Teams](#give-the-team-its-own-assistant) · [Phone calls](#let-it-answer-the-phone-too)
+
+The service desk and analysis dashboards below are examples built with Prism's programmable widgets and tools. Email, Notes, Calendar, Activity and Room are built-in apps; Telephony connects to PrismVox. All screenshots use fictional demonstration data.
+
+### Build the app you've been putting off
+
+> "Turn this service-jobs CSV into an app. Let me search, assign technicians, update a job's status and export the result."
+
+The agent can build a persistent interface with forms, filters, charts and tools behind it. The result stays in your workspace, ready for the next time you need it. Congratulations: that spreadsheet has acquired buttons.
+
+![Agent-built service desk with searchable jobs, editable statuses, technician workload and a CSV export](docs/screenshots/prism-service-desk.webp)
+
+*A service desk built around twelve example jobs. Search the records, follow the workload and open a job to edit it.*
+
+<details>
+<summary>Open a job, then explore the same data in another dashboard</summary>
+
+![Service desk with a selected job, editable details and a follow-up task action](docs/screenshots/prism-service-detail.webp)
+
+*Edit the selected job and create a follow-up from its detail panel.*
+
+![A second dashboard with status charts, workload, estimates and the records behind the figures](docs/screenshots/prism-data-analysis.webp)
+
+*Another view of the same saved records: filter the analysis and inspect the rows behind the numbers. These amounts are estimates, not payments received.*
+
+</details>
+
+Widgets can call native, custom or MCP tools directly through `prismTool()`, or ask the assistant through `prismChat()`. A form can save a record or refresh its data without starting another agent conversation. You do not have to negotiate with a language model every time you click a button.
+
+### Deal with the actual work
+
+> "Summarize this email thread, draft a reply, make a task for the follow-up and put the appointment in my calendar."
+
+Prism connects the assistant to your mailbox, notes, tasks and calendar. You can work in the apps yourself, ask the agent to act, or move between the two when your inbox starts making unreasonable demands.
+
+![Prism Email showing a customer conversation, attachment and actions to create a task or calendar event](docs/screenshots/native-email.png)
+
+*Read the conversation, open its attachments, reply, or turn a message into something you can actually follow up.*
+
+<details>
+<summary>Notes and calendar alongside your work</summary>
+
+![Prism Notes with a Markdown editor, rendered preview, checklist, wikilinks and AI editing tools](docs/screenshots/native-notes.png)
+
+*Markdown notes with a live preview, links, checklists and AI editing tools. Use the database or connect an existing Obsidian/Logseq vault.*
+
+![Prism Calendar displaying a week of appointments](docs/screenshots/native-calendar.png)
+
+*Keep appointments alongside the work. Calendar and task connections include CalDAV, Todoist, Google and Microsoft, depending on the resource.*
+
+</details>
+
+You can also upload documents and images, ask questions about your knowledge collections, and request finished PDF, spreadsheet, presentation or document files. The agent uses code and packages in its execution workspace to produce them; image understanding requires a vision-capable model.
+
+<details>
+<summary>Give it the documents it needs</summary>
+
+![Prism's knowledge settings showing document collections, indexed files and an upload area](docs/screenshots/native-knowledge.png)
+
+*Keep manuals, runbooks, notes and reference files in searchable collections. The assistant can retrieve relevant passages while it works. Document search uses the embedding model you configure.*
+
+</details>
+
+### Give the agent a toolbox. Let it make more tools
+
+> "Write a reusable script that summarizes these jobs, test it, and make it available from the dashboard."
+
+The agent can write and run code, install packages, create reusable Python tools and connect MCP tools. Open its files in the editor, inspect the tool results, or use the built-in terminal when you feel the need to supervise with `htop`.
+
+![Prism's file editor showing a reusable Python script for summarizing service jobs](docs/screenshots/code-editor.png)
+
+*The code behind a result is a workspace file you can inspect and edit.*
+
+<details>
+<summary>Connect external capabilities with MCP</summary>
+
+![Prism MCP settings with example image-generation and documentation servers and their available tools](docs/screenshots/mcp-tools.png)
+
+*Example MCP connections expose image creation and documentation tools. Connect the services you use; their tools become available according to your settings and permissions.*
+
+</details>
+
+It can also start Docker services and embed their interfaces: monitoring, notebooks, internal tools, or whatever else belongs in your particular collection of containers. See [Embedded services](#embedded-services).
+
+### Let it work while you do something else
+
+> "Every weekday morning, check the waiting jobs and send me a summary on Telegram."
+
+Schedule a conversation or a deterministic script, react to a webhook, and follow the work in Activity. From Telegram, you can ask how a task in another workspace is progressing. Closing the browser does not stop a server-owned task. Unfortunately, closing the browser also does not count as finishing your own work.
+
+![Prism Activity showing work across multiple workspaces, recent tools and delegated workers](docs/screenshots/native-activity.png)
+
+*See which workspaces are busy and inspect their current tasks, recent actions and delegated work. Server restarts interrupt running tasks; their saved history remains available.*
+
+### Give the team its own assistant
+
+> "@assistant Which jobs are waiting, who owns them, and what needs our attention?"
+
+In shared mode, each person has a personal agent and each group has a shared one. Talk together in the Room, mention the assistant, and inspect the tools it used. Share widgets, knowledge and group tools with the people who need them.
+
+![A shared Prism Room where two teammates ask the assistant for a job summary and inspect its tool result](docs/screenshots/prism-room-tools.webp)
+
+*A team conversation with the shared assistant and the result of its summary tool. Personal agents and histories keep their own scopes.*
+
+Telegram reaches your personal agent; group Webex and Teams bots reach the group's shared agent. See [Personal, or shared](#personal-or-shared) for account and permission details.
+
+### Let it answer the phone, too
+
+> "Call the supplier tomorrow morning, confirm the delivery date, and report back here."
+
+Connect [PrismVox](https://github.com/blazux/PrismVox) to add reception, outbound missions and a call archive. Recognized callers can reach their personal Prism assistant and its permitted mail, calendar, notes and tasks. Unknown callers reach the receptionist.
+
+![Prism Telephony showing a call archive, transcript and expanded calendar and email tool results](docs/screenshots/telephony.png)
+
+*A recognized caller's conversation, including the tools used during the call. Call access follows the requesting account or group's permissions.*
+
+<details>
+<summary>Schedule an outbound mission and read its outcome</summary>
+
+![Prism Telephony with an outbound mission form, scheduled calls and a completed mission report](docs/screenshots/telephony-outbound.png)
+
+*Give the agent a number, a mission and a time. Follow the queue and read the outcome in Prism. The phone line still needs a SIP provider; omnipotence has paperwork.*
+
+</details>
+
+### Your models, your workspace, your questionable taste in neon
+
+Use local models, Claude, OpenAI or compatible APIs, and switch between configured sources. Choose a sober theme for work or something that suggests you might know the password to a Gibson. The agent's personality is yours to configure too.
+
+<details>
+<summary>Multiple model connections and themes</summary>
+
+![Prism AI provider settings with local Ollama, Claude and OpenAI connections and a separate document-search model](docs/screenshots/ai-providers.png)
+
+*Keep several model sources configured and choose the one you need. Document search can use its own embedding model.*
+
+![Prism's appearance gallery showing Tech, Cyberpunk, Matrix, Synthwave, Dracula and other themes](docs/screenshots/prism-appearance.webp)
+
+*Choose a theme, tune the layout or create your own. No GPU upgrade included.*
+
+</details>
 
 ---
 
 ## Quick start
 
 See the [installation guide](https://www.thelastserver.com/docs/installation/) for detailed setup instructions and links to the configuration reference.
+
+The screenshots and settings instructions here follow the current source. For
+the published v1.0.0 images, use the [v1.0.0 quick start](https://github.com/blazux/prism/blob/v1.0.0/README.md#quick-start).
+[Building from source](#build-from-source) runs the interface shown here.
 
 Install Git and Docker with the Compose v2 plugin. The standard images support
 Linux AMD64 and ARM64. You can use a local model server or an API provider;
@@ -89,14 +236,24 @@ to the machine running the browser.
 
 Open **Settings → AI provider**, or **Admin → AI provider** in shared mode:
 
-1. Select a source or click **+ Add a source**. Choose **OpenAI**, **Anthropic**, **Ollama** or **Other compatible** (vLLM, SGLang, llama.cpp…). OpenAI and Anthropic have preset URLs; for a local or compatible server, enter its URL and a key if required.
-2. Click **Connect**, then choose a model that supports tool calling. Choosing it saves automatically. Local models must already be installed on your model server.
-3. Click **Use as default** for the source you want, if it is not already the default. You can now talk to the agent. **Model settings…** lets you override the context window and image support for an individual model; its **Save** does not change your default model.
+1. Select a connection or click **Add connection**. Choose **OpenAI**, **Anthropic**, **Ollama** or **Other compatible** (vLLM, SGLang, llama.cpp…). OpenAI and Anthropic have preset URLs; for a local or compatible server, enter its URL and a key if required.
+2. Click **Verify connection**, then enter or choose a model that supports tool calling. Local models must already be installed on your model server.
+3. Click **Use as default** for the connection you want, if needed, then **Save changes**. Changes to connections, the default model and **Model settings** are staged until this save. Model settings can override the context window, generation limit and image support for an individual model.
 
 For Ollama running on the Docker host, use `http://host-gateway:11434`; for an OpenAI-compatible server, include `/v1` in its URL. `localhost` inside the Prism container refers to that container, not your host.
 
 Choose your timezone in **Settings → Profile**. For document search, configure
 an embedding model too; see [Choosing your backend](#choosing-your-backend).
+
+**4. Give it something worth doing.**
+
+Upload the fictional [service-jobs CSV](docs/examples/service-jobs.csv) and try:
+
+> Create a service-desk workspace from this CSV. Build a searchable job list with status filters, editable job details, technician workload and a CSV export. Persist edits so the app still works when I reopen Prism. Then give me a short report of waiting and overdue jobs and attach it to your reply. Use November 12, 2026 as the reference date for this example.
+
+This uses the same kind of data shown in the screenshots above. You can then ask
+for charts, a weekly report, a scheduled summary or a second view of the data.
+Start with your own problem when you're ready; the twelve imaginary jobs can wait.
 
 ### Optional local Notes vault
 
@@ -121,13 +278,13 @@ Enter credentials through the secure settings form or the secret prompt the agen
 
 You can keep several AI sources configured at once, including several servers of the same type. Choose a default source/model for conversations and app actions; the chat model picker also offers models from the other sources. Each source has its own connection and credential.
 
-For document search, the **Embeddings** section lets you reuse the default source with **Use same provider**, select another existing source, or enter a dedicated connection. Choose an embedding model and click **Test embeddings**. Anthropic does not provide an embedding endpoint, so choose another source for that part.
+For document search, expand **Document search** and choose **Use default conversation connection**, **Use another connection** or **Dedicated embedding connection**. Enter or choose an embedding model. A dedicated connection also offers **Load models** and, under **Test embeddings**, **Test embedding model**. Anthropic does not provide an embedding endpoint, so choose another source for that part. Leave **Disabled** selected if you do not need document search.
 
 Click **Save changes** to apply embedding settings automatically, without restarting Prism. Settings displays progress if the document index needs rebuilding.
 
 Changing the embedding model or endpoint requires confirming the index rebuild in the form. Prism rebuilds from stored text; there is no need to upload your documents again. The agent can guide you through this too.
 
-The `.env` AI settings remain available as server defaults for existing installations. The interface takes precedence once saved; **Use server settings** restores those defaults.
+The `.env` AI settings remain available as server defaults for existing installations. The interface takes precedence once saved; **Restore server defaults** stages a return to those defaults, applied with **Save changes**.
 
 ---
 
@@ -263,7 +420,7 @@ details. `docker compose down -v` deletes volumes; it is not an update command.
 | Vector store | PostgreSQL + pgvector |
 | Web search | SearXNG |
 | Service routing | Traefik |
-| Messaging | Telegram / Slack / Webex bridge |
+| Messaging | Telegram / Slack / Webex / Teams bridges |
 | Integrations | Email (IMAP/SMTP), CalDAV, Todoist, Google, Microsoft, Obsidian/Logseq |
 | Modes | Personal (single user) or shared (accounts, groups, rooms) — one flag |
 | Runtime | Docker / Docker Compose |
@@ -311,7 +468,7 @@ An assistant that can't see your actual life is just a fancy autocomplete. So Pr
 - **Calendar & Tasks** — events and to-dos in Prism's own database out of the box; connect **CalDAV** (Apple iCloud, Nextcloud, Fastmail) or **Todoist** for tasks, and **Google** or **Microsoft** for your calendar. "Add lunch with Sam Friday at noon" does what you'd hope.
 - **Notes** — Markdown with `[[wikilinks]]`, a split editor with an AI toolbar, and an "Add to knowledge" button that shoves a note straight into a RAG collection. Lives in Prism's database, or in your existing **Obsidian / Logseq vault** (just a folder of `.md` files).
 - **Terminal** — a real, full TTY into the agent's workspace container. Toggle with **Ctrl+Enter**. `vim`, `htop`, colours, package installs — all work. For when you trust the agent right up until you don't.
-- **Reach it from anywhere** — **Telegram**, **Slack** and **Webex** bridges, so you can bother the agent from your phone while pretending to work.
+- **Reach it from anywhere** — **Telegram**, **Slack**, **Webex** and **Teams** bridges, so you can bother the agent from your phone while pretending to work.
 
 Connecting an account is a one-time OAuth click or an app password in **Settings**. Prism never hosts a shared OAuth app — you create your own, because your calendar is nobody's business but yours.
 
@@ -392,7 +549,7 @@ Same binary, one flag. Decide which you are before the first `up`:
 
 **Groups** are the unit of collaboration. The global admin creates them and adds members; a member can be promoted to *group admin* for that group. Each group has:
 
-- a **shared agent** — its own name, avatar, model, system prompt and turn budget, configured by a group admin. It lives in the group's **Room**, a chat where members talk to each other and to the agent by @mention, and it's the one that answers on the group's **Webex** bot;
+- a **shared agent** — its own name, avatar, model, system prompt and turn budget, configured by a group admin. It lives in the group's **Room**, a chat where members talk to each other and to the agent by @mention, and it's the one that answers on the group's **Webex** or **Teams** bot;
 - a **knowledge base** and **MCP servers** shared with the whole group — the shared agent and every member's personal agent can use them, members see them read-only;
 - **group secrets** for those MCP servers and tools;
 - a **tool policy**: the global admin sets the ceiling for every tool (*open to members* / *admins only* / *disabled*), a group admin can only tighten it for their group. Everything is open by default — this is a cockpit for a trusted crew, not a sandbox for strangers on the internet.
@@ -465,7 +622,7 @@ The `.env` file supplies installation settings and optional AI defaults. Docker 
 
 - **It can't reach Ollama.** From inside Docker, `localhost` is the container, not your machine. Use `host-gateway` (the compose file maps it) or the host's LAN IP. `docker compose logs -f prism-server` shows what it tried.
 - **"model not found".** The name must match `ollama list` exactly, tag included — `qwen3.6:27b`, not `qwen3.6`.
-- **Replies come back empty or cut off on a reasoning model.** It spent the whole budget thinking. Lower the reasoning effort in **Settings → Agent** (or `OPENAI_REASONING_EFFORT`), or switch reasoning off there.
+- **Replies come back empty or cut off on a reasoning model.** Check the displayed error first: a connection failure and a generation limit need different fixes. If the model spent its generation budget thinking without producing an answer, lower the reasoning effort in **Settings → Agent** (or `OPENAI_REASONING_EFFORT`), or switch reasoning off there. **AI provider → Model settings** also lets you adjust its generation limit.
 - **Reasoning effort has no effect behind LiteLLM.** `drop_params: true` strips `reasoning_effort` before it reaches the model — add `allowed_openai_params: ["reasoning_effort"]` to the route's `litellm_params`.
 - **"Iteration limit reached".** The agent hit its per-message cap on a long task — not a bug, a budget. Raise it in **Settings → Agent → Turn budget** (default 75, up to 500), or just say "continue".
 - **Widget previews look wrong / the agent says it can't see.** Choose a vision-capable model and set **Vision support → Supports images** in **AI provider → Model settings…**. Ask the agent for help with your model's capabilities.

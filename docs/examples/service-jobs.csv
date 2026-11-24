@@ -1,0 +1,13 @@
+id,client,service,city,scheduled_date,status,priority,amount_eur,technician
+JOB-101,Atelier Horizon,Office Wi-Fi audit,Fort-de-France,2026-11-10,completed,normal,280,Camille
+JOB-102,Studio Mangrove,Backup recovery,Le Lamentin,2026-11-12,in_progress,high,640,Alex
+JOB-103,Maison Corail,Network cabling,Schoelcher,2026-11-13,planned,normal,480,Noa
+JOB-104,Comptoir Indigo,VPN setup,Ducos,2026-11-11,waiting,high,320,Camille
+JOB-105,Atelier Horizon,NAS maintenance,Fort-de-France,2026-11-16,planned,normal,220,Alex
+JOB-106,Studio Mangrove,Workstation setup,Le Lamentin,2026-11-09,completed,normal,180,Noa
+JOB-107,Maison Corail,Switch replacement,Schoelcher,2026-11-12,in_progress,high,760,Camille
+JOB-108,Comptoir Indigo,Mail migration,Ducos,2026-11-17,planned,normal,540,Alex
+JOB-109,Collectif Azur,Guest Wi-Fi setup,Le Robert,2026-11-14,waiting,normal,360,Noa
+JOB-110,Collectif Azur,Network health check,Le Robert,2026-11-18,planned,normal,160,Camille
+JOB-111,Maison Corail,Remote access setup,Schoelcher,2026-11-19,planned,normal,240,Alex
+JOB-112,Atelier Horizon,Backup verification,Fort-de-France,2026-11-12,waiting,high,140,Noa
