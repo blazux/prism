@@ -1,11 +1,42 @@
 package email
 
 import (
+	"bytes"
+	stdmail "net/mail"
 	"strings"
 	"testing"
 
 	"github.com/emersion/go-imap/v2"
 )
+
+func TestPreparedMessageKeepsBlindRecipientsOffTheWire(t *testing.T) {
+	c := Config{User: "sender@example.test", From: "Élodie <sender@example.test>", SMTPHost: "mail.example.test"}
+	from, rcpts, raw, err := c.prepareMessage(`"Doe, Jane" <jane@example.test>`, "jane@example.test, colleague@example.test", "hidden@example.test", "Réunion à Noël", "Déjà prêt.", "<original@example.test>", []OutAttachment{{Filename: "résumé.txt", ContentType: "text/plain", Data: []byte("été")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if from != "sender@example.test" || strings.Join(rcpts, ",") != "jane@example.test,colleague@example.test,hidden@example.test" {
+		t.Fatal(from, rcpts)
+	}
+	m, err := stdmail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Header.Get("Bcc") != "" || bytes.Contains(raw, []byte("hidden@example.test")) {
+		t.Fatal("Bcc recipient disclosed")
+	}
+	if !strings.Contains(m.Header.Get("Cc"), "colleague@example.test") || m.Header.Get("References") != "<original@example.test>" {
+		t.Fatal(m.Header)
+	}
+	if !bytes.Contains(raw, []byte("Déjà prêt.")) {
+		t.Fatal("body accents lost")
+	}
+	for _, recipient := range []string{"bad address", "good@example.test\r\nBcc: injected@example.test"} {
+		if _, _, _, err := c.prepareMessage("valid@example.test", "", recipient, "Subject", "Body", "", nil); err == nil {
+			t.Fatalf("invalid address accepted: %q", recipient)
+		}
+	}
+}
 
 func TestAddr(t *testing.T) {
 	if got := addr(nil); got != "" {

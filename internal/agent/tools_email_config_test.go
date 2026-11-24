@@ -94,7 +94,7 @@ func TestEmailConfigWithFieldsStillUpdatesMailbox(t *testing.T) {
 	executor := NewToolExecutor(nil, t.TempDir(), t.TempDir(), "", "")
 	executor.SetMemoryStore(store)
 	executor.SetPersonalScope("u7")
-	if err := executor.userStore().SetConfig(ctx, emailConfigKey, `{"imap_host":"unreachable.invalid","imap_port":993,"smtp_host":"smtp.invalid","smtp_port":587,"user":"before@example.test","security":"starttls","insecure":true,"list_limit":120}`); err != nil {
+	if err := executor.userStore().SetConfig(ctx, emailConfigKey, `{"imap_host":"unreachable.invalid","imap_port":993,"smtp_host":"smtp.invalid","smtp_port":587,"user":"before@example.test","security":"starttls","insecure":true,"list_limit":120,"signature":"Équipe réseau\nÀ bientôt"}`); err != nil {
 		t.Fatal(err)
 	}
 	const password = "fixture-new-mail-password"
@@ -121,10 +121,26 @@ func TestEmailConfigWithFieldsStillUpdatesMailbox(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &config); err != nil {
 		t.Fatal(err)
 	}
-	if config.User != "after@example.test" || config.Insecure || config.IMAPHost != "unreachable.invalid" || config.SMTPHost != "smtp.invalid" || config.ListLimit != 120 || config.Security != "starttls" {
+	if config.User != "after@example.test" || config.Insecure || config.IMAPHost != "unreachable.invalid" || config.SMTPHost != "smtp.invalid" || config.ListLimit != 120 || config.Security != "starttls" || config.Signature != "Équipe réseau\nÀ bientôt" {
 		t.Fatalf("partial update failed to merge/preserve saved fields: %+v", config)
 	}
 	if got, exists, err := executor.userStore().GetSecret(ctx, emailPasswordSecret); err != nil || !exists || got != password {
 		t.Fatalf("password_secret update failed: exists=%v err=%v", exists, err)
+	}
+	for _, signature := range []string{"Vincent — réseau et développement", ""} {
+		if _, err := executor.emailTool(ctx, map[string]interface{}{"action": "config", "signature": signature}); err != nil {
+			t.Fatal(err)
+		}
+		status, err := executor.emailTool(ctx, map[string]interface{}{"action": "config"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result map[string]any
+		if err := json.Unmarshal([]byte(status), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result["signature"] != signature || result["user"] != "after@example.test" {
+			t.Fatalf("signature update/clear changed mailbox or failed: %s", status)
+		}
 	}
 }

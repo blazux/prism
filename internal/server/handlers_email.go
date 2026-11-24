@@ -7,12 +7,14 @@ package server
 // "email_password" — so both the UI and the agent see one account.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"prism/internal/email"
 )
@@ -31,6 +33,7 @@ type emailStoredConfig struct {
 	Security  string `json:"security,omitempty"`
 	Insecure  bool   `json:"insecure,omitempty"`
 	ListLimit int    `json:"list_limit,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
 func (s *Server) loadEmailCfg(r *http.Request) (email.Config, bool) {
@@ -78,6 +81,7 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 			"security":     sc.Security,
 			"insecure":     sc.Insecure,
 			"list_limit":   sc.ListLimit,
+			"signature":    sc.Signature,
 			"has_password": hasPass && pass != "",
 		})
 	case "POST":
@@ -91,6 +95,10 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
+			return
+		}
+		if len(b.Signature) > 16000 {
+			writeErr(w, http.StatusBadRequest, "Signature must be at most 16,000 bytes.")
 			return
 		}
 		if err := email.ValidateBridgePreset(s.userStore(r).LocalMailBridgeDisabled, b.IMAPHost, b.SMTPHost); err != nil {
@@ -264,81 +272,138 @@ func (s *Server) handleEmailSearch(w http.ResponseWriter, r *http.Request) {
 // reply), plus optional file[] attachments. Falls back to a JSON body when not
 // multipart (no attachments).
 func (s *Server) handleEmailSend(w http.ResponseWriter, r *http.Request) {
-	cfg, ok := s.loadEmailCfg(r)
-	if !ok {
-		http.Error(w, "email not configured", 400)
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "Method not allowed.")
 		return
 	}
-	var to, subject, body string
+	cfg, ok := s.loadEmailCfg(r)
+	if !ok {
+		writeErr(w, 400, "Email is not configured.")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxEmailRequest)
+	var to, cc, bcc, subject, body string
 	var uid uint32
 	var atts []email.OutAttachment
-
+	var draftID, draftRevision int64
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-		if err := r.ParseMultipartForm(25 << 20); err != nil { // 25 MB
-			http.Error(w, "bad form: "+err.Error(), 400)
+		if err := r.ParseMultipartForm(4 << 20); err != nil {
+			writeErr(w, 400, "Invalid email or attachments exceed the request limit.")
 			return
 		}
-		to = r.FormValue("to")
-		subject = r.FormValue("subject")
-		body = r.FormValue("body")
+		if r.MultipartForm != nil {
+			defer r.MultipartForm.RemoveAll()
+		}
+		to, cc, bcc, subject, body = r.FormValue("to"), r.FormValue("cc"), r.FormValue("bcc"), r.FormValue("subject"), r.FormValue("body")
 		if v, err := strconv.ParseUint(r.FormValue("uid"), 10, 32); err == nil {
 			uid = uint32(v)
 		}
 		if r.MultipartForm != nil {
+			total := 0
 			for _, fh := range r.MultipartForm.File["file"] {
 				f, err := fh.Open()
 				if err != nil {
-					continue
+					writeErr(w, 400, "Could not read an attachment.")
+					return
 				}
-				data, _ := io.ReadAll(f)
+				data, err := io.ReadAll(io.LimitReader(f, maxEmailAttachments+1))
 				f.Close()
-				atts = append(atts, email.OutAttachment{
-					Filename:    fh.Filename,
-					ContentType: fh.Header.Get("Content-Type"),
-					Data:        data,
-				})
+				total += len(data)
+				if err != nil || total > maxEmailAttachments {
+					writeErr(w, 400, "Attachments exceed the 20 MiB limit or could not be read.")
+					return
+				}
+				atts = append(atts, email.OutAttachment{Filename: fh.Filename, ContentType: fh.Header.Get("Content-Type"), Data: data})
 			}
 		}
 	} else {
 		var b struct {
-			To, Subject, Body string
-			UID               uint32
+			To, CC, BCC, Subject, Body string
+			UID                        uint32
+			DraftID                    int64 `json:"draft_id"`
+			DraftRevision              int64 `json:"draft_revision"`
 		}
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
-			http.Error(w, "bad body", 400)
+			writeErr(w, 400, "Invalid email request.")
 			return
 		}
-		to, subject, body, uid = b.To, b.Subject, b.Body, b.UID
+		to, cc, bcc, subject, body, uid = b.To, b.CC, b.BCC, b.Subject, b.Body, b.UID
+		draftID, draftRevision = b.DraftID, b.DraftRevision
 	}
-
+	var sent, uncertain bool
+	if draftID > 0 {
+		if draftRevision < 1 {
+			writeErr(w, 400, "The saved draft revision is required.")
+			return
+		}
+		ms := s.userStore(r)
+		if ms == nil {
+			writeErr(w, 503, "Draft storage is unavailable.")
+			return
+		}
+		prior, err := ms.GetEmailDraft(r.Context(), draftID)
+		if err != nil {
+			emailDraftError(w, err)
+			return
+		}
+		if prior.Account != emailAccountFingerprint(cfg) {
+			writeErr(w, 409, "The mailbox connection changed. Save this as a new draft before sending.")
+			return
+		}
+		d, err := ms.ClaimEmailDraft(r.Context(), draftID, draftRevision, emailAccountFingerprint(cfg))
+		if err != nil {
+			emailDraftError(w, err)
+			return
+		}
+		defer func() {
+			// SMTP may outlive an HTTP disconnect. Keep its outcome durable without
+			// letting a cancelled browser request strand a confirmed failed send.
+			// A transport error after SMTP begins can mean delivery succeeded but
+			// its acknowledgement was lost. Keep that snapshot locked for review.
+			if uncertain && !sent {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = ms.FinishEmailDraftSend(ctx, draftID, draftRevision, sent)
+		}()
+		to, cc, bcc, subject, body, uid = d.To, d.CC, d.BCC, d.Subject, d.Body, d.UID
+		cfg.Folder = d.Folder
+		atts = nil
+		for _, a := range d.Attachments {
+			atts = append(atts, email.OutAttachment{Filename: a.Filename, ContentType: a.ContentType, Data: a.Data})
+		}
+	}
 	if strings.TrimSpace(body) == "" {
-		http.Error(w, "body required", 400)
+		writeErr(w, 400, "Message body is required.")
+		return
+	}
+	if len(body) > maxEmailText || len(subject) > 8192 || len(to)+len(cc)+len(bcc) > 32768 {
+		writeErr(w, 400, "Message text is too large.")
 		return
 	}
 	inReplyTo := ""
 	if uid > 0 {
 		orig, err := cfg.Read(uid)
 		if err != nil {
-			http.Error(w, "could not load original: "+err.Error(), 502)
+			writeErr(w, 502, "Could not load original: "+err.Error())
 			return
 		}
 		inReplyTo = orig.MessageID
-		if to == "" {
+		if to == "" && cc == "" && bcc == "" {
 			to = orig.From
 		}
 		if subject == "" {
 			subject = "Re: " + orig.Subject
 		}
 	}
-	if to == "" {
-		http.Error(w, "recipient required", 400)
+	if err := cfg.SendTo(to, cc, bcc, subject, body, inReplyTo, atts); err != nil {
+		uncertain = email.DeliveryUncertain(err)
+		writeErr(w, 502, err.Error())
 		return
 	}
-	if err := cfg.Send(to, subject, body, inReplyTo, atts); err != nil {
-		http.Error(w, err.Error(), 502)
-		return
-	}
-	writeJSON(w, map[string]interface{}{"ok": true})
+	sent = true
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // GET /api/email/attachment?uid=X&i=N — download the N-th attachment.

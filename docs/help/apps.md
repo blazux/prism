@@ -9,7 +9,8 @@ You can triage/categorize with tags, filter by tag, search, read, reply, and sen
 **with attachments**. The agent can summarize your inbox, turn an email into a
 task or a calendar event, and (with cron) send you a morning digest over Telegram.
 Browse and manage folders, move/archive/trash messages, mark read/unread and
-create deterministic inbox rules. See **email** for the full UI and agent workflow.
+create deterministic **Prism rules**. These run in Prism, separately from your
+mail provider's filters. See **email** for the full UI and agent workflow.
 
 ## Calendar
 The Calendar app manages events with a title, time, location and description.
@@ -55,6 +56,11 @@ In a shared deployment a note can be **shared with your group**
 ("share my onboarding note with the team"); sharing it again refreshes the copy,
 and the author or a group admin can unshare it.
 
+Previous edits and removed notes can be recovered through History and Trash.
+Backlinks and a heading outline help navigate linked pages. See **notes** for
+wiki links, version restoration and the difference between a note, its
+published group copy and its indexed knowledge copy.
+
 ## Link to an app item
 
 Use an ordinary Markdown link in a reply or an HTML link in a widget to open an
@@ -67,6 +73,8 @@ For email, the ID is the message UID and `folder` is its exact mailbox folder.
 - Event: `[Open the event](/?app=calendar&id=23)`
 - Email: `[Read the message](/?app=email&id=153&folder=INBOX)`
 - Conversation: `[Open this workspace](/?workspace=finance&chat=open)`
+- Room: `[Open the team Room](/?app=room&group=17)` using the exact accessible
+  group ID returned by the group list.
 
 These links use the signed-in user's connections and permissions. They do not
 select another user's account. A recipient may not have access to the same item.
@@ -83,5 +91,7 @@ Toggle it with **Ctrl+Enter**. It supports terminal programs such as `vim` and
 the environment where the agent runs.
 
 ## Activity
-The Actions view shows completed changes, failures and inbox rule results;
-technical details remain available in separate tabs. See **activity**.
+The Agent work view shows ongoing work, requests needing attention and the latest
+finished work, with links back to their conversations. Actions shows completed
+changes, failures and inbox rule results; technical history is under Details.
+See **activity**.

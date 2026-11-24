@@ -42,11 +42,29 @@ scheduled conversation, also makes the status `running`; `backgroundJobs` counts
 these active agent turns, including delegated workers. Direct tool calls from
 widgets or scripts do not mark the agent as working.
 
-While a dashboard task is active, `request` contains its initiating message,
+While a dashboard task is active, `request` contains its initiating message.
+`startedAt`,
+`lastActivityAt` and `finishedAt` give recorded times when available; older
+work may have no timing metadata. A last recorded event is not a heartbeat or
+an estimate of completion.
+
+While a dashboard task is active,
 `recentTools` lists up to eight recent tool calls and their states, and
 `subagents` lists delegated workers, their assigned tasks and their states. Tool arguments, tool
 outputs, private reasoning and secret or approval dialogs are excluded.
-These live details are no longer available after the dashboard task ends.
+The live tool and delegated-worker details are no longer available after the
+dashboard task ends; full results remain in the saved conversation.
+
+## Overview of work
+
+For work across conversations, use `GET /api/activity/work` with the same
+authorization header. It returns `items` with the latest recorded work in your
+personal conversations and accessible Rooms. Each item includes its
+`conversationUrl`, state, initiating request when recorded, known timestamps,
+and bounded tool/worker metadata. Unlike the live per-workspace details, the
+overview retains the recorded request after a turn ends. No new agent turn is
+started by reading it. In shared mode this overview requires a personal account;
+it does not grant access to another member's personal conversations.
 
 `messages` contains the last four saved user, assistant or error messages in
 chronological order, with timestamps. An optional `?limit=N` accepts 1–20

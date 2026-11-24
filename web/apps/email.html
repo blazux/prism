@@ -121,23 +121,28 @@
 
   <div class="overlay" id="overlay">
     <div class="compose" role="dialog" aria-modal="true" aria-labelledby="compose-title">
-      <div class="compose-head" id="compose-title">New message</div>
+      <div class="compose-head"><span id="compose-title">New message</span><button class="icon-btn" onclick="closeCompose()" aria-label="Save and close draft">✕</button></div>
       <div class="compose-body">
         <label class="compose-field"><span>To</span><input id="c-to" placeholder="name@example.com" aria-label="Recipients"></label>
+        <label class="compose-field"><span>Cc</span><input id="c-cc" placeholder="Optional recipients" aria-label="Cc recipients"></label>
+        <label class="compose-field"><span>Bcc</span><input id="c-bcc" placeholder="Hidden recipients" aria-label="Bcc recipients"></label>
         <label class="compose-field"><span>Subject</span><input id="c-subject" placeholder="Add a subject" aria-label="Subject"></label>
         <textarea id="c-body" aria-label="Message" placeholder="Write your message…"></textarea>
         <div id="c-atts" class="c-atts"></div>
+        <div class="draft-save-line"><span id="c-status" role="status" aria-live="polite"></span><button class="text-btn" id="draft-save-copy" onclick="saveDraftCopy()" hidden>Save as new draft</button></div>
         <div class="err" id="c-err"></div>
       </div>
       <div class="compose-foot">
         <label class="btn" title="Attach files">📎 Attach<input type="file" id="c-file" multiple style="display:none"></label>
+        <button class="icon-btn" id="discard-draft" onclick="discardCompose()" title="Delete draft" aria-label="Delete draft">🗑</button>
         <span style="flex:1"></span>
-        <button class="btn" onclick="closeCompose()">Cancel</button>
+        <button class="btn" onclick="closeCompose()">Save &amp; close</button>
         <button class="btn btn-accent" id="send-mail" onclick="doSend()">Send</button>
       </div>
     </div>
   </div>
 
+<script src="/apps/email-drafts.js"></script>
 <script>
 const J = (r) => r.json();
 function suggest(items) { try { parent.postMessage({ type: 'suggest', items }, '*'); } catch (_) {} }
@@ -211,9 +216,10 @@ function renderInbox() {
       <aside class="mail-sidebar" aria-label="Mailbox navigation">
         <button class="btn btn-accent new-message" onclick="compose();toggleFolders(false)">${mailIcon('compose')} New message</button>
         <div class="sidebar-label"><span>Folders</span><button class="icon-btn" onclick="manageFolders()" title="Manage folders" aria-label="Manage folders">${mailIcon('settings')}</button></div>
+        <button class="nav-item" onclick="showSavedDrafts()">${mailIcon('compose')}<span>Prism drafts</span><span class="draft-count" id="draft-count"></span></button>
         <nav id="folder-nav" aria-label="Mail folders"><div class="sidebar-loading">Loading folders…</div></nav>
         <div class="sidebar-bottom">
-          <button class="nav-item" onclick="manageRules();toggleFolders(false)">${mailIcon('rules')}<span>Inbox rules</span></button>
+          <button class="nav-item" onclick="manageRules();toggleFolders(false)">${mailIcon('rules')}<span>Prism rules</span></button>
           <div class="mail-account" title="${esc(cfg.user||'')}">${esc(cfg.user||'Connected mailbox')}</div>
         </div>
       </aside>
@@ -234,6 +240,7 @@ function renderInbox() {
   document.getElementById('search').addEventListener('search', () => {if(!document.getElementById('search').value)clearMailSearch();});
   suggest([{ label: '📋 Summarize unread', prompt: 'Summarize my unread emails', send: true }]);
   loadFolders();
+  loadSavedDrafts().catch(() => {});
   loadInbox().then(mailReferenceReady);
 }
 
@@ -533,14 +540,14 @@ async function aiReply() {
   openCompose('AI reply draft', current.from, reSubject(current.subject), quotedReply(original, 'Drafting…'));
   const generation = composeGeneration;
   const ta = document.getElementById('c-body');
-  const snapshot = () => JSON.stringify(['c-to','c-subject','c-body'].map(id => document.getElementById(id).value));
+  const snapshot = () => JSON.stringify(['c-to','c-cc','c-bcc','c-subject','c-body'].map(id => document.getElementById(id).value));
   const initialDraft = snapshot();
   const active = () => generation === composeGeneration && snapshot() === initialDraft;
   try {
     const draft = await assist('email_reply', emailPlain());
-    if (active()) { ta.value = quotedReply(original, draft); publishMailContext(); }
+    if (active()) { ta.value = quotedReply(original, draft); publishMailContext(); scheduleDraftSave(); }
   } catch (e) {
-    if (active()) { ta.value = quotedReply(original); document.getElementById('c-err').textContent = 'Draft failed: ' + e.message; publishMailContext(); }
+    if (active()) { ta.value = quotedReply(original); document.getElementById('c-err').textContent = 'Draft failed: ' + e.message; publishMailContext(); scheduleDraftSave(); }
   }
 }
 
@@ -594,13 +601,14 @@ async function triage(scope='all'){
  finally{triageState=null;updateTriageUI();}
 }
 
-function compose() { replyUid = 0; openCompose('New message', '', '', ''); }
+function signatureText() { return cfg?.signature?.trim() ? '\n\n-- \n'+cfg.signature.trim() : ''; }
+function compose() { if(document.getElementById('overlay').classList.contains('open'))return;replyUid = 0; openCompose('New message', '', '', signatureText()); }
 function reSubject(s) { return /^re:/i.test(s || '') ? s : 'Re: ' + (s || ''); }
 function quotedReply(message, answer='') {
   const body = looksHTML(message.body) ? stripHtml(message.body) : (message.body || '');
   const date = new Date(message.date);
   const when = Number.isFinite(date.getTime()) ? 'On '+date.toLocaleString() : 'In the original message';
-  return answer+'\n\n'+when+', '+(message.from || 'the sender')+' wrote:\n'+body.replace(/\r\n?/g,'\n').split('\n').map(line=>'> '+line).join('\n');
+  return answer+signatureText()+'\n\n'+when+', '+(message.from || 'the sender')+' wrote:\n'+body.replace(/\r\n?/g,'\n').split('\n').map(line=>'> '+line).join('\n');
 }
 function reply() {
   if (!current) return;
@@ -610,12 +618,13 @@ function reply() {
 function replyAll() {
   if (!current) return;
   replyUid = current.uid;
-  // sender + original To + Cc, deduped, minus our own address
-  const mine = new Set([cfg && cfg.user, cfg && cfg.from].filter(Boolean).map(x => x.toLowerCase()));
-  const emails = (`${current.from}, ${current.to || ''}, ${current.cc || ''}`.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || []);
-  const seen = new Set(), list = [];
-  for (const e of emails) { const le = e.toLowerCase(); if (!mine.has(le) && !seen.has(le)) { seen.add(le); list.push(e); } }
-  openCompose('Reply all', list.join(', '), reSubject(current.subject), quotedReply(current));
+  const addressList = value => value.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [];
+  const mine = new Set(addressList([cfg?.user,cfg?.from].filter(Boolean).join(', ')).map(s=>s.toLowerCase()));
+  const seen = new Set(mine);
+  const unique = value => addressList(value).filter(address=>{const key=address.toLowerCase();if(seen.has(key))return false;seen.add(key);return true;}).join(', ');
+  const to = unique([current.from,current.to].filter(Boolean).join(', '));
+  const cc = unique(current.cc || '');
+  openCompose('Reply all', to, reSubject(current.subject), quotedReply(current), folder, cc);
 }
 function forward() {
   if (!current) return;
@@ -623,36 +632,40 @@ function forward() {
   const sub = /^fwd?:/i.test(current.subject || '') ? current.subject : 'Fwd: ' + (current.subject || '');
   const body = looksHTML(current.body) ? stripHtml(current.body) : (current.body || '');
   const quoted = `\n\n---------- Forwarded message ----------\nFrom: ${current.from}\nDate: ${new Date(current.date).toLocaleString()}\nSubject: ${current.subject}\nTo: ${current.to || ''}\n\n${body}`;
-  openCompose('Forward', '', sub, quoted);
+  openCompose('Forward', '', sub, signatureText()+quoted);
 }
 let replyFolder="INBOX";
 let composeSnapshot='', sendingMail=false;
 let composeGeneration = 0;
 let composeAtts = []; // File objects to attach
-function openCompose(title, to, subject, body, sourceFolder=folder) {
+function openCompose(title, to, subject, body, sourceFolder=folder, cc='', bcc='', restored=false) {
   composeGeneration++;
   replyFolder=sourceFolder;
   document.getElementById('compose-title').textContent = title;
   document.getElementById('c-to').value = to || '';
+  document.getElementById('c-cc').value = cc || '';
+  document.getElementById('c-bcc').value = bcc || '';
   document.getElementById('c-subject').value = subject || '';
   document.getElementById('c-body').value = body || '';
   document.getElementById('c-err').textContent = '';
   composeAtts = []; renderComposeAtts();
-  composeSnapshot=JSON.stringify([to||'',subject||'',body||'']);
+  composeSnapshot=JSON.stringify([to||'',cc||'',bcc||'',subject||'',body||'']);
   document.getElementById('overlay').classList.add('open');
   document.getElementById(to?'c-body':'c-to').focus();
   if(to)document.getElementById('c-body').setSelectionRange?.(0,0);
+  resetDraftState();
   publishMailContext();
+  if(!restored)scheduleDraftSave();
 }
 function renderComposeAtts() {
   const host = document.getElementById('c-atts');
   host.innerHTML = composeAtts.map((f, i) =>
     `<span class="att-chip">📎 ${esc(f.name)}<span class="att-sz">${fmtSize(f.size)}</span><button class="att-x" data-i="${i}" title="Remove">✕</button></span>`).join('');
-  host.querySelectorAll('.att-x').forEach(b => b.onclick = () => { composeAtts.splice(+b.dataset.i, 1); renderComposeAtts(); });
+  host.querySelectorAll('.att-x').forEach(b => b.onclick = () => { if(sendingMail)return;composeAtts.splice(+b.dataset.i, 1); renderComposeAtts();scheduleDraftSave(true); });
 }
 document.getElementById('c-file').addEventListener('change', e => {
   for (const f of e.target.files) composeAtts.push(f);
-  e.target.value = ''; renderComposeAtts();
+  e.target.value = ''; renderComposeAtts();scheduleDraftSave(true);
 });
 
 // ── Read state ──────────────────────────────────────────────────────────────
@@ -690,12 +703,17 @@ function stripHtml(s) {
   } catch { return (s || '').replace(/<[^>]+>/g, ' ').trim(); }
 }
 async function closeCompose(force=false) {
-  if(sendingMail&&!force)return;
-  const now=JSON.stringify(['c-to','c-subject','c-body'].map(id=>document.getElementById(id).value));
-  if(!force&&(now!==composeSnapshot||composeAtts.length)&&!await PrismModal.confirm('Discard this draft? Your changes will be lost.',{danger:true,okLabel:'Discard'}))return;
+  if(sendingMail&&!force)return false;
+  if(!force&&!draftState?.blocked){
+    try{await flushDraft();}catch(error){document.getElementById('c-err').textContent='Keep this window open: '+error.message;return false;}
+  }
+  clearTimeout(draftSaveTimer);
   composeGeneration++;
   document.getElementById('overlay').classList.remove('open');
+  draftState=null;
+  setComposerDisabled(false);
   publishMailContext();
+  return true;
 }
 
 function publishMailContext() { if (typeof mailEditor !== 'undefined') mailEditor.publish(); }
@@ -719,37 +737,55 @@ async function openMailComposer(args, expiresAt) {
   openCompose('Reply',message.from,reSubject(message.subject),quotedReply(message),sourceFolder);
 }
 const mailEditor = PrismEditor.connect({
-  fields:['to','subject','body'],
+  fields:['to','cc','bcc','subject','body'],
   open:openMailComposer,
   read:() => {
     if (!document.getElementById('overlay').classList.contains('open')) return null;
-    return {app:'email',id:String(composeGeneration),to:document.getElementById('c-to').value,subject:document.getElementById('c-subject').value,body:document.getElementById('c-body').value,reply_to:replyUid?{folder:replyFolder,uid:replyUid}:null,attachments:composeAtts.map(f=>({name:f.name,size:f.size})),readonly:sendingMail};
+    return {app:'email',id:String(composeGeneration),to:document.getElementById('c-to').value,cc:document.getElementById('c-cc').value,bcc:document.getElementById('c-bcc').value,subject:document.getElementById('c-subject').value,body:document.getElementById('c-body').value,reply_to:replyUid?{folder:replyFolder,uid:replyUid}:null,attachments:composeAtts.map(f=>({name:f.name,size:f.size})),readonly:sendingMail||!!draftState?.blocked};
   },
   context:s => `Editing ${s.reply_to?'a reply':'a new email'} in the composer (not sent). To: ${s.to || '(empty)'}. Subject: ${s.subject || '(empty)'}.${s.reply_to?' Original message: '+JSON.stringify(s.reply_to)+'.':''}`,
   idleContext:() => current ? `Reading email UID ${current.uid}, folder ${folder}, subject ${current.subject}.` : `Viewing email folder ${folder}.`,
-  update:patch => { for (const [key,value] of Object.entries(patch)) document.getElementById('c-'+key).value=value; }
+  update:async patch => { for (const [key,value] of Object.entries(patch)) document.getElementById('c-'+key).value=value; scheduleDraftSave(); await flushDraft(); }
 });
-PrismLinks.beforeLeave = () => {
+PrismLinks.beforeLeave = async () => {
   if (!document.getElementById('overlay').classList.contains('open')) return true;
   if (sendingMail) { PrismAPI.toast('Wait for this message to finish sending.'); return false; }
-  return PrismLinks.confirmLeave(() => JSON.stringify([['c-to','c-subject','c-body'].map(id=>document.getElementById(id).value),composeAtts]),JSON.stringify([JSON.parse(composeSnapshot),[]]));
+  try{await flushDraft();return true;}catch(error){PrismAPI.toast('Draft not saved: '+error.message);return false;}
 };
 
 async function doSend() {
   if(sendingMail)return;
-  const body=document.getElementById('c-body').value,to=document.getElementById('c-to').value.trim(),error=document.getElementById('c-err');
+  const values=draftValues(),error=document.getElementById('c-err');
   error.textContent='';
-  if(!to){error.textContent='Add a recipient.';document.getElementById('c-to').focus();return;}
-  if(!body.trim()){error.textContent='Message is empty.';return;}
-  const fd=new FormData();fd.append('to',to);fd.append('subject',document.getElementById('c-subject').value);fd.append('body',body);
-  if(replyUid)fd.append('uid',String(replyUid));for(const f of composeAtts)fd.append('file',f,f.name);
-  sendingMail=true;const button=document.getElementById('send-mail');button.disabled=true;button.textContent='Sending…';
+  if(![values.to,values.cc,values.bcc].some(s=>s.trim())){error.textContent='Add a recipient.';document.getElementById('c-to').focus();return;}
+  if(!values.body.trim()){error.textContent='Message is empty.';return;}
+  sendingMail=true;setComposerDisabled(true);publishMailContext();
+  const button=document.getElementById('send-mail');button.textContent='Saving…';
   try{
-    const res=await fetch('/api/email/send?folder='+encodeURIComponent(replyFolder),{method:'POST',body:fd});
-    if(!res.ok)throw new Error(await res.text());
-    composeAtts=[];await closeCompose(true);PrismAPI.toast('Message sent');
-  }catch(e){error.textContent='Send failed: '+e.message;}
-  finally{sendingMail=false;button.disabled=false;button.textContent='Send';}
+    const saved=await flushDraft();
+    if(!saved?.id)throw Error('Save the draft before sending.');
+    button.textContent='Sending…';setDraftStatus('Sending…');
+    const res=await fetch('/api/email/send',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({draft_id:saved.id,draft_revision:saved.revision})});
+    if(!res.ok)throw new Error(await PrismAPI.failure(res));
+    composeAtts=[];await closeCompose(true);loadSavedDrafts().catch(()=>{});PrismAPI.toast('Message sent','ok');
+  }catch(e){
+    error.textContent='Send not confirmed: '+e.message+'. Check Sent before trying again.';
+    setDraftStatus('Draft kept in Prism',true);
+    if(draftState?.id){
+      try{
+        const latest=await PrismAPI.api('/api/email/drafts?id='+draftState.id);
+        if(latest.draft?.status==='sending'||latest.mailboxChanged){
+          draftState.mailboxChanged=!!latest.mailboxChanged;
+          draftState.blocked=true;document.getElementById('draft-save-copy').hidden=false;
+          setDraftStatus(latest.mailboxChanged?'Mailbox changed. Save a copy to use the current account.':'Send not confirmed. Check Sent before sending a copy.',true);
+        }
+      }catch(readError){
+        if(readError.status===404){draftState.conflict=true;document.getElementById('draft-save-copy').hidden=false;setDraftStatus('Saved draft no longer exists. Check Sent before creating a copy.',true);}
+      }
+    }
+  }
+  finally{sendingMail=false;setComposerDisabled(!!draftState?.blocked);button.textContent='Send';publishMailContext();}
 }
 
 // Relative date bucket for the list group headers.

@@ -1,11 +1,14 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const html=fs.readFileSync(path.join(__dirname,'../apps/notes.html'),'utf8');
+const wiki=fs.readFileSync(path.join(__dirname,'../apps/notes-wiki.js'),'utf8');
+const rebase=wiki.slice(wiki.indexOf('function rebaseCanonicalNoteBody('),wiki.indexOf('\n}',wiki.indexOf('function rebaseCanonicalNoteBody('))+2);
 function fn(name){const start=html.search(new RegExp('(?:async )?function '+name+'\\('));return html.slice(start,html.indexOf('\n}',start)+2);}
 function fixture(api=async()=>({notes:[]})){
  const fields={'e-title':{value:'Title'},'e-body':{value:'Original'},'e-tags':{value:''},'note-conflict':{hidden:true}};
- const ctx=vm.createContext({$:id=>fields[id],api,session:'test',publishNoteContext(){},applyNoteChrome(){},updatePreview(){},closeEditor(){},render(){},setSourceBadge(){},PrismAPI:{toast(){}},noteTags:n=>(n.tags||'').split(',').map(t=>t.trim()).filter(Boolean)});
- vm.runInContext("let selectedId='n1',notes=[{id:'n1',title:'Title',body:'Original',tags:''}],mode='edit',notesLoadVersion=0,notesSyncRequested=false,pendingNoteUpdate=null,savedNoteDraft=JSON.stringify(['Title','Original','']),noteSaveQueue=Promise.resolve(true);function noteDraft(){return JSON.stringify(['e-title','e-body','e-tags'].map(id=>$(id).value))}function currentNote(){return notes.find(n=>n.id===selectedId)}"+['load','syncEditorFromServer','persistNote','saveNote','resolveNoteUpdate'].map(fn).join('\n'),ctx);
+ const ctx=vm.createContext({$:id=>fields[id],api:async(path,options)=>{const result=await api(path,options);if(options){const patch=JSON.parse(options.body);vm.runInContext('notes',ctx).find(note=>note.id===patch.id)&&Object.assign(vm.runInContext('notes',ctx).find(note=>note.id===patch.id),patch);}return result;},session:'test',publishNoteContext(){},wikiRemember(){},wikiRenameID(){},updateWikiDetails(){},applyNoteChrome(){},updatePreview(){},closeEditor(){},render(){},setSourceBadge(){},PrismAPI:{toast(){}},noteTags:n=>(n.tags||'').split(',').map(t=>t.trim()).filter(Boolean)});
+ vm.runInContext(rebase,ctx);
+ vm.runInContext("let selectedId='n1',notes=[{id:'n1',title:'Title',body:'Original',tags:''}],mode='edit',aiEditVersion=0,notesLoadVersion=0,notesSyncRequested=false,pendingNoteUpdate=null,pendingCanonicalNote=null,savedNoteDraft=JSON.stringify(['Title','Original','']),noteSaveQueue=Promise.resolve(true);function noteDraft(){return JSON.stringify(['e-title','e-body','e-tags'].map(id=>$(id).value))}function currentNote(){return notes.find(n=>n.id===selectedId)}"+['load','syncEditorFromServer','persistNote','saveNote','resolveNoteUpdate'].map(fn).join('\n'),ctx);
  return {fields,run:s=>vm.runInContext(s,ctx)};
 }
 test('agent updates replace a clean open note immediately',()=>{

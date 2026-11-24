@@ -296,6 +296,18 @@ func (s *Store) initSchema(ctx context.Context) error {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS notes_session_idx ON notes(session_id, updated_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS email_drafts (
+			id BIGSERIAL PRIMARY KEY,
+			owner_scope TEXT NOT NULL DEFAULT '',
+			client_id TEXT NOT NULL,
+			account TEXT NOT NULL,
+			revision BIGINT NOT NULL DEFAULT 1,
+			status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sending')),
+			content JSONB NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE(owner_scope,client_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS email_drafts_owner_idx ON email_drafts(owner_scope,updated_at DESC)`,
 		// Group-shared notes (Spectrum): a note shared to a group is a copy stored
 		// under the group scope ("g<id>"). owner_id is the sharer (edit/delete rights),
 		// origin_id links back to the author's personal note so re-sharing updates it.
@@ -502,7 +514,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 			return fmt.Errorf("exec: %w", err)
 		}
 	}
-	return nil
+	return s.initNoteRecoverySchema(ctx)
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────

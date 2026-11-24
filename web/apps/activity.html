@@ -68,20 +68,22 @@
                   gap: 8px; color: var(--text3); padding: 60px 20px; text-align: center; font-size: 14px; }
   .empty .big { font-size: 40px; opacity: .3; }
 </style>
+<link rel="stylesheet" href="/apps/activity-work.css">
 </head>
 <body>
 <div class="app">
   <div class="head">
     <h1>Activity</h1>
     <div class="tabs" id="tabs">
-      <button class="tab active" data-view="actions">Actions</button>
-      <button class="tab" data-view="running">In progress</button>
-      <button class="tab" data-view="interrupted">Interrupted</button>
-      <button class="tab" data-view="">Details</button>
-      <button class="tab" data-view="errors">Errors</button>
-      <button class="tab" data-view="tools">Tools</button>
-      <button class="tab" data-view="chat">Chat</button>
-      <button class="tab" data-view="webhooks">Webhooks</button>
+      <button class="tab active" data-view="work">Agent work</button>
+      <button class="tab" data-view="actions">Actions</button>
+      <details class="activity-details"><summary class="tab" id="details-label">Details</summary><div class="activity-details-menu">
+        <button class="tab" data-view="">All events</button>
+        <button class="tab" data-view="errors">Errors</button>
+        <button class="tab" data-view="tools">Tools</button>
+        <button class="tab" data-view="chat">Chat</button>
+        <button class="tab" data-view="webhooks">Webhooks</button>
+      </div></details>
     </div>
     <div class="right">
       <label class="scope" id="scopeWrap"><input type="checkbox" id="scopeAll"> everyone</label>
@@ -95,13 +97,14 @@
   </div>
 </div>
 
+<script src="/apps/activity-work.js"></script>
 <script>
 const feed = document.getElementById('feed');
 const statusEl = document.getElementById('status');
 const moreBtn = document.getElementById('more');
-let view = 'actions', before = 0, loading = false;
+let view = 'work', before = 0, loading = false;
 let canViewAll = false;
-function isWorkView() { return view === 'running' || view === 'interrupted'; }
+function isWorkView() { return view === 'work'; }
 
 fetch('/api/me').then(r => r.json()).then(me => {
   if (me && me.user && me.user.role === 'global_admin') {
@@ -167,42 +170,15 @@ function row(ev) {
 async function load(reset) {
   if (loading) return;
   loading = true;
+  if (isWorkView()) {
+    try { await loadAgentWork(); } finally { loading=false; }
+    return;
+  }
+  statusEl.className='load';
   if (reset) { feed.innerHTML = ''; before = 0; }
   statusEl.style.display = 'flex';
   statusEl.innerHTML = 'Loading…';
   moreBtn.style.display = 'none';
-  if (isWorkView()) {
-    try {
-      const [sessions, membership] = await Promise.all([PrismAPI.api('/api/sessions?includeSystem=1'),view === 'running' ? PrismAPI.api('/api/my/groups') : Promise.resolve({groups:[]})]);
-      const jobs = [];
-      for (const session of sessions.sessions || []) {
-        const states = view === 'interrupted' ? ['interrupted'] : ['running','waiting_for_input','waiting_for_approval'];
-        if (!states.includes(session.runStatus)) continue;
-        const task = await PrismAPI.api('/api/sessions/'+encodeURIComponent(session.id)+'/activity?limit=1');
-        if (!states.includes(task.runStatus)) continue;
-        jobs.push({name:session.name, ...task});
-      }
-      for (const group of view === 'running' ? membership.groups || [] : []) {
-        const id = group.groupId || group.id;
-        try { const task = await PrismAPI.api('/api/room/activity?group='+encodeURIComponent(id)+'&limit=1');
-          if (task.runStatus==='running'||task.runStatus==='queued') jobs.push({name:'Room · '+(group.groupName||group.name),...task});
-        } catch (error) {if(![403,404].includes(error.status))throw error;} // Room access is checked independently of group membership.
-      }
-      for (const task of jobs) {
-        const el=document.createElement('div');el.className='row '+(view==='interrupted'?'warn':'info');
-        el.innerHTML='<div class="time">'+(view==='interrupted'?'stopped':'now')+'</div><div class="rail"><span class="dot"></span></div><div class="body"><div class="line"><span class="badge">'+esc(task.runStatus.replaceAll('_',' '))+'</span><strong>'+esc(task.name)+'</strong></div><div class="detail">'+esc(task.request||(view==='interrupted'?'Review the saved conversation before resuming.':'Background task'))+'</div><div class="detail">'+esc([...(task.recentTools||[]).map(t=>t.tool+' · '+t.status),...(task.subagents||[]).map(t=>'Subagent: '+(t.task||t.id)+' · '+t.status),...(task.backgroundJobs?[task.backgroundJobs+' background job(s)']:[])].join('\n'))+(task.queued?'\n'+esc(task.queued)+' queued':'')+'</div></div>';
-        if (task.session) {
-          const link=document.createElement('a');link.className='work-link';link.textContent='Open chat';
-          link.href='/?workspace='+encodeURIComponent(task.session)+'&chat=open';
-          el.querySelector('.body').appendChild(link);
-        }
-        feed.append(el);
-      }
-      statusEl.textContent=jobs.length?'':view==='interrupted'?'No interrupted tasks.':'No work in progress.';statusEl.style.display=jobs.length?'none':'';
-    } catch(e){ statusEl.textContent='Could not load tasks: '+e.message; }
-    finally {loading=false;}
-    return;
-  }
   const p = new URLSearchParams();
   if (view) p.set('view', view);
   if (before) p.set('before', before);
@@ -224,17 +200,17 @@ async function load(reset) {
 }
 
 document.getElementById('tabs').addEventListener('click', e => {
-  const b = e.target.closest('.tab'); if (!b) return;
+  const b = e.target.closest('button[data-view]'); if (!b) return;
   if(loading)return;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === b));
-  view = b.dataset.view; document.getElementById('scopeWrap').style.display=isWorkView()||!canViewAll?'none':'inline-flex'; load(true);
+  view = b.dataset.view; document.getElementById('scopeWrap').style.display=isWorkView()||!canViewAll?'none':'inline-flex';document.querySelector('.activity-details').open=false;document.getElementById('details-label').classList.toggle('active',!['work','actions'].includes(view)); load(true);
 });
 document.getElementById('scopeAll').addEventListener('change', () => load(true));
 document.getElementById('refresh').addEventListener('click', () => load(true));
 moreBtn.addEventListener('click', () => load(false));
 load(true);
 let lastAutoRefresh=0;
-setInterval(()=>{const now=Date.now();if(!document.hidden && (view==='running'||!before) && now-lastAutoRefresh>=(view==='running'?5000:30000)){lastAutoRefresh=now;load(true)}},5000);
+setInterval(()=>{const now=Date.now();if(!document.hidden && (view==='work'||!before) && now-lastAutoRefresh>=(view==='work'?5000:30000)){lastAutoRefresh=now;load(true)}},5000);
 </script>
 </body>
 </html>

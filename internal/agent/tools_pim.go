@@ -185,11 +185,12 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr string, args 
 			return "", fmt.Errorf("note %q could not be read, so nothing was changed; try again", idStr)
 		}
 		title, body, tags = mergeNoteFields(*item, args)
-		if _, err := prov.Save(ctx, idStr, title, body, tags); err != nil {
+		savedID, err := prov.Save(ctx, idStr, title, body, tags)
+		if err != nil {
 			return "", err
 		}
 		e.dataChanged(e.pimSessionScope(), "notes")
-		return fmt.Sprintf("Note %q updated.", idStr), nil
+		return fmt.Sprintf("Note %q updated.", savedID), nil
 	case "delete", "remove":
 		if strings.TrimSpace(idStr) == "" {
 			return "", fmt.Errorf("delete requires an id")
@@ -202,13 +203,7 @@ func (e *ToolExecutor) noteTool(ctx context.Context, action, idStr string, args 
 			return "", err
 		}
 		e.dataChanged(e.pimSessionScope(), "notes")
-		msg := fmt.Sprintf("Note %q deleted.", idStr)
-		if item != nil {
-			// Echo what was destroyed: if this delete was a mistake, the content
-			// stays in the conversation and the agent can recreate it itself.
-			msg += fmt.Sprintf(" Deleted content (recreate it with 'add' if this was a mistake) — title: %q, tags: %q, body:\n%s", item.Title, item.Tags, item.Body)
-		}
-		return msg, nil
+		return fmt.Sprintf("Note %q moved to trash. It can be restored in Notes; read prism_help topic=notes for recovery.", idStr), nil
 	case "share":
 		// Same as the Notes app's share button: publish one of the user's own
 		// notes to the group (read-only for members); re-sharing updates the copy.

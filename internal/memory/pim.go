@@ -6,20 +6,25 @@ package memory
 
 import (
 	"context"
+	"errors"
+
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"time"
 )
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Note struct {
-	ID        int64     `json:"id"`
-	SessionID string    `json:"sessionId"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	Tags      string    `json:"tags"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        int64      `json:"id"`
+	SessionID string     `json:"sessionId"`
+	Title     string     `json:"title"`
+	Body      string     `json:"body"`
+	Tags      string     `json:"tags"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	Aliases   []string   `json:"aliases,omitempty"`
+	DeletedAt *time.Time `json:"deletedAt,omitempty"`
 	// Group-shared notes only (0 for personal notes): OwnerID is the user who
 	// shared the note (edit/delete rights); OriginID links back to their personal
 	// note so re-sharing updates the same group copy.
@@ -61,19 +66,15 @@ func (s *Store) AddNote(ctx context.Context, session, title, body, tags string) 
 }
 
 func (s *Store) ListNotes(ctx context.Context, session string) ([]Note, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, session_id, title, body, tags, created_at, updated_at,
-		       COALESCE(owner_id, 0), COALESCE(origin_id, 0)
-		FROM notes WHERE session_id = $1 ORDER BY updated_at DESC
-	`, session)
+	rows, err := s.pool.Query(ctx, `SELECT `+noteColumns+` FROM notes WHERE session_id=$1 AND deleted_at IS NULL ORDER BY updated_at DESC`, session)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Note
+	out := []Note{}
 	for rows.Next() {
-		var n Note
-		if err := rows.Scan(&n.ID, &n.SessionID, &n.Title, &n.Body, &n.Tags, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.OriginID); err != nil {
+		n, err := scanNote(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, n)
@@ -81,52 +82,54 @@ func (s *Store) ListNotes(ctx context.Context, session string) ([]Note, error) {
 	return out, rows.Err()
 }
 
-// GetNote fetches a single note within a scope (returns pgx.ErrNoRows if absent).
+// GetNote fetches an active note within its owner scope.
 func (s *Store) GetNote(ctx context.Context, session string, id int64) (Note, error) {
-	var n Note
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, session_id, title, body, tags, created_at, updated_at,
-		       COALESCE(owner_id, 0), COALESCE(origin_id, 0)
-		FROM notes WHERE id = $1 AND session_id = $2
-	`, id, session).Scan(&n.ID, &n.SessionID, &n.Title, &n.Body, &n.Tags, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.OriginID)
-	return n, err
+	return scanNote(s.pool.QueryRow(ctx, `SELECT `+noteColumns+` FROM notes WHERE id=$1 AND session_id=$2 AND deleted_at IS NULL`, id, session))
 }
 
 // ShareNote publishes a note into a group scope. It is idempotent per author:
 // re-sharing the same personal note (same origin) updates the existing group copy
 // rather than creating a duplicate. Returns the group note's id.
 func (s *Store) ShareNote(ctx context.Context, session string, ownerID, originID int64, title, body, tags string) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
 	if originID > 0 {
-		var id int64
-		err := s.pool.QueryRow(ctx, `
-			UPDATE notes SET title = $1, body = $2, tags = $3, updated_at = NOW()
-			WHERE session_id = $4 AND origin_id = $5 AND owner_id = $6
-			RETURNING id
-		`, title, body, tags, session, originID, ownerID).Scan(&id)
-		if err == nil {
-			return id, nil // updated the existing shared copy
+		// Serialize publication of this source so retries cannot create two copies.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, fmt.Sprintf("note-share:%s:%d:%d", session, ownerID, originID)); err != nil {
+			return 0, err
 		}
-		// no existing copy (ErrNoRows) → fall through and insert a new one
+		n, err := scanNote(tx.QueryRow(ctx, `SELECT `+noteColumns+` FROM notes WHERE session_id=$1 AND origin_id=$2 AND owner_id=$3 ORDER BY deleted_at NULLS FIRST,id LIMIT 1 FOR UPDATE`, session, originID, ownerID))
+		if err == nil {
+			if n.Title != title || n.Body != body || n.Tags != tags || n.DeletedAt != nil {
+				if err := captureNote(ctx, tx, n); err != nil {
+					return 0, err
+				}
+				if _, err := tx.Exec(ctx, `UPDATE notes SET title=$1,body=$2,tags=$3,aliases=$4,deleted_at=NULL,updated_at=NOW() WHERE id=$5 AND session_id=$6`, title, body, tags, noteAliases(n.Aliases, n.Title, title), n.ID, session); err != nil {
+					return 0, err
+				}
+			}
+			return n.ID, tx.Commit(ctx)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return 0, err
+		}
 	}
 	var id int64
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO notes (session_id, owner_id, origin_id, title, body, tags)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
-	`, session, ownerID, originID, title, body, tags).Scan(&id)
-	return id, err
+	err = tx.QueryRow(ctx, `INSERT INTO notes(session_id,owner_id,origin_id,title,body,tags) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, session, ownerID, originID, title, body, tags).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, tx.Commit(ctx)
 }
 
 func (s *Store) UpdateNote(ctx context.Context, session string, id int64, title, body, tags string) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE notes SET title = $1, body = $2, tags = $3, updated_at = NOW()
-		WHERE id = $4 AND session_id = $5
-	`, title, body, tags, id, session)
-	return err
+	return s.updateNote(ctx, session, id, title, body, tags)
 }
-
 func (s *Store) DeleteNote(ctx context.Context, session string, id int64) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM notes WHERE id = $1 AND session_id = $2`, id, session)
-	return err
+	return s.trashNote(ctx, session, id)
 }
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────

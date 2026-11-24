@@ -13,7 +13,7 @@ import (
 	"prism/internal/memory"
 )
 
-const workspaceActivityHelp = "To check work in another workspace, use exec_command to GET $PRISM_URL/api/sessions, then GET $PRISM_URL/api/sessions/<id>/activity with Authorization: Bearer $PRISM_TOKEN. This reads task status, recent messages, tools and subagents without starting a turn. Read prism_help(topic=workspace-activity) for details. Do not POST /api/chat merely to ask for progress: it starts another agent turn."
+const workspaceActivityHelp = "To check work in another workspace, use exec_command to GET $PRISM_URL/api/sessions, then GET $PRISM_URL/api/sessions/<id>/activity with Authorization: Bearer $PRISM_TOKEN. For an overview, GET $PRISM_URL/api/activity/work with the same token. This reads task status, recent messages, tools and subagents without starting a turn. Read prism_help(topic=workspace-activity) for details. Do not POST /api/chat merely to ask for progress: it starts another agent turn."
 
 type workspaceActivity struct {
 	Session        string             `json:"session"`

@@ -6,10 +6,10 @@ const vm=require('node:vm');
 const html=readFileSync(path.join(__dirname,'../apps/email.html'),'utf8');
 const send=html.slice(html.indexOf('async function doSend()'),html.indexOf('// Relative date bucket'));
 function fixture(fetch){
- const fields={'c-body':{value:'Keep my draft'},'c-to':{value:'test@example.org'},'c-subject':{value:'Test'},'c-err':{},'send-mail':{}};
+ const fields={'c-body':{value:'Keep my draft'},'c-to':{value:'test@example.org'},'c-cc':{value:''},'c-bcc':{value:''},'c-subject':{value:'Test'},'c-err':{},'send-mail':{},'draft-save-copy':{hidden:true}};
  let closed=0;
- const ctx=vm.createContext({FormData,fetch,document:{getElementById:id=>fields[id]},PrismAPI:{toast:()=>{}},closeCompose:async()=>{closed++;}});
- vm.runInContext("let sendingMail=false,replyUid=17,replyFolder='Projects & receipts',composeAtts=[];"+send,ctx);
+ const ctx=vm.createContext({FormData,fetch,document:{getElementById:id=>fields[id]},PrismAPI:{toast:()=>{},api:async()=>({draft:{status:'draft'}}),failure:async r=>r.text()},draftValues:()=>({body:fields['c-body'].value,to:fields['c-to'].value,cc:'',bcc:'',subject:'Test'}),flushDraft:async()=>({id:12,revision:3}),setComposerDisabled(value){fields['send-mail'].disabled=value;},publishMailContext(){},setDraftStatus(){},loadSavedDrafts:async()=>{},closeCompose:async()=>{closed++;}});
+ vm.runInContext("let sendingMail=false,replyUid=17,replyFolder='Projects & receipts',composeAtts=[],draftState={id:12};"+send,ctx);
  return {ctx,fields,closed:()=>closed};
 }
 test('failed send retains draft, displays error, and allows retry',async()=>{
@@ -19,21 +19,21 @@ test('failed send retains draft, displays error, and allows retry',async()=>{
  assert.match(f.fields['c-err'].textContent,/Connection interrupted/);
  assert.equal(f.fields['send-mail'].disabled,false);
 });
-test('double click sends once with original folder and reply UID',async()=>{
+test('double click sends the canonical saved draft once',async()=>{
  let finish,calls=0;
- const f=fixture((url,opts)=>{calls++;assert.equal(url,'/api/email/send?folder=Projects%20%26%20receipts');assert.equal(opts.body.get('uid'),'17');return new Promise(r=>finish=r);});
+ const f=fixture((url,opts)=>{calls++;assert.equal(url,'/api/email/send');assert.deepEqual(JSON.parse(opts.body),{draft_id:12,draft_revision:3});return new Promise(r=>finish=r);});
  const pending=vm.runInContext('doSend()',f.ctx);
- await vm.runInContext('doSend()',f.ctx);
+ await vm.runInContext('doSend()',f.ctx);await Promise.resolve();
  assert.equal(calls,1);assert.equal(f.fields['send-mail'].disabled,true);
  finish({ok:true});await pending;
  assert.equal(f.closed(),1);assert.equal(f.fields['send-mail'].disabled,false);
 });
 function replyFixture(){
- const fields=Object.fromEntries(['c-body','c-to','c-subject','c-err','compose-title','overlay'].map(id=>[id,{value:'',focus(){},classList:{add(){},remove(){}}}]));
+ const fields=Object.fromEntries(['c-body','c-to','c-cc','c-bcc','c-subject','c-err','compose-title','overlay'].map(id=>[id,{value:'',focus(){},classList:{add(){},remove(){}}}]));
  let resolve,reject;
  function fn(name){const start=html.search(new RegExp('(?:async )?function '+name+'\\('));return html.slice(start,html.indexOf('\n}',start)+2);}
- const ctx=vm.createContext({document:{getElementById:id=>fields[id]},reSubject:s=>s,looksHTML:()=>false,emailPlain:()=>'',assist:()=>new Promise((r,j)=>{resolve=r;reject=j}),renderComposeAtts(){},publishMailContext(){},PrismModal:{confirm:async()=>true}});
- vm.runInContext("let composeGeneration=0,composeAtts=[],composeSnapshot='',folder='INBOX',replyFolder='',replyUid=0,sendingMail=false,current={uid:1,from:'old@example.org',subject:'Old',date:'2026-10-15T11:41:59Z',body:'Original message'};"+['openCompose','closeCompose','quotedReply','aiReply'].map(fn).join('\n'),ctx);
+ const ctx=vm.createContext({document:{getElementById:id=>fields[id]},reSubject:s=>s,looksHTML:()=>false,emailPlain:()=>'',assist:()=>new Promise((r,j)=>{resolve=r;reject=j}),renderComposeAtts(){},publishMailContext(){},signatureText:()=>'',resetDraftState(){},scheduleDraftSave(){},setComposerDisabled(){},clearTimeout(){},PrismModal:{confirm:async()=>true}});
+ vm.runInContext("let composeGeneration=0,composeAtts=[],composeSnapshot='',folder='INBOX',replyFolder='',replyUid=0,sendingMail=false,draftState=null,draftSaveTimer=null,current={uid:1,from:'old@example.org',subject:'Old',date:'2026-10-15T11:41:59Z',body:'Original message'};"+['openCompose','closeCompose','quotedReply','aiReply'].map(fn).join('\n'),ctx);
  return {fields,run:s=>vm.runInContext(s,ctx),resolve:s=>resolve(s),reject:e=>reject(e)};
 }
 for(const failed of [false,true])test(`late AI ${failed?'failure':'reply'} cannot alter a new draft`,async()=>{
@@ -49,9 +49,9 @@ test('AI completion fills its still active untouched draft',async()=>{
 });
 
 function openFixture(api=async()=>({message:{uid:17,from:'sender@example.org',subject:'Question',body:'Original line\nSecond line',date:'2026-10-15T06:28:32Z'}})){
- const classes=new Set(),fields=Object.fromEntries(['c-body','c-to','c-subject','c-err','compose-title'].map(id=>[id,{value:'',focus(){},setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}}]));
+ const classes=new Set(),fields=Object.fromEntries(['c-body','c-to','c-cc','c-bcc','c-subject','c-err','compose-title'].map(id=>[id,{value:'',focus(){},setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end;}}]));
  fields.overlay={classList:{contains:s=>classes.has(s),add:s=>classes.add(s),remove:s=>classes.delete(s)}};
- const ctx=vm.createContext({Date,document:{getElementById:id=>fields[id]},PrismAPI:{api},renderComposeAtts(){},publishMailContext(){},looksHTML:()=>false});
+ const ctx=vm.createContext({Date,document:{getElementById:id=>fields[id]},PrismAPI:{api},renderComposeAtts(){},publishMailContext(){},signatureText:()=>'',resetDraftState(){},scheduleDraftSave(){},looksHTML:()=>false});
  function fn(name){const start=html.search(new RegExp('(?:async )?function '+name+'\\('));return html.slice(start,html.indexOf('\n}',start)+2);}
  vm.runInContext("let composeGeneration=0,composeAtts=[],composeSnapshot='',folder='Other folder',replyFolder='',replyUid=0,sendingMail=false;"+
   "const reSubject=s=>/^re:/i.test(s)?s:'Re: '+s;\n"+['openCompose','quotedReply','openMailComposer'].map(fn).join('\n')+"\nfunction compose(){replyUid=0;openCompose('New message','','','');}",ctx);

@@ -10,7 +10,7 @@
 <script src="/modal.js"></script>
 <script src="/editor-bridge.js"></script>
 <script src="/object-links.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<script src="/vendor/marked/marked.min.js"></script>
 <script src="/vendor/purify.min.js"></script>
 <script>
   addEventListener('message', e => {
@@ -109,6 +109,7 @@
     .back-btn { display: inline-flex; }
   }
 </style>
+<link rel="stylesheet" href="/apps/notes-wiki.css">
 </head>
 <body>
   <div class="app" id="app">
@@ -118,6 +119,7 @@
         <button class="btn btn-accent btn-new" onclick="newNote()">＋ New</button>
         <span id="src-badge" style="display:none;font-size:11px;color:var(--text3);border:1px solid var(--border);border-radius:999px;padding:2px 9px;white-space:nowrap"></span>
       </div>
+      <div class="wiki-library-nav"><button class="btn" id="wiki-back" onclick="navigateWiki(-1)" aria-label="Previous page" disabled>←</button><button class="btn" id="wiki-forward" onclick="navigateWiki(1)" aria-label="Next page" disabled>→</button><span>Pages</span><button class="btn" onclick="showNotesTrash()">Trash</button></div>
       <div class="tag-bar" id="tag-bar"></div>
       <div class="notes" id="notes"></div>
     </div>
@@ -136,13 +138,17 @@
             <button id="tab-split" onclick="setMode('split')">Split</button>
             <button id="tab-preview" onclick="setMode('preview')">Preview</button>
           </div>
-          <button class="btn" id="share-btn" onclick="toggleShare()" title="Share this note with your group" style="display:none">📤 Share</button>
-          <button class="btn" id="kn-btn" onclick="addToKnowledge()" title="Add this note to the agent's knowledge base (RAG)" style="display:none">🧠</button>
-          <button class="btn" id="img-btn" onclick="$('img-file').click()" title="Insert an image">🖼 Image</button>
-          <input type="file" id="img-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="insertImage(event)">
           <button class="btn" id="save-btn" onclick="saveNote()">Save</button>
-          <button class="btn" onclick="if(selectedId)PrismLinks.copy({type:'app',name:'notes',id:selectedId})">Copy link</button>
-          <button class="btn" id="del-btn" onclick="deleteNote()" title="Delete" style="color:var(--red)">🗑</button>
+          <details class="note-actions"><summary class="btn" aria-label="Page actions">⋯</summary><div class="note-actions-menu">
+            <button class="btn" id="insert-link-btn" onclick="insertWikiLink()">Insert page link</button>
+            <button class="btn" id="history-btn" onclick="showNoteHistory()">Version history</button>
+            <button class="btn" id="share-btn" onclick="toggleShare()" style="display:none">Share with group</button>
+            <button class="btn" id="kn-btn" onclick="addToKnowledge()" style="display:none">Add to knowledge</button>
+            <button class="btn" id="img-btn" onclick="$('img-file').click()">Insert image</button>
+            <input type="file" id="img-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="insertImage(event)">
+            <button class="btn" onclick="if(selectedId)PrismLinks.copy({type:'app',name:'notes',id:selectedId})">Copy link</button>
+            <button class="btn" id="del-btn" onclick="deleteNote()">Move to trash</button>
+          </div></details>
         </div>
         <div id="note-conflict" hidden role="status" style="padding:10px;border-bottom:1px solid var(--border);font-size:12px">This note changed elsewhere. Your edits are still here.
           <button class="btn" onclick="resolveNoteUpdate(false)">Load updated note</button>
@@ -159,6 +165,7 @@
           <button class="ai-btn" onclick="customAI()">Custom…</button>
           <span class="ai-scope" id="ai-scope"></span>
         </div>
+        <details class="wiki-context"><summary>Outline &amp; backlinks<span id="wiki-backlink-count"></span></summary><div class="wiki-context-grid"><section><h3>On this page</h3><nav id="wiki-outline" aria-label="Page outline"></nav></section><section><h3>Backlinks</h3><nav id="wiki-backlinks" aria-label="Pages linking here"></nav></section></div></details>
         <div class="panes">
           <textarea id="e-body" placeholder="Write your note… Markdown supported. Link to another note with [[Title]]. Select text, then use an AI action — or run it on the whole note."></textarea>
           <div class="md-preview" id="e-preview"></div>
@@ -202,11 +209,12 @@
     </div>
   </div>
 
+<script src="/apps/notes-wiki.js"></script>
 <script>
 const session = new URLSearchParams(location.search).get('session') || 'default';
 const api = (path, opts) => PrismAPI.api(`/api/notes${path}`, opts);
 const $ = id => document.getElementById(id);
-let savedNoteDraft = '', noteSaveQueue = Promise.resolve(true), notesLoadVersion = 0, notesSyncRequested = false, pendingNoteUpdate = null;
+let savedNoteDraft = '', noteSaveQueue = Promise.resolve(true), notesLoadVersion = 0, notesSyncRequested = false, pendingNoteUpdate = null, pendingCanonicalNote = null;
 function noteDraft() { return JSON.stringify([$('e-title').value, $('e-body').value, noteTags({tags:$('e-tags').value}).join(', ')]); }
 let notes = [], selectedId = null, filter = '', tagFilter = '', mode = 'edit';
 let aiRequestVersion = 0, aiEditVersion = 0, aiResult = null;
@@ -256,13 +264,15 @@ async function load(syncEditor = false) {
   } catch (e) {
     // Never show "no notes" for a failed read: it looks like data loss.
     PrismAPI.toast('Could not load your notes: ' + e.message);
-    return;
+    return false;
   }
-  if (version !== notesLoadVersion) return;
+  if (version !== notesLoadVersion) return false;
   notes = data.notes || [];
   setSourceBadge(data.source);
   render();
   if (notesSyncRequested) { notesSyncRequested = false; syncEditorFromServer(); }
+  if(selectedId)updateWikiDetails();
+  return true;
 }
 
 // Refresh saved notes after agent edits, preserving unsaved local input.
@@ -287,6 +297,7 @@ function syncEditorFromServer() {
   publishNoteContext();
   applyNoteChrome(n);
   if (mode !== 'edit') updatePreview();
+  updateWikiDetails();
 }
 
 function renderTagBar() {
@@ -334,39 +345,15 @@ function setMode(m) {
 }
 function escAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 
-// Render Markdown, turning [[Title]] into wiki links to other notes.
-function renderMarkdown(src) {
-  const withLinks = (src || '').replace(/\[\[([^\]\n]+)\]\]/g, (_, t) => {
-    const title = t.trim();
-    const exists = notes.some(x => (x.title || '').toLowerCase() === title.toLowerCase());
-    return `<a href="#" class="wikilink${exists ? '' : ' missing'}" data-note="${escAttr(title)}">${esc(title)}</a>`;
-  });
-  if (!window.marked) return esc(withLinks);
-  const html = marked.parse(withLinks);
-  return window.DOMPurify ? DOMPurify.sanitize(html) : html;
-}
 function updatePreview() {
   if (mode === 'edit') return;
   const pv = $('e-preview');
   pv.innerHTML = renderMarkdown($('e-body').value);
-  pv.querySelectorAll('.wikilink').forEach(a => a.addEventListener('click', e => { e.preventDefault(); openWikiLink(a.dataset.note); }));
-}
-async function openWikiLink(title) {
-  if (selectedId && !await saveNote()) return;
-  const n = notes.find(x => (x.title || '').toLowerCase() === title.toLowerCase());
-  if (n) { select(n.id); return; }
-  if (await PrismModal.confirm(`Note "${title}" doesn't exist yet. Create it?`, { okLabel: 'Create' })) {
-    let id;
-    try {
-      ({ id } = await api(`?session=${encodeURIComponent(session)}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, body: '', tags: '' })
-      }));
-    } catch (e) {
-      PrismAPI.toast('Could not create the note: ' + e.message);
-      return;
-    }
-    await load(); select(id);
-  }
+  pv.querySelectorAll('a').forEach(a => {
+    const view=PrismLinks.parse(a.getAttribute('href'));
+    const target=a.classList.contains('wikilink')?a.dataset.note:view?.name==='notes'?view.id:null;
+    if(target)a.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();openWikiLink(target);});
+  });
 }
 
 // Push the current note into the agent's RAG knowledge base — pick a collection.
@@ -414,16 +401,16 @@ async function confirmKnowledge() {
 }
 function flashKn(icon, msg) {
   const btn = $('kn-btn'); btn.textContent = icon; btn.title = msg;
-  setTimeout(() => { btn.textContent = '🧠'; btn.title = "Add this note to the agent's knowledge base (RAG)"; }, 2000);
+  setTimeout(() => { btn.textContent = 'Add to knowledge'; btn.title = "Add this note to the agent's knowledge base (RAG)"; }, 2000);
 }
 
-async function select(id) {
-  if (id === selectedId) return;
-  if (!await saveNote()) return;
+async function select(id, remember=true) {
+  if (id === selectedId) return true;
+  if (!await saveNote()) return false;
   pendingNoteUpdate = null; $('note-conflict').hidden = true;
-  selectedId = id;
   const n = notes.find(x => x.id === id);
-  if (!n) return;
+  if (!n) return false;
+  selectedId = id;
   try {
     const tg = noteTags(n).join(', ');
     parent.postMessage({ type: 'context', text: `Viewing note #${n.id} titled "${n.title || 'untitled'}"${tg ? ` (tags: ${tg})` : ''} in the Notes app. To act on "this note" use the note tool with id=${n.id}.` }, '*');
@@ -445,6 +432,9 @@ async function select(id) {
   applyNoteChrome(n);
   $('app').classList.add('editing');
   render();
+  if(remember)wikiRemember(id);
+  updateWikiDetails();
+  return true;
 }
 
 // Configure the editor toolbar + read-only state for the selected note.
@@ -455,7 +445,9 @@ function applyNoteChrome(n) {
   for (const id of ['e-title', 'e-tags', 'e-body']) $(id).readOnly = readOnly;
   $('save-btn').style.display = readOnly ? 'none' : '';
   $('del-btn').style.display = readOnly ? 'none' : '';
-  $('del-btn').title = isGroup ? 'Remove from group' : 'Delete';
+  $('del-btn').title = 'Move to trash';
+  $('history-btn').style.display = readOnly ? 'none' : '';
+  $('insert-link-btn').style.display = readOnly ? 'none' : '';
   document.querySelector('.ai-bar').style.display = readOnly ? 'none' : '';
   // Uploading on a read-only shared note would succeed (the endpoint has no
   // note-id check) but saveNote() then silently no-ops — the image would
@@ -469,7 +461,7 @@ function applyNoteChrome(n) {
   if (CAPS.hasGroup && n.scope === 'personal') {
     const already = notes.find(x => x.scope === 'group' && String(x.originId) === String(n.id));
     shareBtn.style.display = '';
-    shareBtn.textContent = already ? '📤 Shared ✓' : '📤 Share';
+    shareBtn.textContent = already ? 'Update group publication' : 'Share with group';
     shareBtn.title = already
       ? 'Update the shared copy (to unshare, open the shared note and remove it)'
       : 'Share this note with your group';
@@ -523,6 +515,25 @@ function saveNote() {
 async function persistNote() {
   while (selectedId) {
     if (pendingNoteUpdate) { PrismAPI.toast('Resolve the updated note before saving your edits.'); return false; }
+    if(pendingCanonicalNote){
+      const acknowledged=pendingCanonicalNote;
+      if(acknowledged.id!==selectedId)return false;
+      if(!await load()){
+        PrismAPI.toast('The last edit was saved, but its updated version could not be loaded. Your text is still here. Try Save again before leaving.');
+        return false;
+      }
+      if(acknowledged.id!==selectedId)return false;
+      const canonical=currentNote();
+      if(!canonical){PrismAPI.toast('The saved note is unavailable. Your text is still here.');return false;}
+      const submitted=acknowledged.body,local=noteDraft();
+      if($('e-title').value===submitted.title)$('e-title').value=canonical.title||'';
+      if($('e-tags').value===submitted.tags)$('e-tags').value=noteTags(canonical).join(', ');
+      $('e-body').value=rebaseCanonicalNoteBody(submitted.body,canonical.body||'',$('e-body').value);
+      savedNoteDraft=JSON.stringify([canonical.title||'',canonical.body||'',noteTags(canonical).join(', ')]);
+      pendingCanonicalNote=null;
+      if(noteDraft()!==local){aiEditVersion++;publishNoteContext();if(mode!=='edit')updatePreview();updateWikiDetails();}
+      continue;
+    }
     const n = currentNote();
     if (n && n.scope === 'group' && !n.canEdit) return true;
     const draft = noteDraft();
@@ -530,35 +541,37 @@ async function persistNote() {
     const body = { id: selectedId, title: $('e-title').value, body: $('e-body').value, tags: $('e-tags').value };
     if (n && n.scope === 'group') body.scope = 'group';
     try {
-      await api(`?session=${encodeURIComponent(session)}`, {
+      const result = await api(`?session=${encodeURIComponent(session)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
+      if(result?.id&&selectedId===body.id&&result.id!==body.id){wikiRenameID(body.id,result.id);selectedId=result.id;body.id=result.id;}
     } catch (e) {
       PrismAPI.toast('Not saved: ' + e.message);
       return false;
     }
     if (selectedId !== body.id) return false;
     savedNoteDraft = draft;
-    await load();
+    pendingCanonicalNote={id:body.id,body};
     // Typing may have continued during the request. Save those edits before leaving.
   }
   return true;
 }
 
 async function deleteNote() {
-  if (!selectedId) return;
-  const n = currentNote();
+  if (!selectedId||!await saveNote()) return;
+  const n = currentNote(),id=selectedId;
   const isGroup = n && n.scope === 'group';
-  if (!await PrismModal.confirm(isGroup ? 'Remove this note from the group?' : 'Delete this note?', { danger: true, okLabel: isGroup ? 'Remove' : 'Delete' })) return;
+  if (!await PrismModal.confirm(isGroup ? 'Move this published group page to trash?' : 'Move this page to trash? You can restore it later.', { danger: true, okLabel: 'Move to trash' })) return;
+  if(selectedId!==id)return;
   const q = isGroup ? '&scope=group' : '';
   try {
-    await PrismAPI.api(`/api/notes?session=${encodeURIComponent(session)}&id=${selectedId}${q}`, { method: 'DELETE' });
+    await PrismAPI.api(`/api/notes?session=${encodeURIComponent(session)}&id=${encodeURIComponent(id)}${q}`, { method: 'DELETE' });
   } catch (e) {
-    PrismAPI.toast('Not removed: ' + e.message);
+    PrismAPI.toast('Not moved to trash: ' + e.message);
     return;
   }
   selectedId = null;
-  closeEditor();
+  await closeEditor();
   await load();
 }
 
@@ -677,7 +690,7 @@ document.querySelectorAll('.ai-btn[data-task]').forEach(b => b.addEventListener(
 $('p-instr').addEventListener('keydown', e => { if (e.key === 'Enter') runCustom(); });
 function updateScope() { const ta = $('e-body'); $('ai-scope').textContent = ta.selectionStart !== ta.selectionEnd ? 'AI → selection' : 'AI → whole note'; updateAIResultActions(); }
 ['select', 'keyup', 'mouseup'].forEach(ev => $('e-body').addEventListener(ev, updateScope));
-$('e-body').addEventListener('input', () => { if (mode !== 'edit') updatePreview(); });
+$('e-body').addEventListener('input', () => { if (mode !== 'edit') updatePreview();updateWikiOutline(); });
 ['e-title', 'e-tags', 'e-body'].forEach(id => $(id).addEventListener('input', () => { aiEditVersion++; updateAIResultActions(); }));
 
 $('search').addEventListener('input', e => { filter = e.target.value; render(); });
@@ -710,6 +723,7 @@ const noteEditor = PrismEditor.connect({
     for (const [key,value] of Object.entries(patch)) $('e-'+key).value=value;
     aiEditVersion++; updateAIResultActions();
     if (mode !== 'edit') updatePreview();
+    updateWikiDetails();
     publishNoteContext();
     if (!await saveNote()) throw Error('The changes are visible in the editor but could not be saved. They are preserved on screen; do not claim they were saved.');
   }
@@ -721,15 +735,23 @@ async function openLinkedNote(reference, isCurrent) {
   // was absent from that list, so the reload cannot discard the fetched item.
   if (!await saveNote() || !isCurrent()) return;
   const selection = selectedId, version = aiEditVersion;
-  if (!notes.some(note => note.id === reference.id)) {
+  let target=notes.find(note=>note.id===reference.id);
+  if(!target){
+    const aliases=notes.filter(note=>(note.aliases||[]).includes(reference.id));
+    target=aliases.length===1?aliases[0]:aliases.length>1?await chooseWikiPage(aliases,'Choose the linked page'):null;
+    if(aliases.length&&!target)return;
+  }
+  if (!target) {
     const data = await api('?id=' + encodeURIComponent(reference.id));
     if (!isCurrent() || selection !== selectedId || version !== aiEditVersion) return;
     if (!data.note) throw Error('This note is unavailable.');
-    notes.push(data.note);
+    if(!notes.some(note=>note.id===data.note.id))notes.push(data.note);
+    target=data.note;
   }
-  if (isCurrent()) await select(reference.id);
+  if (isCurrent()) await select(target.id);
 }
 const noteReferenceReady = PrismLinks.receive('notes', openLinkedNote);
+document.addEventListener('click',event=>{for(const menu of document.querySelectorAll('.note-actions[open]'))if(!menu.contains(event.target)||event.target.closest('button'))menu.open=false;});
 PrismLinks.beforeLeave = saveNote;
 loadCaps().then(load).then(noteReferenceReady);
 </script>

@@ -59,7 +59,7 @@ func (f *fakeNotesProvider) Kind() string                                { retur
 
 // A wrong id must come back with the ids that DO exist (so the model can
 // self-correct instead of re-guessing), a right id must return the item (so
-// delete can echo the destroyed content), and a listing failure must not
+// a mutation can identify its target), and a listing failure must not
 // block the action.
 func TestNoteLookup(t *testing.T) {
 	ctx := context.Background()

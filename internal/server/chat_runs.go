@@ -19,22 +19,25 @@ type chatRun struct {
 	children       map[string]*childTask
 	childrenDone   sync.WaitGroup
 
-	mu          sync.Mutex
-	owner       *Client
-	subscribers map[*Client]bool
-	history     json.RawMessage
-	events      []json.RawMessage
-	bytes       int
-	cancel      context.CancelFunc
-	failed      bool
-	overflowed  bool
-	status      string
-	request     string
-	requestID   string
-	messageID   int64
-	recentTools []activityTool // bounded progress metadata; no arguments or outputs
-	secret      json.RawMessage
-	approvals   map[string]json.RawMessage
+	mu             sync.Mutex
+	owner          *Client
+	subscribers    map[*Client]bool
+	history        json.RawMessage
+	events         []json.RawMessage
+	bytes          int
+	cancel         context.CancelFunc
+	failed         bool
+	overflowed     bool
+	status         string
+	request        string
+	requestID      string
+	messageID      int64
+	recentTools    []activityTool // bounded progress metadata; no arguments or outputs
+	startedAt      time.Time
+	lastActivityAt time.Time
+	finishedAt     time.Time
+	secret         json.RawMessage
+	approvals      map[string]json.RawMessage
 }
 
 func runKey(c *Client) string {
@@ -106,6 +109,7 @@ func (c *Client) publishRun(v any) bool {
 	if r.overflowed {
 		return true
 	}
+	r.lastActivityAt = time.Now().UTC()
 	switch kind.Type {
 	case "tool_use":
 		r.recentTools = append(r.recentTools, activityTool{ID: kind.ID, Tool: kind.Tool, Status: "running"})
@@ -194,11 +198,6 @@ func (s *Server) beginRunRequest(c *Client, cancel context.CancelFunc, content s
 	if active >= 4 || len(s.runs) >= 16 {
 		return nil, fmt.Errorf("too many running tasks; wait or stop one first")
 	}
-	if ms := s.store(); ms != nil {
-		if err := ms.SetConfig(s.runtimeContext(), runStateKey(c), "running"); err != nil {
-			return nil, fmt.Errorf("could not record task state")
-		}
-	}
 	history := s.historySnapshot(c)
 	var messageID int64
 	if requestID != "" {
@@ -217,6 +216,14 @@ func (s *Server) beginRunRequest(c *Client, cancel context.CancelFunc, content s
 	manual := c.approvalManual
 	c.mu.Unlock()
 	r := &chatRun{done: make(chan struct{}), approvalManual: manual, owner: c, subscribers: map[*Client]bool{c: true}, history: history, cancel: cancel, status: "running", request: activityText(content), requestID: requestID, messageID: messageID}
+	r.startedAt = time.Now().UTC()
+	r.lastActivityAt = r.startedAt
+	if err := s.saveWorkMetadata(s.runtimeContext(), c, metadataFromRun(r, "running")); err != nil {
+		if requestID != "" {
+			s.finishChatRequest(c.sessionID, requestID, "failed")
+		}
+		return nil, fmt.Errorf("could not record task state")
+	}
 	user, _ := json.Marshal(map[string]any{"type": "run_user", "content": content, "images": images})
 	r.events = append(r.events, user)
 	r.bytes = len(user)
@@ -323,7 +330,9 @@ func (s *Server) finishRun(r *chatRun, ctx context.Context) {
 	save, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if ms != nil {
-		_ = ms.SetConfig(save, runStateKey(r.owner), status)
+		r.finishedAt = time.Now().UTC()
+		r.lastActivityAt = r.finishedAt
+		_ = s.saveWorkMetadata(save, r.owner, metadataFromRun(r, status))
 		for _, raw := range r.events {
 			var ev struct{ Type, Content string }
 			if json.Unmarshal(raw, &ev) == nil && ev.Type == "error" {
@@ -422,6 +431,7 @@ type sessionJob struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
 	agentTurn bool
+	work      *workMetadata // optional parent headless metadata; guarded by runsMu
 }
 
 func (s *Server) beginSessionJob(ctx context.Context, session string) (context.Context, func(), error) {
@@ -452,6 +462,9 @@ func (s *Server) beginSessionWork(ctx context.Context, session string, agentTurn
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	job := &sessionJob{cancel: cancel, done: make(chan struct{}), agentTurn: agentTurn}
+	if agentTurn {
+		ctx = context.WithValue(ctx, agentJobContextKey{}, job)
+	}
 	if s.sessionJobs == nil {
 		s.sessionJobs = make(map[string]map[*sessionJob]bool)
 	}

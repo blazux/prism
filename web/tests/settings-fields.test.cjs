@@ -29,13 +29,39 @@ test('failed saves retain edits and a successful explicit save clears only its c
   setResponse(new Response('{}',{status:403}));await state.request('/save',{method:'POST'},[one]);assert.equal(state.dirty(),true);assert.match(status.textContent,/Could not save/);
   setResponse(new Response('{}'));await state.request('/save',{method:'POST'},[one]);assert.equal(state.dirty(),false);
 });
-test('AI connection tests leave edits unsaved; only a save binds the whole configuration form',async()=>{
+function aiRequestFixture({fail=false}={}){
  const source=fs.readFileSync(path.join(__dirname,'../ai-settings.js'),'utf8');
- const calls=[],controls=[{name:'baseURL'}];
- const context={payload:action=>({action}),form:{querySelectorAll:()=>controls},fetchConfig:async(...args)=>{calls.push(args);return {ok:true,text:async()=>'{}'}}};
- vm.createContext(context);vm.runInContext(source.slice(source.indexOf('  async function request(action)'),source.indexOf('  let monitorGeneration')),context);
- for(const action of ['models','test','embedding_models','embedding_test']){await context.request(action);assert.equal(calls.at(-1)[2],null,action+' is not a save');}
- await context.request('save');assert.equal(calls.at(-1)[2],controls);
+ const start=source.indexOf('  async function requestData('),end=source.indexOf('  function setBusy('),performStart=source.indexOf('  async function perform(action)'),performEnd=source.indexOf('  const dialog = pane.querySelector');
+ assert.ok(start>=0&&end>start&&performStart>=0&&performEnd>performStart,'extract the current staged request lifecycle');
+ const calls=[],controls=[{name:'baseURL'},{name:'model'}],fields={embeddingMode:{value:'disabled'},apiKey:{value:'typed-key'},'embed-apiKey':{value:'typed-embedding-key'}};
+ let loads=0;
+ const context={payload:action=>({action}),form:{querySelectorAll:()=>controls,reportValidity:()=>true},f:name=>fields[name],
+  status:{textContent:'',classList:{add(){},remove(){}}},pane:{querySelector:()=>({})},catalogKey:prefix=>prefix||'secondary',
+  catalogs:new Map(),checks:new Map(),showModels(){},drawSources(){},confirm:async()=>true,
+  fetchConfig:async(...args)=>{calls.push(args);return {ok:!fail,text:async()=>JSON.stringify(fail?{error:'Save refused'}:{models:['probe-model'],dimension:1024}),json:async()=>({})}},
+  load:async()=>{loads++},
+ };
+ vm.createContext(context);vm.runInContext('let busy=false,resetPending=false,dirty=true,reloadRequired=false,sources=[{apiKey:"typed-key"}];function setBusy(v){busy=v}'+source.slice(start,end)+source.slice(performStart,performEnd),context);
+ return {context,calls,controls,fields,loads:()=>loads,run:expr=>vm.runInContext(expr,context)};
+}
+test('AI probes leave edits unsaved; explicit save binds the form and clears submitted keys',async()=>{
+ const f=aiRequestFixture();
+ for(const action of ['models','test','embedding_models','embedding_test']){
+  await f.context.perform(action);assert.equal(f.calls.at(-1)[2],null,action+' is not a save');
+  assert.equal(f.run('dirty'),true);assert.equal(f.fields.apiKey.value,'typed-key');assert.equal(f.loads(),0);
+ }
+ await f.context.perform('save');assert.deepEqual(Array.from(f.calls.at(-1)[2]),f.controls);
+ assert.equal(f.run('dirty'),false);assert.equal(f.fields.apiKey.value,'');assert.equal(f.fields['embed-apiKey'].value,'');assert.equal(f.loads(),1);
+});
+test('AI failed saves preserve typed keys and unsaved state',async()=>{
+ const f=aiRequestFixture({fail:true});await f.context.perform('save');
+ assert.equal(f.run('dirty'),true);assert.equal(f.fields.apiKey.value,'typed-key');assert.equal(f.fields['embed-apiKey'].value,'typed-embedding-key');
+ assert.equal(f.loads(),0);assert.match(f.context.status.textContent,/Not saved: Save refused/);assert.deepEqual(Array.from(f.calls[0][2]),f.controls);
+});
+test('restoring AI defaults is staged until explicit Save changes',async()=>{
+ const f=aiRequestFixture();await f.context.perform('reset');assert.equal(f.calls.length,0);assert.equal(f.run('resetPending'),true);
+ await f.context.perform('save');assert.equal(f.calls.length,1);assert.equal(f.calls[0][0],'/api/ai/config?reindex=true');
+ assert.equal(f.calls[0][1].method,'DELETE');assert.deepEqual(Array.from(f.calls[0][2]),f.controls);assert.equal(f.loads(),1);
 });
 
 test('a failed PIM autosave keeps selections and retries them without reporting success',async()=>{

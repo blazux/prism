@@ -1,7 +1,7 @@
 // Ordinary Prism URLs address an app object without carrying user credentials
 // or selecting another account. The app's API resolves its current owner/source.
 ;(function () {
-  const apps = new Set(['email', 'notes', 'tasks', 'calendar'])
+  const apps = new Set(['email', 'notes', 'tasks', 'calendar', 'room'])
   const validID = value => typeof value === 'string' && value.trim() && value.length <= 2048 && !/[\x00-\x1f\x7f]/.test(value)
   function parse(value, base = location.origin) {
     let url
@@ -9,10 +9,15 @@
     if (url.origin !== base || url.pathname !== '/' || url.username || url.password) return null
     const q = url.searchParams
     if (q.has('view')) return null
-    for (const name of ['app', 'id', 'folder', 'workspace']) if (q.getAll(name).length > 1) return null
+    for (const name of ['app', 'id', 'folder', 'workspace', 'group']) if (q.getAll(name).length > 1) return null
     const app = q.get('app')
     if (apps.has(app)) {
       const id = q.get('id'), folder = q.get('folder')
+      if (app === 'room') {
+        const group = q.get('group')
+        if (id !== null || folder !== null || !/^[1-9]\d*$/.test(group || '') || !Number.isSafeInteger(Number(group))) return null
+        return {type:'app', name:'room', group:Number(group)}
+      }
       if (id !== null && !validID(id)) return null
       if (app === 'email' && id !== null && (!/^[1-9]\d{0,9}$/.test(id) || Number(id) > 4294967295)) return null
       if (folder !== null && (app !== 'email' || !validID(folder))) return null
@@ -31,6 +36,7 @@
       q.set('app', view.name)
       if (view.id !== undefined) q.set('id', view.id)
       if (view.folder !== undefined) q.set('folder', view.folder)
+      if (view.name === 'room' && view.group !== undefined) q.set('group', String(view.group))
     }
     return '/?' + q
   }

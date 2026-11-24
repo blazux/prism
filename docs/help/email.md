@@ -1,4 +1,4 @@
-# Email: folders and inbox rules
+# Email: folders and Prism rules
 
 For help connecting a mailbox, first read `prism_help` with topic
 `connecting-accounts`. For **Proton Mail**, read `protonmail-bridge` before
@@ -36,9 +36,13 @@ If Archive/Trash is not advertised and has no recognized name, choose the
 folder explicitly with Move. A server without MOVE or UIDPLUS cannot safely
 move individual messages through Prism; the error explains this limitation.
 
-## Rules
+## Prism rules
 
-**Inbox rules → + Rule** creates a named rule with one condition and one action:
+These rules are saved and executed by Prism. Filters configured with your mail
+provider, such as Proton Mail or Gmail, are managed separately and are not
+synchronized with this list.
+
+**Prism rules → + Rule** creates a named rule with one condition and one action:
 - Match messages whose From, To or Subject field **contains** the specified text. Matching is case-insensitive.
 - Choose whether matching messages should move to a selected folder or be marked as read.
 
@@ -52,8 +56,8 @@ rules. A mark-read rule ignores messages already read. Each pass handles up to
 
 Edit, pause, enable or delete a rule from the list. **Run enabled rules now**
 applies them immediately and reports results, including any server errors.
-Activity shows rule applications and failures. These are Prism rules, not
-Sieve/Gmail rules installed at your mail provider: Prism must remain running.
+Activity shows rule applications and failures. Prism must remain running to
+execute these rules.
 
 ## Ask the agent
 
@@ -91,10 +95,23 @@ to the folder. The message toolbar offers Archive, Move, Trash, Categorize and S
 Reply, Reply all and Draft reply are below the sender, followed by Create task
 and Add to calendar. Forward and Mark unread are in **More (…)**.
 
-**New message** opens the composer. Recipient, subject and message are separate
-fields, with attachments and Send at the bottom. Failed sends keep your draft;
-closing an edited draft asks before discarding it. Drafts in this composer are
-not saved to the server automatically.
+**New message** opens the composer with To, Cc, Bcc, subject, message and
+attachments. Bcc recipients receive the message without appearing in its
+recipient headers. A plain-text signature can be configured in **Settings →
+Email**; it is inserted into new drafts, where you and the agent can edit it.
+
+Drafts are saved in Prism, including their attachments. They belong to your
+account and are available across your workspaces. The save indicator shows
+whether your latest edits have reached the server; keep the composer open if
+saving fails. Open **Prism drafts** to continue a saved message after closing
+the app, reloading the page or restarting Prism. These drafts are separate from
+your mailbox's IMAP Drafts folder and do not synchronize to other mail clients.
+
+**Save & close** keeps the draft; use **Delete draft** to remove it explicitly.
+If another tab changes a draft, Prism refuses to overwrite that saved version
+and keeps your current text visible. Review both versions before continuing.
+A failed send keeps the draft. If the connection fails during sending, check
+your mailbox before retrying: the server may already have accepted the message.
 Reply and Reply all include the original message as quoted text below your
 answer. The list sorts by the actual timestamp, regardless of the sender's timezone.
 
@@ -111,8 +128,10 @@ an existing composer or a draft opened while the message is loading. Mail must
 already be the active app in the browser connected to this chat.
 
 For an existing draft, use `editor action=read`, then `editor action=update revision=...`
-with only the changed `to`, `subject` or `body` fields. Changes appear directly
-in the composer. This does not send mail and does not store a server-side draft.
+with only the changed `to`, `cc`, `bcc`, `subject` or `body` fields. Changes
+appear directly in the composer and are saved as a Prism draft. This never
+sends mail. A save failure is reported; do not describe the draft as saved
+until the update succeeds.
 When replacing a reply body, keep the quoted original below the answer unless
 the user wants it removed.
 For a long body, follow `next_offset` while `truncated=true` before rewriting it.
@@ -120,6 +139,35 @@ If the user types or changes documents after the read, an update is rejected;
 read again and reconsider the change. Do not retry a stale replacement blindly.
 The editor tool acts only on the browser tab connected to this chat; it is not
 available from a headless API call, messaging channel or closed app.
+
+The `email` tool's `send` and `reply` actions also accept `cc` and `bcc`.
+Their `body` is sent as supplied: include any desired signature there yourself.
+Do not send a message merely because the user requested a draft.
+
+## Saved drafts from another channel
+
+When no browser editor is open, use the saved-draft API through `exec_command`
+with the existing `PRISM_URL` and `PRISM_TOKEN` environment variables. Keep the
+token in the authorization header, never in a link or user-facing output.
+
+- `GET /api/email/drafts` lists your draft summaries; add `?id=ID` to read a
+  complete draft, including attachments.
+- `POST /api/email/drafts` saves `to`, `cc`, `bcc`, `subject`, `body`, `folder`
+  and optional reply `uid`. For a new draft, send a fresh UUID as `client_id`;
+  for an edit, pass the saved `id` and `revision`. Copy these values from the
+  response. Omit `attachments` to preserve existing files; an empty array
+  removes them. Attachment objects use `filename`, `content_type` and base64
+  `data`, with a combined decoded limit of 20 MiB.
+- `DELETE /api/email/drafts?id=ID&revision=REVISION` removes that exact saved
+  version. It does not delete a newer revision from another editor.
+
+On a conflict, read the saved version and reconcile it with the user's intended
+changes. A response with `replayed: true` means an earlier create request already
+arrived: compare that draft with your intended text before treating it as saved.
+Saving a draft never sends it. Only when the user has requested sending, use
+`POST /api/email/send` with `draft_id` and `draft_revision` to send the saved
+content. A draft whose delivery is unconfirmed must be reviewed against Sent
+before creating and sending a copy.
 
 ## Visible agent actions
 

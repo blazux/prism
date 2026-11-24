@@ -97,5 +97,18 @@ button:focus-visible,summary:focus-visible,.mrow:focus-visible{outline:2px solid
 .sender-line .mavatar{width:30px;height:30px;font-size:12px}
 .ratts{margin-top:6px}
 .ai-box{margin:8px 16px 0;padding:8px 10px}
+.compose-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.compose-head .icon-btn{margin:-4px -5px -4px 0}
+.draft-save-line{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:30px;font-size:11px;color:var(--text3);flex-wrap:wrap}
+.draft-save-line .save-error{color:var(--red);overflow-wrap:anywhere}
+.draft-save-line .text-btn[hidden]{display:none}
+.draft-count{margin-left:auto;font-size:10px;color:var(--text3)}
+.saved-draft-list{display:grid;gap:8px;max-height:55vh;overflow:auto}
+.saved-draft{display:grid;gap:5px;padding:12px;text-align:left;color:var(--text);background:var(--bg2);border:1px solid var(--border);border-radius:8px;font:inherit;cursor:pointer}
+.saved-draft:hover{border-color:var(--accent);background:var(--bg3)}
+.saved-draft strong,.saved-draft span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.saved-draft span{font-size:12px;color:var(--text2)}
+.saved-draft small{font-size:10px;color:var(--text3)}
+.compose-field input:disabled,.compose-body textarea:disabled{opacity:.7}
 /* Preserve comfortable hit targets on touch devices. */
 @media(pointer:coarse){.icon-btn{width:40px;height:40px}.btn,.nav-item{min-height:40px}.list-tabs>button{min-height:40px}.mail-topbar{height:auto;min-height:54px}.filter-panel .fchip{min-height:36px}}

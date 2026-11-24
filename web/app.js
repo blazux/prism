@@ -1456,10 +1456,34 @@ function boardName(id) {
   return s ? s.name : id
 }
 
-// setView switches the main pane between the board canvas (widgets) and a
+let viewNavigation = 0
+// Every shell entry point (rail, workspace, settings and deep links) honors the
+// current app's save guard before replacing its iframe. Initial navigation stays
+// synchronous when no editor is open. Only the latest requested destination wins.
+function setView(view) {
+  const navigation = ++viewNavigation, previousView = currentView
+  let leave
+  try {
+    if (previousView?.type === 'app') leave = document.getElementById('app-frame')?.contentWindow?.PrismLinks?.beforeLeave
+  } catch (_) {
+    showToast({title:'Navigation',message:'Could not close the current editor. Your changes are still here.',level:'error'})
+    return false
+  }
+  if (typeof leave !== 'function') { applyView(view); return true }
+  return Promise.resolve().then(() => leave()).then(allowed => {
+    if (!allowed || navigation !== viewNavigation || previousView !== currentView) return false
+    applyView(view)
+    return true
+  }).catch(() => {
+    if (navigation === viewNavigation) showToast({title:'Navigation',message:'Could not save or close the current editor. Your changes are still here.',level:'error'})
+    return false
+  })
+}
+
+// applyView switches the main pane between the board canvas (widgets) and a
 // full-pane app iframe. Apps are the same HTML used by board widgets, just
 // maximized — same REST data underneath.
-function setView(view) {
+function applyView(view) {
   // A contentWindow object can survive iframe navigation. Require the newly
   // loaded document to announce readiness before routing editor calls to it.
   activeEditorSource = null
@@ -1510,7 +1534,7 @@ function setView(view) {
     return
   }
   if (view.type === 'app') {
-    if (DISABLED_APPS.has(view.name) || (view.name === 'telephony' && !voxWorkspaceAvailable)) { setView({ type: 'board', workspace: lastWorkspace }); return }
+    if (DISABLED_APPS.has(view.name) || (view.name === 'telephony' && !voxWorkspaceAvailable)) { applyView({ type: 'board', workspace: lastWorkspace }); return }
     // Global apps → chat is the global assistant.
     gotoSession(ASSISTANT)
     const params = new URLSearchParams({ session: ASSISTANT })
@@ -1554,21 +1578,25 @@ function setView(view) {
 
 let referenceNavigation = 0
 async function openPrismReference(view) {
-  const generation = ++referenceNavigation, previousView = currentView
+  const generation = ++referenceNavigation, previousView = currentView, navigation = ++viewNavigation
   const frame = document.getElementById('app-frame')
-  if (view.type === 'app' && currentView?.type === 'app' && view.name === currentView.name && frame?.contentWindow === activeEditorSource) {
+  if (view.type === 'app' && view.name !== 'room' && currentView?.type === 'app' && view.name === currentView.name && frame?.contentWindow === activeEditorSource) {
     frame.contentWindow.postMessage({type:'open-reference-object',href:window.PrismLinks.href(view)},location.origin)
     return true
   }
-  if (currentView?.type === 'app') {
-    try {
-      const leave = frame?.contentWindow?.PrismLinks?.beforeLeave
-      if (leave && !await leave()) return false
-    } catch (_) {
-      showToast({title:'Open link',message:'Could not save or close the current editor. Your changes are still here.',level:'error'})
+  if (view.type === 'app' && view.name === 'room') {
+    let available = false
+    if (Number.isSafeInteger(view.group) && view.group > 0) {
+      try {
+        const response = await fetch('/api/room/activity?group=' + encodeURIComponent(view.group) + '&limit=1', {cache:'no-store'})
+        available = response.ok
+      } catch (_) {}
+    }
+    if (generation !== referenceNavigation || previousView !== currentView || navigation !== viewNavigation) return true
+    if (!available) {
+      showToast({title:'Room',message:'This Room is unavailable to your account.',level:'error'})
       return false
     }
-    if (generation !== referenceNavigation || previousView !== currentView) return true
   }
   if (view.type === 'board') {
     const id = personalSessionID(view.workspace)
@@ -1577,14 +1605,14 @@ async function openPrismReference(view) {
       const response = await fetch('/api/sessions?includeSystem=1', {cache:'no-store'})
       if (response.ok) known = ((await response.json()).sessions || []).some(session => session.id === id)
     } catch (_) {}
-    if (generation !== referenceNavigation || previousView !== currentView) return true
+    if (generation !== referenceNavigation || previousView !== currentView || navigation !== viewNavigation) return true
     if (!known) {
       showToast({title:'Workspace',message:'This workspace is unavailable.',level:'error'})
       return false
     }
     view = {...view, workspace: id}
   }
-  setView(view)
+  if (!await setView(view)) return false
   if (view.chat === 'open' && !chatOpen) toggleChat()
   return true
 }
@@ -2648,8 +2676,11 @@ window.addEventListener('message', e => {
         showToast({title:'Room',message:'This group is not available to your account.',level:'error'}); return
       }
       if(chatOpen)toggleChat()
-      pendingRoomDraft = {group, text}
-      setView({type:'app',name:'room',group})
+      const draft = {group, text}
+      pendingRoomDraft = draft
+      Promise.resolve(setView({type:'app',name:'room',group})).then(opened => {
+        if (opened === false && pendingRoomDraft === draft) pendingRoomDraft = null
+      })
     } else {
       if (!chatOpen) toggleChat()
       const input=document.getElementById('chat-input')

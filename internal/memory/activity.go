@@ -3,9 +3,43 @@ package memory
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
+
+type LatestRoomWork struct {
+	GroupID   int64
+	MessageID int64
+	Status    string
+	Request   string
+	CreatedAt time.Time
+}
+
+// Only the caller's already-authorized groups enter this query. It reads one
+// latest reply per group, with its actual same-group triggering message; neither
+// full tool traces nor unrelated transcript tails are fetched.
+func (s *Store) LatestRoomWork(ctx context.Context, groups []int64) (map[int64]LatestRoomWork, error) {
+	out := map[int64]LatestRoomWork{}
+	if len(groups) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT latest.group_id,latest.id,latest.status,latest.created_at,COALESCE(left(request.content,1000),'') FROM (
+	 SELECT DISTINCT ON(group_id) group_id,id,status,created_at,reply_to FROM room_messages WHERE group_id=ANY($1) AND is_agent ORDER BY group_id,id DESC
+	) latest LEFT JOIN room_messages request ON request.id=latest.reply_to AND request.group_id=latest.group_id AND NOT request.is_agent`, groups)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var work LatestRoomWork
+		if err := rows.Scan(&work.GroupID, &work.MessageID, &work.Status, &work.CreatedAt, &work.Request); err != nil {
+			return nil, err
+		}
+		out[work.GroupID] = work
+	}
+	return out, rows.Err()
+}
 
 // LoadActivityMessages reads a small user-visible transcript tail. Clip content
 // in PostgreSQL and exclude tool payloads and image blobs before transferring

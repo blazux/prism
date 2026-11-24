@@ -52,12 +52,16 @@ func (s *Server) pimGroupScopeFor(r *http.Request) (scope string, gid int64, ok 
 
 // noteJSON is the wire shape for a note in the app: the base fields plus which
 // scope it lives in ("personal" | "group") and whether the caller may edit it.
-func noteJSON(id, title, body, tags string, createdAt, updatedAt time.Time, scope string, canEdit bool, ownerID, originID int64) map[string]interface{} {
-	return map[string]interface{}{
+func noteJSON(id, title, body, tags string, createdAt, updatedAt time.Time, scope string, canEdit bool, ownerID, originID int64, aliases ...[]string) map[string]interface{} {
+	out := map[string]interface{}{
 		"id": id, "title": title, "body": body, "tags": tags,
 		"createdAt": createdAt, "updatedAt": updatedAt,
 		"scope": scope, "canEdit": canEdit, "ownerId": ownerID, "originId": originID,
 	}
+	if len(aliases) > 0 {
+		out["aliases"] = aliases[0]
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
@@ -169,7 +173,7 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 		}
 		out := make([]map[string]interface{}, 0, len(items))
 		for _, n := range items {
-			out = append(out, noteJSON(n.ID, n.Title, n.Body, n.Tags, n.CreatedAt, n.UpdatedAt, "personal", true, 0, 0))
+			out = append(out, noteJSON(n.ID, n.Title, n.Body, n.Tags, n.CreatedAt, n.UpdatedAt, "personal", true, 0, 0, n.Aliases))
 		}
 		// Append the group's shared notes (read-only unless the caller shared them,
 		// or is a group admin). These live under the group scope "g<id>".
@@ -179,7 +183,7 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 			if gnotes, err := s.store().ListNotes(r.Context(), gscope); err == nil {
 				for _, n := range gnotes {
 					canEdit := admin || (u != nil && n.OwnerID == u.ID)
-					out = append(out, noteJSON(strconv.FormatInt(n.ID, 10), n.Title, n.Body, n.Tags, n.CreatedAt, n.UpdatedAt, "group", canEdit, n.OwnerID, n.OriginID))
+					out = append(out, noteJSON(strconv.FormatInt(n.ID, 10), n.Title, n.Body, n.Tags, n.CreatedAt, n.UpdatedAt, "group", canEdit, n.OwnerID, n.OriginID, n.Aliases))
 				}
 			}
 		}
@@ -189,6 +193,26 @@ func (s *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 					writeJSON(w, map[string]interface{}{"note": note, "source": prov.Kind()})
 					return
 				}
+			}
+			// Renamed vault paths remain usable when exactly one active note
+			// carries the old path. An exact current id above always wins.
+			var resolved map[string]interface{}
+			for _, note := range out {
+				if aliases, ok := note["aliases"].([]string); ok {
+					for _, alias := range aliases {
+						if alias == id {
+							if resolved != nil && resolved["id"] != note["id"] {
+								writeErr(w, 409, "This note link is ambiguous. Open Notes to choose the page.")
+								return
+							}
+							resolved = note
+						}
+					}
+				}
+			}
+			if resolved != nil {
+				writeJSON(w, map[string]interface{}{"note": resolved, "source": prov.Kind()})
+				return
 			}
 			writeErr(w, http.StatusNotFound, "Note not found or unavailable.")
 			return

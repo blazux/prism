@@ -63,10 +63,11 @@ function shell(options = {}) {
   const c = vm.createContext({window:{PrismLinks:f.api},ME:{uid:7},allSessions:options.sessions||[],currentView:options.view||{type:'board'},
     activeEditorSource:options.ready ? frame.contentWindow : null, document:{getElementById:()=>frame}, location:{origin:'https://prism.test'},
     showToast:value=>notices.push(value),fetch:options.fetch||(()=>{throw Error('unexpected fetch')}),
-    setView:view=>{views.push(plain(view));c.currentView=view},chatOpen:false,toggleChat:()=>{c.chatOpen=true}})
+    applyView:view=>{views.push(plain(view));c.currentView=view},chatOpen:false,toggleChat:()=>{c.chatOpen=true}})
   const personal = source.slice(source.indexOf('function personalSessionID('), source.indexOf('function gotoSession('))
   const start = source.indexOf('let referenceNavigation = 0')
-  vm.runInContext(personal + source.slice(start, source.indexOf('window.PrismLinks?.bind', start)), c)
+  const guard=source.slice(source.indexOf('let viewNavigation = 0'),source.indexOf('// applyView switches'))
+  vm.runInContext(personal + guard + source.slice(start, source.indexOf('window.PrismLinks?.bind', start)), c)
   return {c,views,notices,messages,open:view=>c.openPrismReference(view)}
 }
 test('workspace links resolve hidden conversations read-only and never create an unknown workspace', async () => {
@@ -86,6 +87,50 @@ test('a late workspace lookup does not override a newer user navigation', async 
   finish({ok:true,json:async()=>({sessions:[{id:'u7-old'}]})});await opening
   assert.equal(f.views.length,0)
 })
+test('Room links require a single valid group and preserve it when copied', () => {
+  const f=links()
+  assert.deepEqual(plain(f.api.parse('/?app=room&group=17')), {type:'app',name:'room',group:17})
+  assert.equal(f.api.href({type:'app',name:'room',group:17}), '/?app=room&group=17')
+  for (const href of ['/?app=room','/?app=room&group=0','/?app=room&group=17&group=18','/?app=room&group=9007199254740992','/?app=room&group=17&id=4']) {
+    assert.equal(f.api.parse(href),null,href)
+  }
+})
+test('Room navigation checks current access and never starts an agent turn', async () => {
+  const paths=[]
+  const f=shell({fetch:async path=>{paths.push(path);return {ok:paths.length===1}}})
+  assert.equal(await f.open({type:'app',name:'room',group:17}),true)
+  assert.deepEqual(f.views[0],{type:'app',name:'room',group:17})
+  assert.equal(await f.open({type:'app',name:'room',group:18}),false)
+  assert.deepEqual(paths,['/api/room/activity?group=17&limit=1','/api/room/activity?group=18&limit=1'])
+  assert.equal(f.views.length,1)
+  assert.equal(f.notices.length,1)
+})
+test('rail, board and settings navigation wait for the app save guard exactly once', async () => {
+  for (const destination of [{type:'app',name:'notes'},{type:'board',workspace:'u7-main'},{type:'settings',tab:'email'}]) {
+    let finish,calls=0
+    const f=shell({view:{type:'app',name:'email'},beforeLeave:()=>{calls++;return new Promise(resolve=>finish=resolve)}})
+    const pending=f.c.setView(destination)
+    await Promise.resolve()
+    assert.equal(f.views.length,0)
+    finish(true)
+    assert.equal(await pending,true)
+    assert.equal(calls,1)
+    assert.deepEqual(f.views,[destination])
+  }
+})
+test('a failed save blocks direct navigation and a newer destination wins a pending save', async () => {
+  const blocked=shell({view:{type:'app',name:'email'},beforeLeave:async()=>false})
+  assert.equal(await blocked.c.setView({type:'settings'}),false)
+  assert.equal(blocked.views.length,0)
+  const waits=[]
+  const f=shell({view:{type:'app',name:'notes'},beforeLeave:()=>new Promise(resolve=>waits.push(resolve))})
+  const first=f.c.setView({type:'app',name:'email'})
+  const second=f.c.setView({type:'board',workspace:'u7-main'})
+  await Promise.resolve()
+  waits[1](true);assert.equal(await second,true)
+  waits[0](true);assert.equal(await first,false)
+  assert.deepEqual(f.views,[{type:'board',workspace:'u7-main'}])
+})
 test('deleted cached workspaces and canceled or stale draft guards never navigate', async () => {
   const stale=shell({sessions:[{id:'u7-deleted'}],fetch:async()=>({ok:true,json:async()=>({sessions:[]})})})
   assert.equal(await stale.open({type:'board',workspace:'deleted'}),false)
@@ -96,6 +141,7 @@ test('deleted cached workspaces and canceled or stale draft guards never navigat
   let finish
   const pending=shell({view:{type:'app',name:'notes'},beforeLeave:()=>new Promise(resolve=>finish=resolve)})
   const opening=pending.open({type:'app',name:'tasks',id:'17'})
+  await Promise.resolve()
   pending.c.currentView={type:'settings'}
   finish(true);await opening
   assert.equal(pending.views.length,0)

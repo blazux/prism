@@ -8,11 +8,14 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net"
+	stdmail "net/mail"
 	"net/smtp"
+	"net/textproto"
 	"regexp"
 	"sort"
 	"strings"
@@ -575,33 +578,76 @@ func sanitizeHeaderVal(s string) string {
 	return strings.NewReplacer("\r", "", "\n", "", "\"", "'").Replace(s)
 }
 
+// Send retains the original API for existing callers.
 func (c Config) Send(to, subject, body, inReplyTo string, atts []OutAttachment) error {
-	if c.SMTPHost == "" {
-		return fmt.Errorf("SMTP host not configured")
-	}
-	port := c.SMTPPort
-	if port == 0 {
-		port = 587
-	}
-	from := c.from()
+	return c.SendTo(to, "", "", subject, body, inReplyTo, atts)
+}
 
-	// CRLF-strip every header value built from a caller-supplied string, same
-	// as attachment filenames already are (sanitizeHeaderVal) — otherwise a
-	// "\r\n" in a subject/recipient/reply-id injects arbitrary extra headers
-	// into the outgoing message.
-	to = sanitizeHeaderVal(to)
+func recipientList(value string) ([]*stdmail.Address, error) {
+	if strings.ContainsAny(value, "\r\n\x00") {
+		return nil, fmt.Errorf("recipient addresses cannot contain line breaks")
+	}
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	list, err := stdmail.ParseAddressList(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid recipient address: %w", err)
+	}
+	return list, nil
+}
+
+// prepareMessage keeps envelope recipients separate from visible MIME headers.
+// In particular, blind-copy recipients must never appear in message headers.
+func (c Config) prepareMessage(to, cc, bcc, subject, body, inReplyTo string, atts []OutAttachment) (string, []string, []byte, error) {
+	if strings.ContainsAny(c.from(), "\r\n\x00") {
+		return "", nil, nil, fmt.Errorf("invalid sender address")
+	}
+	sender, err := stdmail.ParseAddress(c.from())
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("invalid sender address: %w", err)
+	}
+	var lists [3][]*stdmail.Address
+	var rcpts []string
+	seen := map[string]bool{}
+	for i, value := range []string{to, cc, bcc} {
+		lists[i], err = recipientList(value)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		for _, a := range lists[i] {
+			key := strings.ToLower(a.Address)
+			if !seen[key] {
+				seen[key] = true
+				rcpts = append(rcpts, a.Address)
+			}
+		}
+	}
+	if len(rcpts) == 0 {
+		return "", nil, nil, fmt.Errorf("at least one recipient is required")
+	}
+	header := func(list []*stdmail.Address) string {
+		values := make([]string, len(list))
+		for i, a := range list {
+			values[i] = a.String()
+		}
+		return strings.Join(values, ", ")
+	}
 	subject = sanitizeHeaderVal(subject)
 	inReplyTo = sanitizeHeaderVal(inReplyTo)
-
 	var msg bytes.Buffer
-	fmt.Fprintf(&msg, "From: %s\r\n", from)
-	fmt.Fprintf(&msg, "To: %s\r\n", to)
-	fmt.Fprintf(&msg, "Subject: %s\r\n", subject)
+	fmt.Fprintf(&msg, "From: %s\r\n", sender.String())
+	if len(lists[0]) > 0 {
+		fmt.Fprintf(&msg, "To: %s\r\n", header(lists[0]))
+	}
+	if len(lists[1]) > 0 {
+		fmt.Fprintf(&msg, "Cc: %s\r\n", header(lists[1]))
+	}
+	fmt.Fprintf(&msg, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
 	fmt.Fprintf(&msg, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
-	fmt.Fprintf(&msg, "Message-ID: <%d@%s>\r\n", time.Now().UnixNano(), c.SMTPHost)
+	fmt.Fprintf(&msg, "Message-ID: <%d@%s>\r\n", time.Now().UnixNano(), sanitizeHeaderVal(c.SMTPHost))
 	if inReplyTo != "" {
-		fmt.Fprintf(&msg, "In-Reply-To: %s\r\n", inReplyTo)
-		fmt.Fprintf(&msg, "References: %s\r\n", inReplyTo)
+		fmt.Fprintf(&msg, "In-Reply-To: %s\r\nReferences: %s\r\n", inReplyTo, inReplyTo)
 	}
 	msg.WriteString("MIME-Version: 1.0\r\n")
 	if len(atts) == 0 {
@@ -610,8 +656,7 @@ func (c Config) Send(to, subject, body, inReplyTo string, atts []OutAttachment) 
 	} else {
 		boundary := fmt.Sprintf("prism%d", time.Now().UnixNano())
 		fmt.Fprintf(&msg, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
-		fmt.Fprintf(&msg, "--%s\r\n", boundary)
-		msg.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+		fmt.Fprintf(&msg, "--%s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", boundary)
 		msg.WriteString(body)
 		msg.WriteString("\r\n")
 		for _, a := range atts {
@@ -619,35 +664,79 @@ func (c Config) Send(to, subject, body, inReplyTo string, atts []OutAttachment) 
 			if ct == "" {
 				ct = "application/octet-stream"
 			}
-			fn := sanitizeHeaderVal(a.Filename)
-			fmt.Fprintf(&msg, "--%s\r\n", boundary)
-			fmt.Fprintf(&msg, "Content-Type: %s; name=%q\r\n", ct, fn)
-			fmt.Fprintf(&msg, "Content-Disposition: attachment; filename=%q\r\n", fn)
+			media, params, err := mime.ParseMediaType(ct)
+			if err != nil {
+				return "", nil, nil, fmt.Errorf("invalid attachment content type")
+			}
+			params["name"] = sanitizeHeaderVal(a.Filename)
+			fmt.Fprintf(&msg, "--%s\r\nContent-Type: %s\r\n", boundary, mime.FormatMediaType(media, params))
+			fmt.Fprintf(&msg, "Content-Disposition: %s\r\n", mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeHeaderVal(a.Filename)}))
 			msg.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
 			msg.WriteString(b64wrap(a.Data))
 			msg.WriteString("\r\n")
 		}
 		fmt.Fprintf(&msg, "--%s--\r\n", boundary)
 	}
+	return sender.Address, rcpts, msg.Bytes(), nil
+}
 
-	auth := smtp.PlainAuth("", c.User, c.Pass, c.SMTPHost)
-	serverAddr := fmt.Sprintf("%s:%d", c.SMTPHost, port)
-
-	// `to` may be a "Name <a@b>, c@d" list — Rcpt needs the bare addresses.
-	rcpts := extractEmails(to)
-	if len(rcpts) == 0 {
-		return fmt.Errorf("no valid recipient address in %q", to)
+// SendTo sends plain-text mail with separate To, Cc and Bcc recipients.
+func (c Config) SendTo(to, cc, bcc, subject, body, inReplyTo string, atts []OutAttachment) error {
+	if c.SMTPHost == "" {
+		return fmt.Errorf("SMTP host not configured")
 	}
-
+	from, rcpts, msg, err := c.prepareMessage(to, cc, bcc, subject, body, inReplyTo, atts)
+	if err != nil {
+		return err
+	}
+	port := c.SMTPPort
+	if port == 0 {
+		port = 587
+	}
+	auth := smtp.PlainAuth("", c.User, c.Pass, c.SMTPHost)
+	serverAddr := net.JoinHostPort(c.SMTPHost, fmt.Sprint(port))
 	switch {
 	case port == 465:
-		return c.sendImplicitTLS(serverAddr, auth, from, rcpts, msg.Bytes())
+		return c.sendImplicitTLS(serverAddr, auth, from, rcpts, msg)
 	case c.Insecure || c.Security == "starttls":
-		// STARTTLS, accepting a self-signed cert (Proton Mail Bridge).
-		return c.sendStartTLS(serverAddr, auth, from, rcpts, msg.Bytes())
+		return c.sendStartTLS(serverAddr, auth, from, rcpts, msg)
 	default:
-		return smtp.SendMail(serverAddr, auth, from, rcpts, msg.Bytes())
+		return c.sendSMTP(serverAddr, auth, from, rcpts, msg)
 	}
+}
+
+type deliveryUncertainError struct{ err error }
+
+func (e *deliveryUncertainError) Error() string {
+	return "delivery could not be confirmed; check Sent or contact the recipient before retrying: " + e.err.Error()
+}
+func (e *deliveryUncertainError) Unwrap() error { return e.err }
+
+// DeliveryUncertain reports a failure while transferring or acknowledging DATA,
+// when automatically repeating the message could deliver it twice.
+func DeliveryUncertain(err error) bool {
+	var uncertain *deliveryUncertainError
+	return errors.As(err, &uncertain)
+}
+
+func (c Config) sendSMTP(serverAddr string, auth smtp.Auth, from string, rcpts []string, msg []byte) error {
+	conn, err := net.DialTimeout("tcp", serverAddr, 20*time.Second)
+	if err != nil {
+		return fmt.Errorf("smtp dial: %w", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	cl, err := smtp.NewClient(conn, c.SMTPHost)
+	if err != nil {
+		return fmt.Errorf("smtp client: %w", err)
+	}
+	defer cl.Quit()
+	if ok, _ := cl.Extension("STARTTLS"); ok {
+		if err := cl.StartTLS(c.tlsConfig(c.SMTPHost)); err != nil {
+			return fmt.Errorf("smtp starttls: %w", err)
+		}
+	}
+	return smtpDeliver(cl, auth, from, rcpts, msg)
 }
 
 func smtpDeliver(cl *smtp.Client, auth smtp.Auth, from string, rcpts []string, msg []byte) error {
@@ -667,18 +756,27 @@ func smtpDeliver(cl *smtp.Client, auth smtp.Auth, from string, rcpts []string, m
 		return err
 	}
 	if _, err := wc.Write(msg); err != nil {
-		return err
+		return &deliveryUncertainError{err}
 	}
-	return wc.Close()
+	if err := wc.Close(); err != nil {
+		var rejection *textproto.Error
+		if errors.As(err, &rejection) && rejection.Code >= 400 {
+			return fmt.Errorf("smtp message rejected: %w", err)
+		}
+		return &deliveryUncertainError{err}
+	}
+	return nil
 }
 
 // sendStartTLS opens a plain connection, upgrades it with STARTTLS (honouring
 // c.Insecure for self-signed certs), authenticates and sends.
 func (c Config) sendStartTLS(serverAddr string, auth smtp.Auth, from string, rcpts []string, msg []byte) error {
-	conn, err := net.Dial("tcp", serverAddr)
+	conn, err := net.DialTimeout("tcp", serverAddr, 20*time.Second)
 	if err != nil {
 		return fmt.Errorf("smtp dial: %w", err)
 	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
 	cl, err := smtp.NewClient(conn, c.SMTPHost)
 	if err != nil {
 		return fmt.Errorf("smtp client: %w", err)
@@ -693,10 +791,12 @@ func (c Config) sendStartTLS(serverAddr string, auth smtp.Auth, from string, rcp
 // sendImplicitTLS handles port 465 (TLS from the first byte), which net/smtp's
 // SendMail (STARTTLS) does not cover.
 func (c Config) sendImplicitTLS(serverAddr string, auth smtp.Auth, from string, rcpts []string, msg []byte) error {
-	conn, err := tls.Dial("tcp", serverAddr, c.tlsConfig(c.SMTPHost))
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 20 * time.Second}, "tcp", serverAddr, c.tlsConfig(c.SMTPHost))
 	if err != nil {
 		return fmt.Errorf("smtp tls dial: %w", err)
 	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
 	cl, err := smtp.NewClient(conn, c.SMTPHost)
 	if err != nil {
 		return fmt.Errorf("smtp client: %w", err)

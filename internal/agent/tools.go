@@ -473,7 +473,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "editor",
-			Description: "Read or update the user's current note, email draft, task form or calendar form in the browser. With Mail open, action=open app=email opens a new composer; pass folder and uid to draft a reply with the original quoted. Open returns the draft and its revision; it never replaces an existing draft. Then update requested fields with that revision. Otherwise read first. If the user edits or switches, read again and reconsider. Notes are saved; other changes stay in the form. NEVER sends mail. Use email to send only when requested.",
+			Description: "Read or update the user's current note, email draft, task form or calendar form in the browser. With Mail open, action=open app=email opens a new composer; pass folder and uid to draft a reply with the original quoted. Open returns the draft and its revision; it never replaces an existing draft. Then update requested fields with that revision. Otherwise read first. If the user edits or switches, read again and reconsider. Notes and email drafts are saved; task/calendar changes stay in the form. NEVER sends mail. Use email to send only when requested.",
 			Parameters: ollama.ToolParameters{Type: "object", Properties: map[string]ollama.ToolProperty{
 				"action":      {Type: "string", Description: "open a mail composer, read or update", Enum: []string{"open", "read", "update"}},
 				"app":         {Type: "string", Description: "open only: email. Mail must be open in this browser."},
@@ -484,6 +484,8 @@ var ToolDefinitions = []ollama.Tool{
 				"title":       {Type: "string", Description: "Note, task or event title. Omit unchanged fields."},
 				"tags":        {Type: "string", Description: "Note tags, comma-separated."},
 				"to":          {Type: "string", Description: "Email recipients."},
+				"cc":          {Type: "string", Description: "Email copy recipients; comma-separated. Empty clears them."},
+				"bcc":         {Type: "string", Description: "Email blind-copy recipients; comma-separated. Empty clears them."},
 				"subject":     {Type: "string", Description: "Email subject."},
 				"body":        {Type: "string", Description: "Replacement body. Read all pages first. Keep the quoted original in email replies unless asked otherwise. Empty string clears it."},
 				"priority":    {Type: "string", Description: "Task priority.", Enum: []string{"low", "normal", "high"}},
@@ -501,7 +503,7 @@ var ToolDefinitions = []ollama.Tool{
 		Type: "function",
 		Function: ollama.ToolFunction{
 			Name:        "note",
-			Description: "Personal notes, shared across the dashboard. For the currently open note, prefer editor read/update to include unsaved text and show changes in place. action=add|list|update|delete. update/delete: copy the exact id from a fresh list call — never guess or recall one. delete ONLY the note the user explicitly asked to delete, never as cleanup or preparation for another task. Notes have a title, body (Markdown) and comma-separated tags. Use to remember free-form information the user wants kept — and proactively offer to save substantial outputs (deep_research reports, summaries, drafts) as a note so they persist in the Notes app. To embed an image (from a URL, or a file already in the workspace): save/download it under workspace/data/... (wget's path param, e.g. \"data/notes/photo.png\") — NOT elsewhere, /api/file forces text/plain and breaks images — then reference it in the body as Markdown ![alt](/data/notes/photo.png) (the /data/ prefix is what makes it a real, browsable URL).",
+			Description: "Personal notes, shared across the dashboard. For the currently open note, prefer editor read/update to include unsaved text and show changes in place. action=add|list|update|delete. delete moves to trash; prism_help topic=notes explains versions and recovery. update/delete: copy the exact id from a fresh list call — never guess or recall one. delete ONLY the note the user explicitly asked to delete, never as cleanup or preparation for another task. Notes have a title, body (Markdown) and comma-separated tags. Use to remember free-form information the user wants kept — and proactively offer to save substantial outputs (deep_research reports, summaries, drafts) as a note so they persist in the Notes app. To embed an image (from a URL, or a file already in the workspace): save/download it under workspace/data/... (wget's path param, e.g. \"data/notes/photo.png\") — NOT elsewhere, /api/file forces text/plain and breaks images — then reference it in the body as Markdown ![alt](/data/notes/photo.png) (the /data/ prefix is what makes it a real, browsable URL).",
 			Parameters: ollama.ToolParameters{
 				Type: "object",
 				Properties: map[string]ollama.ToolProperty{
@@ -554,6 +556,8 @@ var ToolDefinitions = []ollama.Tool{
 					"rule_action":     {Type: "string", Description: "Rule operation", Enum: []string{"move", "mark_read"}},
 					"enabled":         {Type: "boolean", Description: "rule_save: automatic execution every minute (default true); false pauses."},
 					"to":              {Type: "string", Description: "Recipient (send); defaults to original sender for reply"},
+					"cc":              {Type: "string", Description: "Copy recipients (send/reply), comma-separated"},
+					"bcc":             {Type: "string", Description: "Blind-copy recipients (send/reply), comma-separated; hidden from message headers"},
 					"subject":         {Type: "string", Description: "Subject (send)"},
 					"body":            {Type: "string", Description: "Message body (send/reply)"},
 					"uid":             {Type: "integer", Description: "Message UID from list/search (read/reply)"},
@@ -567,6 +571,7 @@ var ToolDefinitions = []ollama.Tool{
 					"password":        {Type: "string", Description: "Legacy only: account password. Prefer request_secret then password_secret; raw passwords may appear in conversation logs."},
 					"password_secret": {Type: "string", Description: "config: NAME of a secret created with request_secret; its value is stored as the mailbox password"},
 					"from":            {Type: "string", Description: "From address if different from user (config)"},
+					"signature":       {Type: "string", Description: "config: plain-text signature for new Mail drafts; empty disables it. Direct send/reply use the body exactly as supplied."},
 					"security":        {Type: "string", Description: "config: One of: ssl, starttls — ssl = implicit TLS (993/465, the default), starttls = plain port upgraded (143/587, e.g. ProtonMail Bridge)", Enum: []string{"ssl", "starttls"}},
 					"insecure":        {Type: "boolean", Description: "config: accept a self-signed certificate (ProtonMail Bridge needs it)"},
 					"list_limit":      {Type: "integer", Description: "config: how many messages the Email app loads in the inbox (1–500, default 60)"},

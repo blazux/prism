@@ -49,7 +49,7 @@ func TestVaultRoundTrip(t *testing.T) {
 	}
 
 	// Path traversal is rejected.
-	if _, err := p.resolve("../outside.md"); err == nil {
+	if _, err := p.Save(ctx, "../outside.md", "outside", "body", ""); err == nil {
 		t.Fatal("expected traversal to be rejected")
 	}
 
@@ -117,7 +117,12 @@ func TestVaultWritesAreAtomic(t *testing.T) {
 	if err := os.WriteFile(path, []byte("original"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := atomicWrite(path, []byte("replacement")); err != nil {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := rootAtomicWrite(root, "note.md", []byte("replacement"), false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)

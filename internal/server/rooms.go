@@ -479,6 +479,7 @@ func (s *Server) runRoomAgent(groupID int64, cfg memory.RoomConfig, fromName, co
 		return
 	}
 	agentMsg.Status = "running"
+	s.rooms.setProgressMessage(groupID, agentMsg.ID)
 	_ = ms.UpdateRoomResponse(ctx, agentMsg.ID, "", "running", nil)
 	s.rooms.broadcast(groupID, roomEvent(agentMsg))
 	traces := []agent.Event{}

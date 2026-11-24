@@ -22,12 +22,14 @@ const (
 )
 
 type Item struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	Tags      string    `json:"tags"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        string     `json:"id"`
+	Title     string     `json:"title"`
+	Body      string     `json:"body"`
+	Tags      string     `json:"tags"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	Aliases   []string   `json:"aliases,omitempty"`
+	DeletedAt *time.Time `json:"deletedAt,omitempty"`
 }
 
 type Provider interface {
@@ -83,6 +85,7 @@ func (p *DBProvider) List(ctx context.Context) ([]Item, error) {
 		out = append(out, Item{
 			ID: strconv.FormatInt(n.ID, 10), Title: n.Title, Body: n.Body, Tags: n.Tags,
 			CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt,
+			Aliases: n.Aliases, DeletedAt: n.DeletedAt,
 		})
 	}
 	return out, nil

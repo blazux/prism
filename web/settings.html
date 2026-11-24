@@ -2100,6 +2100,7 @@ async function renderEmailTab(container) {
     <div class="efield"><label>Email</label><input id="e-user" value="${escHtml(cfg.user || '')}" placeholder="you@example.com"></div>
     <div class="efield"><label>Password</label><input id="e-pass" type="password" placeholder="${cfg.has_password ? '•••••• (unchanged)' : ''}"></div>
     <div class="efield"><label>Emails to load in the inbox</label><input id="e-limit" type="number" min="1" max="500" value="${cfg.list_limit || 60}" style="width:120px"></div>
+    <div class="efield"><label for="e-signature">Signature</label><textarea id="e-signature" rows="4" maxlength="10000" style="width:100%;box-sizing:border-box;resize:vertical" placeholder="Added to new messages and replies">${escHtml(cfg.signature || '')}</textarea></div>
     <div class="eprov-hint" id="e-hint"></div>
     <details id="e-adv">
       <summary>Advanced — server settings</summary>
@@ -2143,13 +2144,14 @@ async function renderEmailTab(container) {
       user: v('e-user'), imap_host: v('e-ih'), smtp_host: v('e-sh'), from: v('e-from'),
       imap_port: parseInt(v('e-ip')) || 0, smtp_port: parseInt(v('e-sp')) || 0,
       list_limit: Math.max(1, Math.min(500, parseInt(v('e-limit')) || 60)),
+      signature: $('e-signature').value,
       security: $('e-sec').value, insecure: $('e-insec').checked,
     }
     const pass = $('e-pass').value
     if (pass) body.password = pass
     $('e-save').disabled = true; $('e-err').textContent = ''
     try {
-      const res = await settingsFetch('/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, page.querySelectorAll('#e-user,#e-ih,#e-sh,#e-from,#e-ip,#e-sp,#e-limit,#e-sec,#e-insec,#e-pass'))
+      const res = await settingsFetch('/api/email/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, page.querySelectorAll('#e-user,#e-ih,#e-sh,#e-from,#e-ip,#e-sp,#e-limit,#e-sec,#e-insec,#e-pass,#e-signature'))
       if (!res.ok) throw new Error(await res.text())
       showToast('Mailbox saved')
     } catch (e) { $('e-err').textContent = 'Could not save: ' + e.message }

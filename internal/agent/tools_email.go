@@ -24,7 +24,8 @@ type emailStoredConfig struct {
 	// never reads it, but it must round-trip through this struct: a config
 	// action re-marshals the whole record, and a missing field here silently
 	// reset the user's choice to the default.
-	ListLimit int `json:"list_limit,omitempty"`
+	ListLimit int    `json:"list_limit,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
 const emailConfigKey = "email_config"
@@ -78,7 +79,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		// Models also use config to inspect the current mailbox. Without
 		// configuration fields this is a read, not an empty configuration write.
 		update := false
-		for _, key := range []string{"imap_host", "imap_port", "smtp_host", "smtp_port", "user", "from", "security", "insecure", "list_limit", "password", "password_secret"} {
+		for _, key := range []string{"imap_host", "imap_port", "smtp_host", "smtp_port", "user", "from", "security", "insecure", "list_limit", "signature", "password", "password_secret"} {
 			if _, present := args[key]; present {
 				update = true
 				break
@@ -107,6 +108,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 				"user": sc.User, "from": sc.From,
 				"security": sc.Security, "insecure": sc.Insecure,
 				"list_limit":   sc.ListLimit,
+				"signature":    sc.Signature,
 				"has_password": hasPassword && password != "", "connection_tested": false,
 			}), nil
 		}
@@ -132,6 +134,12 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		}
 		if v := str("from"); v != "" {
 			sc.From = v
+		}
+		if v, ok := args["signature"].(string); ok {
+			if len(v) > 16000 {
+				return "", fmt.Errorf("signature must be at most 16000 bytes")
+			}
+			sc.Signature = v
 		}
 		if v := strings.ToLower(strings.TrimSpace(str("security"))); v != "" {
 			if v != "ssl" && v != "starttls" {
@@ -237,10 +245,10 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 			return "", err
 		}
 		to, subject, body := str("to"), str("subject"), str("body")
-		if to == "" || body == "" {
-			return "", fmt.Errorf("send requires 'to' and 'body'")
+		if (strings.TrimSpace(to) == "" && strings.TrimSpace(str("cc")) == "" && strings.TrimSpace(str("bcc")) == "") || strings.TrimSpace(body) == "" {
+			return "", fmt.Errorf("send requires a recipient (to, cc or bcc) and a non-empty body")
 		}
-		if err := cfg.Send(to, subject, body, "", nil); err != nil {
+		if err := cfg.SendTo(to, str("cc"), str("bcc"), subject, body, "", nil); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Email sent to %s.", to), nil
@@ -269,7 +277,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		if to == "" {
 			to = orig.From
 		}
-		if err := cfg.Send(to, subject, body, orig.MessageID, nil); err != nil {
+		if err := cfg.SendTo(to, str("cc"), str("bcc"), subject, body, orig.MessageID, nil); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Reply sent to %s.", to), nil
