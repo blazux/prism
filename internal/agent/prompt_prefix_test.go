@@ -21,7 +21,6 @@ func TestPromptPrefixCacheTracksSourceValues(t *testing.T) {
 				want  string
 			}{
 				{func() { a.agentName = "Beta" }, "Your name is Beta."},
-				{func() { a.sessionID = "u2-second" }, "Your session id is `u2-second`"},
 				{func() { a.basePersonality = "Base B" }, "Base B"},
 				{func() { a.personality = "Adaptation B" }, "Adaptation B"},
 				{func() {
@@ -37,6 +36,43 @@ func TestPromptPrefixCacheTracksSourceValues(t *testing.T) {
 					t.Fatal("changed source value reused an obsolete instruction prefix")
 				}
 				previous = current
+			}
+		})
+	}
+}
+
+func TestPromptPrefixIsSharedAcrossSessions(t *testing.T) {
+	for _, profile := range []string{"guided", "standard", "minimal"} {
+		t.Run(profile, func(t *testing.T) {
+			makeAgent := func(session string) *Agent {
+				return &Agent{executor: &ToolExecutor{}, agentName: "Alpha", sessionID: session,
+					basePersonality: "Base persona", personality: "Workspace voice", limits: Limits{PromptProfile: profile}}
+			}
+			firstAgent, secondAgent := makeAgent("u1-cache-board-alpha"), makeAgent("u1-cache-board-beta")
+			first, firstPrefix := firstAgent.buildSystemPromptWithCachePrefix(t.Context(), "")
+			second, secondPrefix := secondAgent.buildSystemPromptWithCachePrefix(t.Context(), "")
+			if firstPrefix == 0 || firstPrefix != secondPrefix || first[:firstPrefix] != second[:secondPrefix] {
+				t.Fatal("identical names, personalities and profiles did not share an instruction prefix")
+			}
+			for _, tc := range []struct {
+				prompt, session, other string
+			}{
+				{first, firstAgent.sessionID, secondAgent.sessionID},
+				{second, secondAgent.sessionID, firstAgent.sessionID},
+			} {
+				if strings.Contains(tc.prompt[:firstPrefix], tc.session) ||
+					strings.Count(tc.prompt, tc.session) != 1 || strings.Contains(tc.prompt, tc.other) {
+					t.Fatal("session identity was cached, duplicated or leaked between sessions")
+				}
+				if !strings.Contains(tc.prompt[firstPrefix:], "Current session ID: `"+tc.session+"`") ||
+					!strings.Contains(tc.prompt[firstPrefix:], "Wherever these instructions say SESSION_ID, use this exact string.") {
+					t.Fatal("dynamic suffix lost the session identity or SESSION_ID substitution rule")
+				}
+			}
+			firstAgent.sessionID = secondAgent.sessionID
+			changed, changedPrefix := firstAgent.buildSystemPromptWithCachePrefix(t.Context(), "")
+			if changedPrefix != firstPrefix || changed[:changedPrefix] != first[:firstPrefix] || changed != second {
+				t.Fatal("changing sessions on an existing agent changed the instruction prefix or kept a stale session")
 			}
 		})
 	}
@@ -68,7 +104,7 @@ func TestPromptPrefixCacheKeepsAllContextHooksLive(t *testing.T) {
 }
 
 func BenchmarkSystemPromptPrefix(b *testing.B) {
-	key := systemPromptPrefixKey{name: "Prism", session: "u1-workspace", persona: "A helpful generalist", profile: "guided"}
+	key := systemPromptPrefixKey{name: "Prism", persona: "A helpful generalist", profile: "guided"}
 	b.Run("assemble", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {

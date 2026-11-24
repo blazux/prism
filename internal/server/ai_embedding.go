@@ -123,6 +123,26 @@ func (s *Server) prepareEmbedding(p, old *aiProfile) error {
 	}
 	e := p.Embedding
 	e.Model = strings.TrimSpace(e.Model)
+	if e.Model == "" {
+		// A disabled connection is not probed or rebuilt. Its hidden connection
+		// details need not be complete; enabling it validates them again.
+		if e.ClearKey {
+			e.APIKey = ""
+		} else if e.APIKey == "" && !e.UseSameProvider && e.SourceID == "" {
+			// A blank field keeps a dedicated key on the same connection. Never
+			// copy a previous chat/source key: it may be removed in this save.
+			prev := old.Embedding
+			if prev != nil && !prev.UseSameProvider && prev.SourceID == "" {
+				before := aiProfile{Provider: prev.Provider, BaseURL: prev.BaseURL}
+				after := aiProfile{Provider: e.Provider, BaseURL: e.BaseURL}
+				if before.normalize() == nil && after.normalize() == nil && before.Provider == after.Provider && before.BaseURL == after.BaseURL {
+					e.APIKey = prev.APIKey
+				}
+			}
+		}
+		e.Reindex, e.ReindexFor = false, ""
+		return nil
+	}
 	if !e.UseSameProvider && e.SourceID != "" {
 		found := false
 		for _, src := range p.Sources {
@@ -215,6 +235,19 @@ func (s *Server) validateEmbeddingSave(ctx context.Context, p, old *aiProfile) e
 		old = &cp
 	}
 	ep := p.effectiveEmbedding()
+	if ep.Model == "" {
+		// Keep documents and vectors intact while the runtime closes its active
+		// pool. Disabling search sends no text and needs no reindex permission.
+		p.Embedding.Reindex, p.Embedding.ReindexFor = false, ""
+		return nil
+	}
+	previous := old.effectiveEmbedding()
+	if previous != nil && embeddingIdentity(ep) == embeddingIdentity(previous) && previous.APIKey != "" && ep.APIKey == "" {
+		// The runtime intentionally retains its old pool if a replacement probe
+		// fails. Do not claim credential removal while that credential could stay
+		// active; disabling search in this same save safely closes the old pool.
+		return errors.New("This key is also used for document search. Disable document search before removing the key.")
+	}
 	if sameEmbedding(*p, *old) {
 		p.Embedding.Reindex = p.Embedding.Reindex || old.Embedding.Reindex
 		if p.Embedding.Reindex {

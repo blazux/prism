@@ -49,7 +49,7 @@ const adminConsoleHead = `<!DOCTYPE html><html lang="en"><head><meta charset="UT
         <div id="us-tel" style="display:none"></div>
 
       <h3 style="font-size:13px;margin:18px 0 6px">Recent model work</h3>
-      <div class="hint">Estimated Claude API chat cost in USD, not a full bill. Auxiliary model calls, discounts and missing usage are excluded. Older events are grouped by session rather than task.</div>
+      <div class="hint">Estimated standard API cost in USD for supported Claude and official OpenAI usage. Captions, embeddings, connection tests, phone inference, discounts and unreported usage are excluded. Older events are grouped by session rather than task.</div>
       <div id="us-costs" style="overflow-x:auto;margin:8px 0 16px"></div>
       <div id="us-cost-detail" style="overflow-x:auto;margin:8px 0 16px"></div>
 
@@ -504,7 +504,9 @@ async function showUsageTask(i){const t=(window._usageTasks||[])[i],box=$('us-co
  html+='<table style="width:100%;font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Model</th><th>Scope</th><th>Input</th><th>Cache read / write</th><th>Output</th><th>Messages</th><th>Prompt / tools</th><th title="History text / tool results / tool arguments / images, in bytes">History B</th><th>Call USD</th><th>Cumulative USD</th></tr></thead><tbody>';
  let unknown=false;calls.forEach((c,j)=>{if(!c.costKnown)unknown=true;
   const cumulative=Number(c.cumulativeCostUsd||0),width=Math.max(2,Math.round(100*cumulative/max));
-  html+='<tr><td>'+(j+1)+'</td><td>'+esc(new Date(c.ts).toLocaleTimeString())+'</td><td>'+esc(c.model)+'</td><td>'+esc(c.scope||'—')+'</td><td>'+Number(c.inputTokens||0).toLocaleString()+'</td><td>'+Number(c.cacheReadTokens||0).toLocaleString()+' / '+Number(c.cacheWriteTokens||0).toLocaleString()+'</td><td>'+Number(c.outputTokens||0).toLocaleString()+'</td><td>'+Number(c.messageCount||0)+'</td><td>'+Number(c.systemBytes||0).toLocaleString()+' / '+Number(c.toolBytes||0).toLocaleString()+' B</td><td>'+Number(c.historyContentBytes||0).toLocaleString()+' / '+Number(c.historyToolResultBytes||0).toLocaleString()+' / '+Number(c.historyToolArgumentBytes||0).toLocaleString()+' / '+Number(c.historyImageBytes||0).toLocaleString()+'</td><td>'+(c.costKnown?'$'+Number(c.costUsd).toFixed(3):'unknown')+'</td><td style="min-width:100px"><div style="background:var(--bg2);height:5px;border-radius:3px"><div style="width:'+width+'%;height:5px;background:#6b8afd;border-radius:3px"></div></div>'+(unknown?'≥ ':'')+'$'+cumulative.toFixed(3)+'</td></tr>';
+  const count=(n,known)=>known?Number(n||0).toLocaleString():'—';
+  const writes=!c.cacheWriteTokensKnown?'—':c.cacheWritePricingUnknown?Number(c.cacheWriteTokens||0).toLocaleString()+' (TTL unknown)':Number(c.cacheWrite5mTokens||0).toLocaleString()+' (5m) + '+Number(c.cacheWrite1hTokens||0).toLocaleString()+' (1h)';
+  html+='<tr><td>'+(j+1)+'</td><td>'+esc(new Date(c.ts).toLocaleTimeString())+'</td><td>'+esc(c.model)+'</td><td>'+esc(c.scope||'—')+'</td><td>'+count(c.inputTokens,c.inputTokensKnown)+'</td><td>'+count(c.cacheReadTokens,c.cacheReadTokensKnown)+' / '+writes+'</td><td>'+count(c.outputTokens,c.outputTokensKnown)+'</td><td>'+Number(c.messageCount||0)+'</td><td>'+Number(c.systemBytes||0).toLocaleString()+' / '+Number(c.toolBytes||0).toLocaleString()+' B</td><td>'+Number(c.historyContentBytes||0).toLocaleString()+' / '+Number(c.historyToolResultBytes||0).toLocaleString()+' / '+Number(c.historyToolArgumentBytes||0).toLocaleString()+' / '+Number(c.historyImageBytes||0).toLocaleString()+'</td><td>'+(c.costKnown?'$'+Number(c.costUsd).toFixed(3):'unknown')+'</td><td style="min-width:100px"><div style="background:var(--bg2);height:5px;border-radius:3px"><div style="width:'+width+'%;height:5px;background:#6b8afd;border-radius:3px"></div></div>'+(unknown?'≥ ':'')+'$'+cumulative.toFixed(3)+'</td></tr>';
  });
  box.innerHTML=html+'</tbody></table>'+(d.truncated?'<div class="hint">Trace truncated after 500 calls.</div>':'');
 }

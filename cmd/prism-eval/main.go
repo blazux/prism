@@ -77,25 +77,27 @@ type Check struct {
 
 // Result is what one task run produced.
 type Result struct {
-	Name             string            `json:"name"`
-	Tags             []string          `json:"tags,omitempty"`
-	Success          bool              `json:"success"`
-	Failures         []string          `json:"failures,omitempty"`
-	ModelRequests    []json.RawMessage `json:"model_requests,omitempty"`
-	EstimatedCostUSD float64           `json:"estimated_cost_usd,omitempty"`
-	PricedRequests   int               `json:"priced_requests,omitempty"`
-	UnpricedRequests int               `json:"unpriced_requests,omitempty"`
-	InputTokens      int64             `json:"input_tokens,omitempty"`
-	OutputTokens     int64             `json:"output_tokens,omitempty"`
-	CacheReadTokens  int64             `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64             `json:"cache_write_tokens,omitempty"`
-	ToolCalls        int               `json:"tool_calls"`
-	ToolErrors       int               `json:"tool_errors"`
-	Tools            map[string]int    `json:"tools,omitempty"`
-	OverBudget       bool              `json:"over_budget,omitempty"`
-	AgentError       string            `json:"agent_error,omitempty"`
-	DurationMS       int64             `json:"duration_ms"`
-	Response         string            `json:"response,omitempty"`
+	Name               string            `json:"name"`
+	Tags               []string          `json:"tags,omitempty"`
+	Success            bool              `json:"success"`
+	Failures           []string          `json:"failures,omitempty"`
+	ModelRequests      []json.RawMessage `json:"model_requests,omitempty"`
+	EstimatedCostUSD   float64           `json:"estimated_cost_usd,omitempty"`
+	PricedRequests     int               `json:"priced_requests,omitempty"`
+	UnpricedRequests   int               `json:"unpriced_requests,omitempty"`
+	InputTokens        int64             `json:"input_tokens,omitempty"`
+	OutputTokens       int64             `json:"output_tokens,omitempty"`
+	CacheReadTokens    int64             `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens   int64             `json:"cache_write_tokens,omitempty"`
+	CacheWrite5mTokens int64             `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite1hTokens int64             `json:"cache_write_1h_tokens,omitempty"`
+	ToolCalls          int               `json:"tool_calls"`
+	ToolErrors         int               `json:"tool_errors"`
+	Tools              map[string]int    `json:"tools,omitempty"`
+	OverBudget         bool              `json:"over_budget,omitempty"`
+	AgentError         string            `json:"agent_error,omitempty"`
+	DurationMS         int64             `json:"duration_ms"`
+	Response           string            `json:"response,omitempty"`
 }
 
 // Report is the file written by -out and compared by -baseline.
@@ -177,7 +179,7 @@ func main() {
 	fmt.Printf("success %.0f%%  ·  mean tool calls %.1f  ·  mean tool errors %.2f  ·  mean %.0fs\n",
 		rep.SuccessRate*100, rep.MeanCalls, rep.MeanErrors, rep.MeanMS/1000)
 	if rep.KnownCostUSD > 0 {
-		fmt.Printf("known Claude chat cost ~$%.3f USD (partial API estimate; no cost limit)\n", rep.KnownCostUSD)
+		fmt.Printf("known model cost ~$%.3f USD (partial standard API estimate; no cost limit)\n", rep.KnownCostUSD)
 	}
 
 	if *out != "" {
@@ -540,23 +542,41 @@ func scoreUsage(r *Result) {
 			Model string        `json:"model"`
 			Usage *ollama.Usage `json:"usage"`
 		}
-		if json.Unmarshal(raw, &request) != nil || request.Usage == nil || request.Usage.InputTokens == nil || request.Usage.OutputTokens == nil {
+		if json.Unmarshal(raw, &request) != nil || request.Usage == nil {
 			r.UnpricedRequests++
 			continue
 		}
 		u := request.Usage
-		t := usagecost.Tokens{Input: *u.InputTokens, Output: *u.OutputTokens}
+		t := usagecost.Tokens{CacheWritePricingUnknown: u.CacheWritePricingUnknown,
+			PricingProvider: u.PricingProvider, ServiceTier: u.ServiceTier, CacheReadKnown: u.CacheReadTokens != nil}
+		if u.InputTokens != nil {
+			t.Input = *u.InputTokens
+		}
+		if u.OutputTokens != nil {
+			t.Output = *u.OutputTokens
+		}
 		if u.CacheReadTokens != nil {
 			t.CacheRead = *u.CacheReadTokens
 		}
 		if u.CacheWriteTokens != nil {
 			t.CacheWrite = *u.CacheWriteTokens
 		}
+		if u.CacheWrite5mTokens == nil && u.CacheWrite1hTokens == nil && !u.CacheWritePricingUnknown {
+			t.CacheWrite5m = t.CacheWrite
+		}
+		if u.CacheWrite5mTokens != nil {
+			t.CacheWrite5m = *u.CacheWrite5mTokens
+		}
+		if u.CacheWrite1hTokens != nil {
+			t.CacheWrite1h = *u.CacheWrite1hTokens
+		}
 		r.InputTokens += t.Input
 		r.OutputTokens += t.Output
 		r.CacheReadTokens += t.CacheRead
 		r.CacheWriteTokens += t.CacheWrite
-		if cost, ok := usagecost.Estimate(request.Model, t); ok {
+		r.CacheWrite5mTokens += t.CacheWrite5m
+		r.CacheWrite1hTokens += t.CacheWrite1h
+		if cost, ok := usagecost.Estimate(request.Model, t); ok && u.InputTokens != nil && u.OutputTokens != nil {
 			r.EstimatedCostUSD += cost
 			r.PricedRequests++
 		} else {

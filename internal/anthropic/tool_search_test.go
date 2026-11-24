@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,7 +22,7 @@ func TestToolSearchRoundTrip(t *testing.T) {
 		sent = append(sent, body)
 		w.Header().Set("Content-Type", "application/json")
 		if len(sent) == 1 {
-			fmt.Fprint(w, `{"content":[{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_bm25","input":{"query":"widget"}},{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"widget"}]}},{"type":"tool_use","id":"toolu_real","name":"widget","input":{"action":"list"}}],"stop_reason":"tool_use","usage":{"input_tokens":100,"output_tokens":20}}`)
+			fmt.Fprint(w, `{"content":[{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_bm25","input":{"query":"widget"}},{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","opaque_provider_field":{"value":"preserve me"},"content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"widget"}]}},{"type":"tool_use","id":"toolu_real","name":"widget","input":{"action":"list"}}],"stop_reason":"tool_use","usage":{"input_tokens":100,"output_tokens":20}}`)
 			return
 		}
 		fmt.Fprint(w, `{"content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":120,"output_tokens":3}}`)
@@ -94,6 +95,16 @@ func TestToolSearchRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(string(resume.Messages[1].Content[1]), `"tool_reference"`) {
 		t.Fatal("tool reference missing")
+	}
+	var originalBlock, resumedBlock bytes.Buffer
+	if err := json.Compact(&originalBlock, first.ProviderBlocks[1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Compact(&resumedBlock, resume.Messages[1].Content[1]); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(originalBlock.Bytes(), resumedBlock.Bytes()) {
+		t.Fatal("provider-only search fields changed during replay")
 	}
 	if !strings.Contains(string(resume.Messages[2].Content[0]), `"tool_use_id":"toolu_real"`) {
 		t.Fatal("tool result paired with wrong id")

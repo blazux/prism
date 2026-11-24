@@ -5,25 +5,32 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"prism/internal/ollama"
 )
 
-func TestClaudeCatalogOnlyOptedInForClaude(t *testing.T) {
-	t.Setenv("PRISM_CLAUDE_LAZY_TOOLS", "1")
-	for _, model := range []string{"openai::gpt-5", "claude-sonnet-5-5", "ollama::qwen"} {
-		if catalogFromContext(withClaudeCatalog(t.Context(), model)) != nil {
-			t.Fatalf("catalog enabled for %s", model)
+type catalogUsageBackend struct {
+	*usageBackend
+	enabled bool
+}
+
+func (b *catalogUsageBackend) UseClientToolCatalog(context.Context, string) bool { return b.enabled }
+
+func TestClaudeCatalogUsesResolvedProviderNotSelector(t *testing.T) {
+	backend := &catalogUsageBackend{usageBackend: &usageBackend{}, enabled: true}
+	for _, model := range []string{"claude-opus-4-6", "primary::claude-sonnet-5-5", "custom_source::claude-sonnet-5", "anthropic::claude-sonnet-5-5"} {
+		ctx := withClaudeCatalog(t.Context(), model, backend)
+		if catalogFromContext(ctx) == nil {
+			t.Fatalf("catalog not enabled for resolved Claude source %s", model)
 		}
 	}
-	ctx := withClaudeCatalog(t.Context(), "anthropic::claude-sonnet-5-5")
-	if catalogFromContext(ctx) == nil {
-		t.Fatal("Claude catalog not enabled")
+	for _, backend := range []ollama.Backend{&usageBackend{}, &catalogUsageBackend{usageBackend: &usageBackend{}}} {
+		if catalogFromContext(withClaudeCatalog(t.Context(), "anthropic::claude-sonnet-5-5", backend)) != nil {
+			t.Fatal("model label enabled a catalog without provider opt-in")
+		}
 	}
 	if catalogFromContext(context.Background()) != nil {
 		t.Fatal("catalog escaped its turn")
-	}
-	t.Setenv("PRISM_CLAUDE_LAZY_TOOLS", "")
-	if catalogFromContext(withClaudeCatalog(t.Context(), "anthropic::claude-sonnet-5-5")) != nil {
-		t.Fatal("catalog enabled without opt-in")
 	}
 }
 
@@ -60,7 +67,7 @@ func TestClaudeCatalogDoesNotChangeOtherRequests(t *testing.T) {
 	backend := &usageBackend{}
 	a := &Agent{ollama: backend, executor: &ToolExecutor{}, limits: Limits{PromptProfile: "minimal"}, model: "openai::gpt-5"}
 	events := make(chan Event, 10)
-	if _, _, _, _, err := a.callOllama(withClaudeCatalog(t.Context(), a.model), "", events); err != nil {
+	if _, _, _, _, err := a.callOllama(withClaudeCatalog(t.Context(), a.model, a.ollama), "", events); err != nil {
 		t.Fatal(err)
 	}
 	if len(backend.req.Tools) != len(a.buildToolList()) {
@@ -71,12 +78,12 @@ func TestClaudeCatalogDoesNotChangeOtherRequests(t *testing.T) {
 			t.Fatal("Claude-only tool leaked to another provider")
 		}
 	}
-	claude := &Agent{ollama: backend, executor: &ToolExecutor{}, limits: Limits{PromptProfile: "minimal"}, model: "anthropic::claude-sonnet-5-5"}
-	ctx := withClaudeCatalog(t.Context(), claude.model)
+	claude := &Agent{ollama: &catalogUsageBackend{usageBackend: backend, enabled: true}, executor: &ToolExecutor{}, limits: Limits{PromptProfile: "minimal"}, model: "anthropic::claude-sonnet-5-5"}
+	ctx := withClaudeCatalog(t.Context(), claude.model, claude.ollama)
 	if _, _, _, _, err := claude.callOllama(ctx, "", events); err != nil {
 		t.Fatal(err)
 	}
-	if len(backend.req.Tools) != 7 || backend.req.CacheToolPrefixCount != 7 {
+	if len(backend.req.Tools) != 7 || backend.req.CacheToolPrefixCount != 7 || !backend.req.ClientToolCatalog {
 		t.Fatalf("Claude initial request: %d tools, prefix=%d", len(backend.req.Tools), backend.req.CacheToolPrefixCount)
 	}
 	if _, ok := backend.req.Tools[6].Function.Parameters.Properties["names"]; !ok {
@@ -94,8 +101,8 @@ func TestClaudeCatalogPreservesExecutionGuard(t *testing.T) {
 		}
 		return nil
 	}}
-	a := &Agent{executor: executor, model: "anthropic::claude-sonnet-5-5"}
-	ctx := withClaudeCatalog(t.Context(), a.model)
+	a := &Agent{executor: executor, ollama: &catalogUsageBackend{usageBackend: &usageBackend{}, enabled: true}, model: "anthropic::claude-sonnet-5-5"}
+	ctx := withClaudeCatalog(t.Context(), a.model, a.ollama)
 	catalog := catalogFromContext(ctx)
 	if catalog == nil {
 		t.Fatal("Claude catalog disabled for guarded Cloud caller")

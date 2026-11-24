@@ -38,6 +38,7 @@ type textBlock struct {
 
 type cacheControl struct {
 	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type apiMessage struct {
@@ -192,6 +193,144 @@ func buildSystemWithCachePrefix(in []ollama.Message, prefixBytes int) []textBloc
 		}
 	}
 	return blocks
+}
+
+// Native search references are meaningful only while that server tool is
+// declared and their targets remain in the permitted catalogue. Keep canonical
+// text/tool history if the mode or permissions changed; do not revive a removed
+// schema merely to replay an old discovery result.
+func buildMessagesForToolSearch(in []ollama.Message, enabled bool, tools []ollama.Tool) []apiMessage {
+	available := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		available[tool.Function.Name] = true
+	}
+	messages := append([]ollama.Message(nil), in...)
+	for i, message := range messages {
+		if len(message.ProviderBlocks) == 0 {
+			continue
+		}
+		keep := enabled
+		if keep {
+			for _, raw := range message.ProviderBlocks {
+				if !toolSearchBlockAvailable(raw, available) {
+					keep = false
+					break
+				}
+			}
+		}
+		if !keep {
+			messages[i].ProviderBlocks = nil
+		}
+	}
+	// A server search can pause and finish in the next assistant response. Keep
+	// that valid continuation, but never carry an unfinished server operation
+	// across a new user request after cancellation/reload.
+	pending := make(map[string]bool)
+	start := -1
+	fallback := func(end int) {
+		if start < 0 {
+			start = end
+		}
+		for i := start; i <= end; i++ {
+			messages[i].ProviderBlocks = nil
+		}
+		clear(pending)
+		start = -1
+	}
+	for i, message := range messages {
+		if message.Role == "user" && len(pending) > 0 {
+			fallback(i)
+			continue
+		}
+		if message.Role != "assistant" {
+			continue
+		}
+		if len(message.ProviderBlocks) == 0 {
+			if len(pending) > 0 {
+				fallback(i)
+			}
+			continue
+		}
+		for _, raw := range message.ProviderBlocks {
+			var block struct {
+				Type      string `json:"type"`
+				ID        string `json:"id"`
+				ToolUseID string `json:"tool_use_id"`
+			}
+			if json.Unmarshal(raw, &block) != nil {
+				fallback(i)
+				break
+			}
+			switch block.Type {
+			case "server_tool_use":
+				if block.ID == "" || pending[block.ID] {
+					fallback(i)
+					break
+				}
+				if start < 0 {
+					start = i
+				}
+				pending[block.ID] = true
+			case "tool_search_tool_result":
+				if !pending[block.ToolUseID] {
+					fallback(i)
+					break
+				}
+				delete(pending, block.ToolUseID)
+			}
+			if len(messages[i].ProviderBlocks) == 0 {
+				break
+			}
+		}
+		// One assistant message can finish an earlier search and start another.
+		// Its blocks replay atomically, so those two chains share a fallback span.
+		if len(pending) == 0 {
+			start = -1
+		}
+	}
+	return buildMessages(messages)
+}
+
+func toolSearchBlockAvailable(raw json.RawMessage, available map[string]bool) bool {
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	block, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	kind, _ := block["type"].(string)
+	name, _ := block["name"].(string)
+	if kind == "" || (kind == "tool_use" && !available[name]) ||
+		(kind == "server_tool_use" && name != "tool_search_tool_bm25") {
+		return false
+	}
+	var referencesAvailable func(any) bool
+	referencesAvailable = func(node any) bool {
+		switch part := node.(type) {
+		case map[string]any:
+			if part["type"] == "tool_reference" {
+				tool, _ := part["tool_name"].(string)
+				if !available[tool] {
+					return false
+				}
+			}
+			for _, child := range part {
+				if !referencesAvailable(child) {
+					return false
+				}
+			}
+		case []any:
+			for _, child := range part {
+				if !referencesAvailable(child) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return referencesAvailable(value)
 }
 
 // buildMessages converts the pivot history to Anthropic messages.

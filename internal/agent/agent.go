@@ -613,6 +613,9 @@ func (a *Agent) loadHistoryFromDB(ctx context.Context) {
 				msg.ToolCalls = tcs
 			}
 		}
+		if msg.Role == "assistant" {
+			msg.ProviderBlocks = restoreProviderReplay(e.ProviderMetadata, msg.ToolCalls)
+		}
 		a.history = append(a.history, msg)
 	}
 	var unknownResults int
@@ -972,7 +975,9 @@ func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Messa
 	started := time.Now()
 
 	req := ollama.ChatRequest{
-		Model: a.model,
+		Model:                  a.model,
+		TaskID:                 AuxiliaryTaskID(ctx, "compaction", started),
+		CacheSystemPrefixBytes: len(compactionSummaryPrompt),
 		Messages: []ollama.Message{
 			{Role: "system", Content: compactionSummaryPrompt},
 			{Role: "user", Content: excerpt},
@@ -997,6 +1002,7 @@ func (a *Agent) summarizeDroppedSpan(ctx context.Context, dropped []ollama.Messa
 			}
 		}
 	})
+	a.recordAuxiliaryModelUsage(ctx, req, "compaction", started, result.Usage, result.Complete && firstErr == nil)
 	if validationErr != nil {
 		firstErr = validationErr
 	}
@@ -1108,7 +1114,7 @@ func (a *Agent) saveMessageToDB(ctx context.Context, msg ollama.Message) int64 {
 		b, _ := json.Marshal(redactedToolCalls(msg.ToolCalls))
 		toolCallsJSON = b
 	}
-	id, err := a.memStore.AppendMessage(ctx, a.sessionID, msg.Role, sanitizeForDB(msg.Content), toolCallsJSON)
+	id, err := a.memStore.AppendMessageWithProviderMetadata(ctx, a.sessionID, msg.Role, sanitizeForDB(msg.Content), toolCallsJSON, providerReplayMetadata(msg))
 	if err != nil {
 		log.Printf("[agent] save message: %v", err)
 		return 0
@@ -1164,7 +1170,7 @@ func (a *Agent) buildSystemPromptWithCachePrefix(ctx context.Context, learningsC
 
 	profile := a.promptProfile()
 	prefix := a.cachedSystemPromptPrefix(systemPromptPrefixKey{
-		name: a.agentName, session: a.sessionID, persona: persona, profile: profile,
+		name: a.agentName, persona: persona, profile: profile,
 	})
 	sb.Grow(len(prefix) + 1024)
 	sb.WriteString(prefix)
@@ -1253,7 +1259,7 @@ func (a *Agent) buildSystemPromptWithCachePrefix(ctx context.Context, learningsC
 	// The user's local request time lives in the latest user message. Recomputing
 	// it here on every model call would invalidate the cached conversation prefix
 	// whenever the minute changes during a long tool loop.
-	fmt.Fprintf(&sb, "\n\nUser messages begin with their local request timestamp and timezone. The latest timestamp is the time of the request, not a live clock; use an available tool if the exact current time matters later. Never repeat these internal timestamps in your responses. Current session ID: `%s`. Widget tool calls use prismTool(name,args), which handles session/auth automatically; do not append a session parameter to that helper.", a.sessionID)
+	fmt.Fprintf(&sb, "\n\nUser messages begin with their local request timestamp and timezone. The latest timestamp is the time of the request, not a live clock; use an available tool if the exact current time matters later. Never repeat these internal timestamps in your responses. Current session ID: `%s`. Wherever these instructions say SESSION_ID, use this exact string. Widget tool calls use prismTool(name,args), which handles session/auth automatically; do not append a session parameter to that helper.", a.sessionID)
 
 	// Grounding rule, near the end on purpose: late-prompt instructions are the
 	// ones this size of model actually follows (see systemPromptRole's measurements).
@@ -1343,6 +1349,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		taskID = fmt.Sprintf("local-%d", time.Now().UnixNano())
 	}
 	ctx = withTaskID(ctx, taskID)
+	ctx = withAuxiliaryUsage(ctx, a.usageRecorder, a.sessionID, a.promptProfile())
 	a.histMu.Lock()
 	a.history = append(a.history, userMessage)
 	historyLen := len(a.history)
@@ -1365,7 +1372,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 	// never mid-turn.
 	maxIterations, thinking := a.effectiveLimits()
 	ctx = withModelBudget(ctx, maxIterations)
-	ctx = withClaudeCatalog(ctx, a.model)
+	ctx = withClaudeCatalog(ctx, a.model, a.ollama)
 	a.turnThinking = thinking
 	a.turnReasoningEffort = a.reasoningEffort()
 
@@ -1432,7 +1439,7 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		}
 
 		// Empty response: nothing usable came back. WHY it's empty decides the fix.
-		if strings.TrimSpace(fullContent) == "" && len(toolCalls) == 0 {
+		if strings.TrimSpace(fullContent) == "" && len(toolCalls) == 0 && !(doneReason == "pause_turn" && len(providerBlocks) > 0) {
 			// Truncation (done_reason=length/max_tokens): the model was cut off at
 			// the token cap with nothing to show. TWO very different causes, told
 			// apart by how big the live context actually is:
@@ -1495,7 +1502,6 @@ func (a *Agent) Chat(ctx context.Context, userMsg string, images []string, event
 		// Strip thinking blocks before saving to DB (not user-visible content)
 		dbMsg := assistantMsg
 		dbMsg.Content = stripThinkingBlocks(fullContent)
-		dbMsg.ProviderBlocks = nil
 		if len(toolCalls) > 0 {
 			assistantMsg.DBID = a.saveToolBatchMessageToDB(ctx, dbMsg)
 		} else {
@@ -1817,7 +1823,7 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 		prompt += "\n\n" + intentNudgeMsg
 	}
 	if catalogFromContext(ctx) != nil {
-		prompt += "\n\nClaude tool loading is active: exec_command, read_file, write_file, widget, cron, prism_help and tool_catalog are initially visible. Other permitted tools require tool_catalog load before use. Load exact names directly when known from this prompt or the user; list only if names are unknown. Load related tools together. Loaded tools appear on the next model call."
+		prompt += "\n\nPrism tool loading is active: exec_command, read_file, write_file, widget, cron, prism_help and tool_catalog are initially visible when permitted. Other permitted tools require tool_catalog load before use. Load exact names directly when known from this prompt or the user; list only if names are unknown. Load related tools together. Loaded tools appear on the next model call."
 	}
 
 	tools, cacheToolPrefixCount := a.buildToolListWithCachePrefix()
@@ -1845,6 +1851,7 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 		Tools:                  tools,
 		CacheSystemPrefixBytes: cachePrefixBytes,
 		CacheToolPrefixCount:   cacheToolPrefixCount,
+		ClientToolCatalog:      catalogFromContext(ctx) != nil,
 		NoThinking:             !a.turnThinking,
 		ReasoningEffort:        a.turnReasoningEffort,
 	}
@@ -1920,7 +1927,7 @@ func (a *Agent) callOllamaWithReminder(ctx context.Context, learningsCtx string,
 			events <- Event{Type: "stream", Content: ev.Content}
 		}
 	})
-	measured, complete = result.Usage, result.Complete
+	measured, complete = result.Usage, result.Complete && streamErr == nil
 	if inThinking {
 		events <- Event{Type: "stream", Content: "</think>"}
 	}

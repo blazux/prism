@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -224,7 +225,10 @@ func (m *Manager) ToOllamaTools(sessionID string) []ollama.Tool {
 	if err != nil || len(servers) == 0 {
 		return nil
 	}
+	return toOllamaTools(servers)
+}
 
+func toOllamaTools(servers []ServerConfig) []ollama.Tool {
 	seen := make(map[string]bool)
 	var tools []ollama.Tool
 	for _, srv := range servers {
@@ -239,6 +243,10 @@ func (m *Manager) ToOllamaTools(sessionID string) []ollama.Tool {
 			tools = append(tools, toOllamaTool(t))
 		}
 	}
+	// Resolve duplicate names in the same server order as CallTool, then sort
+	// only the exported catalog. Provider discovery order must not churn cache
+	// prefixes, and must not change which server receives a tool call.
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Function.Name < tools[j].Function.Name })
 	return tools
 }
 

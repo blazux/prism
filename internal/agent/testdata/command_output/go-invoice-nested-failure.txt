@@ -1,0 +1,486 @@
+=== RUN   TestInvoiceTotals
+=== RUN   TestInvoiceTotals/case-000-9a8839f6
+=== RUN   TestInvoiceTotals/case-001-31e10e28
+=== RUN   TestInvoiceTotals/case-002-ced070fe
+=== RUN   TestInvoiceTotals/case-003-284673d6
+=== RUN   TestInvoiceTotals/case-004-71ba3432
+=== RUN   TestInvoiceTotals/case-005-b94edffc
+=== RUN   TestInvoiceTotals/case-006-32191d69
+=== RUN   TestInvoiceTotals/case-007-8bea4b93
+=== RUN   TestInvoiceTotals/case-008-6fa20893
+=== RUN   TestInvoiceTotals/case-009-fb4a92ea
+=== RUN   TestInvoiceTotals/case-010-068bb099
+=== RUN   TestInvoiceTotals/case-011-a6a5f713
+=== RUN   TestInvoiceTotals/case-012-98da4ea9
+=== RUN   TestInvoiceTotals/case-013-fa354a86
+=== RUN   TestInvoiceTotals/case-014-474ff37d
+=== RUN   TestInvoiceTotals/case-015-f7d0256c
+=== RUN   TestInvoiceTotals/case-016-33f41021
+=== RUN   TestInvoiceTotals/case-017-b1b47fac
+=== RUN   TestInvoiceTotals/case-018-852eb172
+=== RUN   TestInvoiceTotals/case-019-3e6861d0
+=== RUN   TestInvoiceTotals/case-020-8093fa1c
+=== RUN   TestInvoiceTotals/case-021-2c504ee2
+=== RUN   TestInvoiceTotals/case-022-75214f70
+=== RUN   TestInvoiceTotals/case-023-0aa0bb2e
+=== RUN   TestInvoiceTotals/case-024-f73a0ba7
+=== RUN   TestInvoiceTotals/case-025-a7b1e3bf
+=== RUN   TestInvoiceTotals/case-026-93874c23
+=== RUN   TestInvoiceTotals/case-027-ca77eb94
+=== RUN   TestInvoiceTotals/case-028-28bf9d4c
+=== RUN   TestInvoiceTotals/case-029-7dfc6b01
+=== RUN   TestInvoiceTotals/case-030-d113a34a
+=== RUN   TestInvoiceTotals/case-031-766f9fa9
+=== RUN   TestInvoiceTotals/case-032-ef28345a
+=== RUN   TestInvoiceTotals/case-033-91f13025
+=== RUN   TestInvoiceTotals/case-034-0b2ac13d
+=== RUN   TestInvoiceTotals/case-035-19e13c5b
+=== RUN   TestInvoiceTotals/case-036-7ace3130
+=== RUN   TestInvoiceTotals/case-037-871f4350
+=== RUN   TestInvoiceTotals/case-038-4ec95c2e
+=== RUN   TestInvoiceTotals/case-039-33de946c
+=== RUN   TestInvoiceTotals/case-040-8bf20a68
+=== RUN   TestInvoiceTotals/case-041-63e7087a
+=== RUN   TestInvoiceTotals/case-042-41821a51
+=== RUN   TestInvoiceTotals/case-043-3dd07905
+=== RUN   TestInvoiceTotals/case-044-79f80a19
+=== RUN   TestInvoiceTotals/case-045-07ea22b2
+=== RUN   TestInvoiceTotals/case-046-c9aa611b
+=== RUN   TestInvoiceTotals/case-047-a5bd625d
+=== RUN   TestInvoiceTotals/case-048-cbda0f4a
+=== RUN   TestInvoiceTotals/case-049-02df7845
+=== RUN   TestInvoiceTotals/case-050-638b2062
+=== RUN   TestInvoiceTotals/case-051-a0ff8d07
+=== RUN   TestInvoiceTotals/case-052-a1869722
+=== RUN   TestInvoiceTotals/case-053-ebb032db
+=== RUN   TestInvoiceTotals/case-054-76227346
+=== RUN   TestInvoiceTotals/case-055-59463cbe
+=== RUN   TestInvoiceTotals/case-056-18f03495
+=== RUN   TestInvoiceTotals/case-057-25f78e1c
+=== RUN   TestInvoiceTotals/case-058-e9f186ae
+=== RUN   TestInvoiceTotals/case-059-3b6e2d28
+=== RUN   TestInvoiceTotals/case-060-785225b7
+=== RUN   TestInvoiceTotals/case-061-e120270a
+=== RUN   TestInvoiceTotals/case-062-f51d4384
+=== RUN   TestInvoiceTotals/case-063-87523683
+=== RUN   TestInvoiceTotals/case-064-ee6965c6
+=== RUN   TestInvoiceTotals/case-065-5d8c6603
+=== RUN   TestInvoiceTotals/case-066-3b9b9824
+=== RUN   TestInvoiceTotals/case-067-803c33af
+=== RUN   TestInvoiceTotals/case-068-26afa341
+=== RUN   TestInvoiceTotals/case-069-4b2c2538
+=== RUN   TestInvoiceTotals/case-070-69f1fc72
+=== RUN   TestInvoiceTotals/case-071-ef32b5ea
+=== RUN   TestInvoiceTotals/case-072-569acd5f
+=== RUN   TestInvoiceTotals/case-073-7e33bc4b
+=== RUN   TestInvoiceTotals/case-074-d2266d05
+=== RUN   TestInvoiceTotals/case-075-f242467e
+=== RUN   TestInvoiceTotals/case-076-04ee990d
+=== RUN   TestInvoiceTotals/case-077-d74c98cc
+=== RUN   TestInvoiceTotals/case-078-79feead3
+=== RUN   TestInvoiceTotals/case-079-63b52d50
+=== RUN   TestInvoiceTotals/case-080-6187b8de
+=== RUN   TestInvoiceTotals/case-081-6671efab
+=== RUN   TestInvoiceTotals/case-082-3f4228c1
+=== RUN   TestInvoiceTotals/case-083-931956e9
+=== RUN   TestInvoiceTotals/case-084-f3e7ea9e
+=== RUN   TestInvoiceTotals/case-085-3b77f1fc
+=== RUN   TestInvoiceTotals/case-086-82f41f95
+=== RUN   TestInvoiceTotals/case-087-225c615e
+=== RUN   TestInvoiceTotals/case-088-ec749347
+=== RUN   TestInvoiceTotals/case-089-71e676bb
+=== RUN   TestInvoiceTotals/case-090-a5027592
+=== RUN   TestInvoiceTotals/case-091-a6eff5ed
+=== RUN   TestInvoiceTotals/case-092-25b41b48
+=== RUN   TestInvoiceTotals/case-093-60037601
+=== RUN   TestInvoiceTotals/case-094-fda1fb67
+=== RUN   TestInvoiceTotals/case-095-3572d2b6
+=== RUN   TestInvoiceTotals/case-096-2d292d82
+=== RUN   TestInvoiceTotals/case-097-fc9192d2
+=== RUN   TestInvoiceTotals/case-098-9fc61832
+=== RUN   TestInvoiceTotals/case-099-3677fe1c
+=== RUN   TestInvoiceTotals/case-100-279f46c5
+=== RUN   TestInvoiceTotals/case-101-36ea8a0a
+=== RUN   TestInvoiceTotals/case-102-92114d5c
+=== RUN   TestInvoiceTotals/case-103-5aaacb41
+=== RUN   TestInvoiceTotals/case-104-2fe1e71d
+=== RUN   TestInvoiceTotals/case-105-e6270c67
+=== RUN   TestInvoiceTotals/case-106-70d21425
+=== RUN   TestInvoiceTotals/case-107-8c40df0c
+=== RUN   TestInvoiceTotals/case-108-348959f4
+=== RUN   TestInvoiceTotals/case-109-d8496cfc
+=== RUN   TestInvoiceTotals/case-110-a9a21b00
+=== RUN   TestInvoiceTotals/case-111-043136f5
+=== RUN   TestInvoiceTotals/case-112-b9e85068
+=== RUN   TestInvoiceTotals/case-113-9fe3fb12
+=== RUN   TestInvoiceTotals/case-114-11c0096a
+=== RUN   TestInvoiceTotals/case-115-2dd6f640
+=== RUN   TestInvoiceTotals/case-116-fe7095a9
+=== RUN   TestInvoiceTotals/case-117-2be18115
+=== RUN   TestInvoiceTotals/case-118-10b1cd7e
+=== RUN   TestInvoiceTotals/case-119-6de698fe
+=== RUN   TestInvoiceTotals/case-120-fdd35e7e
+    invoice_test.go:23: invoice INV-120: tax must be rounded once on invoice subtotal: got 4 cents; want 3 cents (subtotal=2, rate=5000 basis points)
+=== RUN   TestInvoiceTotals/case-121-e80a6043
+=== RUN   TestInvoiceTotals/case-122-b41ee0a2
+=== RUN   TestInvoiceTotals/case-123-3f196a2e
+=== RUN   TestInvoiceTotals/case-124-b5906645
+=== RUN   TestInvoiceTotals/case-125-c416293f
+=== RUN   TestInvoiceTotals/case-126-8790fb7f
+=== RUN   TestInvoiceTotals/case-127-e7e69f07
+=== RUN   TestInvoiceTotals/case-128-29dbc5b3
+=== RUN   TestInvoiceTotals/case-129-cfa5b70e
+=== RUN   TestInvoiceTotals/case-130-a0b74d9a
+=== RUN   TestInvoiceTotals/case-131-37205cdb
+=== RUN   TestInvoiceTotals/case-132-cf703c38
+=== RUN   TestInvoiceTotals/case-133-5b2872ff
+=== RUN   TestInvoiceTotals/case-134-e9637888
+=== RUN   TestInvoiceTotals/case-135-deb874cd
+=== RUN   TestInvoiceTotals/case-136-b90cd3fa
+=== RUN   TestInvoiceTotals/case-137-448fac9a
+=== RUN   TestInvoiceTotals/case-138-061c3cde
+=== RUN   TestInvoiceTotals/case-139-bd4f88ca
+=== RUN   TestInvoiceTotals/case-140-a7d3c4b8
+=== RUN   TestInvoiceTotals/case-141-1ade9da0
+=== RUN   TestInvoiceTotals/case-142-8610159d
+=== RUN   TestInvoiceTotals/case-143-31c28b8c
+=== RUN   TestInvoiceTotals/case-144-cb2ece3e
+=== RUN   TestInvoiceTotals/case-145-7236a248
+=== RUN   TestInvoiceTotals/case-146-fa79e24a
+=== RUN   TestInvoiceTotals/case-147-e88ffb3f
+=== RUN   TestInvoiceTotals/case-148-021a3f0a
+=== RUN   TestInvoiceTotals/case-149-1609451b
+=== RUN   TestInvoiceTotals/case-150-c88fcefe
+=== RUN   TestInvoiceTotals/case-151-eae9fd00
+=== RUN   TestInvoiceTotals/case-152-9e7f3892
+=== RUN   TestInvoiceTotals/case-153-00ae10a0
+=== RUN   TestInvoiceTotals/case-154-cb5c61d0
+=== RUN   TestInvoiceTotals/case-155-286b663a
+=== RUN   TestInvoiceTotals/case-156-fddb992f
+=== RUN   TestInvoiceTotals/case-157-6bb22562
+=== RUN   TestInvoiceTotals/case-158-1a79133f
+=== RUN   TestInvoiceTotals/case-159-e8d500b4
+=== RUN   TestInvoiceTotals/case-160-772749b7
+=== RUN   TestInvoiceTotals/case-161-3da35d08
+=== RUN   TestInvoiceTotals/case-162-d714a87d
+=== RUN   TestInvoiceTotals/case-163-80d8a6e3
+=== RUN   TestInvoiceTotals/case-164-5f70065a
+=== RUN   TestInvoiceTotals/case-165-9c79fa00
+=== RUN   TestInvoiceTotals/case-166-6d1fc700
+=== RUN   TestInvoiceTotals/case-167-1cddb5a5
+=== RUN   TestInvoiceTotals/case-168-ac04423a
+=== RUN   TestInvoiceTotals/case-169-a3fe8c6f
+=== RUN   TestInvoiceTotals/case-170-3951d9e6
+=== RUN   TestInvoiceTotals/case-171-2ec0ddce
+=== RUN   TestInvoiceTotals/case-172-fbf7e5ad
+=== RUN   TestInvoiceTotals/case-173-9e96e4bb
+=== RUN   TestInvoiceTotals/case-174-1f821f7b
+=== RUN   TestInvoiceTotals/case-175-079ec427
+=== RUN   TestInvoiceTotals/case-176-cfca4401
+=== RUN   TestInvoiceTotals/case-177-1ea6e3cf
+=== RUN   TestInvoiceTotals/case-178-5831b8f6
+=== RUN   TestInvoiceTotals/case-179-7cfd3dce
+=== RUN   TestInvoiceTotals/case-180-1b816348
+=== RUN   TestInvoiceTotals/case-181-64332b0f
+=== RUN   TestInvoiceTotals/case-182-3a0534ab
+=== RUN   TestInvoiceTotals/case-183-6de8fa96
+=== RUN   TestInvoiceTotals/case-184-fa2f593f
+=== RUN   TestInvoiceTotals/case-185-b1a37137
+=== RUN   TestInvoiceTotals/case-186-95755fad
+=== RUN   TestInvoiceTotals/case-187-4190dabb
+=== RUN   TestInvoiceTotals/case-188-0a86efe5
+=== RUN   TestInvoiceTotals/case-189-a66f74a7
+=== RUN   TestInvoiceTotals/case-190-534aefd0
+=== RUN   TestInvoiceTotals/case-191-f9a39254
+=== RUN   TestInvoiceTotals/case-192-39e60662
+=== RUN   TestInvoiceTotals/case-193-0f2fb2e3
+=== RUN   TestInvoiceTotals/case-194-ffb855fa
+=== RUN   TestInvoiceTotals/case-195-7a0ca433
+=== RUN   TestInvoiceTotals/case-196-c06a40b8
+=== RUN   TestInvoiceTotals/case-197-eb855e47
+=== RUN   TestInvoiceTotals/case-198-3c2ef75c
+=== RUN   TestInvoiceTotals/case-199-25c84ac6
+=== RUN   TestInvoiceTotals/case-200-767130b3
+=== RUN   TestInvoiceTotals/case-201-c48f130b
+=== RUN   TestInvoiceTotals/case-202-a48ab496
+=== RUN   TestInvoiceTotals/case-203-d976989b
+=== RUN   TestInvoiceTotals/case-204-dde2beca
+=== RUN   TestInvoiceTotals/case-205-5c3719d3
+=== RUN   TestInvoiceTotals/case-206-f2146c1a
+=== RUN   TestInvoiceTotals/case-207-fff25f0e
+=== RUN   TestInvoiceTotals/case-208-7375b8cf
+=== RUN   TestInvoiceTotals/case-209-5a3db765
+=== RUN   TestInvoiceTotals/case-210-e40de88e
+=== RUN   TestInvoiceTotals/case-211-da87d80a
+=== RUN   TestInvoiceTotals/case-212-ec8f2c28
+=== RUN   TestInvoiceTotals/case-213-42240afc
+=== RUN   TestInvoiceTotals/case-214-ae43f4b9
+=== RUN   TestInvoiceTotals/case-215-15d48b24
+=== RUN   TestInvoiceTotals/case-216-c594e88b
+=== RUN   TestInvoiceTotals/case-217-5d63d394
+=== RUN   TestInvoiceTotals/case-218-2a6749cb
+=== RUN   TestInvoiceTotals/case-219-3810531a
+=== RUN   TestInvoiceTotals/case-220-38bc4fd8
+=== RUN   TestInvoiceTotals/case-221-476a9a27
+=== RUN   TestInvoiceTotals/case-222-2e1d2dce
+=== RUN   TestInvoiceTotals/case-223-de394e23
+=== RUN   TestInvoiceTotals/case-224-9a7dee7c
+=== RUN   TestInvoiceTotals/case-225-2ee21247
+=== RUN   TestInvoiceTotals/case-226-a8bcf13d
+=== RUN   TestInvoiceTotals/case-227-53cdea01
+=== RUN   TestInvoiceTotals/case-228-92b6d6c0
+=== RUN   TestInvoiceTotals/case-229-f9065c08
+=== RUN   TestInvoiceTotals/case-230-e2493c86
+=== RUN   TestInvoiceTotals/case-231-4de304fb
+=== RUN   TestInvoiceTotals/case-232-3014c9f9
+=== RUN   TestInvoiceTotals/case-233-b80b33a4
+=== RUN   TestInvoiceTotals/case-234-e00f025b
+=== RUN   TestInvoiceTotals/case-235-3cef5c54
+=== RUN   TestInvoiceTotals/case-236-7b402964
+=== RUN   TestInvoiceTotals/case-237-dcb03626
+=== RUN   TestInvoiceTotals/case-238-f3d02929
+=== RUN   TestInvoiceTotals/case-239-fec85912
+--- FAIL: TestInvoiceTotals (0.00s)
+    --- PASS: TestInvoiceTotals/case-000-9a8839f6 (0.00s)
+    --- PASS: TestInvoiceTotals/case-001-31e10e28 (0.00s)
+    --- PASS: TestInvoiceTotals/case-002-ced070fe (0.00s)
+    --- PASS: TestInvoiceTotals/case-003-284673d6 (0.00s)
+    --- PASS: TestInvoiceTotals/case-004-71ba3432 (0.00s)
+    --- PASS: TestInvoiceTotals/case-005-b94edffc (0.00s)
+    --- PASS: TestInvoiceTotals/case-006-32191d69 (0.00s)
+    --- PASS: TestInvoiceTotals/case-007-8bea4b93 (0.00s)
+    --- PASS: TestInvoiceTotals/case-008-6fa20893 (0.00s)
+    --- PASS: TestInvoiceTotals/case-009-fb4a92ea (0.00s)
+    --- PASS: TestInvoiceTotals/case-010-068bb099 (0.00s)
+    --- PASS: TestInvoiceTotals/case-011-a6a5f713 (0.00s)
+    --- PASS: TestInvoiceTotals/case-012-98da4ea9 (0.00s)
+    --- PASS: TestInvoiceTotals/case-013-fa354a86 (0.00s)
+    --- PASS: TestInvoiceTotals/case-014-474ff37d (0.00s)
+    --- PASS: TestInvoiceTotals/case-015-f7d0256c (0.00s)
+    --- PASS: TestInvoiceTotals/case-016-33f41021 (0.00s)
+    --- PASS: TestInvoiceTotals/case-017-b1b47fac (0.00s)
+    --- PASS: TestInvoiceTotals/case-018-852eb172 (0.00s)
+    --- PASS: TestInvoiceTotals/case-019-3e6861d0 (0.00s)
+    --- PASS: TestInvoiceTotals/case-020-8093fa1c (0.00s)
+    --- PASS: TestInvoiceTotals/case-021-2c504ee2 (0.00s)
+    --- PASS: TestInvoiceTotals/case-022-75214f70 (0.00s)
+    --- PASS: TestInvoiceTotals/case-023-0aa0bb2e (0.00s)
+    --- PASS: TestInvoiceTotals/case-024-f73a0ba7 (0.00s)
+    --- PASS: TestInvoiceTotals/case-025-a7b1e3bf (0.00s)
+    --- PASS: TestInvoiceTotals/case-026-93874c23 (0.00s)
+    --- PASS: TestInvoiceTotals/case-027-ca77eb94 (0.00s)
+    --- PASS: TestInvoiceTotals/case-028-28bf9d4c (0.00s)
+    --- PASS: TestInvoiceTotals/case-029-7dfc6b01 (0.00s)
+    --- PASS: TestInvoiceTotals/case-030-d113a34a (0.00s)
+    --- PASS: TestInvoiceTotals/case-031-766f9fa9 (0.00s)
+    --- PASS: TestInvoiceTotals/case-032-ef28345a (0.00s)
+    --- PASS: TestInvoiceTotals/case-033-91f13025 (0.00s)
+    --- PASS: TestInvoiceTotals/case-034-0b2ac13d (0.00s)
+    --- PASS: TestInvoiceTotals/case-035-19e13c5b (0.00s)
+    --- PASS: TestInvoiceTotals/case-036-7ace3130 (0.00s)
+    --- PASS: TestInvoiceTotals/case-037-871f4350 (0.00s)
+    --- PASS: TestInvoiceTotals/case-038-4ec95c2e (0.00s)
+    --- PASS: TestInvoiceTotals/case-039-33de946c (0.00s)
+    --- PASS: TestInvoiceTotals/case-040-8bf20a68 (0.00s)
+    --- PASS: TestInvoiceTotals/case-041-63e7087a (0.00s)
+    --- PASS: TestInvoiceTotals/case-042-41821a51 (0.00s)
+    --- PASS: TestInvoiceTotals/case-043-3dd07905 (0.00s)
+    --- PASS: TestInvoiceTotals/case-044-79f80a19 (0.00s)
+    --- PASS: TestInvoiceTotals/case-045-07ea22b2 (0.00s)
+    --- PASS: TestInvoiceTotals/case-046-c9aa611b (0.00s)
+    --- PASS: TestInvoiceTotals/case-047-a5bd625d (0.00s)
+    --- PASS: TestInvoiceTotals/case-048-cbda0f4a (0.00s)
+    --- PASS: TestInvoiceTotals/case-049-02df7845 (0.00s)
+    --- PASS: TestInvoiceTotals/case-050-638b2062 (0.00s)
+    --- PASS: TestInvoiceTotals/case-051-a0ff8d07 (0.00s)
+    --- PASS: TestInvoiceTotals/case-052-a1869722 (0.00s)
+    --- PASS: TestInvoiceTotals/case-053-ebb032db (0.00s)
+    --- PASS: TestInvoiceTotals/case-054-76227346 (0.00s)
+    --- PASS: TestInvoiceTotals/case-055-59463cbe (0.00s)
+    --- PASS: TestInvoiceTotals/case-056-18f03495 (0.00s)
+    --- PASS: TestInvoiceTotals/case-057-25f78e1c (0.00s)
+    --- PASS: TestInvoiceTotals/case-058-e9f186ae (0.00s)
+    --- PASS: TestInvoiceTotals/case-059-3b6e2d28 (0.00s)
+    --- PASS: TestInvoiceTotals/case-060-785225b7 (0.00s)
+    --- PASS: TestInvoiceTotals/case-061-e120270a (0.00s)
+    --- PASS: TestInvoiceTotals/case-062-f51d4384 (0.00s)
+    --- PASS: TestInvoiceTotals/case-063-87523683 (0.00s)
+    --- PASS: TestInvoiceTotals/case-064-ee6965c6 (0.00s)
+    --- PASS: TestInvoiceTotals/case-065-5d8c6603 (0.00s)
+    --- PASS: TestInvoiceTotals/case-066-3b9b9824 (0.00s)
+    --- PASS: TestInvoiceTotals/case-067-803c33af (0.00s)
+    --- PASS: TestInvoiceTotals/case-068-26afa341 (0.00s)
+    --- PASS: TestInvoiceTotals/case-069-4b2c2538 (0.00s)
+    --- PASS: TestInvoiceTotals/case-070-69f1fc72 (0.00s)
+    --- PASS: TestInvoiceTotals/case-071-ef32b5ea (0.00s)
+    --- PASS: TestInvoiceTotals/case-072-569acd5f (0.00s)
+    --- PASS: TestInvoiceTotals/case-073-7e33bc4b (0.00s)
+    --- PASS: TestInvoiceTotals/case-074-d2266d05 (0.00s)
+    --- PASS: TestInvoiceTotals/case-075-f242467e (0.00s)
+    --- PASS: TestInvoiceTotals/case-076-04ee990d (0.00s)
+    --- PASS: TestInvoiceTotals/case-077-d74c98cc (0.00s)
+    --- PASS: TestInvoiceTotals/case-078-79feead3 (0.00s)
+    --- PASS: TestInvoiceTotals/case-079-63b52d50 (0.00s)
+    --- PASS: TestInvoiceTotals/case-080-6187b8de (0.00s)
+    --- PASS: TestInvoiceTotals/case-081-6671efab (0.00s)
+    --- PASS: TestInvoiceTotals/case-082-3f4228c1 (0.00s)
+    --- PASS: TestInvoiceTotals/case-083-931956e9 (0.00s)
+    --- PASS: TestInvoiceTotals/case-084-f3e7ea9e (0.00s)
+    --- PASS: TestInvoiceTotals/case-085-3b77f1fc (0.00s)
+    --- PASS: TestInvoiceTotals/case-086-82f41f95 (0.00s)
+    --- PASS: TestInvoiceTotals/case-087-225c615e (0.00s)
+    --- PASS: TestInvoiceTotals/case-088-ec749347 (0.00s)
+    --- PASS: TestInvoiceTotals/case-089-71e676bb (0.00s)
+    --- PASS: TestInvoiceTotals/case-090-a5027592 (0.00s)
+    --- PASS: TestInvoiceTotals/case-091-a6eff5ed (0.00s)
+    --- PASS: TestInvoiceTotals/case-092-25b41b48 (0.00s)
+    --- PASS: TestInvoiceTotals/case-093-60037601 (0.00s)
+    --- PASS: TestInvoiceTotals/case-094-fda1fb67 (0.00s)
+    --- PASS: TestInvoiceTotals/case-095-3572d2b6 (0.00s)
+    --- PASS: TestInvoiceTotals/case-096-2d292d82 (0.00s)
+    --- PASS: TestInvoiceTotals/case-097-fc9192d2 (0.00s)
+    --- PASS: TestInvoiceTotals/case-098-9fc61832 (0.00s)
+    --- PASS: TestInvoiceTotals/case-099-3677fe1c (0.00s)
+    --- PASS: TestInvoiceTotals/case-100-279f46c5 (0.00s)
+    --- PASS: TestInvoiceTotals/case-101-36ea8a0a (0.00s)
+    --- PASS: TestInvoiceTotals/case-102-92114d5c (0.00s)
+    --- PASS: TestInvoiceTotals/case-103-5aaacb41 (0.00s)
+    --- PASS: TestInvoiceTotals/case-104-2fe1e71d (0.00s)
+    --- PASS: TestInvoiceTotals/case-105-e6270c67 (0.00s)
+    --- PASS: TestInvoiceTotals/case-106-70d21425 (0.00s)
+    --- PASS: TestInvoiceTotals/case-107-8c40df0c (0.00s)
+    --- PASS: TestInvoiceTotals/case-108-348959f4 (0.00s)
+    --- PASS: TestInvoiceTotals/case-109-d8496cfc (0.00s)
+    --- PASS: TestInvoiceTotals/case-110-a9a21b00 (0.00s)
+    --- PASS: TestInvoiceTotals/case-111-043136f5 (0.00s)
+    --- PASS: TestInvoiceTotals/case-112-b9e85068 (0.00s)
+    --- PASS: TestInvoiceTotals/case-113-9fe3fb12 (0.00s)
+    --- PASS: TestInvoiceTotals/case-114-11c0096a (0.00s)
+    --- PASS: TestInvoiceTotals/case-115-2dd6f640 (0.00s)
+    --- PASS: TestInvoiceTotals/case-116-fe7095a9 (0.00s)
+    --- PASS: TestInvoiceTotals/case-117-2be18115 (0.00s)
+    --- PASS: TestInvoiceTotals/case-118-10b1cd7e (0.00s)
+    --- PASS: TestInvoiceTotals/case-119-6de698fe (0.00s)
+    --- FAIL: TestInvoiceTotals/case-120-fdd35e7e (0.00s)
+    --- PASS: TestInvoiceTotals/case-121-e80a6043 (0.00s)
+    --- PASS: TestInvoiceTotals/case-122-b41ee0a2 (0.00s)
+    --- PASS: TestInvoiceTotals/case-123-3f196a2e (0.00s)
+    --- PASS: TestInvoiceTotals/case-124-b5906645 (0.00s)
+    --- PASS: TestInvoiceTotals/case-125-c416293f (0.00s)
+    --- PASS: TestInvoiceTotals/case-126-8790fb7f (0.00s)
+    --- PASS: TestInvoiceTotals/case-127-e7e69f07 (0.00s)
+    --- PASS: TestInvoiceTotals/case-128-29dbc5b3 (0.00s)
+    --- PASS: TestInvoiceTotals/case-129-cfa5b70e (0.00s)
+    --- PASS: TestInvoiceTotals/case-130-a0b74d9a (0.00s)
+    --- PASS: TestInvoiceTotals/case-131-37205cdb (0.00s)
+    --- PASS: TestInvoiceTotals/case-132-cf703c38 (0.00s)
+    --- PASS: TestInvoiceTotals/case-133-5b2872ff (0.00s)
+    --- PASS: TestInvoiceTotals/case-134-e9637888 (0.00s)
+    --- PASS: TestInvoiceTotals/case-135-deb874cd (0.00s)
+    --- PASS: TestInvoiceTotals/case-136-b90cd3fa (0.00s)
+    --- PASS: TestInvoiceTotals/case-137-448fac9a (0.00s)
+    --- PASS: TestInvoiceTotals/case-138-061c3cde (0.00s)
+    --- PASS: TestInvoiceTotals/case-139-bd4f88ca (0.00s)
+    --- PASS: TestInvoiceTotals/case-140-a7d3c4b8 (0.00s)
+    --- PASS: TestInvoiceTotals/case-141-1ade9da0 (0.00s)
+    --- PASS: TestInvoiceTotals/case-142-8610159d (0.00s)
+    --- PASS: TestInvoiceTotals/case-143-31c28b8c (0.00s)
+    --- PASS: TestInvoiceTotals/case-144-cb2ece3e (0.00s)
+    --- PASS: TestInvoiceTotals/case-145-7236a248 (0.00s)
+    --- PASS: TestInvoiceTotals/case-146-fa79e24a (0.00s)
+    --- PASS: TestInvoiceTotals/case-147-e88ffb3f (0.00s)
+    --- PASS: TestInvoiceTotals/case-148-021a3f0a (0.00s)
+    --- PASS: TestInvoiceTotals/case-149-1609451b (0.00s)
+    --- PASS: TestInvoiceTotals/case-150-c88fcefe (0.00s)
+    --- PASS: TestInvoiceTotals/case-151-eae9fd00 (0.00s)
+    --- PASS: TestInvoiceTotals/case-152-9e7f3892 (0.00s)
+    --- PASS: TestInvoiceTotals/case-153-00ae10a0 (0.00s)
+    --- PASS: TestInvoiceTotals/case-154-cb5c61d0 (0.00s)
+    --- PASS: TestInvoiceTotals/case-155-286b663a (0.00s)
+    --- PASS: TestInvoiceTotals/case-156-fddb992f (0.00s)
+    --- PASS: TestInvoiceTotals/case-157-6bb22562 (0.00s)
+    --- PASS: TestInvoiceTotals/case-158-1a79133f (0.00s)
+    --- PASS: TestInvoiceTotals/case-159-e8d500b4 (0.00s)
+    --- PASS: TestInvoiceTotals/case-160-772749b7 (0.00s)
+    --- PASS: TestInvoiceTotals/case-161-3da35d08 (0.00s)
+    --- PASS: TestInvoiceTotals/case-162-d714a87d (0.00s)
+    --- PASS: TestInvoiceTotals/case-163-80d8a6e3 (0.00s)
+    --- PASS: TestInvoiceTotals/case-164-5f70065a (0.00s)
+    --- PASS: TestInvoiceTotals/case-165-9c79fa00 (0.00s)
+    --- PASS: TestInvoiceTotals/case-166-6d1fc700 (0.00s)
+    --- PASS: TestInvoiceTotals/case-167-1cddb5a5 (0.00s)
+    --- PASS: TestInvoiceTotals/case-168-ac04423a (0.00s)
+    --- PASS: TestInvoiceTotals/case-169-a3fe8c6f (0.00s)
+    --- PASS: TestInvoiceTotals/case-170-3951d9e6 (0.00s)
+    --- PASS: TestInvoiceTotals/case-171-2ec0ddce (0.00s)
+    --- PASS: TestInvoiceTotals/case-172-fbf7e5ad (0.00s)
+    --- PASS: TestInvoiceTotals/case-173-9e96e4bb (0.00s)
+    --- PASS: TestInvoiceTotals/case-174-1f821f7b (0.00s)
+    --- PASS: TestInvoiceTotals/case-175-079ec427 (0.00s)
+    --- PASS: TestInvoiceTotals/case-176-cfca4401 (0.00s)
+    --- PASS: TestInvoiceTotals/case-177-1ea6e3cf (0.00s)
+    --- PASS: TestInvoiceTotals/case-178-5831b8f6 (0.00s)
+    --- PASS: TestInvoiceTotals/case-179-7cfd3dce (0.00s)
+    --- PASS: TestInvoiceTotals/case-180-1b816348 (0.00s)
+    --- PASS: TestInvoiceTotals/case-181-64332b0f (0.00s)
+    --- PASS: TestInvoiceTotals/case-182-3a0534ab (0.00s)
+    --- PASS: TestInvoiceTotals/case-183-6de8fa96 (0.00s)
+    --- PASS: TestInvoiceTotals/case-184-fa2f593f (0.00s)
+    --- PASS: TestInvoiceTotals/case-185-b1a37137 (0.00s)
+    --- PASS: TestInvoiceTotals/case-186-95755fad (0.00s)
+    --- PASS: TestInvoiceTotals/case-187-4190dabb (0.00s)
+    --- PASS: TestInvoiceTotals/case-188-0a86efe5 (0.00s)
+    --- PASS: TestInvoiceTotals/case-189-a66f74a7 (0.00s)
+    --- PASS: TestInvoiceTotals/case-190-534aefd0 (0.00s)
+    --- PASS: TestInvoiceTotals/case-191-f9a39254 (0.00s)
+    --- PASS: TestInvoiceTotals/case-192-39e60662 (0.00s)
+    --- PASS: TestInvoiceTotals/case-193-0f2fb2e3 (0.00s)
+    --- PASS: TestInvoiceTotals/case-194-ffb855fa (0.00s)
+    --- PASS: TestInvoiceTotals/case-195-7a0ca433 (0.00s)
+    --- PASS: TestInvoiceTotals/case-196-c06a40b8 (0.00s)
+    --- PASS: TestInvoiceTotals/case-197-eb855e47 (0.00s)
+    --- PASS: TestInvoiceTotals/case-198-3c2ef75c (0.00s)
+    --- PASS: TestInvoiceTotals/case-199-25c84ac6 (0.00s)
+    --- PASS: TestInvoiceTotals/case-200-767130b3 (0.00s)
+    --- PASS: TestInvoiceTotals/case-201-c48f130b (0.00s)
+    --- PASS: TestInvoiceTotals/case-202-a48ab496 (0.00s)
+    --- PASS: TestInvoiceTotals/case-203-d976989b (0.00s)
+    --- PASS: TestInvoiceTotals/case-204-dde2beca (0.00s)
+    --- PASS: TestInvoiceTotals/case-205-5c3719d3 (0.00s)
+    --- PASS: TestInvoiceTotals/case-206-f2146c1a (0.00s)
+    --- PASS: TestInvoiceTotals/case-207-fff25f0e (0.00s)
+    --- PASS: TestInvoiceTotals/case-208-7375b8cf (0.00s)
+    --- PASS: TestInvoiceTotals/case-209-5a3db765 (0.00s)
+    --- PASS: TestInvoiceTotals/case-210-e40de88e (0.00s)
+    --- PASS: TestInvoiceTotals/case-211-da87d80a (0.00s)
+    --- PASS: TestInvoiceTotals/case-212-ec8f2c28 (0.00s)
+    --- PASS: TestInvoiceTotals/case-213-42240afc (0.00s)
+    --- PASS: TestInvoiceTotals/case-214-ae43f4b9 (0.00s)
+    --- PASS: TestInvoiceTotals/case-215-15d48b24 (0.00s)
+    --- PASS: TestInvoiceTotals/case-216-c594e88b (0.00s)
+    --- PASS: TestInvoiceTotals/case-217-5d63d394 (0.00s)
+    --- PASS: TestInvoiceTotals/case-218-2a6749cb (0.00s)
+    --- PASS: TestInvoiceTotals/case-219-3810531a (0.00s)
+    --- PASS: TestInvoiceTotals/case-220-38bc4fd8 (0.00s)
+    --- PASS: TestInvoiceTotals/case-221-476a9a27 (0.00s)
+    --- PASS: TestInvoiceTotals/case-222-2e1d2dce (0.00s)
+    --- PASS: TestInvoiceTotals/case-223-de394e23 (0.00s)
+    --- PASS: TestInvoiceTotals/case-224-9a7dee7c (0.00s)
+    --- PASS: TestInvoiceTotals/case-225-2ee21247 (0.00s)
+    --- PASS: TestInvoiceTotals/case-226-a8bcf13d (0.00s)
+    --- PASS: TestInvoiceTotals/case-227-53cdea01 (0.00s)
+    --- PASS: TestInvoiceTotals/case-228-92b6d6c0 (0.00s)
+    --- PASS: TestInvoiceTotals/case-229-f9065c08 (0.00s)
+    --- PASS: TestInvoiceTotals/case-230-e2493c86 (0.00s)
+    --- PASS: TestInvoiceTotals/case-231-4de304fb (0.00s)
+    --- PASS: TestInvoiceTotals/case-232-3014c9f9 (0.00s)
+    --- PASS: TestInvoiceTotals/case-233-b80b33a4 (0.00s)
+    --- PASS: TestInvoiceTotals/case-234-e00f025b (0.00s)
+    --- PASS: TestInvoiceTotals/case-235-3cef5c54 (0.00s)
+    --- PASS: TestInvoiceTotals/case-236-7b402964 (0.00s)
+    --- PASS: TestInvoiceTotals/case-237-dcb03626 (0.00s)
+    --- PASS: TestInvoiceTotals/case-238-f3d02929 (0.00s)
+    --- PASS: TestInvoiceTotals/case-239-fec85912 (0.00s)
+FAIL
+FAIL	example.com/prism-eval/invoice	0.002s
+FAIL

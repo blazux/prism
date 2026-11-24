@@ -26,11 +26,12 @@ const (
 
 // HistoryEntry is one row from conversation_history.
 type HistoryEntry struct {
-	ID        int64
-	Role      string
-	Content   string
-	ToolCalls json.RawMessage
-	CreatedAt time.Time
+	ID               int64
+	Role             string
+	Content          string
+	ToolCalls        json.RawMessage
+	ProviderMetadata json.RawMessage `json:"-"`
+	CreatedAt        time.Time
 }
 
 type Store struct {
@@ -228,6 +229,7 @@ func (s *Store) initSchema(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS conv_history_session_idx ON conversation_history(session_id, id)`,
+		`ALTER TABLE conversation_history ADD COLUMN IF NOT EXISTS provider_metadata JSONB`,
 		`CREATE TABLE IF NOT EXISTS chat_requests (
 			session_id TEXT NOT NULL,
 			request_id TEXT NOT NULL,
@@ -739,7 +741,7 @@ func (s *Store) LoadActiveHistoryTail(ctx context.Context, sessionID string, lim
 
 func (s *Store) loadHistoryTail(ctx context.Context, sessionID string, limit int, before int64) ([]HistoryEntry, error) {
 	q := `
-		SELECT id, role, content, tool_calls, created_at
+		SELECT id, role, content, tool_calls, provider_metadata, created_at
 		FROM conversation_history
 		WHERE session_id = $1 AND id >= $2
 		ORDER BY id ASC
@@ -749,8 +751,8 @@ func (s *Store) loadHistoryTail(ctx context.Context, sessionID string, limit int
 		// Take the newest rows, then flip back to insertion order — the order
 		// the agent and the UI both replay.
 		q = `
-			SELECT id, role, content, tool_calls, created_at FROM (
-				SELECT id, role, content, tool_calls, created_at
+			SELECT id, role, content, tool_calls, provider_metadata, created_at FROM (
+				SELECT id, role, content, tool_calls, provider_metadata, created_at
 				FROM conversation_history
 				WHERE session_id = $1 AND id >= $2
 				ORDER BY id DESC
@@ -768,7 +770,7 @@ func (s *Store) loadHistoryTail(ctx context.Context, sessionID string, limit int
 	var entries []HistoryEntry
 	for rows.Next() {
 		var e HistoryEntry
-		if err := rows.Scan(&e.ID, &e.Role, &e.Content, &e.ToolCalls, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Role, &e.Content, &e.ToolCalls, &e.ProviderMetadata, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -779,12 +781,19 @@ func (s *Store) loadHistoryTail(ctx context.Context, sessionID string, limit int
 // AppendMessage inserts a single message into conversation_history and returns
 // its row id.
 func (s *Store) AppendMessage(ctx context.Context, sessionID, role, content string, toolCalls json.RawMessage) (int64, error) {
+	return s.AppendMessageWithProviderMetadata(ctx, sessionID, role, content, toolCalls, nil)
+}
+
+// AppendMessageWithProviderMetadata stores optional provider replay state next
+// to the canonical transcript. Callers must validate and redact that metadata;
+// it is not included in browser history or model-neutral wire messages.
+func (s *Store) AppendMessageWithProviderMetadata(ctx context.Context, sessionID, role, content string, toolCalls, providerMetadata json.RawMessage) (int64, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO conversation_history (session_id, role, content, tool_calls)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO conversation_history (session_id, role, content, tool_calls, provider_metadata)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id
-	`, sessionID, role, content, toolCalls).Scan(&id)
+	`, sessionID, role, content, toolCalls, providerMetadata).Scan(&id)
 	return id, err
 }
 
@@ -1052,7 +1061,7 @@ func (s *Store) MCPListServers(ctx context.Context, sessionID string) ([]MCPServ
 		SELECT id, session_id, name, url, auth_secret, enabled, tools_json, created_at
 		FROM mcp_servers
 		WHERE session_id = $1
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 	`, sessionID)
 	if err != nil {
 		return nil, err

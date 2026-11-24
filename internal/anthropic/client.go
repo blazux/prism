@@ -11,11 +11,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -161,10 +161,12 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	// assistant message cannot be modified". PRISM's pivot stores thinking as
 	// plain text with no signature, so it could not replay them faithfully —
 	// asking for them would break the very next tool turn.
+	// Experimental until the end-to-end cost and quality comparison is done.
+	toolSearch := useNativeToolSearch(req)
 	payload := apiRequest{
 		Model:        req.Model,
 		System:       buildSystemWithCachePrefix(req.Messages, req.CacheSystemPrefixBytes),
-		Messages:     buildMessages(req.Messages),
+		Messages:     buildMessagesForToolSearch(req.Messages, toolSearch, req.Tools),
 		Tools:        buildToolsWithCachePrefix(req.Tools, req.CacheToolPrefixCount),
 		CacheControl: &cacheControl{Type: "ephemeral"},
 		MaxTokens:    req.Options.NumPredict,
@@ -172,14 +174,11 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		TopK:         req.Options.TopK,
 		Stream:       true,
 	}
-	// Experimental until the end-to-end cost and quality comparison is done.
-	toolSearch := os.Getenv("PRISM_ANTHROPIC_TOOL_SEARCH") == "1" &&
-		os.Getenv("PRISM_CLAUDE_LAZY_TOOLS") != "1" &&
-		strings.HasPrefix(req.Model, "claude-sonnet-5-5") && len(req.Tools) >= 8
 	if toolSearch {
 		payload.Tools = buildToolSearchTools(req.Tools)
 		payload.Stream = false // preserve every provider block without SSE reconstruction
 	}
+	configureCacheTTL(&payload)
 	if payload.MaxTokens <= 0 {
 		payload.MaxTokens = defaultMaxTokens
 	}
@@ -216,15 +215,15 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	}
 
 	if toolSearch {
-		c.readMessage(resp.Body, out)
+		c.readMessage(resp.Body, out, payload.CacheControl.TTL)
 	} else {
-		c.readStream(ctx, resp.Body, req.Model, payload.MaxTokens, out)
+		c.readStream(ctx, resp.Body, req.Model, payload.MaxTokens, out, payload.CacheControl.TTL)
 	}
 }
 
 // readMessage is used only for the opt-in tool-search experiment. Non-streaming
 // responses expose complete server-tool and tool-reference blocks for replay.
-func (c *Client) readMessage(body io.Reader, out chan<- ollama.StreamEvent) {
+func (c *Client) readMessage(body io.Reader, out chan<- ollama.StreamEvent, cacheTTL ...string) {
 	var response struct {
 		Content     []json.RawMessage `json:"content"`
 		StopReason  string            `json:"stop_reason"`
@@ -235,11 +234,11 @@ func (c *Client) readMessage(body io.Reader, out chan<- ollama.StreamEvent) {
 		} `json:"stop_details"`
 	}
 	if err := json.NewDecoder(body).Decode(&response); err != nil {
-		out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic response: %w", err)}
+		out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic response: %w", err), Done: true, DoneReason: "interrupted", Usage: response.Usage.usage(cacheTTL...)}
 		return
 	}
 	if response.StopReason == "refusal" {
-		out <- ollama.StreamEvent{Done: true, DoneReason: "refusal", Usage: response.Usage.usage(), Err: fmt.Errorf("anthropic refusal (%s): %s", response.StopDetails.Category, response.StopDetails.Explanation)}
+		out <- ollama.StreamEvent{Done: true, DoneReason: "refusal", Usage: response.Usage.usage(cacheTTL...), Err: fmt.Errorf("anthropic refusal (%s): %s", response.StopDetails.Category, response.StopDetails.Explanation)}
 		return
 	}
 	var content strings.Builder
@@ -252,7 +251,7 @@ func (c *Client) readMessage(body io.Reader, out chan<- ollama.StreamEvent) {
 			Input json.RawMessage `json:"input"`
 		}
 		if err := json.Unmarshal(raw, &block); err != nil {
-			out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic content block: %w", err)}
+			out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic content block: %w", err), Done: true, DoneReason: "interrupted", Usage: response.Usage.usage(cacheTTL...)}
 			return
 		}
 		switch block.Type {
@@ -270,7 +269,7 @@ func (c *Client) readMessage(body io.Reader, out chan<- ollama.StreamEvent) {
 			}
 		}
 	}
-	out <- ollama.StreamEvent{Content: content.String(), ToolCalls: calls, ProviderBlocks: response.Content, Done: true, DoneReason: response.StopReason, Usage: response.Usage.usage()}
+	out <- ollama.StreamEvent{Content: content.String(), ToolCalls: calls, ProviderBlocks: response.Content, Done: true, DoneReason: response.StopReason, Usage: response.Usage.usage(cacheTTL...)}
 }
 
 // ---- streaming response -------------------------------------------------
@@ -278,10 +277,16 @@ func (c *Client) readMessage(body io.Reader, out chan<- ollama.StreamEvent) {
 // streamEvent covers every server-sent event shape we act on. The event: line is
 // ignored — the JSON payload names its own type.
 type streamUsage struct {
-	Input      *int64 `json:"input_tokens"`
-	Output     *int64 `json:"output_tokens"`
-	CacheRead  *int64 `json:"cache_read_input_tokens"`
-	CacheWrite *int64 `json:"cache_creation_input_tokens"`
+	Input         *int64              `json:"input_tokens"`
+	Output        *int64              `json:"output_tokens"`
+	CacheRead     *int64              `json:"cache_read_input_tokens"`
+	CacheWrite    *int64              `json:"cache_creation_input_tokens"`
+	CacheCreation *cacheCreationUsage `json:"cache_creation"`
+}
+
+type cacheCreationUsage struct {
+	FiveMinutes *int64 `json:"ephemeral_5m_input_tokens"`
+	OneHour     *int64 `json:"ephemeral_1h_input_tokens"`
 }
 
 func (u *streamUsage) merge(v *streamUsage) {
@@ -300,23 +305,66 @@ func (u *streamUsage) merge(v *streamUsage) {
 	if v.CacheWrite != nil {
 		u.CacheWrite = v.CacheWrite
 	}
+	if v.CacheCreation != nil {
+		if u.CacheCreation == nil {
+			u.CacheCreation = &cacheCreationUsage{}
+		}
+		if v.CacheCreation.FiveMinutes != nil {
+			u.CacheCreation.FiveMinutes = v.CacheCreation.FiveMinutes
+		}
+		if v.CacheCreation.OneHour != nil {
+			u.CacheCreation.OneHour = v.CacheCreation.OneHour
+		}
+	}
 }
-func (u *streamUsage) usage() *ollama.Usage {
-	if u.Input == nil && u.Output == nil {
+func (u *streamUsage) usage(cacheTTL ...string) *ollama.Usage {
+	if u.Input == nil && u.Output == nil && u.CacheRead == nil && u.CacheWrite == nil && u.CacheCreation == nil {
 		return nil
 	}
+	write := u.CacheWrite
+	var fiveMinutes, oneHour *int64
+	pricingUnknown := false
+	if u.CacheCreation != nil {
+		fiveMinutes, oneHour = u.CacheCreation.FiveMinutes, u.CacheCreation.OneHour
+		if fiveMinutes != nil && oneHour != nil && *fiveMinutes >= 0 && *oneHour >= 0 {
+			sum := *fiveMinutes + *oneHour
+			if sum < 0 {
+				pricingUnknown = true
+			} else if write == nil {
+				write = &sum
+			} else if *write != sum {
+				pricingUnknown = true
+			}
+		} else if fiveMinutes != nil || oneHour != nil || (write != nil && *write > 0) {
+			pricingUnknown = true
+		}
+	}
+	if len(cacheTTL) > 0 && cacheTTL[0] == "1h" && write != nil && *write > 0 && (fiveMinutes == nil || oneHour == nil) {
+		// Server tools can also write their own five-minute cache entries. The
+		// requested TTL alone cannot identify which write price applies.
+		pricingUnknown = true
+	}
+	if u.CacheCreation != nil && write == nil {
+		pricingUnknown = true
+	}
+	for _, count := range []*int64{u.Input, u.Output, u.CacheRead, write, fiveMinutes, oneHour} {
+		if count != nil && *count < 0 {
+			pricingUnknown = true
+		}
+	}
 	var total *int64
-	if u.Input != nil {
+	if u.Input != nil && (u.CacheCreation == nil || write != nil) {
 		n := *u.Input
 		if u.CacheRead != nil {
 			n += *u.CacheRead
 		}
-		if u.CacheWrite != nil {
-			n += *u.CacheWrite
+		if write != nil {
+			n += *write
 		}
 		total = &n
 	}
-	return &ollama.Usage{InputTokens: total, OutputTokens: u.Output, CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite}
+	return &ollama.Usage{InputTokens: total, OutputTokens: u.Output, CacheReadTokens: u.CacheRead, CacheWriteTokens: write,
+		CacheWrite5mTokens: fiveMinutes, CacheWrite1hTokens: oneHour, CacheWritePricingUnknown: pricingUnknown}
 }
 
 type streamEvent struct {
@@ -408,7 +456,7 @@ func validatedToolCall(name, args string) ollama.ToolCall {
 	}}
 }
 
-func (c *Client) readStream(ctx context.Context, body io.Reader, model string, maxTokens int, out chan<- ollama.StreamEvent) {
+func (c *Client) readStream(ctx context.Context, body io.Reader, model string, maxTokens int, out chan<- ollama.StreamEvent, cacheTTL ...string) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	tools := newToolBuilder()
@@ -418,7 +466,7 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, model string, m
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			out <- ollama.StreamEvent{Err: ctx.Err()}
+			out <- ollama.StreamEvent{Err: ctx.Err(), Done: true, DoneReason: "interrupted", Usage: usage.usage(cacheTTL...)}
 			return
 		default:
 		}
@@ -466,26 +514,26 @@ func (c *Client) readStream(ctx context.Context, body io.Reader, model string, m
 			if msg == "" {
 				msg = string(data)
 			}
-			out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic stream error (%s): %s", ev.Error.Type, msg)}
+			out <- ollama.StreamEvent{Err: fmt.Errorf("anthropic stream error (%s): %s", ev.Error.Type, msg), Done: true, DoneReason: "interrupted", Usage: usage.usage(cacheTTL...)}
 			return
 
 		case "message_stop":
 			// Anthropic closes the body right after; stop reading rather than
 			// wait on a scanner that has nothing left to yield.
-			out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: stopReason, Usage: usage.usage()}
+			out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: stopReason, Usage: usage.usage(cacheTTL...)}
 			c.logStop(stopReason, model, maxTokens)
 			return
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		out <- ollama.StreamEvent{Err: fmt.Errorf("scan: %w", err)}
+		out <- ollama.StreamEvent{Err: fmt.Errorf("scan: %w", err), Done: true, DoneReason: "interrupted", Usage: usage.usage(cacheTTL...)}
 		return
 	}
 
 	// The stream ended without message_stop (upstream closed early). Everything
 	// accumulated so far is still worth delivering, with incomplete accounting flagged.
-	out <- ollama.StreamEvent{ToolCalls: tools.result(), Done: true, DoneReason: "interrupted", Usage: usage.usage()}
+	out <- ollama.StreamEvent{Done: true, DoneReason: "interrupted", Usage: usage.usage(cacheTTL...)}
 	c.logStop(stopReason, model, maxTokens)
 }
 
@@ -516,6 +564,17 @@ var knownModels = []string{
 func (c *Client) ContextBudgetChars() int { return 0 }
 
 func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	return c.listModels(ctx, false)
+}
+
+// ListModelsStrict is for an explicit connection check. Unlike a conversation's
+// model picker, it must report an unreachable or forbidden catalog rather than
+// substitute model names that have not been fetched from this connection.
+func (c *Client) ListModelsStrict(ctx context.Context) ([]string, error) {
+	return c.listModels(ctx, true)
+}
+
+func (c *Client) listModels(ctx context.Context, strict bool) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -529,9 +588,15 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		if strict {
+			return nil, err
+		}
 		return c.fallbackModels(), nil
 	}
 	defer resp.Body.Close()
+	if strict && resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("anthropic returned %d", resp.StatusCode)
+	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		// The key is dead or wrong. Serving the fallback list here would put Claude
@@ -554,9 +619,18 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if strict {
+			return nil, err
+		}
 		return c.fallbackModels(), nil
 	}
+	if strict && result.Data == nil {
+		return nil, errors.New("model list response missing data")
+	}
 	if len(result.Data) == 0 {
+		if strict {
+			return []string{}, nil
+		}
 		return c.fallbackModels(), nil
 	}
 	names := make([]string, 0, len(result.Data))

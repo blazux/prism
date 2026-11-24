@@ -14,7 +14,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -31,7 +30,8 @@ import (
 // which surfaces as a truncated answer rather than a dead chat.
 const defaultMaxTokens = 16384
 
-// reasoningEffort is sent as `reasoning_effort` on every request. gpt-oss (and
+// reasoningEffort is the fallback for compatible servers and known native
+// reasoning models. It is never added to native non-reasoning models. gpt-oss (and
 // other harmony/o-series-style models) otherwise default to heavy reasoning and
 // can burn the ENTIRE max_tokens budget in the reasoning channel without ever
 // emitting a final message — the request comes back with finish_reason "length"
@@ -119,7 +119,9 @@ type chatRequest struct {
 	// Reasoning budget. The accepted set is model-specific (gpt-oss: low/medium/
 	// high; Qwen3.8-Flash-Next: low/medium/xhigh). Per-request value first
 	// (Settings › Agent / group config), else the process-wide reasoningEffort.
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ReasoningEffort      string `json:"reasoning_effort,omitempty"`
+	PromptCacheKey       string `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention string `json:"prompt_cache_retention,omitempty"`
 }
 
 type chatMsg struct {
@@ -270,9 +272,10 @@ func (u *streamUsage) usage() *ollama.Usage {
 }
 
 type streamChunk struct {
-	Usage   *streamUsage    `json:"usage"`
-	Error   json.RawMessage `json:"error"`
-	Choices []struct {
+	Usage       *streamUsage    `json:"usage"`
+	Error       json.RawMessage `json:"error"`
+	ServiceTier string          `json:"service_tier"`
+	Choices     []struct {
 		Delta struct {
 			Content          string         `json:"content"`
 			ReasoningContent string         `json:"reasoning_content"`
@@ -397,8 +400,7 @@ func (c *Client) postChatWithRetry(ctx context.Context, body []byte) (*http.Resp
 }
 
 func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ollama.StreamEvent) {
-	endpoint, _ := url.Parse(c.baseURL)
-	officialOpenAI := endpoint != nil && endpoint.Scheme == "https" && endpoint.Hostname() == "api.openai.com"
+	officialOpenAI := c.officialOpenAI()
 	payload := chatRequest{
 		StreamOptions: map[string]bool{"include_usage": true},
 		Model:         req.Model,
@@ -419,14 +421,18 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	if pp := req.Options.PresencePenalty; pp != 0 {
 		payload.PresencePenalty = &pp
 	}
-	if req.NoThinking || (req.EnableThinking != nil && !*req.EnableThinking) {
+	if officialOpenAI {
+		if err := configureOfficialRequest(&payload, req); err != nil {
+			out <- ollama.StreamEvent{Err: err}
+			return
+		}
+		c.configurePromptCache(&payload, req)
+	} else if req.NoThinking || (req.EnableThinking != nil && !*req.EnableThinking) {
 		// The explicit gateway extension is for compatible servers. A native API
 		// has no such boolean and unknown model capabilities cannot imply "none".
-		if req.EnableThinking == nil || !officialOpenAI {
-			payload.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
-		}
+		payload.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
 	} else {
-		if req.EnableThinking != nil && !officialOpenAI {
+		if req.EnableThinking != nil {
 			payload.ChatTemplateKwargs = map[string]any{"enable_thinking": *req.EnableThinking}
 		}
 		if effort := req.ReasoningEffort; effort != "" {
@@ -436,15 +442,6 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 			// Cap reasoning so the model can't spend the whole generation budget
 			// thinking and return empty content. Not set for voice/no-thinking turns.
 			payload.ReasoningEffort = reasoningEffort
-		}
-	}
-	if officialOpenAI && req.EnableThinking != nil {
-		// The phone relay's explicit choice uses the native API contract. Older
-		// callers retain their existing payload and defaults.
-		payload.MaxCompletionTokens, payload.MaxTokens = payload.MaxTokens, 0
-		if payload.ReasoningEffort != "" && payload.ReasoningEffort != "none" {
-			payload.Temperature = 0
-			payload.TopP = nil
 		}
 	}
 	for _, t := range req.Tools {
@@ -494,12 +491,13 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	finish := ""
 	ended := false
 	var usage *ollama.Usage
+	serviceTier := ""
 	streamed := false // set once any chunk arrives, so a later read error is a mid-stream cut, not a failure to start
 
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			out <- ollama.StreamEvent{Err: ctx.Err()}
+			out <- ollama.StreamEvent{Err: ctx.Err(), DoneReason: "interrupted", Usage: usage}
 			return
 		default:
 		}
@@ -518,6 +516,16 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		if err := json.Unmarshal(data, &chunk); err != nil {
 			continue
 		}
+		if chunk.ServiceTier != "" {
+			serviceTier = chunk.ServiceTier
+		}
+		if chunk.Usage != nil {
+			usage = chunk.Usage.usage()
+		}
+		if officialOpenAI && usage != nil {
+			usage.PricingProvider = "openai"
+			usage.ServiceTier = serviceTier
+		}
 		if len(chunk.Error) > 0 && string(bytes.TrimSpace(chunk.Error)) != "null" {
 			var providerError struct {
 				Message string `json:"message"`
@@ -528,11 +536,8 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 			}
 			// An error envelope invalidates this completion, even if a preceding
 			// delta already supplied tool arguments or a finish reason.
-			out <- ollama.StreamEvent{Err: fmt.Errorf("openai stream error: %s", message)}
+			out <- ollama.StreamEvent{Err: fmt.Errorf("openai stream error: %s", message), DoneReason: "interrupted", Usage: usage}
 			return
-		}
-		if chunk.Usage != nil {
-			usage = chunk.Usage.usage()
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -556,6 +561,10 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 	}
 
 	if err := scanner.Err(); err != nil {
+		if ctx.Err() != nil {
+			out <- ollama.StreamEvent{Err: ctx.Err(), DoneReason: "interrupted", Usage: usage}
+			return
+		}
 		// A mid-stream cut (a proxy's idle/response timeout, a dropped connection, a
 		// network reset) surfaces here as "unexpected EOF". If tokens already arrived
 		// they were emitted above, so finalize the turn with that partial content plus
@@ -564,7 +573,7 @@ func (c *Client) Chat(ctx context.Context, req ollama.ChatRequest, out chan<- ol
 		// rather than a cryptic "scan: unexpected EOF" that discards the whole turn.
 		// A cut *before* any chunk is a genuine failure the caller/retry must still see.
 		if !streamed {
-			out <- ollama.StreamEvent{Err: fmt.Errorf("scan: %w", err)}
+			out <- ollama.StreamEvent{Err: fmt.Errorf("scan: %w", err), DoneReason: "interrupted", Usage: usage}
 			return
 		}
 		log.Printf("[openai] stream cut mid-response (%v) — finalizing partial turn, model %q", err, req.Model)
@@ -593,6 +602,16 @@ func (c *Client) ContextBudgetChars() int { return 0 }
 
 // ---- models / health -----------------------------------------------------
 
+// ModelCatalogError carries only the HTTP status. Provider error bodies may
+// contain credentials or other private data and are not public diagnostics.
+type ModelCatalogError struct {
+	StatusCode int
+}
+
+func (e *ModelCatalogError) Error() string {
+	return fmt.Sprintf("model list returned HTTP %d", e.StatusCode)
+}
+
 func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -608,6 +627,9 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, &ModelCatalogError{StatusCode: resp.StatusCode}
+	}
 
 	var result struct {
 		Data []struct {
@@ -616,6 +638,9 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
+	}
+	if result.Data == nil {
+		return nil, fmt.Errorf("model list response missing data")
 	}
 	names := make([]string, len(result.Data))
 	for i, m := range result.Data {

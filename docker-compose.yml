@@ -26,12 +26,16 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_REASONING_EFFORT=${OPENAI_REASONING_EFFORT-medium}
+      - PRISM_OPENAI_LAZY_TOOLS=${PRISM_OPENAI_LAZY_TOOLS:-}
+      - PRISM_OPENAI_CACHE_RETENTION=${PRISM_OPENAI_CACHE_RETENTION:-}
+      - PRISM_COMPACT_COMMAND_OUTPUT=${PRISM_COMPACT_COMMAND_OUTPUT:-}
       # Claude, with LLM_BACKEND=anthropic. Needs a console API key — a Pro/Max
       # subscription token does not work (see the README).
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
-      # Local cost experiment only; off by default.
+      - PRISM_ANTHROPIC_CACHE_TTL=${PRISM_ANTHROPIC_CACHE_TTL:-5m}
+      # Experimental tool discovery; off by default.
       - PRISM_ANTHROPIC_TOOL_SEARCH=${PRISM_ANTHROPIC_TOOL_SEARCH:-}
       - PRISM_CLAUDE_LAZY_TOOLS=${PRISM_CLAUDE_LAZY_TOOLS:-}
       - EMBED_BACKEND=${EMBED_BACKEND:-}

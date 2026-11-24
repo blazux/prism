@@ -2,9 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -13,6 +17,7 @@ import (
 
 	"prism/internal/memory"
 	"prism/internal/ollama"
+	"prism/internal/openai"
 )
 
 // One encrypted record makes provider, endpoint, model and credential changes
@@ -141,6 +146,22 @@ func requestUserID(r *http.Request) int64 {
 }
 
 func (s *Server) validateAIProfileFor(r *http.Request, p *aiProfile) error {
+	if err := s.validateAIProfilePolicyFor(r, p); err != nil {
+		return err
+	}
+	if p.Provider == "anthropic" && p.APIKey == "" {
+		return errors.New("Anthropic API key required")
+	}
+	if p.BaseURL == "https://api.openai.com/v1" && p.APIKey == "" {
+		return errors.New("OpenAI API key required")
+	}
+	return nil
+}
+
+// A saved connection may be disconnected, including after explicit credential
+// removal. Authorization and endpoint validation still apply; probes additionally
+// require the credential through validateAIProfileFor.
+func (s *Server) validateAIProfilePolicyFor(r *http.Request, p *aiProfile) error {
 	if err := p.normalize(); err != nil {
 		return err
 	}
@@ -150,12 +171,6 @@ func (s *Server) validateAIProfileFor(r *http.Request, p *aiProfile) error {
 	}
 	if !s.userCanUseModel(r.Context(), u, p.Model) {
 		return errors.New("this model is not allowed by your administrator")
-	}
-	if p.Provider == "anthropic" && p.APIKey == "" {
-		return errors.New("Anthropic API key required")
-	}
-	if p.BaseURL == "https://api.openai.com/v1" && p.APIKey == "" {
-		return errors.New("OpenAI API key required")
 	}
 	return nil
 }
@@ -254,7 +269,11 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "model required")
 			return
 		}
-		if err := s.validateAIProfileFor(r, &b.aiProfile); err != nil {
+		validate := s.validateAIProfileFor
+		if b.Action == "save" {
+			validate = s.validateAIProfilePolicyFor
+		}
+		if err := validate(r, &b.aiProfile); err != nil {
 			writeErr(w, 400, err.Error())
 			return
 		}
@@ -275,7 +294,7 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 			if b.Action == "embedding_models" {
 				models, err := ep.backendConfig().newChatBackend().ListModels(ctx)
 				if err != nil {
-					writeErr(w, 502, "Cannot load models from the embedding provider")
+					writeAIConnectionFailure(w, "embedding", ep.Provider, err)
 					return
 				}
 				writeJSON(w, map[string]any{"models": embeddingCandidates(models), "manualAllowed": true})
@@ -308,9 +327,9 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		backend := b.backendConfig().newChatBackend()
 		if b.Action == "models" {
-			models, err := backend.ListModels(ctx)
+			models, err := verifiedModelCatalog(ctx, b.Provider, backend)
 			if err != nil {
-				writeErr(w, 502, "cannot list models: check the server and credential")
+				writeAIConnectionFailure(w, b.SourceID, b.Provider, err)
 				return
 			}
 			allowed := []string{}
@@ -330,6 +349,91 @@ func (s *Server) handleAIProfile(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, 405, "method not allowed")
 	}
+}
+
+func writeAIConnectionFailure(w http.ResponseWriter, source, provider string, err error) {
+	code, message := modelCatalogFailure(err)
+	log.Printf("[ai/catalog] source=%q provider=%q reason=%s", source, provider, code)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadGateway)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message, "code": code})
+}
+
+// Anthropic's picker can offer a fallback catalog when listing is unavailable.
+// Explicit verification must report the real outcome of fetching the catalog.
+func verifiedModelCatalog(ctx context.Context, provider string, backend ollama.Backend) ([]string, error) {
+	if provider == "anthropic" {
+		if strict, ok := backend.(interface {
+			ListModelsStrict(context.Context) ([]string, error)
+		}); ok {
+			return strict.ListModelsStrict(ctx)
+		}
+	}
+	return backend.ListModels(ctx)
+}
+
+// Return actionable diagnostics without reflecting a provider's response body,
+// URL, or credential. Codes remain suitable for local audit logs and UI state.
+func modelCatalogFailure(err error) (string, string) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "connection_timeout", "The server did not answer in time. Check its address and availability, then try again."
+	case errors.Is(err, context.Canceled):
+		return "connection_cancelled", "The connection check was cancelled. Try again when the server is ready."
+	case strings.Contains(err.Error(), "looks like a Claude Code OAuth token"):
+		return "unsupported_subscription_token", "This value has the format of a Claude Code sign-in token. Enter a Claude Console API key (sk-ant-api…) in API key."
+	case strings.Contains(err.Error(), "ANTHROPIC_API_KEY is not set"):
+		return "missing_api_key", "Enter an Anthropic API key before checking this connection."
+	}
+
+	status := 0
+	var catalogError *openai.ModelCatalogError
+	if errors.As(err, &catalogError) {
+		status = catalogError.StatusCode
+	} else {
+		// Legacy adapters expose these fixed prefixes, followed by a status.
+		// Parse only that prefix, never arbitrary numbers in a response body.
+		for _, format := range []string{"anthropic rejected the API key (%d)", "anthropic returned %d:", "ollama returned %d"} {
+			if n, _ := fmt.Sscanf(err.Error(), format, &status); n == 1 {
+				break
+			}
+		}
+	}
+	switch status {
+	case 401:
+		return "authentication_rejected", "The provider rejected the API key (HTTP 401). Check that this connection uses an active key for that provider."
+	case 403:
+		return "catalog_access_denied", "The provider refused access to its model list (HTTP 403). Check the key's permissions, or enter a model ID manually."
+	case 404:
+		return "catalog_not_found", "The model-list endpoint was not found (HTTP 404). Check the server URL and API path."
+	case 402:
+		return "provider_billing_required", "The provider requires credits or billing access (HTTP 402). Check the provider account."
+	case 429:
+		return "provider_limit", "The provider's rate or usage limit was reached (HTTP 429). Check its limits and credits before retrying."
+	}
+	if status >= 500 && status <= 599 {
+		return "provider_unavailable", fmt.Sprintf("The provider is temporarily unavailable (HTTP %d). Try again later.", status)
+	}
+	if status >= 400 && status <= 499 {
+		return "catalog_request_rejected", fmt.Sprintf("The provider rejected the model-list request (HTTP %d). Check the provider type and server URL.", status)
+	}
+	var certificateError *tls.CertificateVerificationError
+	if errors.As(err, &certificateError) {
+		return "certificate_error", "The server's TLS certificate could not be verified. Check its certificate and HTTPS address."
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) {
+		if networkError.Timeout() {
+			return "connection_timeout", "The server did not answer in time. Check its address and availability, then try again."
+		}
+		return "server_unreachable", "Prism could not reach this server. Check its address, DNS and network access."
+	}
+	var syntaxError *json.SyntaxError
+	var typeError *json.UnmarshalTypeError
+	if errors.As(err, &syntaxError) || errors.As(err, &typeError) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || err.Error() == "model list response missing data" {
+		return "invalid_model_catalog", "The server did not return a valid model list. Check the provider type, server URL and API path."
+	}
+	return "catalog_unavailable", "The model list could not be loaded. Check this connection's provider and server URL, or enter a model ID manually."
 }
 
 // A completion verifies actual model access; listing models alone can succeed

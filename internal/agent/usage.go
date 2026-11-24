@@ -27,8 +27,8 @@ func taskIDFromContext(ctx context.Context) string {
 	return id
 }
 
-// One record per chat-loop model request, never per streaming delta. Tool-side
-// vision/research/embedding calls are not included in these counters.
+// One record per model request, never per streaming delta. Scope distinguishes
+// chat, subagent and auxiliary requests; embedding/vision counters are separate.
 type ModelUsage struct {
 	TaskID                   string        `json:"taskId,omitempty"`
 	Scope                    string        `json:"scope"`

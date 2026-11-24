@@ -170,6 +170,38 @@ func (b *sourcesBackend) source(id string) (aiSource, bool) {
 	}
 	return aiSource{}, false
 }
+
+func (b *sourcesBackend) UseClientToolCatalog(ctx context.Context, model string) bool {
+	// Avoid probing legacy unqualified model names when no source enables this
+	// opt-in. Normal requests must not gain extra model-list network calls.
+	// Eligibility follows the requested model, not the source's default: a
+	// source can have a different default model with no catalog capability.
+	candidate := model
+	if _, raw, qualified := strings.Cut(candidate, "::"); qualified {
+		candidate = raw
+	}
+	possible := false
+	for _, src := range b.sources {
+		probeModel := candidate
+		if probeModel == "" {
+			probeModel = src.Model
+		}
+		provider, ok := src.profile().backendConfig().newChatBackend().(ollama.ClientToolCatalogProvider)
+		if ok && provider.UseClientToolCatalog(ctx, probeModel) {
+			possible = true
+			break
+		}
+	}
+	if !possible {
+		return false
+	}
+	src, resolved, err := b.resolve(ctx, model)
+	if err != nil {
+		return false
+	}
+	provider, ok := src.profile().backendConfig().newChatBackend().(ollama.ClientToolCatalogProvider)
+	return ok && provider.UseClientToolCatalog(ctx, resolved)
+}
 func (b *sourcesBackend) resolve(ctx context.Context, model string) (aiSource, string, error) {
 	if id, raw, ok := strings.Cut(model, "::"); ok {
 		src, found := b.source(id)
@@ -285,6 +317,15 @@ func (b *sourcesBackend) Chat(ctx context.Context, req ollama.ChatRequest, out c
 		select {
 		case out <- event:
 		case <-ctx.Done():
+			// A provider can report its final counters while unwinding a cancelled
+			// request. Keep them when the caller's buffer has room, but never
+			// strand this relay if the caller has already stopped receiving.
+			if event.Usage != nil {
+				select {
+				case out <- event:
+				default:
+				}
+			}
 		}
 	}
 }
@@ -518,12 +559,12 @@ func (s *Server) saveAIProfileMode(ctx context.Context, u *memory.User, p, old *
 	}
 	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/ai/config", nil)
 	r = withUser(r, u)
-	if err := s.validateAIProfileFor(r, p); err != nil {
+	if err := s.validateAIProfilePolicyFor(r, p); err != nil {
 		return err
 	}
 	for _, src := range p.Sources {
 		cp := src.profile()
-		if err := s.validateAIProfileFor(r, &cp); err != nil {
+		if err := s.validateAIProfilePolicyFor(r, &cp); err != nil {
 			return fmt.Errorf("source %s: %w", src.Name, err)
 		}
 	}

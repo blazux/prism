@@ -62,6 +62,7 @@ func (e *ToolExecutor) deepResearch(ctx context.Context, question string, maxRou
 	}
 
 	start := time.Now()
+	ctx = withTaskID(ctx, AuxiliaryTaskID(ctx, "research", start))
 	e.drProgress(fmt.Sprintf("Planning research: %s", question))
 	plan, _ := e.chatOnce(ctx, "", fmt.Sprintf(drPlanPrompt, drDateContext(), question), 0.3)
 
@@ -137,13 +138,17 @@ func (e *ToolExecutor) chatOnce(ctx context.Context, system, user string, temp f
 	}
 	msgs = append(msgs, ollama.Message{Role: "user", Content: user})
 
+	started := time.Now()
 	req := ollama.ChatRequest{
-		Model:    e.model,
-		Messages: msgs,
-		Stream:   true,
-		Options:  ollama.Options{Temperature: temp},
+		TaskID:                 AuxiliaryTaskID(ctx, "research", started),
+		Model:                  e.model,
+		Messages:               msgs,
+		CacheSystemPrefixBytes: len(system),
+		Stream:                 true,
+		Options:                ollama.Options{Temperature: temp},
 	}
 	result, err := collectModelStream(ctx, e.backend, req, nil)
+	e.recordAuxiliaryModelUsage(ctx, req, "research", started, result.Usage, result.Complete && err == nil)
 	if err != nil {
 		return "", err
 	}

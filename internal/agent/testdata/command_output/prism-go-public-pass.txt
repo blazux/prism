@@ -1,0 +1,20 @@
+=== RUN   TestWrapper
+--- PASS: TestWrapper (0.00s)
+PASS
+ok  	prism/internal/cronclock	0.001s
+=== RUN   TestPersonalTimezones
+=== RUN   TestPersonalTimezones/America/Martinique2026-07-01T09:00
+=== PAUSE TestPersonalTimezones/America/Martinique2026-07-01T09:00
+=== RUN   TestPersonalTimezones/Europe/Paris2026-07-01T09:00
+=== PAUSE TestPersonalTimezones/Europe/Paris2026-07-01T09:00
+=== RUN   TestPersonalTimezones/Europe/Paris2026-01-01T09:00
+=== PAUSE TestPersonalTimezones/Europe/Paris2026-01-01T09:00
+=== CONT  TestPersonalTimezones/America/Martinique2026-07-01T09:00
+=== CONT  TestPersonalTimezones/Europe/Paris2026-01-01T09:00
+=== CONT  TestPersonalTimezones/Europe/Paris2026-07-01T09:00
+--- PASS: TestPersonalTimezones (0.00s)
+    --- PASS: TestPersonalTimezones/America/Martinique2026-07-01T09:00 (0.00s)
+    --- PASS: TestPersonalTimezones/Europe/Paris2026-01-01T09:00 (0.00s)
+    --- PASS: TestPersonalTimezones/Europe/Paris2026-07-01T09:00 (0.00s)
+PASS
+ok  	prism/internal/timeprefs	0.001s

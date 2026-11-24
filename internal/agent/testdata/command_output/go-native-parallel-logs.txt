@@ -1,0 +1,260 @@
+=== RUN   TestQuiet
+=== RUN   TestQuiet/quiet-000
+=== RUN   TestQuiet/quiet-001
+=== RUN   TestQuiet/quiet-002
+=== RUN   TestQuiet/quiet-003
+=== RUN   TestQuiet/quiet-004
+=== RUN   TestQuiet/quiet-005
+=== RUN   TestQuiet/quiet-006
+=== RUN   TestQuiet/quiet-007
+=== RUN   TestQuiet/quiet-008
+=== RUN   TestQuiet/quiet-009
+=== RUN   TestQuiet/quiet-010
+=== RUN   TestQuiet/quiet-011
+=== RUN   TestQuiet/quiet-012
+=== RUN   TestQuiet/quiet-013
+=== RUN   TestQuiet/quiet-014
+=== RUN   TestQuiet/quiet-015
+=== RUN   TestQuiet/quiet-016
+=== RUN   TestQuiet/quiet-017
+=== RUN   TestQuiet/quiet-018
+=== RUN   TestQuiet/quiet-019
+=== RUN   TestQuiet/quiet-020
+=== RUN   TestQuiet/quiet-021
+=== RUN   TestQuiet/quiet-022
+=== RUN   TestQuiet/quiet-023
+=== RUN   TestQuiet/quiet-024
+=== RUN   TestQuiet/quiet-025
+=== RUN   TestQuiet/quiet-026
+=== RUN   TestQuiet/quiet-027
+=== RUN   TestQuiet/quiet-028
+=== RUN   TestQuiet/quiet-029
+=== RUN   TestQuiet/quiet-030
+=== RUN   TestQuiet/quiet-031
+=== RUN   TestQuiet/quiet-032
+=== RUN   TestQuiet/quiet-033
+=== RUN   TestQuiet/quiet-034
+=== RUN   TestQuiet/quiet-035
+=== RUN   TestQuiet/quiet-036
+=== RUN   TestQuiet/quiet-037
+=== RUN   TestQuiet/quiet-038
+=== RUN   TestQuiet/quiet-039
+=== RUN   TestQuiet/quiet-040
+=== RUN   TestQuiet/quiet-041
+=== RUN   TestQuiet/quiet-042
+=== RUN   TestQuiet/quiet-043
+=== RUN   TestQuiet/quiet-044
+=== RUN   TestQuiet/quiet-045
+=== RUN   TestQuiet/quiet-046
+=== RUN   TestQuiet/quiet-047
+=== RUN   TestQuiet/quiet-048
+=== RUN   TestQuiet/quiet-049
+=== RUN   TestQuiet/quiet-050
+=== RUN   TestQuiet/quiet-051
+=== RUN   TestQuiet/quiet-052
+=== RUN   TestQuiet/quiet-053
+=== RUN   TestQuiet/quiet-054
+=== RUN   TestQuiet/quiet-055
+=== RUN   TestQuiet/quiet-056
+=== RUN   TestQuiet/quiet-057
+=== RUN   TestQuiet/quiet-058
+=== RUN   TestQuiet/quiet-059
+=== RUN   TestQuiet/quiet-060
+=== RUN   TestQuiet/quiet-061
+=== RUN   TestQuiet/quiet-062
+=== RUN   TestQuiet/quiet-063
+=== RUN   TestQuiet/quiet-064
+=== RUN   TestQuiet/quiet-065
+=== RUN   TestQuiet/quiet-066
+=== RUN   TestQuiet/quiet-067
+=== RUN   TestQuiet/quiet-068
+=== RUN   TestQuiet/quiet-069
+=== RUN   TestQuiet/quiet-070
+=== RUN   TestQuiet/quiet-071
+=== RUN   TestQuiet/quiet-072
+=== RUN   TestQuiet/quiet-073
+=== RUN   TestQuiet/quiet-074
+=== RUN   TestQuiet/quiet-075
+=== RUN   TestQuiet/quiet-076
+=== RUN   TestQuiet/quiet-077
+=== RUN   TestQuiet/quiet-078
+=== RUN   TestQuiet/quiet-079
+=== RUN   TestQuiet/quiet-080
+=== RUN   TestQuiet/quiet-081
+=== RUN   TestQuiet/quiet-082
+=== RUN   TestQuiet/quiet-083
+=== RUN   TestQuiet/quiet-084
+=== RUN   TestQuiet/quiet-085
+=== RUN   TestQuiet/quiet-086
+=== RUN   TestQuiet/quiet-087
+=== RUN   TestQuiet/quiet-088
+=== RUN   TestQuiet/quiet-089
+=== RUN   TestQuiet/quiet-090
+=== RUN   TestQuiet/quiet-091
+=== RUN   TestQuiet/quiet-092
+=== RUN   TestQuiet/quiet-093
+=== RUN   TestQuiet/quiet-094
+=== RUN   TestQuiet/quiet-095
+=== RUN   TestQuiet/quiet-096
+=== RUN   TestQuiet/quiet-097
+=== RUN   TestQuiet/quiet-098
+=== RUN   TestQuiet/quiet-099
+=== RUN   TestQuiet/quiet-100
+=== RUN   TestQuiet/quiet-101
+=== RUN   TestQuiet/quiet-102
+=== RUN   TestQuiet/quiet-103
+=== RUN   TestQuiet/quiet-104
+=== RUN   TestQuiet/quiet-105
+=== RUN   TestQuiet/quiet-106
+=== RUN   TestQuiet/quiet-107
+=== RUN   TestQuiet/quiet-108
+=== RUN   TestQuiet/quiet-109
+=== RUN   TestQuiet/quiet-110
+=== RUN   TestQuiet/quiet-111
+=== RUN   TestQuiet/quiet-112
+=== RUN   TestQuiet/quiet-113
+=== RUN   TestQuiet/quiet-114
+=== RUN   TestQuiet/quiet-115
+=== RUN   TestQuiet/quiet-116
+=== RUN   TestQuiet/quiet-117
+=== RUN   TestQuiet/quiet-118
+=== RUN   TestQuiet/quiet-119
+--- PASS: TestQuiet (0.00s)
+    --- PASS: TestQuiet/quiet-000 (0.00s)
+    --- PASS: TestQuiet/quiet-001 (0.00s)
+    --- PASS: TestQuiet/quiet-002 (0.00s)
+    --- PASS: TestQuiet/quiet-003 (0.00s)
+    --- PASS: TestQuiet/quiet-004 (0.00s)
+    --- PASS: TestQuiet/quiet-005 (0.00s)
+    --- PASS: TestQuiet/quiet-006 (0.00s)
+    --- PASS: TestQuiet/quiet-007 (0.00s)
+    --- PASS: TestQuiet/quiet-008 (0.00s)
+    --- PASS: TestQuiet/quiet-009 (0.00s)
+    --- PASS: TestQuiet/quiet-010 (0.00s)
+    --- PASS: TestQuiet/quiet-011 (0.00s)
+    --- PASS: TestQuiet/quiet-012 (0.00s)
+    --- PASS: TestQuiet/quiet-013 (0.00s)
+    --- PASS: TestQuiet/quiet-014 (0.00s)
+    --- PASS: TestQuiet/quiet-015 (0.00s)
+    --- PASS: TestQuiet/quiet-016 (0.00s)
+    --- PASS: TestQuiet/quiet-017 (0.00s)
+    --- PASS: TestQuiet/quiet-018 (0.00s)
+    --- PASS: TestQuiet/quiet-019 (0.00s)
+    --- PASS: TestQuiet/quiet-020 (0.00s)
+    --- PASS: TestQuiet/quiet-021 (0.00s)
+    --- PASS: TestQuiet/quiet-022 (0.00s)
+    --- PASS: TestQuiet/quiet-023 (0.00s)
+    --- PASS: TestQuiet/quiet-024 (0.00s)
+    --- PASS: TestQuiet/quiet-025 (0.00s)
+    --- PASS: TestQuiet/quiet-026 (0.00s)
+    --- PASS: TestQuiet/quiet-027 (0.00s)
+    --- PASS: TestQuiet/quiet-028 (0.00s)
+    --- PASS: TestQuiet/quiet-029 (0.00s)
+    --- PASS: TestQuiet/quiet-030 (0.00s)
+    --- PASS: TestQuiet/quiet-031 (0.00s)
+    --- PASS: TestQuiet/quiet-032 (0.00s)
+    --- PASS: TestQuiet/quiet-033 (0.00s)
+    --- PASS: TestQuiet/quiet-034 (0.00s)
+    --- PASS: TestQuiet/quiet-035 (0.00s)
+    --- PASS: TestQuiet/quiet-036 (0.00s)
+    --- PASS: TestQuiet/quiet-037 (0.00s)
+    --- PASS: TestQuiet/quiet-038 (0.00s)
+    --- PASS: TestQuiet/quiet-039 (0.00s)
+    --- PASS: TestQuiet/quiet-040 (0.00s)
+    --- PASS: TestQuiet/quiet-041 (0.00s)
+    --- PASS: TestQuiet/quiet-042 (0.00s)
+    --- PASS: TestQuiet/quiet-043 (0.00s)
+    --- PASS: TestQuiet/quiet-044 (0.00s)
+    --- PASS: TestQuiet/quiet-045 (0.00s)
+    --- PASS: TestQuiet/quiet-046 (0.00s)
+    --- PASS: TestQuiet/quiet-047 (0.00s)
+    --- PASS: TestQuiet/quiet-048 (0.00s)
+    --- PASS: TestQuiet/quiet-049 (0.00s)
+    --- PASS: TestQuiet/quiet-050 (0.00s)
+    --- PASS: TestQuiet/quiet-051 (0.00s)
+    --- PASS: TestQuiet/quiet-052 (0.00s)
+    --- PASS: TestQuiet/quiet-053 (0.00s)
+    --- PASS: TestQuiet/quiet-054 (0.00s)
+    --- PASS: TestQuiet/quiet-055 (0.00s)
+    --- PASS: TestQuiet/quiet-056 (0.00s)
+    --- PASS: TestQuiet/quiet-057 (0.00s)
+    --- PASS: TestQuiet/quiet-058 (0.00s)
+    --- PASS: TestQuiet/quiet-059 (0.00s)
+    --- PASS: TestQuiet/quiet-060 (0.00s)
+    --- PASS: TestQuiet/quiet-061 (0.00s)
+    --- PASS: TestQuiet/quiet-062 (0.00s)
+    --- PASS: TestQuiet/quiet-063 (0.00s)
+    --- PASS: TestQuiet/quiet-064 (0.00s)
+    --- PASS: TestQuiet/quiet-065 (0.00s)
+    --- PASS: TestQuiet/quiet-066 (0.00s)
+    --- PASS: TestQuiet/quiet-067 (0.00s)
+    --- PASS: TestQuiet/quiet-068 (0.00s)
+    --- PASS: TestQuiet/quiet-069 (0.00s)
+    --- PASS: TestQuiet/quiet-070 (0.00s)
+    --- PASS: TestQuiet/quiet-071 (0.00s)
+    --- PASS: TestQuiet/quiet-072 (0.00s)
+    --- PASS: TestQuiet/quiet-073 (0.00s)
+    --- PASS: TestQuiet/quiet-074 (0.00s)
+    --- PASS: TestQuiet/quiet-075 (0.00s)
+    --- PASS: TestQuiet/quiet-076 (0.00s)
+    --- PASS: TestQuiet/quiet-077 (0.00s)
+    --- PASS: TestQuiet/quiet-078 (0.00s)
+    --- PASS: TestQuiet/quiet-079 (0.00s)
+    --- PASS: TestQuiet/quiet-080 (0.00s)
+    --- PASS: TestQuiet/quiet-081 (0.00s)
+    --- PASS: TestQuiet/quiet-082 (0.00s)
+    --- PASS: TestQuiet/quiet-083 (0.00s)
+    --- PASS: TestQuiet/quiet-084 (0.00s)
+    --- PASS: TestQuiet/quiet-085 (0.00s)
+    --- PASS: TestQuiet/quiet-086 (0.00s)
+    --- PASS: TestQuiet/quiet-087 (0.00s)
+    --- PASS: TestQuiet/quiet-088 (0.00s)
+    --- PASS: TestQuiet/quiet-089 (0.00s)
+    --- PASS: TestQuiet/quiet-090 (0.00s)
+    --- PASS: TestQuiet/quiet-091 (0.00s)
+    --- PASS: TestQuiet/quiet-092 (0.00s)
+    --- PASS: TestQuiet/quiet-093 (0.00s)
+    --- PASS: TestQuiet/quiet-094 (0.00s)
+    --- PASS: TestQuiet/quiet-095 (0.00s)
+    --- PASS: TestQuiet/quiet-096 (0.00s)
+    --- PASS: TestQuiet/quiet-097 (0.00s)
+    --- PASS: TestQuiet/quiet-098 (0.00s)
+    --- PASS: TestQuiet/quiet-099 (0.00s)
+    --- PASS: TestQuiet/quiet-100 (0.00s)
+    --- PASS: TestQuiet/quiet-101 (0.00s)
+    --- PASS: TestQuiet/quiet-102 (0.00s)
+    --- PASS: TestQuiet/quiet-103 (0.00s)
+    --- PASS: TestQuiet/quiet-104 (0.00s)
+    --- PASS: TestQuiet/quiet-105 (0.00s)
+    --- PASS: TestQuiet/quiet-106 (0.00s)
+    --- PASS: TestQuiet/quiet-107 (0.00s)
+    --- PASS: TestQuiet/quiet-108 (0.00s)
+    --- PASS: TestQuiet/quiet-109 (0.00s)
+    --- PASS: TestQuiet/quiet-110 (0.00s)
+    --- PASS: TestQuiet/quiet-111 (0.00s)
+    --- PASS: TestQuiet/quiet-112 (0.00s)
+    --- PASS: TestQuiet/quiet-113 (0.00s)
+    --- PASS: TestQuiet/quiet-114 (0.00s)
+    --- PASS: TestQuiet/quiet-115 (0.00s)
+    --- PASS: TestQuiet/quiet-116 (0.00s)
+    --- PASS: TestQuiet/quiet-117 (0.00s)
+    --- PASS: TestQuiet/quiet-118 (0.00s)
+    --- PASS: TestQuiet/quiet-119 (0.00s)
+=== RUN   TestParallelLogs
+=== RUN   TestParallelLogs/first
+=== PAUSE TestParallelLogs/first
+=== RUN   TestParallelLogs/second
+=== PAUSE TestParallelLogs/second
+=== CONT  TestParallelLogs/first
+=== CONT  TestParallelLogs/second
+=== NAME  TestParallelLogs/first
+    contexts_test.go:6: NATIVE_PARALLEL_FIRST
+=== NAME  TestParallelLogs/second
+    contexts_test.go:7: NATIVE_PARALLEL_SECOND
+=== NAME  TestParallelLogs/first
+    contexts_test.go:6: NATIVE_PARALLEL_FIRST_AGAIN
+--- PASS: TestParallelLogs (0.00s)
+    --- PASS: TestParallelLogs/second (0.00s)
+    --- PASS: TestParallelLogs/first (0.00s)
+PASS
+ok  	example.org/contexts	0.002s

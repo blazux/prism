@@ -121,14 +121,18 @@ func TestNativeOpenAIDoesNotReceiveCompatibleThinkingExtension(t *testing.T) {
 		p := 0.9
 		out := make(chan ollama.StreamEvent, 16)
 		go func() {
-			c.Chat(context.Background(), ollama.ChatRequest{Model: "fixture", EnableThinking: tc.choice, ReasoningEffort: tc.effort, Options: ollama.Options{Temperature: 0.7, NumPredict: 512, TopP: &p, TopK: &k}}, out)
+			c.Chat(context.Background(), ollama.ChatRequest{Model: "gpt-5.1", EnableThinking: tc.choice, ReasoningEffort: tc.effort, Options: ollama.Options{Temperature: 0.7, NumPredict: 512, TopP: &p, TopK: &k}}, out)
 			close(out)
 		}()
 		if _, _, _, err := drain(out); err != nil {
 			t.Fatal(err)
 		}
-		if got, _ := received["reasoning_effort"].(string); got != tc.effort {
-			t.Fatalf("effort %q, want %q", got, tc.effort)
+		wantEffort := tc.effort
+		if !*tc.choice {
+			wantEffort = "none"
+		}
+		if got, _ := received["reasoning_effort"].(string); got != wantEffort {
+			t.Fatalf("effort %q, want %q", got, wantEffort)
 		}
 	}
 }

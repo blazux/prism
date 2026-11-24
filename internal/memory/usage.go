@@ -99,24 +99,35 @@ func (s *Store) UsageByUser(ctx context.Context, kind string, since time.Time, l
 // ModelUsageGroup is one model's provider-reported usage within a task. Old
 // events lack task IDs and are grouped by session, explicitly marked legacy.
 type ModelUsageGroup struct {
-	UserID       int64
-	Session      string
-	TaskID       string
-	Legacy       bool
-	Model        string
-	Calls        int64
-	Missing      int64
-	Input        int64
-	Output       int64
-	CacheRead    int64
-	CacheWrite   int64
-	MaxToolBytes int64
-	First        time.Time
-	Last         time.Time
+	UserID                   int64
+	Session                  string
+	TaskID                   string
+	Legacy                   bool
+	Model                    string
+	PricingProvider          string
+	ServiceTier              string
+	CacheReadKnown           bool
+	RequestInputMax          int64
+	Calls                    int64
+	Missing                  int64
+	Input                    int64
+	Output                   int64
+	CacheRead                int64
+	CacheWrite               int64
+	CacheWrite5m             int64
+	CacheWrite1h             int64
+	CacheWritePricingUnknown bool
+	MaxToolBytes             int64
+	First                    time.Time
+	Last                     time.Time
 }
 
 // RecentModelUsageGroups aggregates in PostgreSQL, so the admin pane does not
-// load prompts or per-call JSON. The limit bounds rendered groups, not calls.
+// load prompts or per-call JSON. Partial counters stay separate from priceable
+// requests so missing output tokens can never silently become billed zeroes.
+// Billing provenance, service tier and context bands also remain separate:
+// summing several short GPT requests must not trigger long-context pricing.
+// The limit bounds rendered groups, not calls.
 func (s *Store) RecentModelUsageGroups(ctx context.Context, since time.Time, limit int) ([]ModelUsageGroup, error) {
 	if limit <= 0 || limit > 2000 {
 		limit = 500
@@ -125,18 +136,33 @@ func (s *Store) RecentModelUsageGroups(ctx context.Context, since time.Time, lim
 		SELECT user_id, session,
 			COALESCE(NULLIF(meta #>> '{measurement,taskId}', ''), 'legacy:' || session) AS task_id,
 			(meta #>> '{measurement,taskId}') IS NULL AS legacy,
-			item, COUNT(*),
+			item,
+			COALESCE(meta #>> '{measurement,usage,pricing_provider}', '') AS pricing_provider,
+			COALESCE(meta #>> '{measurement,usage,service_tier}', '') AS service_tier,
+			(meta #>> '{measurement,usage,cache_read_tokens}') IS NOT NULL AS cache_read_known,
+			COALESCE(MAX((meta #>> '{measurement,usage,input_tokens}')::bigint), 0),
+			COUNT(*),
 			COUNT(*) FILTER (WHERE meta #>> '{measurement,usage,input_tokens}' IS NULL
 				OR meta #>> '{measurement,usage,output_tokens}' IS NULL),
 			COALESCE(SUM((meta #>> '{measurement,usage,input_tokens}')::bigint), 0),
 			COALESCE(SUM((meta #>> '{measurement,usage,output_tokens}')::bigint), 0),
 			COALESCE(SUM((meta #>> '{measurement,usage,cache_read_tokens}')::bigint), 0),
 			COALESCE(SUM((meta #>> '{measurement,usage,cache_write_tokens}')::bigint), 0),
+			COALESCE(SUM(COALESCE((meta #>> '{measurement,usage,cache_write_5m_tokens}')::bigint,
+				CASE WHEN meta #>> '{measurement,usage,cache_write_1h_tokens}' IS NULL
+					AND NOT COALESCE((meta #>> '{measurement,usage,cache_write_pricing_unknown}')::boolean, false)
+				THEN (meta #>> '{measurement,usage,cache_write_tokens}')::bigint ELSE 0 END)), 0),
+			COALESCE(SUM((meta #>> '{measurement,usage,cache_write_1h_tokens}')::bigint), 0),
+			COALESCE((meta #>> '{measurement,usage,cache_write_pricing_unknown}')::boolean, false) AS write_pricing_unknown,
 			COALESCE(MAX((meta #>> '{measurement,tool_bytes}')::bigint), 0),
 			MIN(ts), MAX(ts)
 		FROM usage_events
 		WHERE kind = 'model_request' AND ts >= $1
-		GROUP BY user_id, session, task_id, legacy, item
+		GROUP BY user_id, session, task_id, legacy, item, write_pricing_unknown,
+			pricing_provider, service_tier, cache_read_known,
+			COALESCE((meta #>> '{measurement,usage,input_tokens}')::bigint > 272000, false),
+			(meta #>> '{measurement,usage,input_tokens}' IS NULL
+				OR meta #>> '{measurement,usage,output_tokens}' IS NULL)
 		ORDER BY MAX(ts) DESC LIMIT $2
 	`, since, limit)
 	if err != nil {
@@ -147,7 +173,9 @@ func (s *Store) RecentModelUsageGroups(ctx context.Context, since time.Time, lim
 	for rows.Next() {
 		var g ModelUsageGroup
 		if err := rows.Scan(&g.UserID, &g.Session, &g.TaskID, &g.Legacy, &g.Model,
+			&g.PricingProvider, &g.ServiceTier, &g.CacheReadKnown, &g.RequestInputMax,
 			&g.Calls, &g.Missing, &g.Input, &g.Output, &g.CacheRead, &g.CacheWrite,
+			&g.CacheWrite5m, &g.CacheWrite1h, &g.CacheWritePricingUnknown,
 			&g.MaxToolBytes, &g.First, &g.Last); err != nil {
 			return nil, err
 		}

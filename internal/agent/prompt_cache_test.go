@@ -9,21 +9,25 @@ import (
 )
 
 func TestSystemPromptCachePrefixIgnoresLiveContext(t *testing.T) {
-	service := "service A"
-	a := &Agent{
-		executor:      &ToolExecutor{},
-		sessionID:     "test-session",
-		limits:        Limits{PromptProfile: "standard"},
-		servicesCtxFn: func() string { return service },
-	}
-	first, firstPrefix := a.buildSystemPromptWithCachePrefix(t.Context(), "")
-	service = "service B"
-	second, secondPrefix := a.buildSystemPromptWithCachePrefix(t.Context(), "")
-	if firstPrefix == 0 || firstPrefix != secondPrefix || first[:firstPrefix] != second[:secondPrefix] {
-		t.Fatal("live context changed the cacheable system prefix")
-	}
-	if first == second || !strings.Contains(second[secondPrefix:], service) {
-		t.Fatal("live context was lost from the uncached suffix")
+	for _, profile := range []string{"guided", "standard", "minimal"} {
+		t.Run(profile, func(t *testing.T) {
+			live := "live context A"
+			a := &Agent{
+				executor:  &ToolExecutor{},
+				sessionID: "test-session",
+				limits:    Limits{PromptProfile: profile},
+				viewCtxFn: func() string { return live },
+			}
+			first, firstPrefix := a.buildSystemPromptWithCachePrefix(t.Context(), "")
+			live = "live context B"
+			second, secondPrefix := a.buildSystemPromptWithCachePrefix(t.Context(), "")
+			if firstPrefix == 0 || firstPrefix != secondPrefix || first[:firstPrefix] != second[:secondPrefix] {
+				t.Fatal("live context changed the cacheable system prefix")
+			}
+			if first == second || !strings.Contains(second[secondPrefix:], live) || strings.Contains(second[secondPrefix:], "live context A") {
+				t.Fatal("live context was lost or became stale in the uncached suffix")
+			}
+		})
 	}
 }
 

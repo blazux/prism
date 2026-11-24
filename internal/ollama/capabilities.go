@@ -21,6 +21,12 @@ type CapabilitiesProvider interface {
 	ModelCapabilities(context.Context, string) (ModelCapabilities, error)
 }
 
+// ClientToolCatalogProvider is optional. A routed backend resolves the selected
+// source before deciding; source IDs and model labels do not identify a provider.
+type ClientToolCatalogProvider interface {
+	UseClientToolCatalog(context.Context, string) bool
+}
+
 type capabilityEntry struct {
 	value   ModelCapabilities
 	err     error

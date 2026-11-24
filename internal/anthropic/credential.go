@@ -37,7 +37,7 @@ func looksLikeOAuthToken(token string) bool {
 		return false
 	case strings.HasPrefix(token, "sk-ant-api"): // console API key
 		return false
-	case strings.HasPrefix(token, "sk-ant-"): // setup-token (sk-ant-oat…), managed key
+	case strings.HasPrefix(token, "sk-ant-oat"): // Claude Code setup / OAuth token
 		return true
 	case strings.HasPrefix(token, "eyJ"): // JWT from the OAuth flow
 		return true

@@ -4,14 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
 	"prism/internal/ollama"
 )
 
-// Claude-only, opt-in experiment. The selection lives in the turn context: a
+// Provider opt-in experiment. The selection lives in the turn context: a
 // later user turn starts with the same small catalog, not the previous loadout.
 type claudeCatalogKey struct{}
 
@@ -19,9 +18,9 @@ type claudeCatalog struct {
 	loaded map[string]bool
 }
 
-func withClaudeCatalog(ctx context.Context, model string) context.Context {
-	if os.Getenv("PRISM_CLAUDE_LAZY_TOOLS") != "1" ||
-		!strings.HasPrefix(model, "anthropic::claude-") {
+func withClaudeCatalog(ctx context.Context, model string, backend ollama.Backend) context.Context {
+	provider, ok := backend.(ollama.ClientToolCatalogProvider)
+	if !ok || !provider.UseClientToolCatalog(ctx, model) {
 		return ctx
 	}
 	return context.WithValue(ctx, claudeCatalogKey{}, &claudeCatalog{loaded: make(map[string]bool)})

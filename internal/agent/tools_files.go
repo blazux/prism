@@ -82,10 +82,7 @@ func (e *ToolExecutor) execCommand(ctx context.Context, command string) (string,
 		env[name] = value
 	}
 	out, err := e.docker.ExecWithEnv(ctx, "cd /workspace && "+command, 2*time.Minute, env)
-	if len(out) > 8000 {
-		out = out[:4000] + "\n...[truncated]...\n" + out[len(out)-4000:]
-	}
-	return out, err
+	return e.finishCommandOutput(ctx, command, out, err), err
 }
 
 // NormalizeWorkspacePath strips the /workspace prefix that models often include

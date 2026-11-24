@@ -3,11 +3,13 @@ package agent
 import "strings"
 
 // Only the instruction prefix is cached. Every value used to build it is part
-// of the key, so persona/profile/session edits invalidate it without a separate
-// mutation protocol. Live knowledge, permissions, tools and view context remain
-// refreshed on every model call, including changes made outside this agent.
+// of the key, so persona/profile edits invalidate it without a separate
+// mutation protocol. Session identity lives in the dynamic suffix instead of
+// changing the shared instruction prefix. Live knowledge, permissions, tools
+// and view context remain refreshed on every model call, including changes made
+// outside this agent.
 type systemPromptPrefixKey struct {
-	name, session, persona, profile string
+	name, persona, profile string
 }
 
 func (a *Agent) cachedSystemPromptPrefix(key systemPromptPrefixKey) string {
@@ -27,11 +29,6 @@ func buildSystemPromptPrefix(key systemPromptPrefixKey) string {
 		sb.WriteString("Your name is ")
 		sb.WriteString(key.name)
 		sb.WriteString(".\n\n")
-	}
-	if key.session != "" {
-		sb.WriteString("Your session id is `")
-		sb.WriteString(key.session)
-		sb.WriteString("`. Wherever these instructions say SESSION_ID, use this exact string.\n\n")
 	}
 	// Persona changes the voice, never the generalist role or authorization.
 	sb.WriteString(systemPromptRole)

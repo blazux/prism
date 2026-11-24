@@ -23,11 +23,21 @@ window.PrismSettingsState = (() => {
     for(const [el,sent] of snapshot){initial.set(el,sent);if(value(el)===sent)fields.delete(el);else fields.set(el,sent)}
     status(dirty()?'Saved · other changes remain unsaved':'Saved')
   }
+  // A loaded form or a closed draft dialog establishes a new local baseline.
+  // Only those controls are cleared; unrelated settings keep their dirty state.
+  function reset(controls = []) {
+    if (!controls?.[Symbol.iterator]) controls = controls?.querySelectorAll?.('input,textarea,select') || []
+    for (const el of controls) {
+      if (!el?.isConnected) continue
+      initial.set(el, value(el)); fields.delete(el)
+    }
+    status(dirty()?'Unsaved changes':'')
+  }
   async function request(url,options={},controls=null) {
     const mutation=controls!==null && !['GET','HEAD'].includes((options.method||'GET').toUpperCase())
     const snapshot=mutation?begin(controls):[]
     try{const response=await fetch(url,options);if(mutation){if(response.ok)saved(snapshot);else status('Could not save · your edits are kept')}return response}
     catch(e){if(mutation)status('Could not save · your edits are kept');throw e}
   }
-  return {dirty,begin,saved,status,request,clear:()=>{fields.clear();initial=new WeakMap()}}
+  return {dirty,begin,saved,reset,status,request,clear:()=>{fields.clear();initial=new WeakMap()}}
 })()

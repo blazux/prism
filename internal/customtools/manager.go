@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -181,7 +182,14 @@ func (m *Manager) ToOllamaTools() []ollama.Tool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]ollama.Tool, 0, len(m.tools))
+	seen := make(map[string]bool, len(m.tools))
 	for _, t := range m.tools {
+		// Match Get's first discovered tool before ordering the provider catalog.
+		// Sorting duplicate definitions first could change the selected script.
+		if seen[t.Name] {
+			continue
+		}
+		seen[t.Name] = true
 		out = append(out, ollama.Tool{
 			Type: "function",
 			Function: ollama.ToolFunction{
@@ -191,6 +199,7 @@ func (m *Manager) ToOllamaTools() []ollama.Tool {
 			},
 		})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Function.Name < out[j].Function.Name })
 	return out
 }
 

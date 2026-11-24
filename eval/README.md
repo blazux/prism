@@ -13,8 +13,9 @@ over the same WebSocket the dashboard uses, and reports for each task:
 - **tool calls** — how many tries it took,
 - **tool errors** — how many of those tries failed,
 - **duration**,
-- **estimated Claude chat cost** — provider tokens priced at published API
-  rates, including 5-minute cache reads/writes; never an execution limit.
+- **estimated API chat cost** — supported Claude and official OpenAI usage priced
+  at published standard rates, including cache reads and Claude cache writes;
+  never an execution limit.
 
 A change is accepted when, on the deployment's everyday model, the success
 rate does not drop, mean tool calls do not rise by more than 15 % and mean
@@ -65,14 +66,14 @@ go run ./cmd/prism-eval -tasks eval/weather-live-targeted-tools.json -model anth
 ```
 
 Anthropic's native tool search has a separate, opt-in local probe:
-`PRISM_ANTHROPIC_TOOL_SEARCH=1` (Sonnet 5.5 only). It is **off by default and
+`PRISM_ANTHROPIC_TOOL_SEARCH=1` (supported native Anthropic models, at least eight tools). It is **off by default and
 not production-ready**. On 2026-09-29, keeping the five tools above visible
 and deferring the rest passed the weather task 4/4; the three warm-cache runs
 averaged about $0.052 versus $0.069 for the full-catalog control. This task
 did not actually search for a deferred tool. A separate `list_files` discovery
 fixture failed 3/3 with Anthropic `refusal` (category `cyber`), while the
 same prompt with native search off passed 1/1. The probe also uses a complete
-non-streaming response and keeps provider search blocks only in live memory.
+non-streaming response. Current versions persist restricted search metadata for history replay; the September probe kept it only in live memory.
 Do not enable it broadly from the weather result alone.
 
 ```bash
@@ -80,7 +81,7 @@ go run ./cmd/prism-eval -tasks eval/tool-search-discovery.json -model anthropic:
 ```
 
 Prism's own Claude-only catalog is a separate opt-in probe:
-`PRISM_CLAUDE_LAZY_TOOLS=1` (mutually exclusive with native tool search).
+`PRISM_CLAUDE_LAZY_TOOLS=1`. It takes priority over native search where the client catalog is active.
 It starts with `exec_command`, `read_file`, `write_file`, `widget`, `cron`,
 `prism_help`, and `tool_catalog`; `tool_catalog` lists/loads the remaining
 permitted tools for that turn. Other providers keep the full catalog. On
@@ -91,6 +92,31 @@ loading it in one extra model step. Small samples and different cache states
 mean this is evidence for further evaluation, not a production rollout or a
 guaranteed percentage saving. The flag is off by default.
 
+
+## Comparing Claude cache and discovery modes
+
+Use a disposable instance and explicit test credits. Keep the model, source,
+prompt profile, fixture data and generation settings identical. Start with both
+discovery flags unset, then try `PRISM_CLAUDE_LAZY_TOOLS=1`, then native search
+with only `PRISM_ANTHROPIC_TOOL_SEARCH=1`. Recreate the server after changing
+environment options. Native search requires a supported Claude model; the client
+catalog must not be active for that condition. Repeat the existing weather and
+`tool-search-discovery.json` tasks at least three times per condition, and add
+representative tasks from `tasks.json` to catch regressions beyond discovery.
+
+Repeat the comparison separately with `PRISM_ANTHROPIC_CACHE_TTL=5m` (default)
+and `1h`. Record the first request separately from repeat requests. Reuse within
+five minutes does not measure the longer lifetime's advantage; include a repeat
+after more than five minutes and less than one hour, and confirm actual read/write
+counts. Prompt caching is provider-managed, so never label a request “cold” just
+because Prism restarted. A different condition may reuse a provider prefix.
+
+Compare success and delivered artifacts before cost, then extra calls, errors and
+latency. Use the provider's lifetime breakdown for write pricing. If the provider
+omits the breakdown after a one-hour request, the estimate stays unknown. Keep
+raw reports outside the public checkout, and keep this comparison separate from
+output-compaction experiments. No command here enables a paid evaluation by
+itself.
 
 ## CalDAV, against a disposable server
 
@@ -179,25 +205,46 @@ the public checkout.
 
 Select Guided/Standard/Minimal in the instance's Agent settings before each batch.
 Do not change the setting during a run. Each result's `model_requests` now keeps
-one `main_chat` or `subagent` record per model call: actual profile, model,
+one `main_chat` or `subagent` record per streamed conversation call: actual profile, model,
 duration, system/tool bytes, history sizes (not content), message count,
 completion status and provider-reported `usage` if available. This includes
 intermediate chat/tool-loop calls and delegated calls, not only the final
 response. Subagent records also appear in the parent task's Admin → Usage trace.
 
 `input_tokens` includes cached input. `cache_read_tokens`/`cache_write_tokens` are
-breakdowns; do not add them again. `reasoning_tokens`, when reported, is part of
+breakdowns; do not add them again. `cache_write_5m_tokens` and `cache_write_1h_tokens` split the aggregate write total. Unknown write pricing leaves a request unpriced rather than assuming the cheaper lifetime. `reasoning_tokens`, when reported, is part of
 `output_tokens`, not extra output. Missing fields (or `usage: null`) mean unknown,
 not zero. Interrupted streams may have partial or missing usage. Snapshot counts
 are cumulative per request; only the last reported snapshot is recorded.
 
 The report also shows priced/unpriced request counts, input/output/cache tokens
-and the estimated cost for supported Claude models. Unknown prices or missing
+and the estimated cost for supported Claude and official OpenAI models. Unknown prices or missing
 provider counts remain unpriced, not zero. Prices are kept in
 `internal/usagecost/pricing.go` and must be reviewed when models or rates change.
 
-These records **do not cover auxiliary vision captions, deep-research model calls,
-compaction or embeddings**, and are not a complete bill. The legacy admin chat-turn
+GPT pricing requires the official provider attribution, the response's standard
+`service_tier`, and reported cache-read counts. Local models, gateway aliases,
+unsupported models or tiers and missing counters remain unpriced. Long-context
+rates are selected per request, never from several requests' cumulative input.
+The evaluator uses the same pricing rules as the Admin usage trace.
+
+For an OpenAI comparison, use the same supported GPT model with
+`PRISM_OPENAI_LAZY_TOOLS` unset, then `PRISM_OPENAI_LAZY_TOOLS=1`. Keep prompt
+profile, data and output limits identical. Record cache hits and separate fresh
+workspaces from later turns in one conversation. Compare completed task cost and
+independently checked artifacts; loading an extra tool can add an API call.
+`PRISM_OPENAI_CACHE_RETENTION=24h` is a separate opt-in for models that support it.
+This connection uses Chat Completions; the flag does not enable Responses hosted
+tool search. See the [AI provider help](../docs/help/ai-provider.md).
+
+Compaction (`compaction`), deep research (`research`) and app assistance (`assist`)
+are recorded in the database and visible in Admin → Usage. They are not emitted
+as WebSocket `model_usage` events, so the evaluator's `model_requests` and cost
+subtotal do not include them. For tasks using those features, inspect the stored
+trace as well; an app assistance request has its own reserved assistant session.
+
+Neither trace covers auxiliary vision captions, embeddings, connection tests
+or the phone inference gateway. Neither is a complete provider invoice. The legacy admin chat-turn
 estimate is separate; never add it to provider counts. In PostgreSQL, records use
 `usage_events.kind=model_request`, qty=1 and meta.measurement; no prompts, tool
 results or credentials are added to these telemetry records. New records include a

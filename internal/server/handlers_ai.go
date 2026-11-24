@@ -7,12 +7,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
+	"prism/internal/agent"
 	"prism/internal/ollama"
 )
 
@@ -85,7 +87,8 @@ func (s *Server) handleAIAssist(w http.ResponseWriter, r *http.Request) {
 
 	ch := make(chan ollama.StreamEvent, 200)
 	req := ollama.ChatRequest{
-		Model: ai.cfg.Model,
+		TaskID: agent.AuxiliaryTaskID(ctx, "assist", start),
+		Model:  ai.cfg.Model,
 		Messages: []ollama.Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
@@ -94,8 +97,21 @@ func (s *Server) handleAIAssist(w http.ResponseWriter, r *http.Request) {
 		// reasoning model, without this the whole 120s budget can go to the
 		// thinking channel and the handler returns {"result":""} — measured on
 		// email_triage: "done in 2m0s, 0 chars", a silent no-op in the UI.
-		NoThinking: true,
+		CacheSystemPrefixBytes: len(system),
+		NoThinking:             true,
 	}
+	var usage *ollama.Usage
+	complete := false
+	usageUserID, usageSession := assistUsageIdentity(r)
+	defer func() {
+		if !complete || ctx.Err() != nil {
+			complete = false
+			cancel()
+			usage = drainAssistUsage(ch, usage, 2*time.Second)
+		}
+		record := agent.MeasureModelUsage(req, req.TaskID, "assist", "", start, usage, complete && ctx.Err() == nil)
+		agent.RecordModelUsage(s.store(), usageUserID, usageSession, record)
+	}()
 	backend := ai.newChatBackend()
 	go func() {
 		backend.Chat(ctx, req, ch)
@@ -104,12 +120,28 @@ func (s *Server) handleAIAssist(w http.ResponseWriter, r *http.Request) {
 
 	var out strings.Builder
 	for ev := range ch {
+		if ev.Usage != nil {
+			usage = ev.Usage
+		}
+		if ev.Done {
+			complete = ev.DoneReason != "interrupted"
+		}
+		if ctx.Err() != nil {
+			complete = false
+			http.Error(w, "the model request was cancelled or timed out", 502)
+			return
+		}
 		if ev.Err != nil {
+			complete = false
 			log.Printf("[ai/assist] task=%q LLM error after %s: %v", b.Task, time.Since(start).Round(time.Millisecond), ev.Err)
 			http.Error(w, ev.Err.Error(), 502)
 			return
 		}
 		out.WriteString(ev.Content)
+	}
+	if ctx.Err() != nil {
+		http.Error(w, "the model request was cancelled or timed out", 502)
+		return
 	}
 	result := stripThink(out.String())
 	log.Printf("[ai/assist] task=%q done in %s, %d chars", b.Task, time.Since(start).Round(time.Millisecond), out.Len())
@@ -120,4 +152,44 @@ func (s *Server) handleAIAssist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"result": result})
+}
+
+// A cancelled request may have older deltas buffered before its final usage.
+// Drain metadata only after stopping the provider; late text is never accepted.
+func drainAssistUsage(ch <-chan ollama.StreamEvent, usage *ollama.Usage, timeout time.Duration) *ollama.Usage {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case event, open := <-ch:
+			if !open {
+				return usage
+			}
+			if event.Usage != nil {
+				usage = event.Usage
+			}
+		case <-timer.C:
+			return usage
+		}
+	}
+}
+
+// App assistance has no current workspace. A normal account belongs to its
+// reserved personal assistant; capability calls retain their authenticated
+// bound scope rather than trusting a client-supplied session query parameter.
+func assistUsageIdentity(r *http.Request) (int64, string) {
+	id := requestUserID(r)
+	if session := boundSession(r); session != "" {
+		if id < 0 {
+			id = 0
+		}
+		return id, session
+	}
+	if id > 0 {
+		return id, fmt.Sprintf("u%d-assistant", id)
+	}
+	if id < 0 {
+		return 0, fmt.Sprintf("room-g%d", -id)
+	}
+	return 0, "assistant"
 }
