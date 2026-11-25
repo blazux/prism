@@ -26,7 +26,9 @@ Injected helpers:
 - prismOnData(callback, topic?): re-read on data changes/reconnection; returns unsubscribe. Custom signals: prism_help topic=data-events.
 Use these helpers, not parent.postMessage. Widget browser requests use relative URLs and session cookies; never embed server tokens or Docker-internal URLs. For pure display, a tool/cron can write data/name.json for fetch('/data/name.json'). Custom tools are Python scripts registered with register_tool and a single-line # TOOL: JSON header; hard 2-minute timeout.
 
-Personal-data REST uses ?session= plus window.PRISM_SESSION, never a literal board ID:
+Persist widget application data on the server using the existing app APIs or a registered Python tool backed by files/services; browser storage is only transient state or reconstructible cache. File backends need locking and atomic writes. Workspace files are common to the installation, not a private user store; keep the requested personal/group scope. For a short recipe and browser-data migration, see prism_help topic=data-events.
+
+Personal-data REST is scoped to the signed-in user across boards (installation-wide in mono-user mode). Use ?session= plus window.PRISM_SESSION for context, never a literal board ID:
 /api/notes GET/POST/DELETE: POST {title,body,tags} creates, {id,...} updates; DELETE ?id=.
 /api/tasks GET/POST/DELETE: POST {title,priority,due} creates, {id,done} toggles; include_done=true lists completed.
 /api/events GET/POST/DELETE: POST {title,start,end,description,location}; ISO-8601 times; GET from/to bounds.

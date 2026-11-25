@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium} = require('playwright')
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path')
 const root = path.resolve(__dirname, '..')
@@ -31,7 +32,10 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
       await context.routeWebSocket(widgetOrigin.replace('http:','ws:')+'/proxy/fixture/80/ws', socket => {
         socket.onMessage(message => {if(message==='ping')socket.send('pong')})
       })
+      const preferencesFixture = createPreferencesBackend({origin: mainOrigin})
       await context.route('**/*', async route => {
+        const preferenceResponse = preferencesFixture.handle(route)
+        if (preferenceResponse) return preferenceResponse
         const request = route.request(), url = new URL(request.url())
         if (url.origin === serviceOrigin) return route.fulfill({contentType:'text/html',body:'<!doctype html><body>Nested app<script>localStorage.setItem("nested-app","saved");document.body.dataset.working=localStorage.getItem("nested-app")</script>'})
         assert([mainOrigin,widgetOrigin].includes(url.origin),'unexpected external request: '+url.href)

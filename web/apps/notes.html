@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Notes</title>
 <link rel="stylesheet" href="/widget-base.css">
+<script src="/preferences.js"></script>
 <script src="/theme.js"></script>
 <script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
@@ -237,11 +238,12 @@ async function loadCaps() {
 }
 const currentNote = () => notes.find(x => x.id === selectedId);
 
-// Pins (client-side, by note id).
+// Pins are personal account preferences, shared across browsers.
 const PIN_KEY = 'prism-pinned-notes';
-function pins() { try { return new Set(JSON.parse(localStorage.getItem(PIN_KEY) || '[]')); } catch { return new Set(); } }
+function pins() { try { return new Set(JSON.parse(PrismPreferences.getItem(PIN_KEY) || '[]')); } catch { return new Set(); } }
 function isPinned(id) { return pins().has(id); }
-function togglePin(id) { const p = pins(); p.has(id) ? p.delete(id) : p.add(id); localStorage.setItem(PIN_KEY, JSON.stringify([...p])); render(); }
+async function togglePin(id) { if (!await PrismPreferences.ensureReady()) return; const p = pins(); p.has(id) ? p.delete(id) : p.add(id); PrismPreferences.setItem(PIN_KEY, JSON.stringify([...p])); render(); }
+window.addEventListener('prism-preferences-changed', e => { if (e.detail?.remote && e.detail.keys?.includes(PIN_KEY)) render(); });
 
 const noteTags = n => (n.tags || '').split(',').map(t => t.trim()).filter(Boolean);
 function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -753,7 +755,7 @@ async function openLinkedNote(reference, isCurrent) {
 const noteReferenceReady = PrismLinks.receive('notes', openLinkedNote);
 document.addEventListener('click',event=>{for(const menu of document.querySelectorAll('.note-actions[open]'))if(!menu.contains(event.target)||event.target.closest('button'))menu.open=false;});
 PrismLinks.beforeLeave = saveNote;
-loadCaps().then(load).then(noteReferenceReady);
+Promise.all([PrismPreferences.ready, loadCaps()]).then(() => load()).then(noteReferenceReady);
 </script>
 </body>
 </html>

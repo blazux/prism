@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium} = require('playwright')
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path')
 const root = path.resolve(__dirname, '..'), origin = 'http://documents.invalid'
@@ -16,7 +17,10 @@ const wait = async (predicate, label) => {
       let visit = 0, role = 'mono', failCreate = false, holdA = false, releaseA, releaseUpload, deleted = false
       const collections = [{name:'A',description:'Manuals',doc_count:1},{name:'B',description:'Recipes',doc_count:1}]
       page.on('pageerror', error => errors.push(error.message))
+      const preferencesFixture = createPreferencesBackend({origin})
       await context.route('**/*', async route => {
+        const preferenceResponse = preferencesFixture.handle(route)
+        if (preferenceResponse) return preferenceResponse
         const request = route.request(), url = new URL(request.url())
         if (url.origin !== origin) return route.abort()
         if (!url.pathname.startsWith('/api/')) {

@@ -3,6 +3,11 @@
 Open **Settings → Appearance** to change Prism’s theme, typography and window
 layout. You can use a built-in theme or create and save your own palette.
 
+Your appearance preferences and custom themes are saved with your Prism account.
+Sign in to the same installation from another device to find them again. Open
+pages refresh saved preferences when you return to them. A custom font must also
+be installed on each device where you want to use it.
+
 ## Choose a theme
 
 Choose a preview card, use **Current theme**, or use the theme dropdown in the
@@ -18,7 +23,7 @@ header. Changes apply immediately. The gallery groups the palettes by atmosphere
   Arcade and Bubblegum. Their backgrounds show a drifting constellation,
   circuitry, falling code, a neon landscape, a moonlit castle, an amber terminal,
   a pixel shooter or iridescent bubbles.
-- **Your themes**: palettes you have saved in this browser.
+- **Your themes**: palettes you have saved with your account.
 
 Some backgrounds include animated details. **Animated background** adjusts their
 intensity from 0 to 100%; 0 turns the effects off. Animations pause while the page

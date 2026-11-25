@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('nod
 const helper=fs.readFileSync(path.join(__dirname,'../tool-preferences.js'),'utf8');
 function fixture(config) {
  const data=new Map([['agent-config',JSON.stringify(config)]]);
- const context={window:{},localStorage:{getItem:key=>data.get(key),setItem:(key,value)=>data.set(key,value)}};
+ const context={window:{},PrismPreferences:{getItem:key=>data.get(key),setItem:(key,value)=>data.set(key,value)}};
  vm.createContext(context);vm.runInContext(helper,context);
  return {prefs:context.window.PrismToolPreferences,data};
 }

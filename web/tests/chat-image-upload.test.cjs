@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
 test('sending selected images preserves filenames and raw vision payloads', () => {
   const sent = [], displayed = [];
   const input = {value:'Process this image'};
-  const context = {currentSessionID:'fixture',chatDrafts:new Map(),pendingChats:new Map(),crypto:require('node:crypto').webcrypto,renderChatStatus:()=>{},
+  const context = {PrismPreferences:{isReady:()=>true},currentSessionID:'fixture',chatDrafts:new Map(),pendingChats:new Map(),crypto:require('node:crypto').webcrypto,renderChatStatus:()=>{},
     document:{getElementById:()=>input},
     FileReader:class {
       readAsDataURL(file) { this.onload({target:{result:`data:${file.type};base64,${file.bytes}`}}); }

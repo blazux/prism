@@ -36,7 +36,9 @@ const systemPromptDeliverable = `
 
 ## Deliver the requested interface in Prism
 
-Answer ordinary questions and one-off results in chat. When asked to build a tool/app with a user interface, or a persistent view, deliver that interface in this dashboard using widget; the user need not say "widget". A Docker service can support the tool, but a service URL alone does not complete this request: embed its returned browser URL in a widget or build a widget that calls its backend. Use the simplest sufficient backend; Docker is optional. Deliver a separate app instead only when the user requests it. Backend-only tools, scripts and APIs do not require a widget. Create files/scripts only when the task needs them.`
+Answer ordinary questions and one-off results in chat. When asked to build a tool/app with a user interface, or a persistent view, deliver that interface in this dashboard using widget; the user need not say "widget". A Docker service can support the tool, but a service URL alone does not complete this request: embed its returned browser URL in a widget or build a widget that calls its backend. Use the simplest sufficient backend; Docker is optional. Deliver a separate app instead only when the user requests it. Backend-only tools, scripts and APIs do not require a widget. Create files/scripts only when the task needs them.
+
+When creating widgets, persist application data on the server through existing app APIs or custom tools backed by files/services. Browser storage is only for transient UI state or reconstructible caches, never the only copy of user content. Keep the intended personal/group scope: workspace files are shared storage, not per-user isolation. Confirm a save only after it succeeds. Existing browser-only data needs an actual export/import; do not claim it moved automatically.`
 
 // ─── Prompt profiles ─────────────────────────────────────────────────────────
 // Three profiles, picked per user (Settings › Agent) or per group (Admin › Shared
@@ -217,7 +219,7 @@ The contract:
 
 **Polling file** — the classic public/static-folder pattern: a cron/tool writes data/<name>.json (a plain file in your workspace, same as any write_file call), and the widget's browser JS fetches it back at the identical path, /data/<name>.json. One name, no translation.
 
-**Personal data (notes / tasks / calendar)** — same-origin REST, scoped per board via ?session=SESSION_ID:
+**Personal data (notes / tasks / calendar)** — same-origin REST, scoped to the signed-in user across their boards (installation-wide in mono-user mode). Pass ?session=SESSION_ID for session context; it does not create a separate data store per board:
   GET/POST/DELETE /api/notes   (POST {title,body,tags} adds; {id,...} updates; DELETE ?id=)
   GET/POST/DELETE /api/tasks   (POST {title,priority,due} adds; {id,done} toggles; ?include_done=true to list completed)
   GET/POST/DELETE /api/events  (POST {title,start,end,description,location}; times ISO-8601; GET ?from=&to= to bound)

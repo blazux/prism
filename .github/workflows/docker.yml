@@ -59,6 +59,8 @@ jobs:
             web/tests/admin-values-browser.cjs \
             web/tests/widget-origin-browser.cjs \
             web/tests/widget-backend-browser.cjs \
+            web/tests/preferences-browser.cjs \
+            web/tests/settings-chat-browser.cjs \
             web/tests/telephony-app-browser.cjs \
             web/tests/conversation-settings-browser.cjs \
             web/tests/theme-gallery-browser.cjs \

@@ -18,7 +18,7 @@
   const SNAP = 8; // magnetic snap threshold (px)
   // Snapping is on by default; users can turn it off (Settings → Appearance) or
   // hold Alt to place freely during a single drag.
-  function snapEnabled() { try { return localStorage.getItem('prism-window-snap') !== '0'; } catch (_) { return true; } }
+  function snapEnabled() { return window.PrismPreferences?.getItem('prism-window-snap') !== '0'; }
   // Best alignment within SNAP: cands = [[edgeValue, offsetFromBase], …].
   function snapAxis(cands, lines) {
     let best = null;

@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium}=require('playwright');
 const fs=require('fs'),path=require('path');
 const root=path.resolve(__dirname,'..');
@@ -7,11 +8,13 @@ const root=path.resolve(__dirname,'..');
   const page=await browser.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>{
-   localStorage.setItem('active-workspace','default');
    window.__sockets=[];
    window.WebSocket=class {static OPEN=1;constructor(url){this.url=url;this.readyState=0;window.__sockets.push(this)}close(){this.readyState=3}send(){}};
   });
+  const preferencesFixture = createPreferencesBackend({})
   await page.route('**/*',route=>{
+    const preferenceResponse = preferencesFixture.handle(route)
+    if (preferenceResponse) return preferenceResponse
    const u=new URL(route.request().url());
    if(u.hostname!=='fixture.invalid')return route.abort();
    let data={};

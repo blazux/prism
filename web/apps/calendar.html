@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Calendar</title>
 <link rel="stylesheet" href="/widget-base.css">
+<script src="/preferences.js"></script>
 <script src="/theme.js"></script>
 <script src="/apiclient.js"></script>
 <script src="/modal.js"></script>
@@ -155,7 +156,9 @@ const HOUR_H = 44;       // px per hour in the time grid
 const AGENDA_DAYS = 30;
 const MODE_KEY = 'prism-cal-mode';
 
-let mode = localStorage.getItem(MODE_KEY) || 'month';
+const savedMode = () => ['month','week','day','agenda'].includes(PrismPreferences.getItem(MODE_KEY)) ? PrismPreferences.getItem(MODE_KEY) : 'month';
+let mode = savedMode();
+let calendarPreferencesReady = false;
 let view = new Date();
 let events = [];
 
@@ -174,7 +177,7 @@ function occursOn(ev,d){const next=startOfDay(d);next.setDate(next.getDate()+1);
 function minutesOf(d) { return d.getHours() * 60 + d.getMinutes(); }
 
 function setMode(m) {
-  mode = m; localStorage.setItem(MODE_KEY, m);
+  mode = m; PrismPreferences.setItem(MODE_KEY, m);
   document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('active', b.dataset.m === m));
   load();
 }
@@ -537,7 +540,12 @@ PrismLinks.beforeLeave = () => {
   if (calendarSaving) { PrismAPI.toast('Wait for this event to finish saving.'); return false; }
   return !$('overlay').classList.contains('open') || PrismLinks.confirmLeave(calendarFormDraft,calendarSavedDraft);
 };
-load().then(calendarReferenceReady);
+window.addEventListener('prism-preferences-changed', e => {
+  if (!calendarPreferencesReady || !e.detail?.remote || !e.detail.keys?.includes(MODE_KEY)) return;
+  const next = savedMode();
+  if (next !== mode) { mode = next; load(); }
+});
+PrismPreferences.ready.then(() => { calendarPreferencesReady = true; mode = savedMode(); return load(); }).then(calendarReferenceReady);
 </script>
 </body>
 </html>

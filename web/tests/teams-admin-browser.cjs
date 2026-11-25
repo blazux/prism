@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'../..'),read=p=>fs.readFileSync(path.join(root,p),'utf8');
@@ -13,7 +14,10 @@ const app='11111111-1111-1111-1111-111111111111',tenant='22222222-2222-2222-2222
   const delayed=new Promise(resolve=>releaseGroup3=resolve);
   const configs={3:{appId:app,tenantId:tenant,ragRead:'*',ragWrite:'',tools:'',ownerConversation:'conversation-3'},5:{appId:'55555555-5555-5555-5555-555555555555',tenantId:tenant,ragRead:'',ragWrite:'',tools:'',ownerConversation:''}};
   page.on('pageerror',e=>errors.push(e.message));
+  const preferencesFixture = createPreferencesBackend({})
   await page.route('**/*',async route=>{
+    const preferenceResponse = preferencesFixture.handle(route)
+    if (preferenceResponse) return preferenceResponse
    const r=route.request(),u=new URL(r.url());assert.equal(u.hostname,'fixture.invalid');
    if(u.pathname==='/admin')return route.fulfill({contentType:'text/html',body:html});
    if(!u.pathname.startsWith('/api/')){const file=path.join(root,'web',u.pathname);return fs.existsSync(file)&&fs.statSync(file).isFile()?route.fulfill({path:file}):route.fulfill({status:404,body:''});}

@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 // Connection and editing checks use only synthetic APIs; no model, SIP or TTS service is called.
 const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('fs'),path=require('path');
 const root=path.resolve(__dirname,'../..'),read=file=>fs.readFileSync(path.join(root,file),'utf8');
@@ -11,7 +12,10 @@ const html=constant(settingsSource,'telephonySettingsHead')+constant(formSource,
   let supportsPairing=true,remoteDisconnectFailure=false;
   let connection={configured:false,reachable:false,authenticated:false,reverse_connected:false,url:'',user:'',prism_url:'',prism_public_url:'',model:''},servers=[];
   page.on('pageerror',error=>errors.push(error.message));
+  const preferencesFixture = createPreferencesBackend({})
   await page.route('**/*',route=>{
+    const preferenceResponse = preferencesFixture.handle(route)
+    if (preferenceResponse) return preferenceResponse
    const request=route.request(),url=new URL(request.url());assert.equal(url.hostname,'fixture.invalid');requests.push(url.pathname);
    if(url.pathname==='/settings/telephony')return route.fulfill({contentType:'text/html',body:html});
    if(url.pathname==='/api/vox/voice/editor')return route.fulfill({contentType:'text/html',body:'<p>Fixture speech editor</p>'});

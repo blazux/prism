@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link rel="stylesheet" href="/style.css">
 <!-- Applies the saved theme (sets CSS vars on :root) before the page renders -->
+<script src="/preferences.js"></script>
 <script src="/theme.js"></script>
 <script src="/theme-gallery.js"></script>
 <link rel="stylesheet" href="/theme-gallery.css">
@@ -248,6 +249,10 @@ input[type=color] { width: 42px; height: 28px; padding: 0; border: 1px solid var
     </div>
   </header>
 
+  <div id="browser-preference-import" hidden style="padding:12px 18px;background:var(--bg2);border-bottom:1px solid var(--border);font-size:13px">
+    <span>This browser has older Prism preferences. Import them into your account to use them on your other devices. Saved account preferences will be kept.</span>
+    <button type="button" id="import-browser-preferences" class="btn" style="margin-left:10px">Import browser preferences</button>
+  </div>
   <div id="settings-main">
 
     <nav id="settings-nav" aria-label="Settings">
@@ -373,7 +378,22 @@ window.addEventListener('message', e => {
 })
 window.addEventListener('prism-theme-change', e => document.getElementById('telephony-settings-frame')?.contentWindow?.postMessage({type:'prism-theme', vars:e.detail.vars}, location.origin))
 
-requestAnimationFrame(() => renderTab(currentTab))
+PrismPreferences.ready.then(() => renderTab(currentTab))
+function refreshPreferenceImport() {
+  document.getElementById('browser-preference-import').hidden = !PrismPreferences.needsLegacyImport()
+}
+PrismPreferences.ready.then(refreshPreferenceImport)
+window.addEventListener('prism-preferences-changed', refreshPreferenceImport)
+document.getElementById('import-browser-preferences').onclick = async event => {
+  event.currentTarget.disabled = true
+  try {
+    await PrismPreferences.importLegacy()
+    refreshPreferenceImport()
+    if (currentTab === 'tools') renderTab(currentTab)
+    showToast('Browser preferences imported')
+  } catch (_) { showToast('Could not import preferences. Your browser values are still available.', true) }
+  finally { event.target.disabled = false }
+}
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
@@ -437,7 +457,7 @@ function renderAppearanceTab(container) {
   const pane = document.createElement('div')
   pane.className = 'appearance-content'
   pane.innerHTML = `
-    ${settingsHeading('Appearance', 'Theme and interface preferences apply immediately. Custom themes use Save & apply.', 'This browser')}
+    ${settingsHeading('Appearance', 'Theme and interface preferences follow your account. Custom themes use Save & apply.', 'Personal')}
     <div class="appe-card appearance-current">
       <div class="appe-row"><label for="appe-theme">Current theme</label><select id="appe-theme"></select></div>
     </div>
@@ -607,9 +627,6 @@ function renderAppearanceTab(container) {
     T.populateSelect(themeSel); renderCustomList()
   }
   window.addEventListener('prism-theme-catalog-change', refreshThemeCatalog, {signal: themeEvents.signal})
-  window.addEventListener('storage', e => {
-    if (e.key === 'prism-custom-themes') refreshThemeCatalog()
-  }, {signal: themeEvents.signal})
 
   // Interface prefs
   const scaleSel = pane.querySelector('#appe-scale'), densSel = pane.querySelector('#appe-density')
@@ -636,11 +653,32 @@ function renderAppearanceTab(container) {
   const chatSide = pane.querySelector('#appe-chatside'), chatDefault = pane.querySelector('#appe-chatdefault')
   chatSide.value = T.getPref(T.KEYS.CHATSIDE, 'right')
   chatSide.addEventListener('change', () => T.applyChatSide(chatSide.value))
-  chatDefault.checked = localStorage.getItem('prism-chat-default') === 'open'
-  chatDefault.addEventListener('change', () => localStorage.setItem('prism-chat-default', chatDefault.checked ? 'open' : 'closed'))
+  chatDefault.checked = PrismPreferences.getItem('prism-chat-default') === 'open'
+  chatDefault.addEventListener('change', () => PrismPreferences.setItem('prism-chat-default', chatDefault.checked ? 'open' : 'closed'))
   const snap = pane.querySelector('#appe-snap')
-  snap.checked = localStorage.getItem('prism-window-snap') !== '0'
-  snap.addEventListener('change', () => localStorage.setItem('prism-window-snap', snap.checked ? '1' : '0'))
+  snap.checked = PrismPreferences.getItem('prism-window-snap') !== '0'
+  snap.addEventListener('change', () => PrismPreferences.setItem('prism-window-snap', snap.checked ? '1' : '0'))
+
+  function refreshAppearancePreferences() {
+    if (!pane.isConnected) { themeEvents.abort(); gallery.destroy(); return }
+    T.populateSelect(themeSel); renderCustomList()
+    scaleSel.value = T.getPref(T.KEYS.SCALE, '100')
+    densSel.value = T.getPref(T.KEYS.DENSITY, 'comfortable')
+    bgfx.value = T.getPref(T.KEYS.BGFX, '100'); bgfxVal.textContent = bgfx.value + '%'
+    const savedFont = T.getPref(T.KEYS.FONT, '')
+    const isPreset = [...fontSel.options].some(o => o.value === savedFont)
+    fontSel.value = isPreset ? savedFont : (savedFont ? '__custom__' : '')
+    fontCustom.value = isPreset ? '' : savedFont
+    fontRow.style.display = fontSel.value === '__custom__' ? '' : 'none'
+    chatSide.value = T.getPref(T.KEYS.CHATSIDE, 'right')
+    chatDefault.checked = PrismPreferences.getItem('prism-chat-default') === 'open'
+    snap.checked = PrismPreferences.getItem('prism-window-snap') !== '0'
+  }
+  PrismPreferences.ready.then(refreshAppearancePreferences)
+  window.addEventListener('prism-preferences-changed', e => {
+    const keys = [...Object.values(T.KEYS), 'prism-custom-themes', 'prism-chat-default', 'prism-window-snap']
+    if ((e.detail?.remote || e.detail?.initial) && e.detail.keys.some(key => keys.includes(key))) refreshAppearancePreferences()
+  }, {signal: themeEvents.signal})
 }
 
 // ── Brain tab: the agent's mind — Knowledge (RAG: documents, memories,
@@ -1207,12 +1245,17 @@ async function renderResourcesTab(container) {
 }
 
 async function renderToolsTab(container) {
+  if (!await PrismPreferences.ensureReady()) {
+    container.textContent = 'Could not load your tool preferences. Retry loading your preferences before changing tools.'
+    return
+  }
+  if (!container.isConnected) return
   await computeRagManage() // resolves MULTI_USER before the personal-MCP guard below runs
   const page = document.createElement('div')
   page.className = 'settings-page'
   container.appendChild(page)
 
-  page.innerHTML = settingsHeading('Tools', MULTI_USER ? 'Built-in tool switches are saved in this browser and sent with each chat. Group MCP preferences are saved to your account.' : 'Tool switches are saved in this browser and sent with each chat.', 'Personal preferences')
+  page.innerHTML = settingsHeading('Tools', MULTI_USER ? 'Built-in tool switches are saved with your account and sent with each chat. Group MCP preferences are saved to your account.' : 'Tool switches are saved with your account and sent with each chat.', 'Personal preferences')
 
   const combined = getConfig().combinedToolNotices || []
   if (combined.length) {

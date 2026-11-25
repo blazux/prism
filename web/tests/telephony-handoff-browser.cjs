@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('fs'),path=require('path');
 const root=path.resolve(__dirname,'..');
 (async()=>{
@@ -6,7 +7,10 @@ const root=path.resolve(__dirname,'..');
   for(const multi of [false,true]){
    const page=await browser.newPage({locale:'en-US'}),errors=[];page.on('pageerror',error=>errors.push(error.message));
    await page.addInitScript(()=>{window.__sockets=[];window.WebSocket=class{static OPEN=1;constructor(url){this.url=url;this.frames=[];this.readyState=0;window.__sockets.push(this)}close(){this.readyState=3}send(frame){this.frames.push(JSON.parse(frame))}}});
+   const preferencesFixture = createPreferencesBackend({})
    await page.route('**/*',route=>{
+     const preferenceResponse = preferencesFixture.handle(route)
+     if (preferenceResponse) return preferenceResponse
     const url=new URL(route.request().url());assert.equal(url.hostname,'fixture.invalid');
     if(!url.pathname.startsWith('/api/')){const file=path.join(root,url.pathname==='/'?'index.html':url.pathname);if(fs.existsSync(file)&&fs.statSync(file).isFile())return route.fulfill({path:file});return route.fulfill({status:404,body:''});}
     let data={};

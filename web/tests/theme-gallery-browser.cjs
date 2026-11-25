@@ -4,18 +4,29 @@ const root=path.resolve(__dirname,'..');
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE_PATH});
  try{
   const context=await browser.newContext({viewport:{width:1440,height:1050}}),page=await context.newPage(),errors=[];
+  const preferences={};
   context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
   page.on('pageerror',e=>errors.push(e.message));
-  await context.route('**/*',route=>{
+  const routeFixture=async route=>{
    const url=new URL(route.request().url());
    if(url.hostname!=='theme.invalid')return route.abort();
    if(url.pathname.startsWith('/api/')){
+    if(url.pathname==='/api/preferences'){
+     const request=route.request(),method=request.method();
+     if(method==='PATCH'||method==='POST'){
+      const body=request.postDataJSON();
+      if(body.owner!=='global')return route.fulfill({status:409,body:'The account changed.'});
+      for(const [key,value]of Object.entries(body.values||{}))if(method==='PATCH'||!Object.hasOwn(preferences,key))preferences[key]=value;
+     }
+     return route.fulfill({contentType:'application/json',body:JSON.stringify({values:{...preferences},owner:'global',legacyImportAllowed:true})});
+    }
     const body=url.pathname==='/api/me'?{authenticated:true,multiUser:false,isAdmin:true}:url.pathname==='/api/platform'?{disabledApps:[],voxDocked:false}:url.pathname==='/api/auth'?{authenticated:true,auth_enabled:false}:{};
     return route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
    }
    const file=path.join(root,url.pathname);
    return fs.existsSync(file)&&fs.statSync(file).isFile()?route.fulfill({path:file}):route.fulfill({status:404,body:''});
-  });
+  };
+  await context.route('**/*',routeFixture);
   await page.goto('http://theme.invalid/settings.html#appearance');await page.locator('.theme-card').first().waitFor();
   const presetCount=await page.evaluate(()=>Object.keys(PrismTheme.THEMES).length);
   assert.equal(await page.getByRole('radio').count(),presetCount);
@@ -78,7 +89,22 @@ const root=path.resolve(__dirname,'..');
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='paper');
   assert.equal(await page.evaluate(()=>PrismTheme.getThemeId()),'paper');
   assert.equal(await page.evaluate(()=>document.documentElement.style.getPropertyValue('--bg')),await page.evaluate(()=>PrismTheme.THEMES.paper.vars['--bg']));
+  await page.waitForFunction(async()=>{
+   const saved=await fetch('/api/preferences').then(r=>r.json());
+   return saved.values['prism-theme']==='paper'&&JSON.parse(saved.values['prism-custom-themes']||'[]').some(theme=>theme.id==='legacy-light');
+  });
+  const roaming=await browser.newContext();
+  try{
+   await roaming.route('**/*',routeFixture);
+   const third=await roaming.newPage();
+   third.on('pageerror',e=>errors.push(e.message));
+   await third.goto('http://theme.invalid/settings.html#appearance');
+   await third.waitForFunction(()=>PrismTheme.getThemeId()==='paper');
+   assert(await third.getByRole('radio',{name:'Paper',exact:true}).isChecked());
+   assert(await third.getByRole('radio',{name:'Legacy light',exact:true}).isVisible());
+   assert.equal(await third.evaluate(()=>localStorage.length),0,'roaming account wrote browser storage');
+  }finally{await roaming.close()}
   assert.deepEqual(errors,[]);
-  console.log('Theme gallery: grouped cards, keyboard and pointer selection, dropdown sync, preview state, custom save/delete, cross-tab changes, legacy light custom, desktop/mobile and preview restoration on leaving Appearance passed.');
+  console.log('Theme gallery: grouped cards, selection, preview, custom themes, cross-tab changes, fresh-browser account preferences, desktop/mobile and preview restoration passed.');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -3,12 +3,13 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
-function fn(name,next){return source.slice(source.indexOf(`function ${name}(`),source.indexOf(`function ${next}(`));}
-test('late events from an old workspace socket cannot overwrite the current conversation',()=>{
+function fn(name,next){const prefix=name==='connect'?'async ':'';return source.slice(source.indexOf(`${prefix}function ${name}(`),source.indexOf(`function ${next}(`));}
+test('late events from an old workspace socket cannot overwrite the current conversation',async()=>{
  const sockets=[],timers=[],seen=[];
  const c={ws:null,currentSessionID:'first',location:{protocol:'https:',host:'fixture'},WebSocket:class {constructor(){sockets.push(this)}},setTimeout:f=>timers.push(f),setContainerBadge:()=>{},handleServerMsg:m=>seen.push(m),console,renderChatStatus:()=>{}};
+ c.PrismPreferences={ensureReady:async()=>true};c.connectionAttempt=0;c.approvalInitialized=true;
  vm.createContext(c);vm.runInContext(fn('connect','send'),c);
- c.connect();const old=sockets[0];old.onclose();c.currentSessionID='second';c.connect();
+ await c.connect();const old=sockets[0];old.onclose();c.currentSessionID='second';await c.connect();
  old.onmessage({data:'{"type":"stream","content":"old"}'});timers[0]();
  sockets[1].onmessage({data:'{"type":"stream","content":"new"}'});
  assert.equal(sockets.length,2);assert.deepEqual(JSON.parse(JSON.stringify(seen)),[{type:'stream',content:'new'}]);

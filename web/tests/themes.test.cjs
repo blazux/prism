@@ -4,8 +4,10 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../theme.js'),'utf8');
 const historical=['prism','prism-dark','prism-light','graphite','slate','paper','boardroom','midnight','nord','solarized-dark','rose-pine','tech','cyberpunk','matrix','synthwave'];
 
-function boot(storage=new Map()) {
- const vars=new Map(),attributes=new Map(),listeners=new Map(),messages=[];
+function boot(storage=new Map(),account=true) {
+ const vars=new Map(),attributes=new Map(),listeners=new Map(),messages=[],writes=[];
+ let resolveReady;
+ const ready=new Promise(resolve=>{resolveReady=resolve});
  const frames=[{contentWindow:{postMessage:message=>messages.push({frame:'widget',message})}}];
  const appFrame={contentWindow:{postMessage:message=>messages.push({frame:'app',message})}};
  const classes=new Set();
@@ -20,10 +22,11 @@ function boot(storage=new Map()) {
   getComputedStyle:()=>root.style,console};
  context.window={document,matchMedia:context.matchMedia,addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push(fn)},
   dispatchEvent(event){for(const fn of listeners.get(event.type)||[])fn(event)}};
+ if(account)context.window.PrismPreferences={getItem:k=>storage.get(k)??null,setItem:(k,v)=>{writes.push([k,String(v)]);storage.set(k,String(v))},ready};
  context.window.parent=context.window;
  vm.createContext(context);vm.runInContext(source,context);
- return {theme:context.window.PrismTheme,vars,attributes,storage,messages,
-  storageChanged:key=>context.window.dispatchEvent({type:'storage',key})};
+ return {theme:context.window.PrismTheme,vars,attributes,storage,messages,writes,ready:()=>{resolveReady();return ready.then(()=>Promise.resolve())},
+  preferencesChanged:(key,initial=false)=>context.window.dispatchEvent({type:'prism-preferences-changed',detail:{keys:[key],remote:true,initial}})};
 }
 
 function luminance(color) {
@@ -92,12 +95,41 @@ test('partial custom themes are completed, survive reload and do not leave stale
  assert.equal(reloaded.theme.getThemeId(),'prism-dark');assert(!reloaded.theme.getAllThemes()['custom-fixture']);
 });
 
-test('a theme selected in another tab updates sandboxed widget palettes too',()=>{
- const {theme,storage,messages,attributes,storageChanged}=boot();
- storage.set(theme.KEYS.THEME,'paper');storageChanged(theme.KEYS.THEME);
+test('a theme selected in another tab updates sandboxed widget palettes too',async()=>{
+ const fixture=boot();await fixture.ready();
+ const {theme,storage,messages,attributes,preferencesChanged}=fixture;
+ storage.set(theme.KEYS.THEME,'paper');preferencesChanged(theme.KEYS.THEME);
  assert.equal(theme.getThemeId(),'paper');assert.equal(attributes.get('data-theme'),'paper');
  assert(messages.some(({frame,message})=>frame==='widget'&&message.vars['--accent']===theme.activeVars()['--accent']),
   'cross-tab changes did not reach sandboxed widgets');
+});
+
+test('loading account preferences and remote changes never save startup defaults',async()=>{
+ const f=boot();
+ assert.deepEqual(f.writes,[]);
+ f.storage.set('prism-theme','matrix');
+ f.storage.set('prism-ui-scale','125');
+ await f.ready();
+ assert.equal(f.attributes.get('data-theme'),'matrix');
+ assert.equal(f.vars.get('--ui-scale'),'1.25');
+ assert.deepEqual(f.writes,[],'loading settings wrote values back to the server');
+ f.storage.set('prism-theme','paper');f.preferencesChanged('prism-theme');
+ assert.equal(f.attributes.get('data-theme'),'paper');
+ assert.deepEqual(f.writes,[],'remote refresh wrote settings back to the server');
+ f.storage.set('prism-theme','matrix');f.preferencesChanged('prism-theme',true);
+ assert.equal(f.attributes.get('data-theme'),'matrix','late initial preferences did not apply after a retry');
+ f.theme.applyTheme('nord');
+ assert.deepEqual(f.writes,[['prism-theme','nord']]);
+});
+
+test('generated-content theme helper uses memory without account access or browser persistence',()=>{
+ const storage=new Map([['prism-theme','matrix']]);
+ const f=boot(storage,false);
+ assert.equal(f.theme.getThemeId(),'prism-dark');
+ f.theme.applyTheme('nord');
+ assert.equal(f.theme.getThemeId(),'nord');
+ assert.equal(storage.get('prism-theme'),'matrix');
+ assert.deepEqual(f.writes,[]);
 });
 
 test('widget documents receive the active complete palette and their explicit conversation ID',()=>{

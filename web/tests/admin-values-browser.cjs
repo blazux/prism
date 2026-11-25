@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'../..'),read=p=>fs.readFileSync(path.join(root,p),'utf8');
@@ -12,7 +13,10 @@ const wait=async predicate=>{const until=Date.now()+7000;while(!predicate()){if(
   const page=await browser.newPage(),errors=[],writes=[];
   page.setDefaultTimeout(8000);
   page.on('pageerror',error=>errors.push(error.message));
+  const preferencesFixture = createPreferencesBackend({})
   await page.route('**/*',async route=>{
+    const preferenceResponse = preferencesFixture.handle(route)
+    if (preferenceResponse) return preferenceResponse
    const request=route.request(),url=new URL(request.url());
    assert.equal(url.hostname,'fixture.invalid');
    if(url.pathname==='/admin')return route.fulfill({contentType:'text/html',body:html});

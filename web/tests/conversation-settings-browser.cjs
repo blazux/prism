@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'..');
@@ -14,7 +15,10 @@ const root=path.resolve(__dirname,'..');
    window.WebSocket=class {static OPEN=1;static CLOSED=3;constructor(){this.readyState=1;this.messages=[];fixtureSockets.push(this);queueMicrotask(()=>this.onopen?.())}send(raw){this.messages.push(JSON.parse(raw))}close(){this.readyState=3;this.onclose?.()}};
    window.deliverFixture=msg=>fixtureSockets.at(-1).onmessage({data:JSON.stringify(msg)});
   });
+  const preferencesFixture = createPreferencesBackend({})
   await page.route('**/*',async route=>{
+    const preferenceResponse = preferencesFixture.handle(route)
+    if (preferenceResponse) return preferenceResponse
    const req=route.request(),url=new URL(req.url());
    if(url.hostname!=='fixture.invalid')return route.abort();
    if(url.pathname==='/app.js')return route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(root,'app.js'),'utf8')+'\nwindow.fixtureChat={reconnect:connect,reset:clearChat,goto:gotoSession,get open(){return chatOpen},get files(){return pendingFiles},set files(v){pendingFiles=v}};'});

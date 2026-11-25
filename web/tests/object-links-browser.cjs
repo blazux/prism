@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium} = require('playwright')
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path')
 const root = path.resolve(__dirname, '..'), origin = 'http://localhost', widgetOrigin = 'http://localhost:48082'
@@ -30,7 +31,10 @@ const wait = async (predicate, label) => {
         window.deliverFixture = message => fixtureSockets.at(-1).onmessage({data:JSON.stringify(message)})
         Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.fixtureCopied=text}}})
       })
+      const preferencesFixture = createPreferencesBackend({origin})
       await context.route('**/*', async route => {
+        const preferenceResponse = preferencesFixture.handle(route)
+        if (preferenceResponse) return preferenceResponse
         const request=route.request(), url=new URL(request.url())
         if (url.origin === widgetOrigin) {
           if (url.pathname === '/__prism_widget/authorize') return route.fulfill({contentType:'application/json',body:'{"ok":true}'})

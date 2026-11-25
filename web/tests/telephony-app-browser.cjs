@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict'),fs=require('fs'),path=require('path');
 const root=path.resolve(__dirname,'../..'),read=p=>fs.readFileSync(path.join(root,p),'utf8');
@@ -14,7 +15,10 @@ const settings=constant(settingsSource,'telephonySettingsHead')+pane.replace('cl
    const personal=role==='personal',admin=['admin','personal'].includes(role),connected=role!=='disconnected';
    let queue=[{id:42,phone_number:'0596123456',mission:'Fixture mission <b>safe</b>',scheduled_at:'2030-11-01T13:00:00Z',status:'pending',attempts:0,max_attempts:3}];
    page.on('pageerror',e=>{errors.push(e.message);console.error(role+': '+e.message)});
+   const preferencesFixture = createPreferencesBackend({})
    await page.route('**/*',route=>{
+     const preferenceResponse = preferencesFixture.handle(route)
+     if (preferenceResponse) return preferenceResponse
     const r=route.request(),u=new URL(r.url());assert.equal(u.hostname,'fixture.invalid');requests.push(u.pathname);
     if(u.pathname==='/admin')return route.fulfill({contentType:'text/html',body:adminPage});
     if(u.pathname==='/settings/telephony')return route.fulfill({status:personal?200:403,contentType:'text/html',body:personal?settings:'Forbidden'});

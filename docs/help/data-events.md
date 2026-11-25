@@ -1,5 +1,51 @@
 # Refresh widgets and scripts when data changes
 
+## Keep widget data on the server
+
+Widget HTML and its saved data are separate. A widget can reappear on another
+device while data written only to `localStorage`, `sessionStorage` or IndexedDB
+stays in the original browser and origin. Use browser storage for temporary
+interface state or caches that can be rebuilt, not the only copy of documents,
+lists, settings needed by the app or other user content.
+
+Use the existing notes, tasks or calendar tools/APIs when the data fits them.
+Their personal data belongs to the signed-in user across workspaces; in
+mono-user mode it belongs to the installation.
+
+For other data, the agent can build a small Python custom tool:
+
+1. Register the tool with load/update operations. Store its JSON or SQLite data
+   in the persistent workspace. For JSON, lock the read-modify-write operation
+   and replace the file atomically; do not overwrite a newer file with a stale
+   browser snapshot.
+2. Call it from the widget with `await prismTool('my_app', {action: 'load'})`
+   and its update operation. Keep the draft if saving fails; display success
+   only after the tool confirms the write. No model call is needed to run the
+   custom tool.
+3. Reload saved data on opening and after changes using `prismOnData`, as below.
+   A display-only widget can instead fetch a file written by its tool or cron
+   at `/data/my_app.json`.
+
+Choose the data scope before saving. In standard self-hosted shared mode,
+`/workspace` and `/data/` are common files, not private storage per user or group.
+A directory named after a user does not add access control. Use the existing
+scoped app APIs for private data, or enforce the required permissions in the
+custom backend. Sharing a widget copies its interface; sharing its data depends
+on that backend and its permissions.
+
+### Move data from an older browser-only widget
+
+Keep the original browser profile and URL available. Ask the agent to help
+export only that widget's data before replacing its storage code. If an export
+control is needed, use it in the original browser where the data still exists;
+the agent's separate preview browser cannot recover those values. Keep the
+export, import it through the new backend, then check the saved result from a
+second browser or device before removing the old copy. Do not export unrelated
+browser storage or credentials. Changing the widget's code alone does not move
+existing browser data to the server.
+
+## Refresh after a change
+
 `prismOnData` subscribes to changes without asking the agent to run again.
 Notes, tasks and calendar writes made through Prism notify the signed-in user's
 open views, including writes from native tools and direct HTTP requests. Shared

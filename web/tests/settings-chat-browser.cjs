@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'..'),origin='http://fixture.invalid';
@@ -13,7 +14,6 @@ const root=path.resolve(__dirname,'..'),origin='http://fixture.invalid';
    page.setDefaultTimeout(10000);
    page.on('pageerror',error=>errors.push(error.message));
    await context.addInitScript(()=>{
-    localStorage.setItem('active-workspace','obsolete');
     window.fixtureDocument=Math.random();
     window.marked={parse:text=>text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')};
     window.fixtureSockets=[];
@@ -24,7 +24,15 @@ const root=path.resolve(__dirname,'..'),origin='http://fixture.invalid';
      close(){this.readyState=3;this.onclose?.()}
     };
    });
+   const preferencesFixture = createPreferencesBackend({origin, values: {'active-workspace': 'obsolete'}})
+   let failFirstPreferenceRead = !multi && width === 1280
    await context.route('**/*',async route=>{
+    if (failFirstPreferenceRead && route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/preferences') {
+     failFirstPreferenceRead = false
+     return route.fulfill({status:503,contentType:'application/json',body:'{}'})
+    }
+     const preferenceResponse = preferencesFixture.handle(route)
+     if (preferenceResponse) return preferenceResponse
     const request=route.request(),url=new URL(request.url());
     if(url.origin!==origin)return route.abort();
     if(url.pathname==='/app.js')return route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(root,'app.js'),'utf8')+
@@ -51,6 +59,9 @@ const root=path.resolve(__dirname,'..'),origin='http://fixture.invalid';
    try {
     await page.goto(origin+'/');
     await page.waitForFunction(()=>window.fixtureState?.view.type==='board'&&fixtureSockets.length>0);
+    const expectedWorkspace = multi ? 'u1-obsolete' : 'obsolete';
+    assert.equal(await page.evaluate(()=>fixtureState.session),expectedWorkspace,label+' restores the saved workspace after a failed preference read');
+    assert.equal(await page.evaluate(()=>new URL(fixtureSockets[0].url).searchParams.get('session')),expectedWorkspace,label+' must restore preferences before opening its first conversation socket');
     const documentId=await page.evaluate(()=>fixtureDocument);
     await page.locator('.rail-item[data-app="email"]').click();
     const email=page.frameLocator('#app-frame');

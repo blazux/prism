@@ -6,7 +6,7 @@ const sendChat=source.slice(source.indexOf('function sendChat('),source.indexOf(
 
 function harness(state,throws=false){
  const input={value:'Please analyse this image'},messages=[],toasts=[],sent=[];
- const c={currentSessionID:'fixture',pendingChats:new Map(),crypto:require('node:crypto').webcrypto,renderChatStatus:()=>{},ws:state===null?null:{readyState:state,send:raw=>{if(throws)throw new Error('socket closed');sent.push(JSON.parse(raw))}},
+ const c={PrismPreferences:{isReady:()=>true,ensureReady:async()=>true},currentSessionID:'fixture',pendingChats:new Map(),crypto:require('node:crypto').webcrypto,renderChatStatus:()=>{},ws:state===null?null:{readyState:state,send:raw=>{if(throws)throw new Error('socket closed');sent.push(JSON.parse(raw))}},
   WebSocket:{OPEN:1},document:{getElementById:()=>input},pendingImages:[{data:'image-data',name:'diagram.png'}],pendingFiles:[{name:'report.txt',path:'uploads/report.txt'}],isStreaming:false,
   appendUserMessage:(...args)=>messages.push(args),autoResizeTextarea:()=>{},renderPreviews:()=>{},getDisabledTools:()=>[],setStreaming:value=>{c.isStreaming=value},showToast:t=>toasts.push(t)};
  vm.createContext(c);vm.runInContext(send+'\n'+sendChat+'\n'+source.match(/function replyToWidgetChat\([^]*?^}/m)[0]+'\n'+source.match(/function receiveChatReceipt\([^]*?^}/m)[0],c);
@@ -40,4 +40,11 @@ test('a receipt keeps an upload that finished after the request was sent',()=>{
  const h=harness(1);h.c.sendChat();const later={name:'later.txt',path:'uploads/later.txt'};h.c.pendingFiles.push(later);
  h.c.receiveChatReceipt({requestId:h.sent[0].requestId,status:'accepted',replayed:false});
  assert.equal(h.c.pendingFiles.length,1);assert.equal(h.c.pendingFiles[0],later);
+});
+
+test('unavailable account preferences keep the draft and prevent an unrestricted chat request',async()=>{
+ const h=harness(1);h.c.PrismPreferences={isReady:()=>false,ensureReady:async()=>false};
+ h.c.sendChat();await Promise.resolve();
+ assert.equal(h.sent.length,0);assert.equal(h.input.value,'Please analyse this image');
+ assert.equal(h.c.pendingImages.length,1);assert.equal(h.c.pendingFiles.length,1);assert.equal(h.c.pendingChats.size,0);
 });

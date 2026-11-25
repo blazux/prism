@@ -407,6 +407,7 @@ func (s *Server) productRoutes() (http.Handler, error) {
 	mux.HandleFunc("/api/my/groups", s.resourceRoute((*Server).handleMyGroups))
 	mux.HandleFunc("/api/data-events", s.resourceRoute((*Server).handleDataEvents))
 	mux.HandleFunc("/api/my/tool-prefs", s.resourceRoute((*Server).handleMyToolPrefs))
+	mux.HandleFunc("/api/preferences", s.resourceRoute((*Server).handlePreferences))
 	mux.HandleFunc("/api/group/members", s.resourceRoute((*Server).handleGroupMembers))
 	mux.HandleFunc("/api/room/history", s.resourceRoute((*Server).handleRoomHistory))
 	mux.HandleFunc("/api/room/activity", s.resourceRoute((*Server).handleRoomActivity))

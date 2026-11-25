@@ -24,6 +24,7 @@ const adminConsoleHead = `<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/ai-settings.css">
 <script src="/ai-settings.js"></script>
+<script src="/preferences.js"></script>
 <script src="/theme.js"></script>
 <script src="/modal.js"></script>
 <script src="/settings-state.js"></script>
@@ -154,9 +155,9 @@ const adminConsoleMid = `
 const $=i=>document.getElementById(i);
 let USERS=[],MODELS=[],ME=null,MY=null,ALLGROUPS=[],ACTIVE_GROUP='',WEBEX_GROUP='';
 const GROUP_PICKERS=['ag-group','ac-group','rg-group','mc-group','gs-group'];
-function groupKey(){return 'prism-admin-group-'+(ME?.user?.id||'owner');}
+function groupKey(){return 'prism-admin-group';}
 function markGroupLoaded(picker,g){const pane=$(picker)?.closest('.pane');if(pane&&$(picker).value===g){pane.dataset.loadedGroup=g;pane.removeAttribute('aria-busy');}}
-function selectAdminGroup(id){if(!adminGroups().some(g=>String(g.groupId||g.id)===String(id)))return;if(ACTIVE_GROUP!==String(id))GROUP_PICKERS.forEach(i=>{const pane=$(i)?.closest('.pane');if(pane){pane.dataset.loadedGroup='';pane.setAttribute('aria-busy','true');}});ACTIVE_GROUP=String(id);GROUP_PICKERS.forEach(i=>{if($(i))$(i).value=ACTIVE_GROUP;});try{localStorage.setItem(groupKey(),ACTIVE_GROUP);}catch(_){}}
+function selectAdminGroup(id){if(!adminGroups().some(g=>String(g.groupId||g.id)===String(id)))return;if(ACTIVE_GROUP!==String(id))GROUP_PICKERS.forEach(i=>{const pane=$(i)?.closest('.pane');if(pane){pane.dataset.loadedGroup='';pane.setAttribute('aria-busy','true');}});ACTIVE_GROUP=String(id);GROUP_PICKERS.forEach(i=>{if($(i))$(i).value=ACTIVE_GROUP;});try{PrismPreferences.setItem(groupKey(),ACTIVE_GROUP);}catch(_){}}
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 async function jget(u){const r=await fetch(u);if(!r.ok){PrismSettingsState.status('Could not load: '+(await r.text()).slice(0,180));return null;}return r.json();}
 async function jpost(u,b,controls=[]){const options={method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)};const snapshot=PrismSettingsState.begin(controls);try{const r=await fetch(u,options);if(r.ok)PrismSettingsState.saved(snapshot);else PrismSettingsState.status('Could not save: '+(await r.clone().text()).slice(0,200));return r;}catch(e){PrismSettingsState.status('Could not save · your edits are kept');throw e;}}
@@ -221,7 +222,7 @@ async function setPol(t,a){await jpost('/api/admin/tool-policy',{tool:t,access:a
 // group admins only the groups where they hold the admin role.
 function adminGroups(){return MY.isGlobalAdmin?ALLGROUPS:(MY.groups||[]).filter(g=>g.role==='admin');}
 function fillGroupPickers(){const groups=adminGroups();const opts=groups.map(g=>'<option value="'+(g.groupId||g.id)+'">'+esc(g.groupName||g.name)+'</option>').join('');
- let keep=ACTIVE_GROUP;try{keep=keep||localStorage.getItem(groupKey());}catch(_){}
+ let keep=ACTIVE_GROUP;try{keep=keep||PrismPreferences.getItem(groupKey());}catch(_){}
  GROUP_PICKERS.forEach(i=>{if($(i))$(i).innerHTML=opts;});
  selectAdminGroup(groups.some(g=>String(g.groupId||g.id)===keep)?keep:(groups[0]?.groupId||groups[0]?.id||''));}
 async function loadAgent(){const g=$('ag-group').value;if(!g)return;const c=await jget('/api/room/config?group='+g);if(!c||g!==$('ag-group').value)return;markGroupLoaded('ag-group',g);
@@ -592,6 +593,7 @@ async function setModel(m,allowed){const s2=new Set(PF.allowedModels);allowed?s2
  const r=await jpost('/api/admin/platform',{allowedModels:[...s2]});$('pf-st').textContent=r&&r.ok?'saved ✓':'error';setTimeout(()=>$('pf-st').textContent='',1500);loadPlatform();}
 
 async function init(){
+ await PrismPreferences.ready;
  ME=await jget('/api/me'); MY=await jget('/api/my/groups')||{groups:[]};
  if(!ME||!ME.authenticated){location.href='/login';return;}
  // Single-user (legacy) /api/me has no user object: fall through to the

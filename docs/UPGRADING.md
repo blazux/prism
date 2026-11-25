@@ -6,6 +6,25 @@ startup. A restart interrupts active agent tasks; let them finish first.
 Review the requirements below before recreating services, particularly when
 using a custom reverse proxy or execution image.
 
+## Browser preference migration
+
+Appearance settings, custom themes, workspace icons, pinned notes, the calendar
+view and tool preferences are stored on the server. They follow your account
+within the same Prism installation. Preferences belong to your account, including
+while you view a shared workspace; they are not group settings. Changing a saved
+tool approval preference does not change another open connection's approval mode.
+
+On the first visit after this update, single-user installations import the old
+preferences from the browser you use. In multi-user or hosted personal accounts,
+open **Settings** in the original browser and click **Import browser preferences**
+to import them into your account. Existing server preferences take priority.
+The original browser values remain available as a backup.
+
+This import covers Prism's own preferences. Data stored in browser storage by an
+older generated widget needs to be exported from its original browser and saved
+in the widget's server backend. Ask the agent to adapt that widget; see
+[persistent widget data](help/data-events.md#keep-widget-data-on-the-server).
+
 ## Upgrading to 1.1
 
 Back up PostgreSQL, the workspace, the server-private volume and your deployment

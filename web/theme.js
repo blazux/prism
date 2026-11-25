@@ -10,6 +10,20 @@
 (function () {
   'use strict';
 
+  // Generated content may load this helper without access to account settings.
+  // In that case keep theme choices in memory for the lifetime of the page.
+  const transient = new Map();
+  const preferences = window.PrismPreferences || {
+    getItem: key => transient.get(key) ?? null,
+    setItem: (key, value) => transient.set(key, String(value)),
+    ready: Promise.resolve(),
+  };
+  let applyingPreferences = false;
+  let preferencesReady = false;
+  function savePreference(key, value) {
+    if (!applyingPreferences) preferences.setItem(key, String(value));
+  }
+
   // Every preset defines a complete palette; derived controls and surfaces reset on switch.
   const COLOR_KEYS = ["--bg", "--bg1", "--bg2", "--bg3", "--bg4", "--border", "--border2", "--text", "--text2", "--text3", "--accent", "--accent-dim", "--green", "--red", "--yellow", "--orange"];
   const BASE_VARS = Object.fromEntries(COLOR_KEYS.map((key, i) => [key, ['#090c13','#10151f','#171e2b','#202a3a','#2b3749','#293549','#3c4c65','#eef2fb','#b9c3d6','#91a0b9','#9baeff','#293654','#72d6ad','#ff939d','#e9c783','#f1ae7f'][i]]));
@@ -101,10 +115,10 @@
   // broadcasts from the dashboard and updates :root in place (no reload).
   const WIDGET_BOOTSTRAP = `(function(){function a(v){var r=document.documentElement.style;for(var k in v)r.setProperty(k,v[k]);}window.addEventListener('message',function(e){var d=e.data;if(d&&d.type==='prism-theme'&&d.vars)a(d.vars);});})();`;
 
-  // ─── Custom themes (localStorage) ─────────────────────────────────────────
+  // ─── Custom themes ───────────────────────────────────────────────────────
   const CUSTOM_KEY = 'prism-custom-themes';
   function readCustomArr() {
-    try { const arr = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); return Array.isArray(arr) ? arr : []; } catch (_) { return []; }
+    try { const arr = JSON.parse(preferences.getItem(CUSTOM_KEY) || '[]'); return Array.isArray(arr) ? arr : []; } catch (_) { return []; }
   }
   function loadCustomThemes() {
     const out = {};
@@ -120,17 +134,17 @@
     const i = arr.findIndex((t) => t.id === id);
     const entry = { id, label, vars: completeVars(vars) };
     if (i >= 0) arr[i] = entry; else arr.push(entry);
-    localStorage.setItem(CUSTOM_KEY, JSON.stringify(arr));
+    savePreference(CUSTOM_KEY, JSON.stringify(arr));
     window.dispatchEvent(new CustomEvent('prism-theme-catalog-change'));
   }
   function deleteCustomTheme(id) {
-    localStorage.setItem(CUSTOM_KEY, JSON.stringify(readCustomArr().filter((t) => t.id !== id)));
-    if (localStorage.getItem(STORAGE_KEY) === id) applyTheme(DEFAULT_THEME);
+    savePreference(CUSTOM_KEY, JSON.stringify(readCustomArr().filter((t) => t.id !== id)));
+    if (preferences.getItem(STORAGE_KEY) === id) applyTheme(DEFAULT_THEME);
     window.dispatchEvent(new CustomEvent('prism-theme-catalog-change'));
   }
 
   function getThemeId() {
-    const id = localStorage.getItem(STORAGE_KEY);
+    const id = preferences.getItem(STORAGE_KEY);
     return Object.hasOwn(getAllThemes(), id) ? id : DEFAULT_THEME;
   }
 
@@ -157,7 +171,7 @@
     document.documentElement.setAttribute('data-theme-group', all[id].group || 'custom');
     document.documentElement.setAttribute('data-theme-mode', all[id].mode || vars['color-scheme']);
     document.documentElement.setAttribute('data-chat-surface', GLASS_THEMES.has(id) ? 'glass' : 'solid');
-    localStorage.setItem(STORAGE_KEY, id);
+    savePreference(STORAGE_KEY, id);
     if (broadcast) {
       // widgets (board) + the full-pane app iframe both get live updates
       const frames = [...document.querySelectorAll('.widget-body iframe')];
@@ -244,19 +258,19 @@
 
   // ─── UI preferences (scale / density / animated-bg intensity) ─────────────
   const SCALE_KEY = 'prism-ui-scale', DENSITY_KEY = 'prism-density', BGFX_KEY = 'prism-bgfx';
-  function getPref(k, d) { return localStorage.getItem(k) || d; }
+  function getPref(k, d) { return preferences.getItem(k) || d; }
   function applyUIScale(v) {
-    v = v || getPref(SCALE_KEY, '100'); localStorage.setItem(SCALE_KEY, v);
+    v = v || getPref(SCALE_KEY, '100'); savePreference(SCALE_KEY, v);
     document.documentElement.style.setProperty('--ui-scale', String(Number(v) / 100));
   }
   function applyDensity(v) {
-    v = v || getPref(DENSITY_KEY, 'comfortable'); localStorage.setItem(DENSITY_KEY, v);
+    v = v || getPref(DENSITY_KEY, 'comfortable'); savePreference(DENSITY_KEY, v);
     const c = document.documentElement.classList;
     c.remove('density-compact', 'density-spacious');
     if (v !== 'comfortable') c.add('density-' + v);
   }
   function applyBgfx(v) {
-    v = (v == null ? getPref(BGFX_KEY, '100') : String(v)); localStorage.setItem(BGFX_KEY, v);
+    v = (v == null ? getPref(BGFX_KEY, '100') : String(v)); savePreference(BGFX_KEY, v);
     document.documentElement.style.setProperty('--bgfx-opacity', String(Number(v) / 100));
     document.documentElement.setAttribute('data-bgfx-disabled', String(Number(v) === 0));
     window.dispatchEvent(new CustomEvent('prism-bgfx-change'));
@@ -265,7 +279,7 @@
   const FONT_KEY = 'prism-ui-font';
   function applyFont(v) {
     v = v == null ? getPref(FONT_KEY, '') : v;
-    localStorage.setItem(FONT_KEY, v);
+    savePreference(FONT_KEY, v);
     const r = document.documentElement.style;
     if (v) r.setProperty('--sans', v); else r.removeProperty('--sans');
   }
@@ -275,10 +289,14 @@
   function applyChatSide(v) {
     v = v || getPref(CHATSIDE_KEY, 'right');
     if (v !== 'left' && v !== 'right') v = 'right';
-    localStorage.setItem(CHATSIDE_KEY, v);
+    savePreference(CHATSIDE_KEY, v);
     document.documentElement.setAttribute('data-chat-side', v);
   }
-  function applyPrefs(broadcast = false) { applyTheme(getThemeId(), broadcast); applyUIScale(); applyDensity(); applyBgfx(); applyChatSide(); applyFont(); }
+  function applyPrefs(broadcast = false) {
+    applyingPreferences = true;
+    try { applyTheme(getThemeId(), broadcast); applyUIScale(); applyDensity(); applyBgfx(); applyChatSide(); applyFont(); }
+    finally { applyingPreferences = false; }
+  }
 
   // Wrap an agent-authored widget document with the active theme tokens, the
   // shared widget stylesheet and the live-update bootstrap.
@@ -324,16 +342,24 @@
     KEYS: { THEME: STORAGE_KEY, SCALE: SCALE_KEY, DENSITY: DENSITY_KEY, BGFX: BGFX_KEY, CHATSIDE: CHATSIDE_KEY, FONT: FONT_KEY },
   };
 
-  // Cross-tab: when settings change prefs/themes, re-apply + refresh the picker.
-  window.addEventListener('storage', (e) => {
-    if ([STORAGE_KEY, CUSTOM_KEY, SCALE_KEY, DENSITY_KEY, BGFX_KEY, FONT_KEY, CHATSIDE_KEY].includes(e.key)) {
+  // Server preferences also refresh pages already open in another tab.
+  window.addEventListener('prism-preferences-changed', (e) => {
+    const keys = e.detail?.keys || [];
+    if (preferencesReady && e.detail?.remote && keys.some(key => [STORAGE_KEY, CUSTOM_KEY, SCALE_KEY, DENSITY_KEY, BGFX_KEY, FONT_KEY, CHATSIDE_KEY].includes(key))) {
       applyPrefs(true);
       const sel = document.getElementById('theme-select');
       if (sel) populateSelect(sel);
-      if (e.key === CUSTOM_KEY) window.dispatchEvent(new CustomEvent('prism-theme-catalog-change'));
+      if (keys.includes(CUSTOM_KEY)) window.dispatchEvent(new CustomEvent('prism-theme-catalog-change'));
     }
   });
 
-  // Apply everything immediately (before app.js runs) so there is no flash.
+  // Paint a complete palette immediately, then apply the saved account choices.
   applyPrefs();
+  preferences.ready.then(() => {
+    preferencesReady = true;
+    applyPrefs(true);
+    const sel = document.getElementById('theme-select');
+    if (sel) populateSelect(sel);
+    window.dispatchEvent(new CustomEvent('prism-theme-catalog-change'));
+  });
 })();

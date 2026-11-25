@@ -6,7 +6,7 @@ window.PrismThemeGallery = (() => {
     ['professional', 'Focus & work', 'Quiet surfaces and restrained accents.'],
     ['studio', 'Color & atmosphere', 'Warm tones, soft color and deep night palettes.'],
     ['playful', 'Geek & retro', 'Terminal green, neon and arcade color.'],
-    ['custom', 'Your themes', 'Palettes saved in this browser.'],
+    ['custom', 'Your themes', 'Your saved palettes.'],
   ]
   let instance = 0
   const preview = `<div class="theme-preview" aria-hidden="true">

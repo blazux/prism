@@ -1,11 +1,15 @@
 import { createSharedGallery } from './shared-gallery.js'
 import { legacyWidgetStorage, acknowledgeWidgetStorage } from './widget-storage-migration.js'
 
+// Load account preferences before choosing a workspace or opening the socket.
+await PrismPreferences.ready
+
 // Dashboard — Frontend
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
 let ws = null
+let appInitialized = false
 let isStreaming = false
 let activeRunStatus = 'idle'
 let chatOpen = false
@@ -18,7 +22,7 @@ let pendingFiles  = [] // {name, text} parsed file attachments waiting to be sen
 // The workspace whose dashboard we return to. The live chat session
 // (currentSessionID) follows the view: a workspace id on a dashboard, or the
 // global ASSISTANT session while viewing a global app.
-let lastWorkspace = localStorage.getItem('active-workspace') || localStorage.getItem('active-session') || 'default'
+let lastWorkspace = PrismPreferences.getItem('active-workspace') || 'default'
 let currentSessionID = lastWorkspace
 let pendingRoomDraft = null
 
@@ -145,7 +149,16 @@ function persistState(id, patch) {
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 
-function connect() {
+let connectionAttempt = 0
+async function connect() {
+  const attempt = ++connectionAttempt
+  if (!await PrismPreferences.ensureReady() || attempt !== connectionAttempt) return
+  if (!approvalInitialized) {
+    approvalMode = PrismPreferences.getItem('prism-approval') === 'manual' ||
+      (!PrismPreferences.getItem('prism-approval') && PrismPreferences.legacyManualApproval()) ? 'manual' : 'auto'
+    approvalInitialized = true
+    syncApprovalSelect()
+  }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const socket = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(currentSessionID)}`)
   ws = socket
@@ -617,7 +630,7 @@ window.toggleChat = function() {
 }
 
 // Layout preference: open the chat on load if the user chose so (Settings → Appearance).
-if (localStorage.getItem('prism-chat-default') === 'open') toggleChat()
+if (PrismPreferences.getItem('prism-chat-default') === 'open') toggleChat()
 
 // ─── Context-aware chat ─────────────────────────────────────────────────────────
 // Tells the agent what the user is currently looking at (workspace, app, the
@@ -786,6 +799,11 @@ function receiveChatHistory(msg) {
 }
 
 function sendChat(widgetRequest) {
+  if (!PrismPreferences.isReady()) {
+    if (widgetRequest?.widget) replyToWidgetChat(widgetRequest.widget, 'rejected', 'Account preferences are unavailable. Reload them before sending a message.')
+    PrismPreferences.ensureReady().then(ready => { if (ready && !ws) connect() })
+    return
+  }
   // Widget and continuation messages preserve the user's separate draft.
   const widget = widgetRequest?.widget
   const preserveDraft = !!widget || widgetRequest?.continuation === true
@@ -1626,7 +1644,7 @@ function applyView(view) {
     const ws_id = personalSessionID(view.workspace || lastWorkspace)
     view.workspace = ws_id
     lastWorkspace = ws_id
-    localStorage.setItem('active-workspace', ws_id)
+    if (PrismPreferences.isReady()) PrismPreferences.setItem('active-workspace', ws_id)
     gotoSession(ws_id)
     frame.style.display = 'none'
     frame.src = 'about:blank'
@@ -1724,12 +1742,16 @@ async function loadSessions() {
 
 // ─── Workspace icons (client-side) ──────────────────────────────────────────────
 const WS_ICON_KEY = 'prism-workspace-icons'
-function wsIcons() { try { return JSON.parse(localStorage.getItem(WS_ICON_KEY) || '{}') } catch { return {} } }
+function wsIcons() { try { return JSON.parse(PrismPreferences.getItem(WS_ICON_KEY) || '{}') } catch { return {} } }
 function getWorkspaceIcon(id) { return wsIcons()[id] || '' }
 function setWorkspaceIcon(id, emoji) {
+  if (!PrismPreferences.isReady()) {
+    PrismPreferences.ensureReady().then(ready => { if (ready) { setWorkspaceIcon(id, emoji); renderDock() } })
+    return
+  }
   const m = wsIcons()
   if (emoji) m[id] = emoji; else delete m[id]
-  localStorage.setItem(WS_ICON_KEY, JSON.stringify(m))
+  PrismPreferences.setItem(WS_ICON_KEY, JSON.stringify(m))
 }
 const escAttr = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 
@@ -2262,10 +2284,6 @@ document.addEventListener('paste', e => {
 
 // ─── Shared config helpers (read by app.js when sending chat messages) ────────
 
-const CONFIG_KEY = 'agent-config'
-function getConfig() {
-  try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}') } catch { return {} }
-}
 function getDisabledTools() { return PrismToolPreferences.read().disabled || [] }
 
 // ─── Model selector ───────────────────────────────────────────────────────────
@@ -2274,14 +2292,16 @@ window.setModel = function(model) { send({ type: 'set_model', model }) }
 
 // ─── Tool approval mode ───────────────────────────────────────────────────────
 // "auto" (default) runs tool calls immediately; "manual" pauses before each one
-// until it's approved in chat. Kept per browser, pushed to the server over WS
-// (it lives on the connection, so a new tab starts from localStorage).
+// until it's approved in chat. The saved preference initializes this connection.
+// A change from another page never silently enables tools on an active socket.
 let approvalMode = 'auto'
-try { approvalMode = localStorage.getItem('prism-approval') === 'manual' ? 'manual' : 'auto' } catch (_) {}
+let approvalInitialized = PrismPreferences.isReady()
+approvalMode = PrismPreferences.getItem('prism-approval') === 'manual' ||
+  (!PrismPreferences.getItem('prism-approval') && PrismPreferences.legacyManualApproval()) ? 'manual' : 'auto'
 
 window.setApprovalMode = function(mode) {
   approvalMode = mode === 'manual' ? 'manual' : 'auto'
-  try { localStorage.setItem('prism-approval', approvalMode) } catch (_) {}
+  try { PrismPreferences.setItem('prism-approval', approvalMode) } catch (_) {}
   syncApprovalSelect()
   send({ type: 'approval_mode', content: approvalMode })
 }
@@ -2809,8 +2829,16 @@ const DRAWER_WIDTH_KEY = 'chat-drawer-width'
 const chatDrawer = document.getElementById('chat-drawer')
 
 // Restore saved width
-const savedDrawerWidth = localStorage.getItem(DRAWER_WIDTH_KEY)
+const savedDrawerWidth = PrismPreferences.getItem(DRAWER_WIDTH_KEY)
 if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
+
+window.addEventListener('prism-preferences-changed', event => {
+  if (!event.detail?.remote) return
+  if (event.detail.keys.includes(DRAWER_WIDTH_KEY)) chatDrawer.style.width = PrismPreferences.getItem(DRAWER_WIDTH_KEY) || ''
+  if (event.detail.keys.includes(WS_ICON_KEY)) renderDock()
+  // Preferences loaded by Retry after an initial connection failure.
+  if (appInitialized && !ws && approvalInitialized === false && PrismPreferences.isReady()) connect()
+})
 
 {
   const handle = document.getElementById('chat-resize-handle')
@@ -2847,7 +2875,7 @@ if (savedDrawerWidth) chatDrawer.style.width = savedDrawerWidth
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
     setIframePE(true)
-    localStorage.setItem(DRAWER_WIDTH_KEY, chatDrawer.style.width)
+    PrismPreferences.setItem(DRAWER_WIDTH_KEY, chatDrawer.style.width)
   })
 }
 
@@ -2893,6 +2921,12 @@ async function initApp() {
     return
   }
 
+  // On mono-user password login the first anonymous preference request may
+  // have failed. Resolve the saved workspace before opening its conversation.
+  if (await PrismPreferences.ensureReady() && !ws) {
+    lastWorkspace = PrismPreferences.getItem('active-workspace') || 'default'
+    currentSessionID = lastWorkspace
+  }
   await loadIdentity()
   applyDisabledApps()
   window.PrismTheme.populateSelect(document.getElementById('theme-select'))
@@ -2911,6 +2945,7 @@ async function initApp() {
   } else if (requestedApp.get('app') === 'telephony' && voxWorkspaceAvailable) {
     setView({ type: 'app', name: 'telephony', tab: requestedApp.get('tab'), group: requestedApp.get('group') })
   } else setView({ type: 'board', workspace: lastWorkspace })
+  appInitialized = true
   if (!ws) connect()
   loadModels()
   setInterval(loadModels, 30000)

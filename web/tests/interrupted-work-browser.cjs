@@ -1,3 +1,4 @@
+const {createPreferencesBackend} = require('./preferences-fixture.cjs')
 const {chromium} = require('playwright')
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path')
 const root = path.resolve(__dirname, '..'), origin = 'http://fixture.invalid'
@@ -20,7 +21,10 @@ const root = path.resolve(__dirname, '..'), origin = 'http://fixture.invalid'
         }
         window.deliverFixture = message => fixtureSockets.at(-1).onmessage({data: JSON.stringify(message)})
       })
+      const preferencesFixture = createPreferencesBackend({origin})
       await page.route('**/*', async route => {
+        const preferenceResponse = preferencesFixture.handle(route)
+        if (preferenceResponse) return preferenceResponse
         const url = new URL(route.request().url())
         assert.equal(url.origin, origin, 'fixture requested an external resource')
         if (url.pathname === '/app.js') {

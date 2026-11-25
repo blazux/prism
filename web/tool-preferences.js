@@ -1,4 +1,4 @@
-// Browser-local opt-outs. A former per-action opt-out keeps its combined tool off.
+// Account tool opt-outs. A former per-action opt-out keeps its combined tool off.
 window.PrismToolPreferences = (() => {
   const key = 'agent-config'
   const combined = {
@@ -9,7 +9,7 @@ window.PrismToolPreferences = (() => {
   }
   function read() {
     let config
-    try { config = JSON.parse(localStorage.getItem(key) || '{}') } catch { config = {} }
+    try { config = JSON.parse(PrismPreferences.getItem(key) || '{}') } catch { config = {} }
     if (!config || typeof config !== 'object' || Array.isArray(config)) config = {}
     const disabled = Array.isArray(config.disabled) ? config.disabled : []
     const notices = new Set(Array.isArray(config.combinedToolNotices) ? config.combinedToolNotices : [])
@@ -26,7 +26,7 @@ window.PrismToolPreferences = (() => {
     }
     return config
   }
-  function write(config) { localStorage.setItem(key, JSON.stringify(config)) }
+  function write(config) { PrismPreferences.setItem(key, JSON.stringify(config)) }
   function set(name, enabled) {
     const config = read(), disabled = new Set(config.disabled)
     enabled ? disabled.delete(name) : disabled.add(name)

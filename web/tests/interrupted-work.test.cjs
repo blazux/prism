@@ -12,6 +12,7 @@ function fixture() {
   const input = {value: 'My next request', readOnly: false}
   const status = {children: [], set textContent(value) {this.text = value; this.children = []}, append(...nodes) {this.children.push(...nodes)}}
   const context = vm.createContext({
+    PrismPreferences: {isReady: () => true},
     currentSessionID: 'main', activeRunStatus: 'interrupted', isStreaming: false,
     pendingChats: new Map(), pendingImages: [{data: 'image', name: 'keep.png'}], pendingFiles: [{name: 'keep.txt', path: 'keep.txt'}],
     ws: {readyState: 1, send: raw => sent.push(JSON.parse(raw))}, WebSocket: {OPEN: 1},
