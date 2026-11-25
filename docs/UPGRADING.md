@@ -1,9 +1,84 @@
 # Upgrading a running Prism
 
-An existing instance upgrades by pulling the new image and restarting —
-`docker compose pull && docker compose up -d` (or `build` if you build locally).
-No manual step, no export/import, no downtime beyond the restart. This file is
-the contract that keeps that true. Every change to `main` must respect it.
+Update the Compose files and images together, preserving your installation's
+environment, volumes, project name and overrides. Database migrations run at
+startup. A restart interrupts active agent tasks; let them finish first.
+Review the requirements below before recreating services, particularly when
+using a custom reverse proxy or execution image.
+
+## Upgrading to 1.1
+
+Back up PostgreSQL, the workspace, the server-private volume and your deployment
+configuration. Preserve the existing encryption key. A database backup without
+that key cannot restore encrypted credentials. Keep your current personal or
+shared mode; do not change `MULTI_USER` during an ordinary upgrade.
+
+### Widget connection
+
+The server now has two listeners: the dashboard on container port **8080** and
+generated widget content on **8081**. The updated standard Compose file publishes
+them on host ports **48080** and **48082**. Updating only the image in an older
+Compose file does not publish the widget listener.
+
+For direct HTTP access, make both published ports reachable from the browser.
+Set `WIDGET_PORT` in `.env` if the widget host port needs to change.
+
+For HTTPS behind a reverse proxy:
+
+1. Give widgets a separate HTTPS hostname, for example
+   `widgets.prism.example.com`, with a valid certificate.
+2. Route that hostname to `prism-server:8081` on a shared Docker network, or to
+   the widget port published on the Docker host. Keep the dashboard route on
+   container port 8080.
+3. Set `WIDGET_ORIGIN=https://widgets.prism.example.com` in the server environment
+   and recreate the server. An HTTPS dashboard requires an HTTPS widget origin.
+4. If your proxy sets a dashboard CSP with `frame-src 'self'`, allow the widget
+   origin in that directive. On the widget hostname, allow the dashboard as a
+   CSP `frame-ancestors` source; do not apply `frame-ancestors 'none'`,
+   `X-Frame-Options: DENY` or `X-Frame-Options: SAMEORIGIN` there.
+5. If your proxy restricts camera, microphone or geolocation to `self` using
+   Permissions-Policy, delegate the features needed by your widgets to the widget
+   origin as well. Browser permission prompts still apply.
+
+Reload open Prism pages after upgrading. Existing widget helpers and tool names
+remain available. For the first reload, use the same browser and profile so
+compatible browser-only widget state can migrate. The original browser storage
+is retained; widgets with dynamically generated storage keys can require a
+separate migration. Back up browser-only data before changing origins.
+Workspace files and application services remain on their existing volumes.
+
+### Execution workspace
+
+Update the execution workspace as well as the server. The standard CPU image
+now uses Ubuntu 24.04, Python 3.12 and Node 26, with updated Python/npm security
+constraints. Rebuild custom images from the current Dockerfiles and check
+third-party scripts that pin older package versions.
+
+The NVIDIA workspace remains a local build based on NVIDIA 26.03. Keep its
+existing GPU access and mounts. Use the
+[NVIDIA update procedure](../README.md#optional-nvidia-workspace);
+the stable pipeline publishes the server and CPU workspace, not a GPU image.
+
+### Pull and recreate
+
+For the standard published CPU installation, run from the repository root:
+
+```sh
+git pull --ff-only
+docker compose pull
+docker compose up -d --no-build
+```
+
+Merge changes into existing overrides rather than replacing your deployment
+configuration. If you normally specify `-p`, `-f`, `--env-file` or profiles,
+keep using the same options. For a local build, use
+`docker compose up -d --build` instead of the published-image command.
+Do not run `down -v` to update.
+
+Check the dashboard, a widget and an existing custom tool after startup.
+Keep backups until those checks pass. For rollback, restore a compatible
+server/workspace pair with its matching configuration and encryption key;
+an older image may not understand newly written data.
 
 ## What must never break
 

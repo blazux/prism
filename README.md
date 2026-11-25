@@ -4,7 +4,7 @@
 
 *Also known as: Probably Runs Interesting Stuff Magically*
 
-**[Get started](#quick-start)** · **[See it in action](#see-it-in-action)** · **[Documentation](https://www.thelastserver.com/docs/installation/)** · [1.0 release notes](docs/releases/v1.0.0.md)
+**[Get started](#quick-start)** · **[See it in action](#see-it-in-action)** · **[Documentation](https://www.thelastserver.com/docs/installation/)** · [1.1 release notes](docs/releases/v1.1.0.md)
 
 **A self-hosted assistant that uses your apps, writes code, automates work and builds the missing interface.**
 
@@ -180,9 +180,10 @@ Use local models, Claude, OpenAI or compatible APIs, and switch between configur
 
 See the [installation guide](https://www.thelastserver.com/docs/installation/) for detailed setup instructions and links to the configuration reference.
 
-The screenshots and settings instructions here follow the current source. For
-the published v1.0.0 images, use the [v1.0.0 quick start](https://github.com/blazux/prism/blob/v1.0.0/README.md#quick-start).
-[Building from source](#build-from-source) runs the interface shown here.
+The screenshots and settings instructions here cover Prism 1.1.
+For an older pinned image, use the README at its matching release tag.
+Existing installations should read the [upgrade guide](docs/UPGRADING.md)
+before pulling a new version.
 
 Install Git and Docker with the Compose v2 plugin. The standard images support
 Linux AMD64 and ARM64. You can use a local model server or an API provider;
