@@ -89,10 +89,10 @@ const root=path.resolve(__dirname,'..');
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='paper');
   assert.equal(await page.evaluate(()=>PrismTheme.getThemeId()),'paper');
   assert.equal(await page.evaluate(()=>document.documentElement.style.getPropertyValue('--bg')),await page.evaluate(()=>PrismTheme.THEMES.paper.vars['--bg']));
-  await page.waitForFunction(async()=>{
-   const saved=await fetch('/api/preferences').then(r=>r.json());
-   return saved.values['prism-theme']==='paper'&&JSON.parse(saved.values['prism-custom-themes']||'[]').some(theme=>theme.id==='legacy-light');
-  });
+  assert.equal(await page.evaluate(()=>PrismPreferences.flush()),true,'save the selected theme before opening another browser');
+  const saved=await page.evaluate(()=>fetch('/api/preferences').then(r=>r.json()));
+  assert.equal(saved.values['prism-theme'],'paper');
+  assert(JSON.parse(saved.values['prism-custom-themes']||'[]').some(theme=>theme.id==='legacy-light'));
   const roaming=await browser.newContext();
   try{
    await roaming.route('**/*',routeFixture);
