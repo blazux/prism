@@ -5,6 +5,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,6 +66,18 @@ class WorkspacePipTests(unittest.TestCase):
         original = self.floors.read_text()
         PIP.configure(self.floors, self.config, [str(self.floors)])
         self.assertEqual(self.floors.read_text(), original)
+
+    def test_installed_framework_packages_survive_empty_vendor_constraints(self):
+        upstream = self.root / "nvidia.txt"
+        upstream.write_text("")
+        versions = {"torch": "2.11.0a0+nv26.03", "numpy": "2.1.0",
+                    "huggingface-hub": "1.7.2", "click": "8.3.1"}
+        with mock.patch.object(PIP.importlib.metadata, "version", side_effect=versions.__getitem__):
+            PIP.configure(self.floors, self.config, [str(upstream)], tuple(versions))
+        result = self.floors.read_text()
+        for name, version in versions.items():
+            self.assertIn(f"{name}=={version}", result)
+        self.assertIn("Pillow>=13.0.0", result)
 
 
 if __name__ == "__main__":

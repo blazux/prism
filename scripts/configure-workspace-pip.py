@@ -2,6 +2,7 @@
 """Apply workspace package floors without changing CUDA/PyTorch constraints."""
 
 import configparser
+import importlib.metadata
 import os
 from pathlib import Path
 import re
@@ -52,8 +53,15 @@ def merge_constraints(floors, upstream):
     floors.write_text(content)
 
 
-def configure(floors, config_path, upstream):
+def configure(floors, config_path, upstream, preserve=()):
     merge_constraints(floors, upstream)
+    # Some framework images ship an empty constraint file. Keep their native
+    # APIs and the selected compatibility dependencies at the installed versions.
+    if preserve:
+        with floors.open("a") as output:
+            output.write("\n# Installed framework compatibility packages.\n")
+            for name in preserve:
+                output.write(f"{name}=={importlib.metadata.version(name)}\n")
     config = configparser.ConfigParser(interpolation=None)
     config.read(config_path)
     if not config.has_section("global"):
@@ -69,4 +77,5 @@ if __name__ == "__main__":
         Path("/etc/prism/python-constraints.txt"),
         Path("/etc/pip.conf"),
         shlex.split(os.environ.get("PIP_CONSTRAINT", "")),
+        shlex.split(os.environ.get("PRISM_PRESERVE_PYTHON_PACKAGES", "")),
     )

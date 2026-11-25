@@ -10,8 +10,10 @@ COPY --from=node-runtime /usr/local/lib/node_modules/ /usr/local/lib/node_module
 COPY --from=node-runtime /usr/local/include/node/ /usr/local/include/node/
 COPY workspace-security-constraints.txt /etc/prism/python-constraints.txt
 COPY scripts/configure-workspace-pip.py /usr/local/bin/configure-workspace-pip.py
-# Preserve NVIDIA's CUDA/PyTorch pins while updating security-managed packages.
-RUN python /usr/local/bin/configure-workspace-pip.py
+# Preserve NVIDIA's native APIs and their dependency compatibility, including
+# releases whose upstream constraint file is empty.
+RUN PRISM_PRESERVE_PYTHON_PACKAGES="torch torchvision numpy pyarrow huggingface-hub click" \
+    python /usr/local/bin/configure-workspace-pip.py
 ENV PIP_CONSTRAINT=/etc/prism/python-constraints.txt
 
 # Tools not included in the NVIDIA base

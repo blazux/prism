@@ -57,10 +57,14 @@ const delay = ms => new Promise(resolve=>setTimeout(resolve,ms))
     // A same-origin regain would expose the dashboard DOM after that navigation.
     for(const activePath of ['/plugins/main/fixture.html','/data/fixture.html','/proxy/3000/page']){
       const current=page.frames().find(frame=>frame.parentFrame()===page.mainFrame())
-      await current.evaluate(destination=>{location.href=destination},base.main+activePath)
+      await Promise.all([
+        current.waitForURL(url=>url.origin===base.widget&&url.pathname===activePath&&!url.searchParams.has('widget_grant'),{waitUntil:'load'}),
+        current.evaluate(destination=>{setTimeout(()=>{location.href=destination},0)},base.main+activePath)
+      ])
       await widget.locator('body[data-ready="true"]').waitFor()
       const navigated=page.frames().find(frame=>frame.parentFrame()===page.mainFrame())
       assert.equal(new URL(navigated.url()).origin,base.widget,'generated content must remain on the content origin')
+      assert.equal(new URL(navigated.url()).pathname,activePath,'each active-content navigation must finish before the next check')
       assert.equal(new URL(navigated.url()).searchParams.has('widget_grant'),false,'one-time URL credential must be scrubbed')
       assert.equal(await widget.locator('body').getAttribute('data-parent-blocked'),'true')
     }
