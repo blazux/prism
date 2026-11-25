@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+
+	"prism/internal/httpguard"
 	"prism/internal/ollama"
 )
 
@@ -19,7 +21,7 @@ func (c *Client) ModelCapabilities(ctx context.Context, model string) (ollama.Mo
 		if err := c.auth(req); err != nil {
 			return ollama.ModelCapabilities{}, err
 		}
-		resp, err := c.httpClient.Do(req)
+		resp, err := httpguard.Do(c.httpClient, req)
 		if err != nil {
 			return ollama.ModelCapabilities{}, err
 		}

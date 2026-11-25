@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"prism/internal/httpguard"
 )
 
 func (c *Client) ModelCapabilities(ctx context.Context, model string) (ModelCapabilities, error) {
@@ -18,7 +20,7 @@ func (c *Client) ModelCapabilities(ctx context.Context, model string) (ModelCapa
 			return ModelCapabilities{}, err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		resp, err := c.httpClient.Do(req)
+		resp, err := httpguard.Do(c.httpClient, req)
 		if err != nil {
 			return ModelCapabilities{}, err
 		}

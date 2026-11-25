@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/httpguard"
 	"prism/internal/ollama"
 )
 
@@ -70,7 +71,7 @@ func NewClient(baseURL, apiKey, fallbackModel string) *Client {
 		apiKey:        strings.TrimSpace(apiKey),
 		fallbackModel: fallbackModel,
 		// No client-wide timeout: it would also cap the streamed body.
-		httpClient: &http.Client{Timeout: 0, Transport: tr},
+		httpClient: &http.Client{Timeout: 0, Transport: tr, CheckRedirect: httpguard.SameOriginRedirect},
 	}
 }
 
@@ -114,7 +115,7 @@ func (c *Client) postMessages(ctx context.Context, body []byte) (*http.Response,
 			return nil, err
 		}
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := httpguard.Do(c.httpClient, req)
 		if err == nil {
 			ollama.ObserveHTTPStatus(ctx, resp.StatusCode)
 			switch resp.StatusCode {
@@ -128,6 +129,8 @@ func (c *Client) postMessages(ctx context.Context, body []byte) (*http.Response,
 			default:
 				return resp, nil
 			}
+		} else if errors.Is(err, httpguard.ErrRedirect) {
+			return nil, err
 		} else {
 			lastErr = err
 		}
@@ -586,7 +589,7 @@ func (c *Client) listModels(ctx context.Context, strict bool) ([]string, error) 
 		return nil, err
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpguard.Do(c.httpClient, req)
 	if err != nil {
 		if strict {
 			return nil, err
@@ -673,7 +676,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	if err := c.auth(req); err != nil {
 		return err
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpguard.Do(c.httpClient, req)
 	if err != nil {
 		return err
 	}

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"prism/internal/httpguard"
 	"prism/internal/ollama"
 )
 
@@ -86,7 +88,7 @@ func NewClient(baseURL, apiKey string) *Client {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
 		// No client-wide timeout: it would also cap the streamed body.
-		httpClient: &http.Client{Timeout: 0, Transport: tr},
+		httpClient: &http.Client{Timeout: 0, Transport: tr, CheckRedirect: httpguard.SameOriginRedirect},
 	}
 }
 
@@ -366,7 +368,7 @@ func (c *Client) postChatWithRetry(ctx context.Context, body []byte) (*http.Resp
 		}
 		c.auth(req)
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := httpguard.Do(c.httpClient, req)
 		if err == nil {
 			ollama.ObserveHTTPStatus(ctx, resp.StatusCode)
 			switch resp.StatusCode {
@@ -378,6 +380,8 @@ func (c *Client) postChatWithRetry(ctx context.Context, body []byte) (*http.Resp
 			default:
 				return resp, nil // success (200) or a non-transient status the caller handles
 			}
+		} else if errors.Is(err, httpguard.ErrRedirect) {
+			return nil, err
 		} else {
 			lastErr = err // dial/connection failure
 		}
@@ -622,7 +626,7 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}
 	c.auth(req)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpguard.Do(c.httpClient, req)
 	if err != nil {
 		return nil, err
 	}

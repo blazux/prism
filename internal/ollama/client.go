@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +15,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"prism/internal/httpguard"
 )
 
 // retryBaseBackoff is the first retry delay (doubled each attempt); a package
@@ -39,7 +42,7 @@ func (c *Client) postChat(ctx context.Context, body []byte) (*http.Response, err
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.httpClient.Do(httpReq)
+		resp, err := httpguard.Do(c.httpClient, httpReq)
 		if err == nil {
 			ObserveHTTPStatus(ctx, resp.StatusCode)
 			switch resp.StatusCode {
@@ -49,6 +52,8 @@ func (c *Client) postChat(ctx context.Context, body []byte) (*http.Response, err
 			default:
 				return resp, nil // success (200) or a non-transient status the caller handles
 			}
+		} else if errors.Is(err, httpguard.ErrRedirect) {
+			return nil, err
 		} else {
 			lastErr = fmt.Errorf("http: %w", err) // dial/connection failure
 		}
@@ -138,8 +143,9 @@ func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout:   0, // no client-wide timeout: it would also cap the streamed body
-			Transport: tr,
+			Timeout:       0, // no client-wide timeout: it would also cap the streamed body
+			Transport:     tr,
+			CheckRedirect: httpguard.SameOriginRedirect,
 		},
 	}
 }
@@ -327,7 +333,7 @@ func (c *Client) modelThinking(ctx context.Context, model string) thinkingSuppor
 		return thinkingSupport{}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpguard.Do(c.httpClient, req)
 	if err != nil {
 		return thinkingSupport{}
 	}
@@ -468,7 +474,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpguard.Do(c.httpClient, req)
 	if err != nil {
 		return err
 	}
@@ -487,7 +493,7 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpguard.Do(c.httpClient, req)
 	if err != nil {
 		return nil, err
 	}
