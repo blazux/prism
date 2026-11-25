@@ -32,6 +32,7 @@ func TestStripPrismCredentials(t *testing.T) {
 	h := http.Header{}
 	h.Set("Authorization", "Bearer deployment-token")
 	h.Add("Cookie", sessionCookie+"=abc; grafana_session=keep")
+	h.Add("Cookie", widgetCookie+"=legacy; "+widgetCookie+"_first=one; "+widgetCookie+"_second =two")
 	h.Add("Cookie", "other=1")
 	stripPrismCredentials(h)
 	if h.Get("Authorization") != "" {

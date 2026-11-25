@@ -67,7 +67,7 @@ func TestWidgetBrowserFixture(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		proxyCalls++
-		proxyCredential = proxyCredential || strings.Contains(r.Header.Get("Cookie"), sessionCookie+"=") || strings.Contains(r.Header.Get("Cookie"), widgetCookie+"=") || r.Header.Get("Authorization") != "" || r.URL.Query().Has("widget_grant")
+		proxyCredential = proxyCredential || strings.Contains(r.Header.Get("Cookie"), sessionCookie+"=") || strings.Contains(r.Header.Get("Cookie"), widgetCookie) || r.Header.Get("Authorization") != "" || r.URL.Query().Has("widget_grant")
 		serviceCookie = serviceCookie || strings.Contains(r.Header.Get("Cookie"), "fixture_service=retained")
 		mu.Unlock()
 		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {

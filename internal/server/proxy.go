@@ -152,7 +152,9 @@ func stripPrismCredentials(h http.Header) {
 	for _, line := range raw {
 		for _, part := range strings.Split(line, ";") {
 			part = strings.TrimSpace(part)
-			if part == "" || strings.HasPrefix(part, sessionCookie+"=") || strings.HasPrefix(part, widgetCookie+"=") {
+			name, _, _ := strings.Cut(part, "=")
+			name = strings.TrimSpace(name)
+			if part == "" || name == sessionCookie || isWidgetCookie(name) {
 				continue
 			}
 			kept = append(kept, part)
@@ -171,7 +173,7 @@ func stripPrismResponseCookies(h http.Header) {
 	for _, value := range values {
 		name, _, _ := strings.Cut(value, "=")
 		name = strings.TrimSpace(name)
-		if name != sessionCookie && name != widgetCookie {
+		if name != sessionCookie && !isWidgetCookie(name) {
 			h.Add("Set-Cookie", value)
 		}
 	}

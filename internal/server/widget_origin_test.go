@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -24,13 +25,14 @@ import (
 func TestWidgetWebSocketProxyKeepsServiceSessionWithoutReplacingPrismCookies(t *testing.T) {
 	s := isolatedWidgetServer(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" || strings.Contains(r.Header.Get("Cookie"), widgetCookie+"=") || strings.Contains(r.Header.Get("Cookie"), sessionCookie+"=") || r.URL.Query().Get("widget_grant") != "" {
+		if r.Header.Get("Authorization") != "" || strings.Contains(r.Header.Get("Cookie"), widgetCookie) || strings.Contains(r.Header.Get("Cookie"), sessionCookie+"=") || r.URL.Query().Get("widget_grant") != "" {
 			http.Error(w, "unexpected Prism credential", 403)
 			return
 		}
 		headers := http.Header{}
 		headers.Add("Set-Cookie", sessionCookie+"=rejected; Path=/; HttpOnly")
 		headers.Add("Set-Cookie", widgetCookie+"=rejected; Path=/; HttpOnly")
+		headers.Add("Set-Cookie", widgetCookie+"_foreign=rejected; Path=/; HttpOnly")
 		headers.Add("Set-Cookie", "service_session=preserved; Path=/; HttpOnly")
 		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, headers)
 		if err != nil {
@@ -63,7 +65,7 @@ func TestWidgetWebSocketProxyKeepsServiceSessionWithoutReplacingPrismCookies(t *
 	defer conn.Close()
 	serviceCookie := false
 	for _, cookie := range response.Cookies() {
-		if cookie.Name == sessionCookie || cookie.Name == widgetCookie && cookie.Value != grant {
+		if cookie.Name == sessionCookie || isWidgetCookie(cookie.Name) && cookie.Value != grant {
 			t.Fatalf("service upgrade replaced a Prism cookie: %v", response.Header.Values("Set-Cookie"))
 		}
 		serviceCookie = serviceCookie || cookie.Name == "service_session" && cookie.Value == "preserved"
@@ -117,6 +119,62 @@ func TestWidgetAccessSurvivesRestartWithTheInstallationKey(t *testing.T) {
 	other.initializeWidgetKey([]byte("different-installation-private-key"))
 	if _, ok := other.openWidgetGrant(grant); ok {
 		t.Fatal("another installation accepted the widget credential")
+	}
+}
+
+func TestWidgetCookiesCoexistAcrossPortsAndMigrateOpenApps(t *testing.T) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar, Timeout: 3 * time.Second}
+	var origins []string
+	for _, key := range []string{"first-installation", "second-installation"} {
+		s := isolatedWidgetServer(t)
+		s.cfg.AuthToken = key
+		handler, err := s.WidgetHandler()
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := httptest.NewServer(handler)
+		t.Cleanup(content.Close)
+		grant := widgetGrantForTest(t, s, "")
+		response, err := client.Post(content.URL+"/__prism_widget/authorize", "application/json",
+			strings.NewReader("{\"token\":\""+grant+"\"}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("authorize content: %d", response.StatusCode)
+		}
+		origins = append(origins, content.URL)
+	}
+	for range 3 {
+		for _, origin := range origins {
+			response, err := client.Get(origin + "/data/fixture.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK || string(body) != "fixture data" {
+				t.Fatalf("another port replaced a native widget credential: %d %q", response.StatusCode, body)
+			}
+		}
+	}
+	s := isolatedWidgetServer(t)
+	handler, err := s.WidgetHandler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://widgets.prism.test/data/fixture.json", nil)
+	request.AddCookie(&http.Cookie{Name: widgetCookie, Value: widgetGrantForTest(t, s, "")})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	cookies := response.Result().Cookies()
+	if response.Code != http.StatusOK || len(cookies) != 1 || cookies[0].Name != widgetCookieName(request) || !cookies[0].HttpOnly {
+		t.Fatal("an existing native app did not migrate its legacy credential")
 	}
 }
 
@@ -227,7 +285,7 @@ func TestWidgetAuthorizationRejectsOtherOrigins(t *testing.T) {
 	r.Header.Set("Origin", "https://widgets.prism.test")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
-	if w.Code != 200 || len(w.Result().Cookies()) != 1 || w.Result().Cookies()[0].Name != widgetCookie || !w.Result().Cookies()[0].HttpOnly || !w.Result().Cookies()[0].Secure {
+	if w.Code != 200 || len(w.Result().Cookies()) != 1 || w.Result().Cookies()[0].Name != widgetCookieName(r) || !w.Result().Cookies()[0].HttpOnly || !w.Result().Cookies()[0].Secure {
 		t.Fatal("same-origin frame authorization or its protected cookie broke", w.Code)
 	}
 }
@@ -354,6 +412,8 @@ func TestWidgetProxyKeepsServiceStateWithoutForwardingPrismCredentials(t *testin
 	r := httptest.NewRequest(http.MethodPost, "https://widgets.prism.test/proxy/3000/fixture?value=keep&widget_grant="+url.QueryEscape(grant), strings.NewReader("fixture service input"))
 	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: "unrelated-main-cookie"})
 	r.AddCookie(&http.Cookie{Name: widgetCookie, Value: "unrelated-widget-cookie"})
+	r.AddCookie(&http.Cookie{Name: widgetCookieName(r), Value: "other-content-cookie"})
+	r.AddCookie(&http.Cookie{Name: widgetCookie + "_foreign", Value: "another-instance-cookie"})
 	r.AddCookie(&http.Cookie{Name: "service_session", Value: "keep"})
 	r.Header.Set("Authorization", "Bearer unrelated-main-token")
 	w := httptest.NewRecorder()

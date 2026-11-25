@@ -27,6 +27,17 @@ const widgetCookie = "prism_widget"
 const widgetGrantTTL = sessionTTL
 const widgetAAD = "prism-widget-access-v1"
 
+func widgetCookieName(r *http.Request) string {
+	// Cookies have no port scope. Keep two installations on different ports of
+	// one host from replacing each other's native app/service credentials.
+	sum := sha256.Sum256([]byte(strings.ToLower(requestOrigin(r))))
+	return fmt.Sprintf("%s_%x", widgetCookie, sum[:8])
+}
+
+func isWidgetCookie(name string) bool {
+	return name == widgetCookie || strings.HasPrefix(name, widgetCookie+"_")
+}
+
 type widgetCredential struct {
 	Kind    string `json:"kind"`
 	Value   string `json:"value,omitempty"`
@@ -206,7 +217,7 @@ func widgetAPIAllowed(r *http.Request) bool {
 }
 
 func (s *Server) setWidgetCookie(w http.ResponseWriter, r *http.Request, token string) {
-	http.SetCookie(w, &http.Cookie{Name: widgetCookie, Value: token, Path: "/", HttpOnly: true,
+	http.SetCookie(w, &http.Cookie{Name: widgetCookieName(r), Value: token, Path: "/", HttpOnly: true,
 		Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https", SameSite: http.SameSiteLaxMode,
 		MaxAge: int(widgetGrantTTL.Seconds())})
 }
@@ -261,8 +272,13 @@ func (s *Server) WidgetHandler() (http.Handler, error) {
 			return
 		}
 		token := r.URL.Query().Get("widget_grant")
+		legacyCookie := false
 		if token == "" {
-			token = cookieValue(r, widgetCookie)
+			token = cookieValue(r, widgetCookieName(r))
+			if token == "" {
+				token = cookieValue(r, widgetCookie)
+				legacyCookie = token != ""
+			}
 		}
 		credential, ok := s.openWidgetGrant(token)
 		if !ok {
@@ -272,6 +288,11 @@ func (s *Server) WidgetHandler() (http.Handler, error) {
 		if origin := r.Header.Get("Origin"); origin != "" && origin != requestOrigin(r) {
 			writeErr(w, 403, "cross-origin widget request refused")
 			return
+		}
+		if legacyCookie {
+			// Existing open widgets migrate without a reload. Other instances may
+			// still use the old cookie, so do not delete it on their behalf.
+			s.setWidgetCookie(w, r, token)
 		}
 		if r.URL.Query().Has("widget_grant") {
 			s.setWidgetCookie(w, r, token)
@@ -297,7 +318,7 @@ func (s *Server) WidgetHandler() (http.Handler, error) {
 		cookies := clone.Cookies()
 		clone.Header.Del("Cookie")
 		for _, c := range cookies {
-			if c.Name != widgetCookie {
+			if !isWidgetCookie(c.Name) {
 				clone.AddCookie(c)
 			}
 		}

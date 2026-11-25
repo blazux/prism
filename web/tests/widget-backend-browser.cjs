@@ -51,7 +51,7 @@ const delay = ms => new Promise(resolve=>setTimeout(resolve,ms))
     assert.equal(state.results[3],403,'content-origin control API must stay blocked')
     assert.equal(state.results[4],true,'the content document must not read the main API')
     assert.equal(state.results[5],'pong','proxied WebSocket must retain native operation')
-    assert.equal(await frame.evaluate(()=>document.cookie.includes('prism_session=')||document.cookie.includes('prism_widget=')),false,'content scripts must not read either HTTP-only credential')
+    assert.equal(await frame.evaluate(()=>document.cookie.includes('prism_session=')||document.cookie.includes('prism_widget')),false,'content scripts must not read either HTTP-only credential')
 
     // Navigate the generated document to each main-origin active-content path.
     // A same-origin regain would expose the dashboard DOM after that navigation.
@@ -75,7 +75,7 @@ const delay = ms => new Promise(resolve=>setTimeout(resolve,ms))
     assert.equal(stats.proxyCredential,false,'actual proxy must not forward Prism login or widget credentials')
     assert.equal(stats.serviceCookie,true,'actual proxy must preserve the service own cookie')
 
-    await context.clearCookies({name:'prism_widget'})
+    await context.clearCookies({name:/^prism_widget(?:_|$)/})
     assert.equal((await page.request.get(base.widget+'/data/fixture.json')).status(),401,'main cookie alone must not authorize the content origin')
     assert.equal((await page.request.get(base.main+'/api/auth').then(r=>r.json())).authenticated,true,'dashboard cookie remains valid on the main origin')
     assert.deepEqual(errors,[])
