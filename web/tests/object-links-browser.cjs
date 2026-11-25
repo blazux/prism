@@ -1,6 +1,6 @@
 const {chromium} = require('playwright')
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path')
-const root = path.resolve(__dirname, '..'), origin = 'http://fixture.invalid'
+const root = path.resolve(__dirname, '..'), origin = 'http://localhost'
 const wait = async (predicate, label) => {
   const until = Date.now() + 7000
   while (!predicate()) {if (Date.now() > until) throw Error('Timed out: ' + label); await new Promise(resolve => setTimeout(resolve, 20))}
@@ -13,8 +13,11 @@ const wait = async (predicate, label) => {
       page.setDefaultTimeout(8000)
       const errors = [], reads = [], writes = [], navigations = []
       let failNoteSave=false, holdNoteSave=false, releaseNoteSave
+      let failDraftSave=false, holdDraftSave=false, releaseDraftSave
       const session = multi ? 'u7-main' : 'main', assistant = multi ? 'u7-assistant' : 'assistant'
       const noteID = 'Folder/A & B #é.md', secondNoteID = 'Folder/Other.md'
+      const notes=new Map([noteID,secondNoteID].map(id=>[id,{id,title:id===noteID?'Linked note':'Second note',body:'Saved body',tags:'',scope:'personal',canEdit:true}]))
+      const listedNotes=new Set(), drafts=new Map()
       page.on('pageerror', error => errors.push(error.message))
       await page.addInitScript(() => {
         window.fixtureSockets = []
@@ -61,12 +64,17 @@ const wait = async (predicate, label) => {
             if(JSON.parse(request.postData()).body==='Keep this draft through the link') await new Promise(resolve=>setTimeout(resolve,150))
             if(holdNoteSave){holdNoteSave=false;await new Promise(resolve=>releaseNoteSave=resolve)}
             if(failNoteSave){status=503;data={error:'Fixture note save unavailable'}}
-            else data={id:JSON.parse(request.postData()).id}
+            else {
+              const incoming=request.postDataJSON()
+              notes.set(incoming.id,{...notes.get(incoming.id),...incoming})
+              listedNotes.add(incoming.id)
+              data={id:incoming.id}
+            }
           }
           else if(url.searchParams.has('id')) {
             const id=url.searchParams.get('id')
-            data={note:{id,title:id===noteID?'Linked note':'Second note',body:'Saved body',tags:'',scope:'personal',canEdit:true},source:'vault'}
-          } else data={notes:[],source:'vault'}
+            data={note:notes.get(id),source:'vault'}
+          } else data={notes:[...listedNotes].map(id=>notes.get(id)),source:'vault'}
         } else if(url.pathname==='/api/tasks') {
           const id=url.searchParams.get('id')
           if(id==='missing'){status=404;data={error:'Task not found or unavailable.'}}
@@ -78,6 +86,21 @@ const wait = async (predicate, label) => {
         } else if(url.pathname==='/api/email/config') data={configured:true,has_password:true,user:'fixture@example.test',list_limit:2}
         else if(url.pathname==='/api/email/folders') data={folders:['INBOX','Archive/2024']}
         else if(url.pathname==='/api/email/list') data={messages:[]}
+        else if(url.pathname==='/api/email/drafts') {
+          if(request.method()==='POST') {
+            if(holdDraftSave){holdDraftSave=false;await new Promise(resolve=>releaseDraftSave=resolve)}
+            if(failDraftSave){status=503;data={error:'Fixture draft save unavailable'}}
+            else {
+              const incoming=request.postDataJSON(),id=incoming.id||drafts.size+1,previous=drafts.get(id)
+              if(previous&&previous.revision!==incoming.revision){status=409;data={error:'Draft changed'}}
+              else {
+                const draft={...previous,...incoming,id,revision:(previous?.revision||0)+1,status:'draft',updatedAt:'2026-11-24T16:00:00Z'}
+                drafts.set(id,draft);data={draft}
+              }
+            }
+          } else if(url.searchParams.has('id'))data={draft:drafts.get(Number(url.searchParams.get('id'))),mailboxChanged:false}
+          else data={drafts:[...drafts.values()]}
+        }
         else if(url.pathname==='/api/email/read') data={message:{uid:Number(url.searchParams.get('uid')),subject:'Archived linked message',from:'friend@example.test',to:'fixture@example.test',body:'Older than the loaded page',seen:true,date:'2024-01-01T10:00:00Z'}}
         return route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)})
       })
@@ -94,7 +117,9 @@ const wait = async (predicate, label) => {
       await app.locator('#e-title').waitFor()
       await page.waitForFunction(()=>fixtureLinks.ready)
       assert.equal(await app.locator('#e-title').inputValue(),'Linked note')
+      await app.locator('.note-actions > summary').click()
       await app.getByRole('button',{name:'Copy link',exact:true}).click()
+      await app.locator('.note-actions > summary').click()
       assert.equal(await page.frames().find(f=>f.url().includes('/apps/notes.html')).evaluate(()=>fixtureCopied),origin+'/?app=notes&id='+encodeURIComponent(noteID).replaceAll('%20','+'))
       assert.equal(await page.evaluate(()=>fixtureLinks.session),assistant)
       const notesNavigation=navigations.length
@@ -149,13 +174,19 @@ const wait = async (predicate, label) => {
       await app.getByText(/Close the current draft/).waitFor()
       assert.equal(await app.locator('#c-body').inputValue(),'Keep my mail draft')
 
+      failDraftSave=true
+      await app.locator('#c-body').fill('Keep my mail draft after an edit')
       await chatLink('/?workspace='+session)
-      await app.getByText('Discard unsaved changes before opening this link?',{exact:true}).waitFor()
-      await app.locator('.pm-overlay').getByRole('button',{name:'Cancel',exact:true}).click()
-      assert.equal(await app.locator('#c-body').inputValue(),'Keep my mail draft')
+      await app.getByText('Draft not saved: Fixture draft save unavailable',{exact:true}).waitFor()
+      assert.equal(await app.locator('#c-body').inputValue(),'Keep my mail draft after an edit')
+      assert.equal(await page.evaluate(()=>fixtureLinks.view.type),'app','failed draft save blocks navigation')
+      failDraftSave=false;holdDraftSave=true
       await chatLink('/?workspace='+session)
-      await app.locator('.pm-overlay').getByRole('button',{name:'Discard',exact:true}).click()
+      await wait(()=>releaseDraftSave,'mail draft save before navigation')
+      assert.equal(await page.evaluate(()=>fixtureLinks.view.type),'app','navigation waits for durable draft save')
+      releaseDraftSave()
       await page.waitForFunction(id=>fixtureLinks.view.type==='board'&&fixtureLinks.session===id,session)
+      assert([...drafts.values()].some(draft=>draft.body==='Keep my mail draft after an edit'),'mail draft survives leaving the app')
       await page.evaluate(()=>deliverFixture({type:'plugin_load',id:'links',title:'Links widget',content:'<a href="/?app=tasks&id=from-widget">Task from widget</a>',open:true}))
       await page.frameLocator('.widget-body iframe').getByRole('link',{name:'Task from widget'}).click()
       await app.locator('dialog[open] input[name=title]').waitFor()

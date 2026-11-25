@@ -41,6 +41,7 @@ const root = path.resolve(__dirname, '..'), origin = 'http://fixture.invalid'
         else if (url.pathname === '/api/vox-workspace') data = {available: false}
         else if (url.pathname === '/api/sessions') data = {sessions: [{id: session, name: 'Report', runStatus: 'interrupted'}]}
         else if (url.pathname === '/api/sessions/' + session + '/activity') data = {session, runStatus: 'interrupted', messages: [], recentTools: [], subagents: [], backgroundJobs: 0}
+        else if (url.pathname === '/api/activity/work') data = {items: [{id: 'workspace:' + session, name: 'Report', runStatus: 'interrupted', conversationUrl: '/?workspace=' + session + '&chat=open'}], observedAt: '2026-11-24T16:00:00Z'}
         else if (url.pathname === '/api/activity') data = {events: []}
         else if (url.pathname === '/api/resources') data = []
         else if (url.pathname.startsWith('/api/sessions/') && url.pathname.endsWith('/activity')) {status = 404; data = {error: 'not found'}}
@@ -50,9 +51,8 @@ const root = path.resolve(__dirname, '..'), origin = 'http://fixture.invalid'
       await page.waitForFunction(() => fixtureSockets.length > 0)
       await page.locator('.rail-item[data-app="activity"]').click()
       const activity = page.frameLocator('#app-frame')
-      await activity.getByRole('button', {name: 'Interrupted', exact: true}).click()
-      await activity.getByText('Report', {exact: true}).waitFor()
-      await activity.getByRole('link', {name: 'Open chat'}).click()
+      await activity.locator('[data-group=attention] .work-card').getByText('Report', {exact: true}).waitFor()
+      await activity.getByRole('link', {name: 'Open conversation'}).click()
       await page.waitForFunction(id => fixtureRun.open && fixtureRun.session === id, session)
       const calls = () => page.evaluate(() => fixtureSockets.flatMap(socket => socket.messages).filter(message => message.type === 'chat'))
       assert.equal((await calls()).length, 0, 'opening an interrupted conversation must not resume it')
@@ -82,8 +82,7 @@ const root = path.resolve(__dirname, '..'), origin = 'http://fixture.invalid'
       assert.equal((await calls()).length, 0, 'reloading must not resume automatically')
       await page.setViewportSize({width: 390, height: 820})
       await page.locator('.rail-item[data-app="activity"]').click()
-      await activity.getByRole('button', {name: 'Interrupted', exact: true}).click()
-      await activity.getByRole('link', {name: 'Open chat'}).waitFor()
+      await activity.locator('[data-group=attention] .work-card').getByRole('link', {name: 'Open conversation'}).waitFor()
       assert.equal(await page.locator('#app-frame').evaluate(frame => frame.contentDocument.documentElement.scrollWidth <= frame.contentWindow.innerWidth), true)
       assert.deepEqual(errors, [])
       await context.close()

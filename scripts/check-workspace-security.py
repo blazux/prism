@@ -12,11 +12,15 @@ def version(value):
     return tuple(int(part) for part in re.findall(r"\d+", value)[:3])
 
 
-def main():
+def check_system_decoder():
     library = ctypes.util.find_library("brotlidec")
-    if not library:
-        raise SystemExit("Missing system Brotli decoder")
-    decoder = ctypes.CDLL(library)
+    # Discovery invokes external tools which can fail under cross-build
+    # emulation. The Linux loader can still resolve the installed SONAME,
+    # including its architecture-specific library directory.
+    try:
+        decoder = ctypes.CDLL(library or "libbrotlidec.so.1")
+    except OSError as error:
+        raise SystemExit(f"Cannot load system Brotli decoder: {error}") from error
     error_string = decoder.BrotliDecoderErrorString
     error_string.argtypes = [ctypes.c_int]
     error_string.restype = ctypes.c_char_p
@@ -25,6 +29,10 @@ def main():
     # Brotli 1.0.x returns the bare name; 1.1.x+ includes the category prefix.
     if error_string(-17) not in (b"BLOCK_SWITCH", b"_ERROR_FORMAT_BLOCK_SWITCH"):
         raise SystemExit("System Brotli decoder lacks the block-switch fix")
+
+
+def main():
+    check_system_decoder()
 
     packages = {}
     for name in ("Brotli", "brotlicffi"):
