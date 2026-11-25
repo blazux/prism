@@ -38,6 +38,9 @@ type Config struct {
 	PostgresURL      string
 	EmbedModel       string
 	AuthToken        string
+	WidgetListenAddr string
+	WidgetOrigin     string
+	WidgetPublicPort string
 	// MultiUser turns Prism from a personal dashboard into a shared one: accounts,
 	// groups, rooms, per-user scoping and a login page. Off by default — at home
 	// there is one user, and AuthToken is the whole of authentication. It is read

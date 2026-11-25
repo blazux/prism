@@ -189,8 +189,8 @@ Linux AMD64 and ARM64. You can use a local model server or an API provider;
 you will connect it in Prism's interface after startup.
 
 Run the following commands in a terminal **on the Docker host**.
-The default stack needs host ports **48080** for Prism and
-**80** for the service proxy to be available.
+The default stack needs host ports **48080** for Prism, **48082** for widgets,
+and **80** for the service proxy to be available.
 
 **1. Install.**
 
@@ -231,6 +231,13 @@ In personal mode, sign in with your token. In shared mode, create the first
 administrator account. If Docker runs on another machine, use that machine's
 address or your configured reverse-proxy URL: `localhost` in your browser refers
 to the machine running the browser.
+
+Widgets open on the same hostname at port **48082**. Keep that port reachable
+from your browser; change `WIDGET_PORT` in `.env` if it is already in use.
+For an HTTPS reverse proxy, give widgets a separate HTTPS hostname, route it to
+the server container's port **8081**, and set
+`WIDGET_ORIGIN=https://widgets.prism.example.com`. Both hostnames need a valid
+TLS certificate. The dashboard continues to use container port **8080**.
 
 **3. Connect your first model.**
 

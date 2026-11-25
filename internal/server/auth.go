@@ -323,8 +323,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		if s.docker != nil {
 			identity["terminalAvailable"] = s.docker.SupportsTerminal()
 		}
-		if s.cfg.WidgetFrameURL != "" {
-			identity["widgetHosting"] = map[string]string{"frameURL": s.cfg.WidgetFrameURL, "grantURL": s.cfg.WidgetGrantURL}
+		if widget := s.widgetHosting(r); widget != nil {
+			identity["widgetHosting"] = widget
 		}
 		json.NewEncoder(w).Encode(identity)
 		return
@@ -344,11 +344,20 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	// isAdmin = global admin OR admin of any group — the very predicate that guards
 	// /api/terminal and /api/exec. The UI hides the terminal on it; the server never
 	// trusts it.
-	json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "user": u, "isAdmin": s.isAdminUser(r.Context(), u), "multiUser": true})
+	identity := map[string]any{"authenticated": true, "user": u, "isAdmin": s.isAdminUser(r.Context(), u), "multiUser": true}
+	if widget := s.widgetHosting(r); widget != nil {
+		identity["widgetHosting"] = widget
+	}
+	json.NewEncoder(w).Encode(identity)
 }
 
 // POST /api/signup {email, password, displayName}
 func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeErr(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
 	ms := s.store()
 	if ms == nil {
 		writeErr(w, http.StatusServiceUnavailable, "signup requires a database (POSTGRES_URL)")
@@ -431,6 +440,11 @@ func (s *Server) notifyAdminsOfSignup(displayName, email string) {
 
 // POST /api/login {email, password}
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeErr(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
 	ms := s.store()
 	if ms == nil {
 		writeErr(w, http.StatusServiceUnavailable, "login requires a database (POSTGRES_URL)")

@@ -10,6 +10,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "48080:8080"
+      - "${WIDGET_PORT:-48082}:8081"
     volumes:
       - workspace:/workspace
       - server-private:/var/lib/prism
@@ -55,6 +56,8 @@ services:
       - LIVE_CONTEXT_CHAR_BUDGET=${LIVE_CONTEXT_CHAR_BUDGET:-}
       - SEARXNG_URL=${SEARXNG_URL}
       - PRISM_TOKEN=${PRISM_TOKEN:-}
+      - WIDGET_ORIGIN=${WIDGET_ORIGIN:-}
+      - WIDGET_PORT=${WIDGET_PORT:-48082}
       - DOCKER_MODE=${DOCKER_MODE:-host}
       - SERVICE_PORT_START=${SERVICE_PORT_START:-20000}
       - SERVICE_PORT_END=${SERVICE_PORT_END:-20999}

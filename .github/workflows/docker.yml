@@ -56,6 +56,9 @@ jobs:
           for test in \
             web/tests/response-attachments-browser.cjs \
             web/tests/teams-admin-browser.cjs \
+            web/tests/admin-values-browser.cjs \
+            web/tests/widget-origin-browser.cjs \
+            web/tests/widget-backend-browser.cjs \
             web/tests/telephony-app-browser.cjs \
             web/tests/conversation-settings-browser.cjs \
             web/tests/theme-gallery-browser.cjs \

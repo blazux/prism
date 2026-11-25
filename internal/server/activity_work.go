@@ -94,7 +94,7 @@ func (s *Server) handleActivityWork(w http.ResponseWriter, r *http.Request) {
 	}
 	groups := []memory.Group{}
 	if s.cfg.MultiUser && u != nil {
-		if s.isAdminUser(ctx, u) {
+		if u.IsGlobalAdmin() {
 			groups, err = ms.ListGroups(ctx)
 		} else {
 			var memberships []memory.Membership

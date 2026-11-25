@@ -69,6 +69,7 @@ func (s *Server) handleSocketIOProxy(w http.ResponseWriter, r *http.Request) {
 		stripPrismCredentials(req.Header)
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
+		stripPrismResponseCookies(resp.Header)
 		body, err := readProxyBody(resp.Body)
 		resp.Body.Close()
 		if err != nil {
@@ -151,7 +152,7 @@ func stripPrismCredentials(h http.Header) {
 	for _, line := range raw {
 		for _, part := range strings.Split(line, ";") {
 			part = strings.TrimSpace(part)
-			if part == "" || strings.HasPrefix(part, sessionCookie+"=") {
+			if part == "" || strings.HasPrefix(part, sessionCookie+"=") || strings.HasPrefix(part, widgetCookie+"=") {
 				continue
 			}
 			kept = append(kept, part)
@@ -159,6 +160,20 @@ func stripPrismCredentials(h http.Header) {
 	}
 	if len(kept) > 0 {
 		h.Set("Cookie", strings.Join(kept, "; "))
+	}
+}
+
+// Services may set their own cookies, but cannot replace Prism's login or
+// widget authorization on installations using separate ports on one hostname.
+func stripPrismResponseCookies(h http.Header) {
+	values := h.Values("Set-Cookie")
+	h.Del("Set-Cookie")
+	for _, value := range values {
+		name, _, _ := strings.Cut(value, "=")
+		name = strings.TrimSpace(name)
+		if name != sessionCookie && name != widgetCookie {
+			h.Add("Set-Cookie", value)
+		}
 	}
 }
 
@@ -212,10 +227,6 @@ func (s *Server) handleWorkspaceProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) reverseProxy(w http.ResponseWriter, r *http.Request, targetHost, subPath, prefix string) {
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		s.tunnelWebSocket(w, r, targetHost, subPath)
-		return
-	}
 	targetURL := &url.URL{Scheme: "http", Host: targetHost}
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.Transport = s.workspaceProxyTransport()
@@ -224,9 +235,16 @@ func (s *Server) reverseProxy(w http.ResponseWriter, r *http.Request, targetHost
 		req.URL.Host = targetHost
 		req.URL.Path = subPath
 		req.Host = targetHost
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			req.Host = r.Host
+		}
 		stripPrismCredentials(req.Header)
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
+		stripPrismResponseCookies(resp.Header)
+		if resp.StatusCode == http.StatusSwitchingProtocols {
+			return nil
+		}
 		// Strip framing restrictions so the service can be embedded as an iframe
 		// in the Prism dashboard (same origin via proxy bypasses X-Frame-Options).
 		resp.Header.Del("X-Frame-Options")
@@ -359,38 +377,9 @@ func rewriteAttr(body, attr, prefix string) string {
 }
 
 func (s *Server) tunnelWebSocket(w http.ResponseWriter, r *http.Request, targetHost, subPath string) {
-	dst, err := s.dialWorkspaceProxy(r.Context(), "tcp", targetHost)
-	if err != nil {
-		http.Error(w, "workspace service unreachable", http.StatusBadGateway)
-		return
-	}
-	defer dst.Close()
-
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
-		return
-	}
-	src, _, err := hj.Hijack()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer src.Close()
-
-	// Re-send the original upgrade request to the target.
-	fwd := r.Clone(r.Context())
-	fwd.URL = &url.URL{Path: subPath, RawQuery: r.URL.RawQuery}
-	fwd.RequestURI = ""
-	stripPrismCredentials(fwd.Header)
-	if err := fwd.Write(dst); err != nil {
-		return
-	}
-
-	done := make(chan struct{}, 2)
-	go func() { io.Copy(dst, src); done <- struct{}{} }()
-	go func() { io.Copy(src, dst); done <- struct{}{} }()
-	<-done
+	// ReverseProxy handles the upgrade and filters response cookies before
+	// handing the connection to its bidirectional transport.
+	s.reverseProxy(w, r, targetHost, subPath, "")
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────

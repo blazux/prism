@@ -53,8 +53,8 @@ func TestWidgetRuntimeContract(t *testing.T) {
 	if !strings.Contains(app, "type: 'data-changed'") {
 		t.Error("app.js no longer posts 'data-changed' to frames")
 	}
-	// The widget sandbox keeps same-origin: the system prompt promises widgets
-	// that relative /api and /data fetches are cookie-authenticated.
+	// Widgets retain their own content origin so browser storage, nested apps
+	// and relative /api and /data requests work through the content gateway.
 	if !regexp.MustCompile(`WIDGET_SANDBOX = '[^']*allow-same-origin`).MatchString(app) {
 		t.Error("widget iframe sandbox dropped allow-same-origin — relative fetches from widgets would lose their cookie (see docs/UPGRADING.md)")
 	}

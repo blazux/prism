@@ -193,13 +193,14 @@ async function loadGroups(){const d=await jget('/api/admin/groups');if(!d)return
   const mo=USERS.map(u=>'<option value="'+u.id+'">'+esc(u.displayName)+'</option>').join('');
   const dm=MODELS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join('');
   const mem=(g.members||[]).map(m=>'<span class="tag">'+esc(m.displayName)+(m.role==='admin'?' (admin)':'')+' <button onclick="gact({action:\'remove_member\',groupId:'+g.id+',userId:'+m.userId+'})">×</button></span>').join('')||'<span style="color:var(--text3)">no members</span>';
-  const mods=(g.models&&g.models.length)?g.models.map(m=>'<span class="tag">'+esc(m)+' <button onclick="gmodel('+g.id+',\''+esc(m)+'\',\'remove\')">×</button></span>').join(''):'<span style="color:var(--text3)">all models</span>';
+  const mods=(g.models&&g.models.length)?g.models.map(m=>'<span class="tag">'+esc(m)+' <button data-remove-model="'+esc(m)+'">×</button></span>').join(''):'<span style="color:var(--text3)">all models</span>';
   const el=document.createElement('div');el.className='grp';
   el.innerHTML='<div class="row"><b>'+esc(g.name)+'</b><button class="mini" onclick="gact({action:\'delete\',groupId:'+g.id+'})">delete</button></div>'+
    '<div class="row">Members: '+mem+'</div>'+
    '<div class="row"><select id="mu'+g.id+'">'+mo+'</select><select id="mr'+g.id+'"><option value="member">member</option><option value="admin">admin</option></select><button class="mini" onclick="gact({action:\'add_member\',groupId:'+g.id+',userId:+document.getElementById(\'mu'+g.id+'\').value,role:document.getElementById(\'mr'+g.id+'\').value})">add</button></div>'+
    '<div class="row">Models: '+mods+'</div>'+
    (MODELS.length?'<div class="row"><select id="gm'+g.id+'">'+dm+'</select><button class="mini" onclick="gmodel('+g.id+',document.getElementById(\'gm'+g.id+'\').value,\'add\')">grant model</button></div>':'');
+  el.querySelectorAll('[data-remove-model]').forEach(button=>button.addEventListener('click',()=>gmodel(g.id,button.dataset.removeModel,'remove')));
   box.appendChild(el);});}
 
 // ── Global tool policy ──
@@ -207,11 +208,12 @@ async function loadTools(){const d=await jget('/api/admin/tool-policy');if(!d)re
  (d.tools||[]).forEach(t=>{const row=document.createElement('div');row.className='tool-row';let ctrl;
   if(t.hardFloor){ctrl='<span class="st">admin-only 🔒</span>';}
   else{const a=t.access||'open';
-   ctrl='<select onchange="setPol(\''+esc(t.tool)+'\',this.value)" style="font-size:11.5px;padding:2px 6px">'+
+   ctrl='<select style="font-size:11.5px;padding:2px 6px">'+
     '<option value="open"'+(a==='open'?' selected':'')+'>Open to members</option>'+
     '<option value="admin_only"'+(a==='admin_only'?' selected':'')+'>Admins only</option>'+
     '<option value="disabled"'+(a==='disabled'?' selected':'')+'>Disabled</option></select>';}
-  row.innerHTML='<code style="'+(t.access==='disabled'?'opacity:.45;text-decoration:line-through':'')+'">'+esc(t.tool)+'</code><span class="tool-ctrl">'+ctrl+'</span>';box.appendChild(row);});}
+  row.innerHTML='<code style="'+(t.access==='disabled'?'opacity:.45;text-decoration:line-through':'')+'">'+esc(t.tool)+'</code><span class="tool-ctrl">'+ctrl+'</span>';
+  row.querySelector('select')?.addEventListener('change',event=>setPol(t.tool,event.currentTarget.value));box.appendChild(row);});}
 async function setPol(t,a){await jpost('/api/admin/tool-policy',{tool:t,access:a});loadTools();}
 
 // ── Shared agent (group admin) ──
@@ -270,8 +272,9 @@ async function loadGroupSecrets(){const g=$('gs-group').value;if(!g)return;
  const d=await jget('/api/group/secrets?group='+g);if(!d||g!==$('gs-group').value)return;markGroupLoaded('gs-group',g);const box=$('gsecrets');box.innerHTML='';
  const names=(d&&d.secrets)||[];
  if(!names.length){box.innerHTML='<div style="color:var(--text3)">No secrets for this group.</div>';return;}
- names.forEach(n=>{const el=document.createElement('div');
-  el.innerHTML='<span><b>'+esc(n)+'</b></span><button class="mini" onclick="removeGroupSecret(\''+esc(n)+'\')">remove</button>';
+ names.forEach(n=>{const el=document.createElement('div'),label=document.createElement('span'),name=document.createElement('b'),button=document.createElement('button');
+  name.textContent=n;label.appendChild(name);button.className='mini';button.textContent='remove';
+  button.addEventListener('click',()=>removeGroupSecret(n));el.append(label,button);
   box.appendChild(el);});}
 async function addGroupSecret(){const g=$('gs-group').value;if(!g)return;const n=$('gs-name').value.trim(),v=$('gs-value').value;if(!n||!v)return;
  $('gs-status').textContent='saving…';
@@ -300,18 +303,21 @@ async function loadGroupMCP(){const g=$('mc-group').value;if(!g)return;
  const list=(d&&d.servers)||[];const pol=(d&&d.policy)||{};
  if(!list.length){box.innerHTML='<div style="color:var(--text3)">No MCP servers connected for this group.</div>';return;}
  const accessSel=t=>{const a=pol[t]||'open';
-  return '<select onchange="setToolAccess(\''+esc(t)+'\',this.value)" style="font-size:11.5px;padding:2px 6px">'+
+  return '<select data-tool="'+esc(t)+'" style="font-size:11.5px;padding:2px 6px">'+
    '<option value="open"'+(a==='open'?' selected':'')+'>Open to members</option>'+
    '<option value="admin_only"'+(a==='admin_only'?' selected':'')+'>Admins only</option>'+
    '<option value="disabled"'+(a==='disabled'?' selected':'')+'>Disabled</option></select>';};
  list.forEach(sv=>{const el=document.createElement('div');el.style.flexDirection='column';el.style.alignItems='stretch';
   const auth=sv.authSecret?' · 🔑 '+esc(sv.authSecret):'';
   let html='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span><b>'+esc(sv.name)+'</b> <span style="color:var(--text3)">'+esc(sv.url)+' · '+((sv.tools||[]).length)+' tools'+auth+'</span></span>'+
-   '<span style="display:flex;gap:6px"><button class="mini" title="Reconnect and update the tools list" onclick="refreshGroupMCP(\''+esc(sv.id)+'\',this)">Refresh</button><button class="mini" onclick="removeGroupMCP(\''+esc(sv.id)+'\')">remove</button></span></div>';
+   '<span style="display:flex;gap:6px"><button class="mini" title="Reconnect and update the tools list" data-action="refresh">Refresh</button><button class="mini" data-action="remove">remove</button></span></div>';
   (sv.tools||[]).forEach(t=>{const a=pol[t.name]||'open';
    html+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0 3px 14px;font-size:12px">'+
     '<code style="'+(a==='disabled'?'opacity:.45;text-decoration:line-through':'')+'">'+esc(t.name)+'</code>'+accessSel(t.name)+'</div>';});
-  box.appendChild(el);el.innerHTML=html;});}
+  box.appendChild(el);el.innerHTML=html;
+  el.querySelector('[data-action="refresh"]').addEventListener('click',event=>refreshGroupMCP(sv.id,event.currentTarget));
+  el.querySelector('[data-action="remove"]').addEventListener('click',()=>removeGroupMCP(sv.id));
+  el.querySelectorAll('select[data-tool]').forEach(select=>select.addEventListener('change',()=>setToolAccess(select.dataset.tool,select.value)));});}
 async function setToolAccess(tool,access){const g=$('mc-group').value;if(!g)return;
  await jpost('/api/group/tool-policy?group='+g,{tool:tool,access:access});if(g===$('mc-group').value)loadGroupMCP();}
 async function addGroupMCP(){const g=$('mc-group').value;if(!g)return;const n=$('gmcp-name').value.trim(),u=$('gmcp-url').value.trim();if(!n||!u)return;
@@ -366,12 +372,15 @@ async function loadGroupRAG(){const g=$('rg-group').value;if(!g)return;const d=a
   const desc=c.description||'';
   el.innerHTML='<span><b>'+esc(c.name)+'</b> <span style=\"color:var(--text3)\">'+(c.doc_count||0)+' docs</span>'+
    '<div class=\"coldesc'+(desc?'':' missing')+'\">'+(desc?esc(desc):'No description — the agent will not know when to search this collection.')+'</div></span>'+
-   '<span><button class=\"mini\" onclick=\"editGroupColDesc(\''+esc(c.name)+'\')\">description</button> '+
-   '<button class=\"mini\" onclick=\"deleteGroupCol(\''+esc(c.name)+'\')\">delete</button></span>';
+   '<span><button class=\"mini\" data-action="description">description</button> '+
+   '<button class=\"mini\" data-action="delete">delete</button></span>';
+  el.querySelector('[data-action="description"]').addEventListener('click',()=>editGroupColDesc(c.name));
+  el.querySelector('[data-action="delete"]').addEventListener('click',()=>deleteGroupCol(c.name));
   box.appendChild(el);
   docsByCol[i].forEach(doc=>{const row=document.createElement('div');row.className='docrow';
    row.innerHTML='<span>'+esc(doc.filename)+'<span class=\"docmeta\">'+fmtBytes(doc.size_bytes)+' · '+(doc.chunk_count||0)+' chunks · '+fmtDay(doc.updated_at)+'</span></span>'+
-    '<span><button class=\"mini\" onclick=\"deleteGroupDoc('+Number(doc.id)+',\''+esc(doc.filename)+'\',\''+esc(c.name)+'\')\">delete</button></span>';
+    '<span><button class=\"mini\">delete</button></span>';
+   row.querySelector('button').addEventListener('click',()=>deleteGroupDoc(Number(doc.id),doc.filename,c.name));
    box.appendChild(row);});});}
 
 function fmtBytes(n){n=Number(n)||0;if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB';}
@@ -468,8 +477,9 @@ async function loadAccess(){const g=$('ac-group').value;if(!g)return;const d=awa
   const open=!locked&&!t.groupRestricted;
   let ctrl;
   if(locked){ctrl='<span class="st">admin-only</span><label class="tgl" title="Locked by the global policy"><input type="checkbox" disabled><span class="sl"></span></label>';}
-  else{ctrl='<span class="st">'+(open?'All members':'Admins only')+'</span><label class="tgl"><input type="checkbox" '+(open?'checked':'')+' onchange="setAccess(\''+esc(t.tool)+'\',!this.checked)"><span class="sl"></span></label>';}
-  row.innerHTML='<code>'+esc(t.tool)+'</code><span class="tool-ctrl">'+ctrl+'</span>';box.appendChild(row);});}
+  else{ctrl='<span class="st">'+(open?'All members':'Admins only')+'</span><label class="tgl"><input type="checkbox" '+(open?'checked':'')+'><span class="sl"></span></label>';}
+  row.innerHTML='<code>'+esc(t.tool)+'</code><span class="tool-ctrl">'+ctrl+'</span>';
+  if(!locked)row.querySelector('input').addEventListener('change',event=>setAccess(t.tool,!event.currentTarget.checked));box.appendChild(row);});}
 async function setAccess(t,restrict){await jpost('/api/group/tool-policy?group='+$('ac-group').value,{tool:t,restrict});loadAccess();}
 
 // ── Usage & Logs (global admin) ──
@@ -566,13 +576,15 @@ const APP_LABELS={email:'Email',notes:'Notes',tasks:'Tasks',calendar:'Calendar',
 async function loadPlatform(){const d=await jget('/api/admin/platform');if(!d)return;PF=d;
  const ab=$('papps');ab.innerHTML='';(PF.apps||[]).forEach(a=>{const off=PF.disabledApps.includes(a);
   const row=document.createElement('div');row.className='tool-row';
-  row.innerHTML='<code>'+esc(APP_LABELS[a]||a)+'</code><span class="tool-ctrl"><span class="st">'+(off?'Hidden':'Enabled')+'</span><label class="tgl"><input type="checkbox" '+(off?'':'checked')+' onchange="setApp(\''+esc(a)+'\',this.checked)"><span class="sl"></span></label></span>';
+  row.innerHTML='<code>'+esc(APP_LABELS[a]||a)+'</code><span class="tool-ctrl"><span class="st">'+(off?'Hidden':'Enabled')+'</span><label class="tgl"><input type="checkbox" '+(off?'':'checked')+'><span class="sl"></span></label></span>';
+  row.querySelector('input').addEventListener('change',event=>setApp(a,event.currentTarget.checked));
   ab.appendChild(row);});
  const mb=$('pmodels');mb.innerHTML='';
  if(!(PF.allModels||[]).length){mb.innerHTML='<div class="hint">No models reported by the backend.</div>';return;}
  PF.allModels.forEach(m=>{const on=PF.allowedModels.includes(m);
   const row=document.createElement('div');row.className='tool-row';
-  row.innerHTML='<code>'+esc(m)+'</code><span class="tool-ctrl"><span class="st">'+(PF.allowedModels.length?(on?'Allowed':'Hidden'):'All allowed')+'</span><label class="tgl"><input type="checkbox" '+(on?'checked':'')+' onchange="setModel(\''+esc(m)+'\',this.checked)"><span class="sl"></span></label></span>';
+  row.innerHTML='<code>'+esc(m)+'</code><span class="tool-ctrl"><span class="st">'+(PF.allowedModels.length?(on?'Allowed':'Hidden'):'All allowed')+'</span><label class="tgl"><input type="checkbox" '+(on?'checked':'')+'><span class="sl"></span></label></span>';
+  row.querySelector('input').addEventListener('change',event=>setModel(m,event.currentTarget.checked));
   mb.appendChild(row);});}
 async function setApp(a,enabled){const d=new Set(PF.disabledApps);enabled?d.delete(a):d.add(a);
  const r=await jpost('/api/admin/platform',{disabledApps:[...d]});$('pf-st').textContent=r&&r.ok?'saved ✓':'error';setTimeout(()=>$('pf-st').textContent='',1500);loadPlatform();}

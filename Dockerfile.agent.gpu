@@ -1,20 +1,22 @@
+FROM node:26-bookworm-slim AS node-runtime
+
 FROM nvcr.io/nvidia/pytorch:26.03-py3
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
+COPY --from=node-runtime /usr/local/include/node/ /usr/local/include/node/
 COPY workspace-security-constraints.txt /etc/prism/python-constraints.txt
-# Retain the NVIDIA image's Python/CUDA constraints alongside the security floor.
-RUN for constraints in ${PIP_CONSTRAINT:-}; do \
-        if [ "$constraints" != /etc/prism/python-constraints.txt ]; then \
-            printf '\n-c %s\n' "$constraints" >> /etc/prism/python-constraints.txt; \
-        fi; \
-    done
+COPY scripts/configure-workspace-pip.py /usr/local/bin/configure-workspace-pip.py
+# Preserve NVIDIA's CUDA/PyTorch pins while updating security-managed packages.
+RUN python /usr/local/bin/configure-workspace-pip.py
 ENV PIP_CONSTRAINT=/etc/prism/python-constraints.txt
 
 # Tools not included in the NVIDIA base
 RUN apt-get update && apt-get install -y \
-    nodejs npm \
+    apt apt-utils \
     golang-go \
     rustc cargo \
     vim nano libbrotli1 \
@@ -27,7 +29,9 @@ RUN apt-get update && apt-get install -y \
 
 # Extra Python packages (PyTorch, numpy, CUDA already in base)
 RUN pip install --no-cache-dir \
-    httpx "Brotli>=1.2.1" \
+    httpx Brotli Pillow SoupSieve \
+    aiohttp anyio filelock fsspec datasets jupyter-server jupyterlab mistune msgpack \
+    nbconvert notebook onnx tornado urllib3 uv \
     pandas \
     matplotlib seaborn plotly \
     flask fastapi uvicorn \
@@ -39,6 +43,14 @@ RUN pip install --no-cache-dir "playwright>=1.64.1" && \
     python -m playwright install chromium && \
     python -m playwright install-deps chromium && \
     mkdir -p /workspace/.screenshots
+
+# Keep the maintained runtime available to existing cron commands too.
+RUN node /usr/local/lib/node_modules/npm/bin/npm-cli.js install --global --prefix /usr/local --no-audit --no-fund npm@12.2.3 && \
+    node /usr/local/lib/node_modules/npm/bin/npm-cli.js cache clean --force && \
+    ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    for binary in node npm npx; do ln -sf "/usr/local/bin/$binary" "/usr/bin/$binary"; done && \
+    ln -sf /usr/local/bin/node /usr/bin/nodejs
 
 COPY scripts/check-workspace-security.py /usr/local/bin/check-workspace-security.py
 RUN python /usr/local/bin/check-workspace-security.py

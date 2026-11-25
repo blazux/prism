@@ -1,4 +1,5 @@
 import { createSharedGallery } from './shared-gallery.js'
+import { legacyWidgetStorage, acknowledgeWidgetStorage } from './widget-storage-migration.js'
 
 // Dashboard — Frontend
 
@@ -300,6 +301,55 @@ function handleServerMsg(msg) {
 
 const WIDGET_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox'
 
+function widgetFrameURL() {
+  if (!WIDGET_HOSTING?.frameURL || !WIDGET_HOSTING?.grantURL) return null
+  try {
+    const url = new URL(WIDGET_HOSTING.frameURL, location.href)
+    const grant = new URL(WIDGET_HOSTING.grantURL, location.href)
+    if (!['http:', 'https:'].includes(url.protocol) || url.origin === location.origin || grant.origin !== location.origin) return null
+    url.searchParams.set('parent', location.origin)
+    return url
+  } catch (_) { return null }
+}
+
+function widgetForMessage(event) {
+  return [...widgets.values()].find(rec => rec.widgetOrigin === event.origin &&
+    rec.el?.querySelector('.widget-body iframe')?.contentWindow === event.source)
+}
+
+function authorizeWidget(rec, source, origin, render) {
+  if (rec.authorizing) return
+  rec.authorizing = true
+  fetch(WIDGET_HOSTING.grantURL, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({session: rec.sessionID})
+  }).then(async response => {
+    if (!response.ok) throw new Error('Widget access unavailable')
+    return response.json()
+  }).then(grant => {
+    if (typeof grant.token !== 'string' || widgets.get(rec.id) !== rec ||
+        rec.el?.querySelector('.widget-body iframe')?.contentWindow !== source || rec.widgetOrigin !== origin) return
+    if (render) {
+      rec.storageMigration = legacyWidgetStorage(rec.content, origin)
+      source.postMessage({type:'prism-widget-render', grant:grant.token,
+        html:window.PrismTheme.composeWidgetDoc(rec.content, rec.sessionID), storage:rec.storageMigration}, origin)
+    } else source.postMessage({type:'prism-widget-authorize', grant:grant.token}, origin)
+    rec.authorizedAt = Date.now()
+  }).catch(() => {
+    if (widgets.get(rec.id) === rec) showToast({title:'Widget',message:'Unable to open the widget. Reload the page to retry.',level:'error'})
+  }).finally(() => { rec.authorizing = false })
+}
+
+function refreshWidgetAuthorization() {
+  for (const rec of widgets.values()) {
+    const source = rec.el?.querySelector('.widget-body iframe')?.contentWindow
+    if (source && rec.authorizedAt && Date.now() - rec.authorizedAt >= 60 * 60 * 1000) authorizeWidget(rec, source, rec.widgetOrigin, false)
+  }
+}
+setInterval(refreshWidgetAuthorization, 60 * 60 * 1000)
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshWidgetAuthorization() })
+window.addEventListener('focus', refreshWidgetAuthorization)
+
 // addWidget handles a plugin_load: create (or update) the widget record from
 // its persisted meta, then mount it as a window if it is open. `meta` carries
 // id, title, content, cols, height, locked, open and the saved x/y/w/h.
@@ -332,6 +382,7 @@ function addWidget(meta) {
 
   const rec = {
     id, title: meta.title || id, content: meta.content || '',
+    sessionID: currentSessionID,
     cols, height: meta.height || 280, locked: !!meta.locked,
     open, x, y, w, h, el: null, win: null,
   }
@@ -386,11 +437,27 @@ function mountWindow(rec) {
   const body = document.createElement('div')
   body.className = 'widget-body'
 
-  const iframe = document.createElement('iframe')
-  if (WIDGET_HOSTING) iframe.src = WIDGET_HOSTING.frameURL
-  else iframe.srcdoc = window.PrismTheme.composeWidgetDoc(rec.content, currentSessionID)
-  iframe.setAttribute('sandbox', WIDGET_SANDBOX)
-  body.appendChild(iframe)
+  const frameURL = widgetFrameURL()
+  if (frameURL) {
+    const iframe = document.createElement('iframe')
+    rec.widgetOrigin = frameURL.origin
+    iframe.src = frameURL.href
+    iframe.referrerPolicy = 'no-referrer'
+    // These browser APIs previously inherited the dashboard's same-origin
+    // policy. Keep them available on the content origin, with the browser's
+    // ordinary permission prompts and the installation's response policy.
+    const browserFeatures = ['autoplay', 'camera', 'microphone', 'geolocation', 'fullscreen',
+      'clipboard-read', 'clipboard-write', 'display-capture', 'encrypted-media', 'picture-in-picture',
+      'screen-wake-lock', 'accelerometer', 'gyroscope', 'magnetometer', 'midi', 'usb', 'serial', 'hid', 'gamepad']
+    const supported = document.featurePolicy?.features()
+    iframe.allow = browserFeatures.filter(feature => !supported || supported.includes(feature)).map(feature => feature + " 'src'").join('; ')
+    iframe.setAttribute('sandbox', WIDGET_SANDBOX)
+    body.appendChild(iframe)
+  } else {
+    const unavailable = document.createElement('p')
+    unavailable.textContent = 'The widget could not be opened. Reload the page to try again.'
+    body.appendChild(unavailable)
+  }
 
   card.append(hdr, body)
   el.appendChild(card)
@@ -2637,8 +2704,7 @@ window.addEventListener('message', e => {
   // Only our own frames (widgets, apps, settings) may drive the dashboard. A
   // third-party page embedded inside a widget can postMessage(…, '*') to
   // window.top just as easily, and 'sendChat' would hand it the agent.
-  const remoteWidget = WIDGET_HOSTING && e.origin === new URL(WIDGET_HOSTING.frameURL).origin
-    ? [...widgets.values()].find(rec => rec.el?.querySelector('.widget-body iframe')?.contentWindow === e.source) : null
+  const remoteWidget = widgetForMessage(e)
   if (e.origin !== location.origin && !remoteWidget) return
   const d = e.data
   if (!d || !d.type) return
@@ -2647,13 +2713,16 @@ window.addEventListener('message', e => {
     return
   }
   if (d.type === 'prism-widget-ready' && remoteWidget) {
-    fetch(WIDGET_HOSTING.grantURL, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })
-      .then(async response => { if (!response.ok) throw new Error('Widget access unavailable'); return response.json() })
-      .then(grant => {
-        if (widgets.get(remoteWidget.id) !== remoteWidget || remoteWidget.el?.querySelector('.widget-body iframe')?.contentWindow !== e.source) return
-        e.source.postMessage({ type:'prism-widget-render', grant:grant.token,
-          html:window.PrismTheme.composeWidgetDoc(remoteWidget.content, currentSessionID) }, e.origin)
-      }).catch(() => showToast({title:'Widget',message:'Unable to open the widget. Reload the page to retry.',level:'error'}))
+    authorizeWidget(remoteWidget, e.source, e.origin, true)
+    return
+  }
+  if (d.type === 'prism-widget-storage-migrated' && remoteWidget) {
+    acknowledgeWidgetStorage(remoteWidget.storageMigration, d.keys, e.origin)
+    delete remoteWidget.storageMigration
+    return
+  }
+  if (d.type === 'prism-widget-authorization-needed' && remoteWidget) {
+    authorizeWidget(remoteWidget, e.source, e.origin, false)
     return
   }
   if (d.type === 'editor-response') {

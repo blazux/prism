@@ -32,6 +32,9 @@ type Config struct {
 	DisableAIServerDefaults        bool   // hosting mode without usable server AI defaults; local default remains enabled
 	CapabilityPrefix               string // opaque routing envelope supplied by a trusted embedding host
 	WidgetFrameURL, WidgetGrantURL string // optional isolated widget host supplied by embedding application
+	WidgetListenAddr               string // standalone content listener, separate from the dashboard origin
+	WidgetOrigin                   string // public HTTPS content origin behind a reverse proxy
+	WidgetPublicPort               string // local Docker-published content port
 	DockerBackend                  docker.Backend
 	AISources                      []aiSource
 	AIDefaultSource                string
@@ -82,6 +85,8 @@ type Config struct {
 }
 
 type Server struct {
+	widgetKeyOnce sync.Once
+	widgetKey     []byte
 	completedRuns map[string]*chatRun
 	dataEvents    dataEventHub
 
@@ -147,6 +152,9 @@ func New(cfg Config) *Server {
 }
 
 func (s *Server) initialize(runtime context.Context) error {
+	if err := s.validateWidgetConfig(); err != nil {
+		return err
+	}
 	if err := s.cfg.DockerBackend.Validate(); err != nil {
 		return err
 	}
@@ -173,6 +181,7 @@ func (s *Server) initialize(runtime context.Context) error {
 	if err != nil {
 		return fmt.Errorf("secret key: %w", err)
 	}
+	s.initializeWidgetKey(encKey)
 
 	// Initialize memory store (agent config + conversation history)
 	if s.cfg.PostgresURL != "" {
@@ -248,6 +257,14 @@ func (s *Server) Start() error {
 
 // Handler assembles routes without initializing resources or background work.
 func (s *Server) Handler() (http.Handler, error) {
+	mux, err := s.productRoutes()
+	if err != nil {
+		return nil, err
+	}
+	return s.lifecycleHandler(s.withAuth(s.redirectWidgetContent(mux))), nil
+}
+
+func (s *Server) productRoutes() (http.Handler, error) {
 	mux := http.NewServeMux()
 
 	// Embedded web files
@@ -372,6 +389,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/mcp/servers/", s.resourceRoute((*Server).handleMCPServerByID))
 	mux.HandleFunc("/api/oauth/mcp/callback", s.resourceRoute((*Server).handleMCPOAuthCallback))
 	mux.HandleFunc("/api/auth", s.resourceRoute((*Server).handleAuth))
+	mux.HandleFunc("/api/widget/grant", s.resourceRoute((*Server).handleWidgetGrant))
 	// Multi-user identity (Prism heavy)
 	mux.HandleFunc("/api/signup", s.resourceRoute((*Server).handleSignup))
 	mux.HandleFunc("/api/login", s.resourceRoute((*Server).handleLogin))
@@ -408,5 +426,5 @@ func (s *Server) Handler() (http.Handler, error) {
 	// proxied SPAs. Routes to the correct backend using Referer/Origin.
 	mux.HandleFunc("/socket.io/", s.resourceRoute((*Server).handleSocketIOProxy))
 
-	return s.lifecycleHandler(s.withAuth(mux)), nil
+	return mux, nil
 }

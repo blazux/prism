@@ -13,7 +13,7 @@ RUN apk add --no-cache docker-cli docker-cli-compose ca-certificates poppler-uti
 WORKDIR /app
 COPY --from=builder /build/prism .
 
-EXPOSE 8080
+EXPOSE 8080 8081
 
 ENV PORT=8080
 ENV WORKSPACE_DIR=/workspace

@@ -150,7 +150,26 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		return errors.Join(err, s.Shutdown(drain))
 	}
 	httpServer := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
-	result := make(chan error, 1)
+	result := make(chan error, 2)
+	var widgetHTTP *http.Server
+	failedWidgetStart := func(cause error) error {
+		drain, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return errors.Join(cause, s.Shutdown(drain))
+	}
+	if s.cfg.WidgetListenAddr != "" && s.cfg.WidgetFrameURL == "" {
+		widgetHandler, widgetErr := s.WidgetHandler()
+		if widgetErr != nil {
+			return failedWidgetStart(widgetErr)
+		}
+		widgetListener, widgetErr := net.Listen("tcp", s.cfg.WidgetListenAddr)
+		if widgetErr != nil {
+			return failedWidgetStart(widgetErr)
+		}
+		widgetHTTP = &http.Server{Handler: widgetHandler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
+		defer widgetListener.Close()
+		go func() { result <- widgetHTTP.Serve(widgetListener) }()
+	}
 	go func() { result <- httpServer.Serve(listener) }()
 	select {
 	case err = <-result:
@@ -159,6 +178,12 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	drain, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	shutdownErr := s.Shutdown(drain)
+	if widgetHTTP != nil {
+		if stopErr := widgetHTTP.Shutdown(drain); stopErr != nil {
+			_ = widgetHTTP.Close()
+			shutdownErr = errors.Join(shutdownErr, stopErr)
+		}
+	}
 	httpErr := httpServer.Shutdown(drain)
 	if httpErr != nil {
 		_ = httpServer.Close()

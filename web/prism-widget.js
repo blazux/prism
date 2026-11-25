@@ -12,13 +12,46 @@
     return window.PRISM_SESSION || '';
   }
 
+  // Refresh the content-origin credential without replacing the running app.
+  // The dashboard remains the only source of grants; widget code never receives
+  // the dashboard's cookie or an unrestricted API credential.
+  const ownerOrigin = window.PRISM_PARENT_ORIGIN;
+  let authorization;
+  if (ownerOrigin && window.parent !== window) window.addEventListener('message', async function (event) {
+    if (event.source !== window.parent || event.origin !== ownerOrigin || event.data?.type !== 'prism-widget-authorize' || typeof event.data.grant !== 'string') return;
+    try {
+      const response = await fetch('/__prism_widget/authorize', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin', cache: 'no-store', body: JSON.stringify({token: event.data.grant})
+      });
+      if (!response.ok) throw new Error('Widget access unavailable');
+      authorization?.resolve();
+    } catch (error) { authorization?.reject(error); }
+  });
+  function refreshAuthorization() {
+    if (authorization) return authorization.promise;
+    let resolve, reject;
+    const promise = new Promise(function (yes, no) { resolve = yes; reject = no; });
+    const timer = setTimeout(function () { reject(new Error('Widget access unavailable. Reload the page to retry.')); }, 10000);
+    authorization = {promise, resolve, reject};
+    promise.finally(function () { clearTimeout(timer); authorization = null; }).catch(function () {});
+    window.parent.postMessage({type: 'prism-widget-authorization-needed'}, ownerOrigin);
+    return promise;
+  }
+  async function widgetFetch(url, options) {
+    const response = await fetch(url, options);
+    if (response.status !== 401 || !ownerOrigin || window.parent === window) return response;
+    await refreshAuthorization();
+    return fetch(url, options);
+  }
+
   // prismTool(name, args?) → the tool's result.
   // Works for ANY tool — a custom Python tool, a built-in, or an MCP tool — via
   // the one universal endpoint; you never choose an endpoint. JSON output is
   // parsed for you (so you get an array/object, not a string). A tool error
   // rejects with that error message, so wrap calls in try/catch.
   window.prismTool = async function (name, args) {
-    const res = await fetch(
+    const res = await widgetFetch(
       '/api/builtin/' + encodeURIComponent(name) + '?session=' + encodeURIComponent(session()),
       {
         method: 'POST',
@@ -77,7 +110,7 @@
   // the rare tool that produces images (screenshot / vision / browser). prismTool
   // gives you just the parsed result; use this when you also need the images.
   window.prismToolRaw = async function (name, args) {
-    const res = await fetch(
+    const res = await widgetFetch(
       '/api/builtin/' + encodeURIComponent(name) + '?session=' + encodeURIComponent(session()),
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args || {}) }
     );
@@ -166,7 +199,7 @@
   // its group scope; emitting a signal grants no access to that backend.
   window.prismDataChanged = async function (topic, options) {
     options = options || {};
-    const response = await fetch('/api/data-events?session=' + encodeURIComponent(session()), {
+    const response = await widgetFetch('/api/data-events?session=' + encodeURIComponent(session()), {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({topic: topic, scope: options.scope, group: options.group})
     });

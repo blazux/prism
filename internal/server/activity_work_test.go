@@ -97,6 +97,18 @@ func TestActivityWorkKeepsOwnerScopeAndCurrentRoomMembership(t *testing.T) {
 	if room == nil || room.Request != "Find waiting jobs" || room.RunStatus != "completed" || room.FinishedAt != nil {
 		t.Fatal("legacy room fabricated or lost metadata", room)
 	}
+	if err := ms.AddGroupMember(ctx, group.ID, a.ID, memory.GroupRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	groupAdminItems := readWork(t, s, a)
+	if workByID(groupAdminItems, fmt.Sprintf("room:%d", group.ID)) == nil || workByID(groupAdminItems, fmt.Sprintf("room:%d", other.ID)) != nil {
+		t.Fatal("group administrator's Room access widened beyond membership", groupAdminItems)
+	}
+	denied := httptest.NewRecorder()
+	s.handleRoomHistory(denied, withUser(httptest.NewRequest("GET", fmt.Sprintf("/api/room/history?group=%d", other.ID), nil), a))
+	if denied.Code != 403 {
+		t.Fatal("foreign Room history no longer matches activity scope", denied.Code)
+	}
 	adminItems := readWork(t, s, admin)
 	if workByID(adminItems, fmt.Sprintf("workspace:u%d-report", a.ID)) != nil || workByID(adminItems, fmt.Sprintf("room:%d", other.ID)) == nil {
 		t.Fatal("admin personal/Room scope drifted", adminItems)

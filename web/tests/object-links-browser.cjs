@@ -1,6 +1,6 @@
 const {chromium} = require('playwright')
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path')
-const root = path.resolve(__dirname, '..'), origin = 'http://localhost'
+const root = path.resolve(__dirname, '..'), origin = 'http://localhost', widgetOrigin = 'http://localhost:48082'
 const wait = async (predicate, label) => {
   const until = Date.now() + 7000
   while (!predicate()) {if (Date.now() > until) throw Error('Timed out: ' + label); await new Promise(resolve => setTimeout(resolve, 20))}
@@ -32,6 +32,11 @@ const wait = async (predicate, label) => {
       })
       await context.route('**/*', async route => {
         const request=route.request(), url=new URL(request.url())
+        if (url.origin === widgetOrigin) {
+          if (url.pathname === '/__prism_widget/authorize') return route.fulfill({contentType:'application/json',body:'{"ok":true}'})
+          const file=path.resolve(root,'.'+url.pathname)
+          return file.startsWith(root+path.sep)&&fs.existsSync(file)&&fs.statSync(file).isFile()?route.fulfill({path:file}):route.fulfill({status:404,body:''})
+        }
         if (url.origin !== origin) {
           if (url.href === 'https://cdn.jsdelivr.net/npm/marked@9/marked.min.js') return route.fulfill({path:path.join(root,'vendor/marked/marked.min.js')})
           return route.abort()
@@ -47,7 +52,8 @@ const wait = async (predicate, label) => {
         else reads.push(url.pathname+url.search)
         let data={},status=200
         if (url.pathname==='/api/auth') data={authenticated:true,auth_enabled:false}
-        else if(url.pathname==='/api/me') data={authenticated:true,multiUser:multi,isAdmin:!multi,user:multi?{id:7,role:'member'}:undefined}
+        else if(url.pathname==='/api/me') data={authenticated:true,multiUser:multi,isAdmin:!multi,user:multi?{id:7,role:'member'}:undefined,widgetHosting:{frameURL:widgetOrigin+'/widget-frame.html?parent='+encodeURIComponent(origin),grantURL:'/api/widget/grant'}}
+        else if(url.pathname==='/api/widget/grant') data={token:'fixture-widget-grant'}
         else if(url.pathname==='/api/profile') data={userId:multi?7:0,displayName:'Fixture'}
         else if(url.pathname==='/api/platform') data={disabledApps:[]}
         else if(url.pathname==='/api/my/groups') data={groups:[]}

@@ -1,17 +1,21 @@
-FROM ubuntu:22.04
+FROM node:26-bookworm-slim AS node-runtime
+
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Etc/GMT+4
-ENV PIP_CONSTRAINT=/etc/prism/python-constraints.txt
 
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
+COPY --from=node-runtime /usr/local/include/node/ /usr/local/include/node/
 COPY workspace-security-constraints.txt /etc/prism/python-constraints.txt
+COPY scripts/configure-workspace-pip.py /usr/local/bin/configure-workspace-pip.py
 
 RUN apt-get update && apt-get install -y \
     tzdata \
-    python3 python3-pip python3-venv python3-dev \
-    nodejs npm \
+    python3 python3-pip python3-venv python3-dev python-is-python3 \
     golang-go \
     rustc cargo \
     curl wget git vim nano libbrotli1 \
@@ -23,9 +27,12 @@ RUN apt-get update && apt-get install -y \
     cron \
     && rm -rf /var/lib/apt/lists/*
 
+RUN python3 /usr/local/bin/configure-workspace-pip.py
+ENV PIP_CONSTRAINT=/etc/prism/python-constraints.txt
+
 # Common Python packages for data science / web
 RUN pip3 install --no-cache-dir \
-    requests httpx "Brotli>=1.2.1" \
+    requests httpx Brotli Pillow SoupSieve \
     numpy pandas \
     matplotlib seaborn plotly \
     flask fastapi uvicorn \
@@ -37,6 +44,14 @@ RUN pip3 install --no-cache-dir "playwright>=1.64.1" && \
     python3 -m playwright install chromium && \
     python3 -m playwright install-deps chromium && \
     mkdir -p /workspace/.screenshots
+
+# Cron uses /usr/bin:/bin instead of the container's PATH.
+RUN node /usr/local/lib/node_modules/npm/bin/npm-cli.js install --global --prefix /usr/local --no-audit --no-fund npm@12.2.3 && \
+    node /usr/local/lib/node_modules/npm/bin/npm-cli.js cache clean --force && \
+    ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    for binary in node npm npx; do ln -sf "/usr/local/bin/$binary" "/usr/bin/$binary"; done && \
+    ln -sf /usr/local/bin/node /usr/bin/nodejs
 
 COPY scripts/check-workspace-security.py /usr/local/bin/check-workspace-security.py
 RUN python3 /usr/local/bin/check-workspace-security.py

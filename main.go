@@ -113,6 +113,10 @@ func main() {
 	}
 
 	authToken := os.Getenv("PRISM_TOKEN")
+	widgetListen := os.Getenv("WIDGET_LISTEN_ADDR")
+	if widgetListen == "" {
+		widgetListen = ":8081"
+	}
 
 	// MULTI_USER turns on accounts, groups and rooms. Anything but "1"/"true" leaves
 	// Prism single-user, which is the default and the personal case: withAuth then
@@ -145,6 +149,9 @@ func main() {
 		EmbedModel:       embedModel,
 		AuthToken:        authToken,
 		MultiUser:        multiUser,
+		WidgetListenAddr: widgetListen,
+		WidgetOrigin:     os.Getenv("WIDGET_ORIGIN"),
+		WidgetPublicPort: os.Getenv("WIDGET_PORT"),
 		VoxURL:           os.Getenv("VOX_URL"), // set → docked with Prism Vox (Téléphonie app appears)
 		VoxUser:          os.Getenv("VOX_USER"),
 		VoxPassword:      os.Getenv("VOX_PASSWORD"),
