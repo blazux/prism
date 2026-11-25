@@ -52,6 +52,9 @@ const root = path.resolve(__dirname, '..'), origin = 'http://fixture.invalid'
       await page.locator('.rail-item[data-app="activity"]').click()
       const activity = page.frameLocator('#app-frame')
       await activity.locator('[data-group=attention] .work-card').getByText('Report', {exact: true}).waitFor()
+      // Leave the sidebar so its hover flyout no longer covers the link.
+      await page.mouse.move(550, 100)
+      await page.waitForFunction(() => document.querySelector('#rail-inner').getBoundingClientRect().width <= document.querySelector('#rail').getBoundingClientRect().width + 1)
       await activity.getByRole('link', {name: 'Open conversation'}).click()
       await page.waitForFunction(id => fixtureRun.open && fixtureRun.session === id, session)
       const calls = () => page.evaluate(() => fixtureSockets.flatMap(socket => socket.messages).filter(message => message.type === 'chat'))
