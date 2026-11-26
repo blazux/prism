@@ -14,7 +14,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 )
 
-func testMailbox(t *testing.T, move bool) Config {
+func testMailbox(t *testing.T, move bool, onOpen ...func()) Config {
 	t.Helper()
 	cert := httptest.NewTLSServer(nil)
 	tlsCfg := cert.TLS.Clone()
@@ -37,6 +37,9 @@ func testMailbox(t *testing.T, move bool) Config {
 		caps[imap.CapMove] = struct{}{}
 	}
 	srv := imapserver.New(&imapserver.Options{NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
+		for _, opened := range onOpen {
+			opened()
+		}
 		return mem.NewSession(), nil, nil
 	}, Caps: caps})
 	go srv.Serve(ln)

@@ -36,6 +36,12 @@ type emailStoredConfig struct {
 	Signature string `json:"signature,omitempty"`
 }
 
+func (sc emailStoredConfig) clientConfig() email.Config {
+	return email.Config{IMAPHost: sc.IMAPHost, IMAPPort: sc.IMAPPort,
+		SMTPHost: sc.SMTPHost, SMTPPort: sc.SMTPPort, User: sc.User, From: sc.From,
+		Security: sc.Security, Insecure: sc.Insecure}
+}
+
 func (s *Server) loadEmailCfg(r *http.Request) (email.Config, bool) {
 	if s.userStore(r) == nil {
 		return email.Config{}, false
@@ -49,13 +55,9 @@ func (s *Server) loadEmailCfg(r *http.Request) (email.Config, bool) {
 		return email.Config{}, false
 	}
 	pass, _, _ := s.userStore(r).GetSecret(r.Context(), emailPasswordSecret)
-	return email.Config{
-		Folder:   r.URL.Query().Get("folder"),
-		IMAPHost: sc.IMAPHost, IMAPPort: sc.IMAPPort,
-		SMTPHost: sc.SMTPHost, SMTPPort: sc.SMTPPort,
-		User: sc.User, From: sc.From, Pass: pass,
-		Security: sc.Security, Insecure: sc.Insecure,
-	}, true
+	cfg := sc.clientConfig()
+	cfg.Folder, cfg.Pass = r.URL.Query().Get("folder"), pass
+	return cfg, true
 }
 
 // GET /api/email/config (masked), POST to set/merge.
@@ -70,8 +72,13 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 			json.Unmarshal([]byte(raw), &sc)
 		}
 		pass, hasPass, _ := s.userStore(r).GetSecret(r.Context(), emailPasswordSecret)
+		account := ""
+		if sc.IMAPHost != "" && sc.User != "" {
+			account = sc.clientConfig().AccountFingerprint()
+		}
 		writeJSON(w, map[string]interface{}{
 			"configured":   sc.IMAPHost != "" && sc.User != "",
+			"account":      account,
 			"imap_host":    sc.IMAPHost,
 			"imap_port":    sc.IMAPPort,
 			"smtp_host":    sc.SMTPHost,
@@ -93,6 +100,7 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 		if raw, ok, _ := s.userStore(r).GetConfig(r.Context(), emailConfigKey); ok {
 			json.Unmarshal([]byte(raw), &b.emailStoredConfig)
 		}
+		prior := b.emailStoredConfig
 		if json.NewDecoder(r.Body).Decode(&b) != nil {
 			http.Error(w, "bad body", 400)
 			return
@@ -104,6 +112,12 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 		if err := email.ValidateBridgePreset(s.userStore(r).LocalMailBridgeDisabled, b.IMAPHost, b.SMTPHost); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		if prior.IMAPHost != "" && prior.User != "" {
+			if err := email.BindLegacyTags(r.Context(), s.userStore(r), prior.clientConfig().AccountFingerprint()); err != nil {
+				writeErr(w, http.StatusInternalServerError, "Could not preserve existing email categories.")
+				return
+			}
 		}
 		out, _ := json.Marshal(b.emailStoredConfig)
 		if err := s.userStore(r).SetConfig(r.Context(), emailConfigKey, string(out)); err != nil {
@@ -122,50 +136,36 @@ func (s *Server) handleEmailConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-const emailTagsKey = "email_tags"
-
-func emailTagsScope(r *http.Request) string {
-	f := r.URL.Query().Get("folder")
-	if f == "" || strings.EqualFold(f, "INBOX") {
-		return emailTagsKey
-	}
-	return emailTagsKey + ":" + f
-}
-
-// GET /api/email/tags -> stored {uid: {category, tags}} map.
-// POST a {uid: {category, tags}} map to merge it in (used by AI triage + manual).
+// Category storage belongs to this mailbox identity within the user's scope.
 func (s *Server) handleEmailTags(w http.ResponseWriter, r *http.Request) {
 	if !s.pimStore(w) {
 		return
 	}
+	cfg, configured := s.loadEmailCfg(r)
+	if !configured {
+		writeErr(w, http.StatusBadRequest, "email not configured")
+		return
+	}
+	if !emailAccountMatches(w, cfg, r.URL.Query().Get("account")) {
+		return
+	}
+	store, folder, account := s.userStore(r), r.URL.Query().Get("folder"), cfg.AccountFingerprint()
 	switch r.Method {
 	case "GET":
-		raw, _, _ := s.userStore(r).GetConfig(r.Context(), emailTagsScope(r))
-		if raw == "" {
-			raw = "{}"
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(raw))
-	case "POST":
-		var incoming map[string]json.RawMessage
-		if json.NewDecoder(r.Body).Decode(&incoming) != nil {
-			http.Error(w, "bad body", 400)
+		tags, err := email.LoadTags(r.Context(), store, account, folder)
+		if err != nil {
+			writeErr(w, 500, err.Error())
 			return
 		}
-		cur := map[string]json.RawMessage{}
-		if raw, ok, _ := s.userStore(r).GetConfig(r.Context(), emailTagsScope(r)); ok && raw != "" {
-			json.Unmarshal([]byte(raw), &cur)
+		writeJSON(w, tags)
+	case "POST":
+		var incoming map[string]json.RawMessage
+		if json.NewDecoder(r.Body).Decode(&incoming) != nil || incoming == nil {
+			writeErr(w, 400, "bad body")
+			return
 		}
-		for k, v := range incoming {
-			if string(v) == "null" {
-				delete(cur, k)
-			} else {
-				cur[k] = v
-			}
-		}
-		out, _ := json.Marshal(cur)
-		if err := s.userStore(r).SetConfig(r.Context(), emailTagsScope(r), string(out)); err != nil {
-			http.Error(w, err.Error(), 500)
+		if err := email.MergeTags(r.Context(), store, account, folder, incoming); err != nil {
+			writeErr(w, 500, err.Error())
 			return
 		}
 		writeJSON(w, map[string]interface{}{"ok": true})
@@ -198,11 +198,15 @@ func (s *Server) handleEmailMarkSeen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b struct {
-		UID  uint32 `json:"uid"`
-		Seen bool   `json:"seen"`
+		UID     uint32 `json:"uid"`
+		Seen    bool   `json:"seen"`
+		Account string `json:"account"`
 	}
 	if json.NewDecoder(r.Body).Decode(&b) != nil || b.UID == 0 {
 		http.Error(w, "uid required", 400)
+		return
+	}
+	if !emailAccountMatches(w, cfg, b.Account) {
 		return
 	}
 	if err := cfg.SetSeen(b.UID, b.Seen); err != nil {
@@ -220,21 +224,22 @@ func (s *Server) handleEmailList(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	cfg.Offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
-	msgs, err := cfg.List(limit)
+	cfg.UnreadOnly, _ = strconv.ParseBool(r.URL.Query().Get("unread"))
+	page, err := cfg.ListPage(limit)
 	if err != nil {
 		http.Error(w, err.Error(), 502)
 		return
 	}
-	if msgs == nil {
-		msgs = []email.Message{}
-	}
-	writeJSON(w, map[string]interface{}{"messages": msgs})
+	writeEmailPage(w, cfg, page)
 }
 
 func (s *Server) handleEmailRead(w http.ResponseWriter, r *http.Request) {
 	cfg, ok := s.loadEmailCfg(r)
 	if !ok {
 		http.Error(w, "email not configured", 400)
+		return
+	}
+	if !emailAccountMatches(w, cfg, r.URL.Query().Get("account")) {
 		return
 	}
 	uid, _ := strconv.ParseUint(r.URL.Query().Get("uid"), 10, 32)
@@ -247,7 +252,7 @@ func (s *Server) handleEmailRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 502)
 		return
 	}
-	writeJSON(w, map[string]interface{}{"message": msg})
+	writeJSON(w, map[string]interface{}{"message": msg, "account": cfg.AccountFingerprint()})
 }
 
 func (s *Server) handleEmailSearch(w http.ResponseWriter, r *http.Request) {
@@ -257,15 +262,55 @@ func (s *Server) handleEmailSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	msgs, err := cfg.Search(r.URL.Query().Get("q"), limit)
+	cfg.Offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	cfg.UnreadOnly, _ = strconv.ParseBool(r.URL.Query().Get("unread"))
+	page, err := cfg.SearchPage(r.URL.Query().Get("q"), limit)
 	if err != nil {
 		http.Error(w, err.Error(), 502)
 		return
 	}
-	if msgs == nil {
-		msgs = []email.Message{}
+	writeEmailPage(w, cfg, page)
+}
+
+func writeEmailPage(w http.ResponseWriter, cfg email.Config, page email.Page) {
+	writeJSON(w, struct {
+		email.Page
+		Account string `json:"account"`
+	}{Page: page, Account: cfg.AccountFingerprint()})
+}
+
+func emailAccountMatches(w http.ResponseWriter, cfg email.Config, expected string) bool {
+	if err := cfg.CheckAccount(expected); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return false
 	}
-	writeJSON(w, map[string]interface{}{"messages": msgs})
+	return true
+}
+
+func (s *Server) handleEmailStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeErr(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	cfg, ok := s.loadEmailCfg(r)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "email not configured")
+		return
+	}
+	if !emailAccountMatches(w, cfg, r.URL.Query().Get("account")) {
+		return
+	}
+	status, err := cfg.FolderStatus()
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, struct {
+		email.FolderStatus
+		Account string `json:"account"`
+	}{FolderStatus: status, Account: cfg.AccountFingerprint()})
 }
 
 // POST /api/email/send — multipart/form-data: to, subject, body, uid (for a
@@ -391,7 +436,10 @@ func (s *Server) handleEmailSend(w http.ResponseWriter, r *http.Request) {
 		}
 		inReplyTo = orig.MessageID
 		if to == "" && cc == "" && bcc == "" {
-			to = orig.From
+			to = orig.ReplyTo
+			if to == "" {
+				to = orig.From
+			}
 		}
 		if subject == "" {
 			subject = "Re: " + orig.Subject
@@ -411,6 +459,9 @@ func (s *Server) handleEmailAttachment(w http.ResponseWriter, r *http.Request) {
 	cfg, ok := s.loadEmailCfg(r)
 	if !ok {
 		http.Error(w, "email not configured", 400)
+		return
+	}
+	if !emailAccountMatches(w, cfg, r.URL.Query().Get("account")) {
 		return
 	}
 	uid, _ := strconv.ParseUint(r.URL.Query().Get("uid"), 10, 32)

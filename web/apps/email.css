@@ -71,6 +71,9 @@ button:focus-visible,summary:focus-visible,.mrow:focus-visible{outline:2px solid
 #message-category:empty{display:none}
 .triage-status{display:flex;align-items:center;gap:8px;padding:7px 20px;border-bottom:1px solid var(--border);flex-shrink:0;font-size:11px;line-height:1.5;color:var(--text2);overflow-wrap:anywhere}
 .triage-status:not(:has(#triage-progress:not(:empty))){display:none}
+#mail-refresh-status{display:block;font-size:11px;line-height:1.5;color:var(--text3)}
+#mail-refresh-status:empty{display:none}
+#mail-refresh-status.mail-sync-error{color:var(--red)}
 .text-btn{border:0;background:none;color:var(--accent);font:inherit;cursor:pointer;padding:3px;flex-shrink:0}
 @media(max-width:1100px){.mail-brand{width:auto}.mail-topbar{gap:8px}}
 @media(max-width:960px){.mail-topbar{height:auto;min-height:50px;flex-wrap:wrap;padding:6px 10px}.folder-actions{order:1;flex-basis:100%}.mail-search{max-width:none}.folder-actions .filter-panel{left:0;right:auto}.triage-status{padding:7px 12px}}
@@ -112,3 +115,27 @@ button:focus-visible,summary:focus-visible,.mrow:focus-visible{outline:2px solid
 .compose-field input:disabled,.compose-body textarea:disabled{opacity:.7}
 /* Preserve comfortable hit targets on touch devices. */
 @media(pointer:coarse){.icon-btn{width:40px;height:40px}.btn,.nav-item{min-height:40px}.list-tabs>button{min-height:40px}.mail-topbar{height:auto;min-height:54px}.filter-panel .fchip{min-height:36px}}
+
+/* Selection stays with the displayed page; its actions never open a message. */
+.mail-selection{display:grid;gap:6px;padding:7px 12px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;font-size:11px;color:var(--text2)}
+.mail-selection[hidden],.mail-selection-actions[hidden],.mail-selection-status[hidden],.mail-selection-errors[hidden],.mail-selection-stop[hidden]{display:none}
+.mail-selection-controls{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px}
+.mail-select-page{display:inline-flex;align-items:center;gap:7px;cursor:pointer;min-height:24px}
+.mail-select-page input,.mail-select-message{accent-color:var(--accent);width:16px;height:16px;margin:0;cursor:pointer;flex-shrink:0}
+.mail-select-page input:disabled,.mail-select-message:disabled{cursor:default;opacity:.5}
+.mail-selection-count{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--text)}
+.mail-selection-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap;flex-basis:100%}
+.mail-selection-actions .btn{font-size:11px;padding:5px 7px;min-height:29px}
+.mail-selection-actions button:disabled{opacity:.45;cursor:default}
+.mail-selection-actions .text-btn{font-size:11px;padding:5px 2px}
+.mail-selection-status{display:flex;align-items:center;gap:8px;line-height:1.5;overflow-wrap:anywhere}
+.mail-selection-status>[role=status]{flex:1;min-width:0}
+.mail-selection-errors{color:var(--text2);overflow-wrap:anywhere;max-height:150px;overflow:auto}
+.mail-selection-errors summary{cursor:pointer;color:var(--red);line-height:1.5}
+.mail-selection-errors ul{padding-left:18px;margin:5px 0;line-height:1.5}
+.mail-selection-errors li+li{margin-top:5px}
+.mrow>.mail-select-message{margin-top:5px}
+.mrow.mail-selected{background:var(--accent-dim,var(--bg3))}
+.mail-select-message:focus-visible,.mail-select-page input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.mail-batch-destination{display:block;margin:8px 0 12px}
+@media(pointer:coarse){.mail-select-page{min-height:36px}.mail-select-page input,.mrow>.mail-select-message{width:20px;height:20px}.mail-selection-actions .btn,.mail-selection-actions .text-btn{min-height:40px}}

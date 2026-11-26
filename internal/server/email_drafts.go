@@ -1,8 +1,6 @@
 package server
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,8 +25,7 @@ var draftClientID = regexp.MustCompile(`^[A-Za-z0-9_-]{16,100}$`)
 // Changing mailboxes must never silently send an old draft under a new identity.
 // Password rotation and transport security changes do not change its identity.
 func emailAccountFingerprint(c email.Config) string {
-	h := sha256.Sum256([]byte(strings.Join([]string{c.IMAPHost, strconv.Itoa(c.IMAPPort), c.SMTPHost, strconv.Itoa(c.SMTPPort), c.User, c.From}, "\x00")))
-	return hex.EncodeToString(h[:])
+	return c.AccountFingerprint()
 }
 
 func validateEmailDraft(d memory.EmailDraft) error {
@@ -134,6 +131,16 @@ func (s *Server) handleEmailDrafts(w http.ResponseWriter, r *http.Request) {
 		if err := validateEmailDraft(d); err != nil {
 			writeErr(w, 400, err.Error())
 			return
+		}
+		if raw, supplied := fields["account"]; supplied {
+			var expected string
+			if json.Unmarshal(raw, &expected) != nil {
+				writeErr(w, 400, "Invalid draft mailbox identity.")
+				return
+			}
+			if !emailAccountMatches(w, cfg, expected) {
+				return
+			}
 		}
 		d.Account = emailAccountFingerprint(cfg)
 		if d.ID > 0 {

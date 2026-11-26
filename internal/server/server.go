@@ -372,6 +372,7 @@ func (s *Server) productRoutes() (http.Handler, error) {
 	mux.HandleFunc("/api/email/config", s.resourceRoute((*Server).handleEmailConfig))
 	mux.HandleFunc("/api/email/drafts", s.resourceRoute((*Server).handleEmailDrafts))
 	mux.HandleFunc("/api/email/unread", s.resourceRoute((*Server).handleEmailUnread))
+	mux.HandleFunc("/api/email/status", s.resourceRoute((*Server).handleEmailStatus))
 	mux.HandleFunc("/api/email/markseen", s.resourceRoute((*Server).handleEmailMarkSeen))
 	mux.HandleFunc("/api/email/list", s.resourceRoute((*Server).handleEmailList))
 	mux.HandleFunc("/api/email/read", s.resourceRoute((*Server).handleEmailRead))

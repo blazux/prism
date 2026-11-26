@@ -14,19 +14,22 @@ function renderFolderNav(){
 function updateMailHeading(){
  const title=document.getElementById('folder-title');if(!title)return;
  const f=mailFolders.find(f=>f.name===folder)||{name:folder,role:folder==='INBOX'?'inbox':''};title.textContent=folderLabel(f);
- document.getElementById('mail-count').textContent=searchQuery?'Results for “'+searchQuery+'”':messages.length+' loaded · '+messages.filter(m=>!m.seen).length+' unread';
- document.getElementById('page-label').textContent=searchQuery?'Search results':messages.length?(mailOffset+1)+'–'+(mailOffset+messages.length):'No messages';
+ const total=mailPagination?.total,unread=mailPagination?.unread_count;
+ const baseCount=Number.isFinite(total)?total+' message'+(total===1?'':'s'):messages.length+' loaded';
+ const count=activeFilter?messages.filter(passesFilter).length+' shown on this page · '+baseCount:baseCount;
+ document.getElementById('mail-count').textContent=(searchQuery?'Results for “'+searchQuery+'” · ':'')+count+(Number.isFinite(unread)?' · '+unread+' unread':'');
+ document.getElementById('page-label').textContent=messages.length?(mailOffset+1)+'–'+(mailOffset+messages.length)+(Number.isFinite(total)?' of '+total:''):'No messages';
  document.getElementById('clear-search').hidden=!searchQuery;
  document.getElementById('tab-all').classList.toggle('on',!unreadOnly);document.getElementById('tab-unread').classList.toggle('on',unreadOnly);
  updateTriageUI();
  document.getElementById('tab-all').setAttribute('aria-pressed',String(!unreadOnly));document.getElementById('tab-unread').setAttribute('aria-pressed',String(unreadOnly));
 }
-function setUnreadOnly(v){unreadOnly=v;renderList();}
+function setUnreadOnly(v){if(unreadOnly===v)return;unreadOnly=v;mailOffset=0;mailPagination=null;searchQuery?search(searchQuery,false,{preserveReading:true}):loadInbox(false,{preserveReading:true});}
 function toggleFolders(open){const shell=document.getElementById('mail-shell');if(shell)shell.classList.toggle('folders-open',open??!shell.classList.contains('folders-open'));}
 function emptyReading(){return '<div class="reading-empty">'+mailIcon('mail')+'<h2>Select a message</h2><p>Read, reply or organize it from here.</p></div>';}
 function runMailSearch(){const q=document.getElementById('search').value.trim();q?search(q):clearMailSearch();}
 function clearMailSearch(){document.getElementById('search').value='';loadInbox();}
-function refreshMail(){searchQuery?search(searchQuery):loadInbox(true);}
+function refreshMail(options={}){const opts={preserveReading:true,...options};return searchQuery?search(searchQuery,true,opts):loadInbox(true,opts);}
 document.addEventListener('click',e=>{for(const menu of document.querySelectorAll('.action-menu[open], .filter-menu[open]'))if(!menu.contains(e.target)||(menu.classList.contains('action-menu')&&e.target.closest('button')))menu.open=false;});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){toggleFolders(false);for(const m of document.querySelectorAll('.action-menu[open], .filter-menu[open]'))m.open=false;}});
 

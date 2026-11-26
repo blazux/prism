@@ -56,6 +56,11 @@ func (e *ToolExecutor) saveEmailConfig(ctx context.Context, sc emailStoredConfig
 	if err := email.ValidateBridgePreset(e.userStore().LocalMailBridgeDisabled, sc.IMAPHost, sc.SMTPHost); err != nil {
 		return err
 	}
+	if prior, err := e.loadEmailConfig(ctx); err == nil {
+		if err = email.BindLegacyTags(ctx, e.userStore(), prior.AccountFingerprint()); err != nil {
+			return fmt.Errorf("could not preserve existing email categories: %w", err)
+		}
+	}
 	b, _ := json.Marshal(sc)
 	if err := e.userStore().SetConfig(ctx, emailConfigKey, string(b)); err != nil {
 		return err
@@ -73,6 +78,13 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 	}
 	str := func(k string) string { v, _ := args[k].(string); return v }
 	num := func(k string) int { f, _ := args[k].(float64); return int(f) }
+	loadConfig := func() (email.Config, error) {
+		cfg, err := e.loadEmailConfig(ctx)
+		if err == nil {
+			err = cfg.CheckAccount(str("account"))
+		}
+		return cfg, err
+	}
 
 	switch strings.ToLower(strings.TrimSpace(str("action"))) {
 	case "config", "setup":
@@ -184,7 +196,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 			map[bool]string{true: "stored", false: "unchanged"}[password != ""]), nil
 
 	case "list", "inbox", "":
-		cfg, err := e.loadEmailConfig(ctx)
+		cfg, err := loadConfig()
 		cfg.Folder = str("folder")
 		cfg.Offset = num("offset")
 		if err != nil {
@@ -201,7 +213,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		return jsonResult(msgs), nil
 
 	case "read", "open":
-		cfg, err := e.loadEmailConfig(ctx)
+		cfg, err := loadConfig()
 		cfg.Folder = str("folder")
 		cfg.Offset = num("offset")
 		if err != nil {
@@ -218,7 +230,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		return emailReadResult(msg, num("offset"))
 
 	case "search":
-		cfg, err := e.loadEmailConfig(ctx)
+		cfg, err := loadConfig()
 		cfg.Folder = str("folder")
 		cfg.Offset = num("offset")
 		if err != nil {
@@ -238,7 +250,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		return jsonResult(msgs), nil
 
 	case "send":
-		cfg, err := e.loadEmailConfig(ctx)
+		cfg, err := loadConfig()
 		cfg.Folder = str("folder")
 		cfg.Offset = num("offset")
 		if err != nil {
@@ -254,7 +266,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		return fmt.Sprintf("Email sent to %s.", to), nil
 
 	case "reply":
-		cfg, err := e.loadEmailConfig(ctx)
+		cfg, err := loadConfig()
 		cfg.Folder = str("folder")
 		cfg.Offset = num("offset")
 		if err != nil {
@@ -275,7 +287,10 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		}
 		to := str("to")
 		if to == "" {
-			to = orig.From
+			to = orig.ReplyTo
+			if to == "" {
+				to = orig.From
+			}
 		}
 		if err := cfg.SendTo(to, str("cc"), str("bcc"), subject, body, orig.MessageID, nil); err != nil {
 			return "", err
@@ -291,7 +306,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		if action == "rule_delete" {
 			return "Rule deleted.", email.DeleteRule(ctx, e.userStore(), str("name"))
 		}
-		cfg, err := e.loadEmailConfig(ctx)
+		cfg, err := loadConfig()
 		if err != nil {
 			return "", err
 		}
@@ -363,14 +378,14 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		return jsonResult(result), err
 
 	case "folders":
-		cfg, err := e.loadEmailConfig(ctx)
+		cfg, err := loadConfig()
 		if err != nil {
 			return "", err
 		}
 		fs, err := cfg.Folders()
 		return jsonResult(fs), err
 	case "create_folder", "rename_folder", "delete_folder":
-		cfg, err := e.loadEmailConfig(ctx)
+		cfg, err := loadConfig()
 		if err != nil {
 			return "", err
 		}
@@ -380,7 +395,7 @@ func (e *ToolExecutor) emailTool(ctx context.Context, args map[string]interface{
 		}
 		return jsonResult(map[string]string{"folder": resolved, "status": "updated"}), nil
 	case "move", "archive", "trash", "mark_read", "mark_unread":
-		cfg, err := e.loadEmailConfig(ctx)
+		cfg, err := loadConfig()
 		if err != nil {
 			return "", err
 		}

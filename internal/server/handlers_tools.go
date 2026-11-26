@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"prism/internal/agent"
+	"prism/internal/email"
 )
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -326,6 +328,9 @@ func (s *Server) handleBuiltinTool(w http.ResponseWriter, r *http.Request) {
 	}
 	if execErr != nil {
 		resp["error"] = execErr.Error()
+	}
+	if errors.Is(execErr, email.ErrAccountChanged) {
+		w.WriteHeader(http.StatusConflict)
 	}
 	json.NewEncoder(w).Encode(resp)
 }

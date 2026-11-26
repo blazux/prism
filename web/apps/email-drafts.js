@@ -3,6 +3,93 @@
 let draftState = null, draftSaveTimer = null, savedDrafts = [], draftListGeneration = 0;
 const draftFields = ['to', 'cc', 'bcc', 'subject', 'body'];
 const draftAttachmentLimit = 20 * 1024 * 1024;
+let forwardState = null;
+
+function forwardAttachmentsBlocked() {
+  return !!(forwardState && forwardState.generation===composeGeneration && !forwardState.complete);
+}
+function resetForwardAttachments() {
+  forwardState?.controller?.abort();
+  forwardState=null;
+  const retry=document.getElementById('forward-retry');if(retry)retry.hidden=true;
+  const skip=document.getElementById('forward-skip');if(skip)skip.hidden=true;
+}
+async function ensureForwardAttachments() {
+  const state=forwardState;
+  if(!state||state.generation!==composeGeneration)return;
+  if(state.pending)await state.pending;
+  if(forwardState!==state||state.generation!==composeGeneration)throw Error('The composer changed while attachments were loading.');
+  if(!state.complete)throw Error(state.error||'The original attachments are still loading.');
+}
+function startForwardAttachments(message, sourceFolder, sourceAccount='') {
+  if(!message.attachments?.length)return Promise.resolve(true);
+  forwardState={generation:composeGeneration,uid:message.uid,folder:sourceFolder,account:sourceAccount,
+    attachments:message.attachments.slice(),controller:null,pending:null,complete:false,error:''};
+  return retryForwardAttachments();
+}
+async function retryForwardAttachments() {
+  const state=forwardState;
+  if(!state||state.generation!==composeGeneration||state.complete)return false;
+  if(state.pending)return state.pending;
+  const active=()=>forwardState===state&&composeGeneration===state.generation&&draftIsOpen();
+  state.controller=new AbortController();state.error='';
+  clearTimeout(draftSaveTimer);
+  const retry=document.getElementById('forward-retry');if(retry)retry.hidden=true;
+  const skip=document.getElementById('forward-skip');if(skip)skip.hidden=true;
+  document.getElementById('c-err').textContent='';
+  document.getElementById('send-mail').disabled=true;
+  setDraftStatus('Loading original attachments…');publishMailContext();
+  state.pending=(async()=>{
+    const files=[];
+    let size=composeAtts.reduce((total,file)=>total+file.size,0);
+    if(size+state.attachments.reduce((total,file)=>total+Math.max(0,Number(file.size)||0),0)>draftAttachmentLimit)throw Error('Attachments exceed the 20 MB draft limit.');
+    for(let index=0;index<state.attachments.length;index++){
+      const attachment=state.attachments[index];
+      const query=new URLSearchParams({folder:state.folder,uid:String(state.uid),i:String(index)});
+      if(state.account)query.set('account',state.account);
+      const response=await fetch('/api/email/attachment?'+query,{credentials:'same-origin',signal:state.controller.signal});
+      if(!response.ok){const error=Error('Could not load '+attachment.filename+': '+await PrismAPI.failure(response));error.status=response.status;throw error;}
+      const blob=await response.blob();
+      if(!active())return false;
+      size+=blob.size;
+      if(size>draftAttachmentLimit)throw Error('Attachments exceed the 20 MB draft limit.');
+      files.push(new File([blob],attachment.filename,{type:attachment.contentType||blob.type||'application/octet-stream'}));
+      setDraftStatus('Loading original attachments ('+(index+1)+'/'+state.attachments.length+')…');
+    }
+    if(!active())return false;
+    // Publish the originals together only after every attachment has arrived.
+    // A retry cannot duplicate a partial download or send an incomplete forward.
+    if(composeAtts.reduce((total,file)=>total+file.size,0)+files.reduce((total,file)=>total+file.size,0)>draftAttachmentLimit)throw Error('Attachments exceed the 20 MB draft limit.');
+    composeAtts.push(...files);state.complete=true;
+    if(state.mailboxChanged&&draftState){draftState.blocked=false;draftState.mailboxChanged=false;document.getElementById('draft-save-copy').hidden=true;}
+    renderComposeAtts();scheduleDraftSave(true);publishMailContext();
+    return true;
+  })().catch(error=>{
+    if(active()){
+      state.error=error.message+' Your message is kept here. Retry loading the originals before sending.';
+      if(error.status===409&&draftState){state.mailboxChanged=true;draftState.mailboxChanged=true;document.getElementById('draft-save-copy').hidden=false;}
+      document.getElementById('c-err').textContent=state.error;
+      setDraftStatus('Original attachments not loaded',true);
+      if(retry)retry.hidden=false;
+      if(skip)skip.hidden=error.status===409;
+    }
+    return false;
+  }).finally(()=>{
+    state.pending=null;
+    if(active())setComposerDisabled(sendingMail||!!draftState?.blocked);
+  });
+  return state.pending;
+}
+async function continueWithoutForwardAttachments() {
+  const state=forwardState;
+  if(!state||state.pending||state.complete||state.generation!==composeGeneration)return;
+  if(!await PrismModal.confirm('Continue without the original attachments? Only this message text and files you attached yourself will be included.',{okLabel:'Continue without originals'}))return;
+  if(forwardState!==state||state.generation!==composeGeneration)return;
+  resetForwardAttachments();
+  document.getElementById('c-err').textContent='';
+  setComposerDisabled(sendingMail||!!draftState?.blocked);
+  scheduleDraftSave();publishMailContext();
+}
 
 function draftValues() {
   return Object.fromEntries(draftFields.map(key => [key, document.getElementById('c-' + key).value]));
@@ -20,6 +107,7 @@ function resetDraftState(saved) {
   clearTimeout(draftSaveTimer);
   draftState={id:saved?.id || 0,revision:saved?.revision || 0,
     clientID:saved?.client_id || crypto.randomUUID(),generation:composeGeneration,
+    account:typeof mailAccount==='string'?mailAccount:'',
     saved:saved?draftSnapshot():'',attachmentsVersion:0,savedAttachmentsVersion:saved?0:-1,
     pending:null,conflict:false,blocked:saved?.status==='sending',mailboxChanged:false};
   setDraftStatus(saved?.status==='sending'?'Send not confirmed. Check Sent before sending a copy.':saved?'Saved in Prism':'Draft not saved yet',draftState.blocked);
@@ -36,6 +124,7 @@ function scheduleDraftSave(attachmentsChanged=false) {
   if(attachmentsChanged)draftState.attachmentsVersion++;
   publishMailContext();
   clearTimeout(draftSaveTimer);
+  if(forwardAttachmentsBlocked())return;
   if(draftState.conflict||draftState.blocked)return;
   if(draftSnapshot()===draftState.saved){setDraftStatus('Saved in Prism');return;}
   if(!draftState.id&&!draftHasContent())return;
@@ -53,6 +142,8 @@ async function flushDraft(options={}) {
   clearTimeout(draftSaveTimer);
   const state=draftState;
   if(!state||!draftIsOpen())return null;
+  await ensureForwardAttachments();
+  if(draftState!==state||!draftIsOpen())return null;
   if(state.pending){await state.pending;if(draftState!==state)return null;return flushDraft(options);}
   if(state.conflict)throw Error('This draft changed elsewhere. Save your edits as a new draft or reopen the saved version.');
   if(state.blocked)throw Error('This draft is read-only. Check its mailbox and send status before saving a copy.');
@@ -61,6 +152,7 @@ async function flushDraft(options={}) {
   if(snapshot===state.saved)return state;
   const values=draftValues(),attachmentVersion=state.attachmentsVersion;
   const payload={...values,id:state.id,revision:state.revision,client_id:state.clientID,uid:replyUid,folder:replyFolder};
+  if(state.account)payload.account=state.account;
   const files=composeAtts.slice();
   state.pending=(async()=>{
     setDraftStatus('Saving…');
@@ -96,7 +188,7 @@ async function flushDraft(options={}) {
 function setComposerDisabled(disabled) {
   for(const key of draftFields)document.getElementById('c-'+key).disabled=disabled;
   document.getElementById('c-file').disabled=disabled;
-  document.getElementById('send-mail').disabled=disabled;
+  document.getElementById('send-mail').disabled=disabled||forwardAttachmentsBlocked();
   document.getElementById('discard-draft').disabled=disabled;
   document.querySelectorAll('#c-atts .att-x').forEach(b=>b.disabled=disabled);
 }
@@ -155,15 +247,28 @@ async function openSavedDraft(id) {
 async function saveDraftCopy() {
   if(!draftState||sendingMail)return;
   const prior=draftState,generation=composeGeneration;
-  const warning=draftState.blocked?'Save a copy for the currently connected mailbox? If an earlier send was interrupted, check Sent first to avoid sending the message twice.':'Keep these edits as a new draft? The existing saved version will remain unchanged.';
+  let copyAccount;
+  try{
+    const connection=await PrismAPI.api('/api/email/config');
+    if(typeof connection.account!=='string'||!connection.account)throw Error('The current mailbox is unavailable. Reconnect it before saving a copy.');
+    copyAccount=connection.account;
+  }catch(error){if(draftState===prior&&composeGeneration===generation)document.getElementById('c-err').textContent=error.message;return;}
+  if(draftState!==prior||composeGeneration!==generation)return;
+  const mailboxChanged=prior.mailboxChanged||prior.account!==copyAccount;
+  const missingOriginals=!!forwardState?.mailboxChanged;
+  const warning=missingOriginals?'Save a copy for the currently connected mailbox? The original attachments could not be loaded and will not be included. Your text and files you attached yourself will be kept.':
+    draftState.blocked||mailboxChanged?'Save a copy for the currently connected mailbox? If an earlier send was interrupted, check Sent first to avoid sending the message twice.':
+    'Keep these edits as a new draft? The existing saved version will remain unchanged.';
   if(!await PrismModal.confirm(warning,{okLabel:'Save as new draft'}))return;
   if(draftState!==prior||composeGeneration!==generation)return;
   if(prior.pending)await prior.pending.catch(()=>{});
   if(draftState!==prior||composeGeneration!==generation)return;
   // IMAP UIDs belong to one mailbox. A copy under a new account is a new
   // message, not a reply to whichever message happens to have the old UID.
-  if(prior.mailboxChanged){replyUid=0;replyFolder='INBOX';}
+  if(mailboxChanged){replyUid=0;replyFolder='INBOX';}
+  if(missingOriginals)resetForwardAttachments();
   resetDraftState();
+  draftState.account=copyAccount;
   try{await flushDraft();PrismAPI.toast('Saved as a new draft.','ok');}catch(error){document.getElementById('c-err').textContent=error.message;}
 }
 async function discardCompose() {
@@ -172,6 +277,7 @@ async function discardCompose() {
   if(!await PrismModal.confirm('Delete this draft and its attachments from Prism?',{danger:true,okLabel:'Delete draft'}))return;
   if(generation!==composeGeneration)return;
   clearTimeout(draftSaveTimer);
+  resetForwardAttachments();
   try{
     if(state.pending)await state.pending;
     if(state.id)await PrismAPI.api('/api/email/drafts?id='+state.id+'&revision='+state.revision,{method:'DELETE'});

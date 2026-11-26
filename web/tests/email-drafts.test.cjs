@@ -16,9 +16,10 @@ function fixture(post) {
  const ctx=vm.createContext({crypto:{randomUUID:()=>`unique-client-token-${++token}`},setTimeout:()=>1,clearTimeout(){},addEventListener(){},
   document:{getElementById:id=>fields[id],querySelectorAll:()=>[],addEventListener(){}},publishMailContext(){},
   PrismModal:{confirm:async()=>true},PrismAPI:{toast(){},body:(method,body)=>({method,body}),api:async(url,opts)=>{
+   if(url==='/api/email/config')return {account:'current-fixture-mailbox'};
    if(!opts)return {drafts:[]};writes.push(opts.body);return post(opts.body,writes.length);
   }}});
- vm.runInContext("let composeGeneration=1,composeAtts=[],replyUid=17,replyFolder='Projects',sendingMail=false,cfg={};",ctx);
+ vm.runInContext("let composeGeneration=1,composeAtts=[],replyUid=17,replyFolder='Projects',sendingMail=false,cfg={},mailAccount='current-fixture-mailbox';",ctx);
  vm.runInContext(source,ctx);
  const closeStart=html.indexOf('async function closeCompose(');
  vm.runInContext(html.slice(closeStart,html.indexOf('\nfunction publishMailContext()',closeStart)),ctx);
@@ -70,4 +71,5 @@ for(const changed of [false,true])test(`copying a draft ${changed?'to a new mail
  assert.equal(f.writes.length,1);assert.equal(f.writes[0].id,0);
  assert.equal(f.writes[0].uid,changed?0:17);assert.equal(f.writes[0].folder,changed?'INBOX':'Projects');
  assert.equal(f.writes[0].body,'Initial draft');
+  if(changed)assert.equal(f.writes[0].account,'current-fixture-mailbox');
 });

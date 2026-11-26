@@ -33,15 +33,16 @@ import (
 )
 
 type Config struct {
-	Folder   string // request scope; empty means INBOX
-	Offset   int    // list pagination
-	IMAPHost string
-	IMAPPort int
-	SMTPHost string
-	SMTPPort int
-	User     string
-	Pass     string
-	From     string // From address; defaults to User
+	Folder     string // request scope; empty means INBOX
+	Offset     int    // list pagination
+	UnreadOnly bool   // apply UNSEEN on the server, before sorting and pagination
+	IMAPHost   string
+	IMAPPort   int
+	SMTPHost   string
+	SMTPPort   int
+	User       string
+	Pass       string
+	From       string // From address; defaults to User
 	// Security selects the IMAP/SMTP transport: "" / "ssl" = implicit TLS
 	// (default, ports 993/465); "starttls" = upgrade a plain connection
 	// (ports 143/1143/587/1025). Insecure accepts a self-signed certificate —
@@ -69,11 +70,24 @@ type Message struct {
 	From        string       `json:"from"`
 	To          string       `json:"to,omitempty"` // comma-joined recipients (for reply-all)
 	Cc          string       `json:"cc,omitempty"`
+	ReplyTo     string       `json:"replyTo,omitempty"`
 	Date        time.Time    `json:"date"`
 	Seen        bool         `json:"seen"`
 	MessageID   string       `json:"messageId,omitempty"`
 	Body        string       `json:"body,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+// Page describes the complete matching result set and one bounded page of it.
+// UnreadCount counts unseen matches for the current query, not just this page.
+type Page struct {
+	Messages    []Message `json:"messages"`
+	Total       int       `json:"total"`
+	UnreadCount int       `json:"unread_count"`
+	FolderTotal int       `json:"folder_total"`
+	Offset      int       `json:"offset"`
+	Limit       int       `json:"limit"`
+	NextOffset  *int      `json:"next_offset"`
 }
 
 // Attachment is one file attached to a received message (metadata only; bytes
@@ -180,79 +194,128 @@ func (c Config) fetchByUIDs(cl *imapclient.Client, uids []imap.UID) ([]Message, 
 	return out, nil
 }
 
-// List returns up to `limit` most recent messages in INBOX, newest first.
+// List returns up to `limit` most recent messages in the selected folder.
 func (c Config) List(limit int) ([]Message, error) {
-	if limit > 500 {
-		limit = 500
-	}
-	if c.Offset < 0 {
-		c.Offset = 0
-	}
+	page, err := c.ListPage(limit)
+	return page.Messages, err
+}
+
+// ListPage applies the unread filter before sorting and paginating the folder.
+func (c Config) ListPage(limit int) (Page, error) {
+	return c.messagePage("", min(limit, 500))
+}
+
+func (c Config) messagePage(query string, limit int) (Page, error) {
 	if limit <= 0 {
 		limit = 20
 	}
+	c.Offset = max(c.Offset, 0)
+	page := Page{Messages: []Message{}, Offset: c.Offset, Limit: limit}
 	cl, err := c.dial()
 	if err != nil {
-		return nil, err
+		return page, err
 	}
 	defer cl.Close()
-
 	sel, err := cl.Select(c.mailbox(), &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {
-		return nil, fmt.Errorf("select inbox: %w", err)
+		return page, fmt.Errorf("select inbox: %w", err)
 	}
+	page.FolderTotal = int(sel.NumMessages)
 	if sel.NumMessages == 0 {
-		return nil, nil
+		return page, nil
+	}
+	criteria := &imap.SearchCriteria{}
+	if query != "" {
+		criteria.Text = []string{query}
+	}
+	if c.UnreadOnly {
+		criteria.NotFlag = []imap.Flag{imap.FlagSeen}
 	}
 
-	// Preferred: server-side SORT by date, newest first (when supported).
+	// SORT keeps fetching bounded to the requested page on capable servers.
 	if cl.Caps().Has(imap.CapSort) {
-		nums, serr := cl.UIDSort(&imapclient.SortOptions{
-			SearchCriteria: &imap.SearchCriteria{},
+		nums, sortErr := cl.UIDSort(&imapclient.SortOptions{
+			SearchCriteria: criteria,
 			SortCriteria:   []imapclient.SortCriterion{{Key: imapclient.SortKeyDate, Reverse: true}},
 		}).Wait()
-		if serr == nil && len(nums) > 0 {
-			if c.Offset >= len(nums) {
-				return []Message{}, nil
+		if sortErr == nil {
+			page.Total = len(nums)
+			if c.UnreadOnly {
+				page.UnreadCount = len(nums)
+			} else if len(nums) > 0 {
+				unseen := *criteria
+				unseen.NotFlag = []imap.Flag{imap.FlagSeen}
+				found, err := cl.UIDSearch(&unseen, nil).Wait()
+				if err != nil {
+					return page, fmt.Errorf("count unread: %w", err)
+				}
+				page.UnreadCount = len(found.AllUIDs())
 			}
-			nums = nums[c.Offset:]
-			if len(nums) > limit {
-				nums = nums[:limit]
+			start, end := page.bounds()
+			if start == end {
+				return page, nil
 			}
-			uids := make([]imap.UID, len(nums))
-			for i, n := range nums {
+			uids := make([]imap.UID, end-start)
+			for i, n := range nums[start:end] {
 				uids[i] = imap.UID(n)
 			}
-			if out, ferr := c.fetchByUIDs(cl, uids); ferr == nil {
-				return out, nil
-			}
+			page.Messages, err = c.fetchByUIDs(cl, uids)
+			return page, err
 		}
 	}
 
-	// Fallback (Proton Bridge lacks SORT): IMAP sequence order is import order,
-	// NOT date order — so the last N by sequence can be the OLDEST mails. Fetch
-	// every message's date cheaply, sort by date, and keep the newest N.
-	var all imap.SeqSet
-	all.AddRange(1, sel.NumMessages)
-	metas, err := cl.Fetch(all, &imap.FetchOptions{UID: true, InternalDate: true, Envelope: true, Flags: true}).Collect()
+	// Proton Bridge has no SORT. Fetch only lightweight matching metadata, then
+	// use actual message dates: UID/import order is not chronological order.
+	var ids imap.NumSet
+	if query != "" || c.UnreadOnly {
+		found, err := cl.UIDSearch(criteria, nil).Wait()
+		if err != nil {
+			return page, fmt.Errorf("search: %w", err)
+		}
+		uids := found.AllUIDs()
+		if len(uids) == 0 {
+			return page, nil
+		}
+		ids = imap.UIDSetNum(uids...)
+	} else {
+		var all imap.SeqSet
+		all.AddRange(1, sel.NumMessages)
+		ids = all
+	}
+	metas, err := cl.Fetch(ids, &imap.FetchOptions{UID: true, InternalDate: true, Envelope: true, Flags: true}).Collect()
 	if err != nil {
-		return nil, fmt.Errorf("fetch: %w", err)
+		return page, fmt.Errorf("fetch: %w", err)
 	}
-	sort.Slice(metas, func(i, j int) bool { return msgDate(metas[i]).After(msgDate(metas[j])) })
-	if c.Offset >= len(metas) {
-		return []Message{}, nil
+	page.Total = len(metas)
+	for _, message := range metas {
+		if !hasFlag(message.Flags, imap.FlagSeen) {
+			page.UnreadCount++
+		}
 	}
-	metas = metas[c.Offset:]
-	if len(metas) > limit {
-		metas = metas[:limit]
-	}
-	out := make([]Message, 0, len(metas))
-	for _, m := range metas {
+	sort.Slice(metas, func(i, j int) bool {
+		a, b := msgDate(metas[i]), msgDate(metas[j])
+		if a.Equal(b) {
+			return metas[i].UID > metas[j].UID
+		}
+		return a.After(b)
+	})
+	start, end := page.bounds()
+	for _, m := range metas[start:end] {
 		msg := toMessage(m)
 		msg.Folder = c.mailbox()
-		out = append(out, msg)
+		page.Messages = append(page.Messages, msg)
 	}
-	return out, nil
+	return page, nil
+}
+
+func (p *Page) bounds() (int, int) {
+	start := min(p.Offset, p.Total)
+	end := start + min(p.Limit, p.Total-start)
+	if end < p.Total {
+		next := end
+		p.NextOffset = &next
+	}
+	return start, end
 }
 
 // UnreadCount returns the number of unseen messages in INBOX (a cheap STATUS,
@@ -370,51 +433,17 @@ func (c Config) Attachment(uid uint32, index int) (filename, contentType string,
 	return "", "", nil, fmt.Errorf("attachment %d not found", index)
 }
 
-// Search runs a server-side text search and returns matching messages (newest
-// first), capped at `limit`.
+// Search retains its original first-page behavior. SearchPage provides explicit
+// pagination without reinterpreting Config.Offset in existing callers.
 func (c Config) Search(query string, limit int) ([]Message, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-	cl, err := c.dial()
-	if err != nil {
-		return nil, err
-	}
-	defer cl.Close()
-	if _, err := cl.Select(c.mailbox(), &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
-		return nil, fmt.Errorf("select inbox: %w", err)
-	}
+	c.Offset = 0
+	page, err := c.SearchPage(query, limit)
+	return page.Messages, err
+}
 
-	data, err := cl.UIDSearch(&imap.SearchCriteria{Text: []string{query}}, nil).Wait()
-	if err != nil {
-		return nil, fmt.Errorf("search: %w", err)
-	}
-	uids := data.AllUIDs()
-	if len(uids) == 0 {
-		return nil, nil
-	}
-	// Imported messages can have newer UIDs but older dates. Sort lightweight
-	// metadata before applying the limit, rather than keeping the highest UIDs.
-	msgs, err := cl.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{Envelope: true, InternalDate: true, Flags: true, UID: true}).Collect()
-	if err != nil {
-		return nil, fmt.Errorf("fetch: %w", err)
-	}
-	out := make([]Message, 0, len(msgs))
-	for _, m := range msgs {
-		msg := toMessage(m)
-		msg.Folder = c.mailbox()
-		out = append(out, msg)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Date.Equal(out[j].Date) {
-			return out[i].UID > out[j].UID
-		}
-		return out[i].Date.After(out[j].Date)
-	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
+// SearchPage searches the selected folder, filtering before pagination.
+func (c Config) SearchPage(query string, limit int) (Page, error) {
+	return c.messagePage(query, limit)
 }
 
 func toMessage(m *imapclient.FetchMessageBuffer) Message {
@@ -424,6 +453,10 @@ func toMessage(m *imapclient.FetchMessageBuffer) Message {
 		msg.From = addr(m.Envelope.From)
 		msg.To = addrList(m.Envelope.To)
 		msg.Cc = addrList(m.Envelope.Cc)
+		replyTo := addrList(m.Envelope.ReplyTo)
+		if _, err := recipientList(replyTo); err == nil {
+			msg.ReplyTo = replyTo
+		}
 		msg.MessageID = m.Envelope.MessageID
 	}
 	return msg

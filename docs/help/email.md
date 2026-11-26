@@ -1,4 +1,4 @@
-# Email: folders and Prism rules
+# Email
 
 For help connecting a mailbox, first read `prism_help` with topic
 `connecting-accounts`. For **Proton Mail**, read `protonmail-bridge` before
@@ -28,9 +28,26 @@ Open a message to read, reply, reply all, forward or download attachments.
 **Move** selects a destination; **Archive** and **Trash** move to the matching
 server folder. Trash is a recoverable move: Prism does not permanently expunge
 all mail. To restore a message, open Trash and move it back. The message’s **More (…) → Mark unread** keeps it as a reminder.
-**All / Unread** filters the loaded page; use the bottom arrows for older or newer messages. Search is within the selected folder; **Older messages**
-and **Newer messages** browse the folder's pages. AI categories remain separate
-from actual IMAP folders.
+**Unread** searches the whole selected folder before displaying a page of results.
+Use the bottom arrows for older or newer results, including while searching.
+Search is within the selected folder. Categories and tags filter the loaded
+page; they remain separate from actual IMAP folders.
+
+Select messages using their checkboxes, or use **This page** to select the
+visible messages. The selection toolbar can archive, move, send to Trash or
+mark several messages read or unread. For example, select twenty newsletters
+and archive them together. The progress report distinguishes confirmed changes,
+changes that could not be confirmed and messages not processed. Successful
+messages leave the selection; review failures before trying them again.
+**Stop** stops starting new operations and waits for those already in progress.
+Finish or stop the operation before leaving Email.
+
+While Email is visible, it checks for mailbox changes approximately every
+30 seconds. New messages refresh the list without closing the message you are
+reading or resetting its scroll position. Automatic checks pause while a draft
+is open or selected messages are being processed. **Refresh** reloads the
+current folder or search results immediately. If refreshing fails, the current
+message remains readable and the app displays the error.
 
 If Archive/Trash is not advertised and has no recognized name, choose the
 folder explicitly with Move. A server without MOVE or UIDPLUS cannot safely
@@ -113,7 +130,19 @@ and keeps your current text visible. Review both versions before continuing.
 A failed send keeps the draft. If the connection fails during sending, check
 your mailbox before retrying: the server may already have accepted the message.
 Reply and Reply all include the original message as quoted text below your
-answer. The list sorts by the actual timestamp, regardless of the sender's timezone.
+answer. They use the message's Reply-To address when one is provided. The list
+sorts by the actual timestamp, regardless of the sender's timezone.
+
+Forward includes the original attachments. Prism downloads them before saving
+or sending the forwarded draft. If a download fails, your text stays in the
+composer and sending is blocked. Use **Retry attachments**, or explicitly
+choose to continue without the original attachments. Your own added files are
+kept. Saved drafts and their attachments remain subject to the 20 MB limit.
+
+If the connected mailbox changes in another tab, Prism refuses actions that
+still refer to the previous mailbox. Refresh Email before acting on the new
+mailbox. A saved draft from the previous mailbox remains available; use its
+explicit copy action if you want to prepare it for the current account.
 
 ## Writing together with the agent
 

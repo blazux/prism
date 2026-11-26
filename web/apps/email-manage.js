@@ -2,7 +2,7 @@
 let mailFolders=[];
 function mailURL(path){return path+'?folder='+encodeURIComponent(folder);}
 async function mailTool(action,args={}) {
- const d=await PrismAPI.api('/api/builtin/email?session='+encodeURIComponent(SESSION),PrismAPI.body('POST',{action,folder,...args}));
+ const d=await PrismAPI.api('/api/builtin/email?session='+encodeURIComponent(SESSION),PrismAPI.body('POST',{action,folder,account:mailAccount,...args}));
  if(d.error)throw new Error(d.error);
  if(typeof d.result==='string'){try{return JSON.parse(d.result);}catch(_){return d.result;}}return d.result;
 }
@@ -10,8 +10,8 @@ async function loadFolders(){
  try {mailFolders=await mailTool('folders');renderFolderNav();}
  catch(e){const nav=document.getElementById('folder-nav');if(nav){nav.replaceChildren();const b=document.createElement('button');b.className='nav-item';b.textContent='Retry loading folders';b.onclick=loadFolders;nav.appendChild(b);}PrismAPI.toast(e.message);}
 }
-function changeFolder(name){folder=name;activeFilter='';current=null;messages=[];searchQuery='';unreadOnly=false;document.getElementById('search').value='';toggleFolders(false);renderFolderNav();loadInbox();}
-function olderMail(){mailOffset+=inboxLimit();loadInbox(true);}
+function changeFolder(name){window.PrismMailSelection?.clear();folder=name;activeFilter='';current=null;messages=[];mailPagination=null;mailStatusStamp='';searchQuery='';unreadOnly=false;document.getElementById('search').value='';toggleFolders(false);renderFolderNav();loadInbox();}
+function olderMail(){return browseMailPage(mailPagination?.next_offset??(mailOffset+inboxLimit()));}
 function mailDialog(title,body){
  const d=document.createElement('dialog');d.className='mail-dialog';d.setAttribute('aria-label',title);
  d.innerHTML='<h3 style="margin:0 0 14px">'+esc(title)+'</h3>'+body+'<div class="dialog-footer"><button class="btn close-dialog">Close</button></div>';
@@ -44,15 +44,15 @@ async function manageFolders(selected=folder){
 }
 async function mailAction(action,target){
  if(!current)return;
- const uid=current.uid,source=folder;
- try{await mailTool(action,{uid,folder:source,target});if(folder===source)await loadInbox(true);notifyBadge();}
+ const uid=current.uid,source=folder,account=mailAccount;
+ try{await mailTool(action,{uid,folder:source,account,target});if(folder===source&&mailAccount===account){if(current?.uid===uid)resetMailReading();await refreshMail({preserveReading:true});}notifyBadge();}
  catch(e){PrismAPI.toast(e.message);}
 }
 async function moveMessage(){
  if(!current)return;
- const uid=current.uid,source=folder;await loadFolders();
+ const uid=current.uid,source=folder,account=mailAccount;await loadFolders();
  const d=mailDialog('Move message','<select aria-label="Destination">'+folderOptions(mailFolders.find(f=>f.selectable&&f.name!==source)?.name)+'</select> <button class="btn move">Move</button><p class="error"></p>');
- d.querySelector('.move').onclick=async()=>{const button=d.querySelector('.move');button.disabled=true;try{await mailTool('move',{uid,folder:source,target:d.querySelector('select').value});d.close();if(folder===source)loadInbox(true);notifyBadge();}catch(e){d.querySelector('.error').textContent=e.message;}finally{button.disabled=false;}};
+ d.querySelector('.move').onclick=async()=>{const button=d.querySelector('.move');button.disabled=true;try{await mailTool('move',{uid,folder:source,account,target:d.querySelector('select').value});d.close();if(folder===source&&mailAccount===account){if(current?.uid===uid)resetMailReading();refreshMail({preserveReading:true});}notifyBadge();}catch(e){d.querySelector('.error').textContent=e.message;}finally{button.disabled=false;}};
 }
 async function manageRules(){
  try{
