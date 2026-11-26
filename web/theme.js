@@ -20,6 +20,7 @@
   };
   let applyingPreferences = false;
   let preferencesReady = false;
+  let renderedVars = null;
   function savePreference(key, value) {
     if (!applyingPreferences) preferences.setItem(key, String(value));
   }
@@ -113,7 +114,15 @@
 
   // The live-update bootstrap injected into each widget: listens for theme
   // broadcasts from the dashboard and updates :root in place (no reload).
-  const WIDGET_BOOTSTRAP = `(function(){function a(v){var r=document.documentElement.style;for(var k in v)r.setProperty(k,v[k]);}window.addEventListener('message',function(e){var d=e.data;if(d&&d.type==='prism-theme'&&d.vars)a(d.vars);});})();`;
+  const WIDGET_BOOTSTRAP = `(function(){
+    window.addEventListener('message',function(e){
+      var d=e.data,o=window.PRISM_PARENT_ORIGIN;
+      if(e.source!==window.parent||(o&&e.origin!==o)||!d||d.type!=='prism-theme'||!d.vars)return;
+      var r=document.documentElement.style;for(var k in d.vars)r.setProperty(k,d.vars[k]);
+      if(o){var keys=['--bg1','--text','--text2','--accent','--border','color-scheme'];
+        window.parent.postMessage({type:'prism-widget-theme-ready',theme:keys.map(function(k){return r.getPropertyValue(k).trim();}).join('|')},o);}
+    });
+  })();`;
 
   // ─── Custom themes ───────────────────────────────────────────────────────
   const CUSTOM_KEY = 'prism-custom-themes';
@@ -152,6 +161,34 @@
     const t = getAllThemes()[getThemeId()];
     return (t || THEMES[DEFAULT_THEME]).vars;
   }
+  function currentVars() {
+    const vars = { ...(renderedVars || activeVars()) };
+    const font = document.documentElement.style.getPropertyValue?.('--sans');
+    if (font) vars['--sans'] = font;
+    return vars;
+  }
+
+  function inheritParentTheme() {
+    try {
+      if (window.parent === window || !window.parent?.PrismTheme?.currentVars) return false;
+      const vars = window.parent.PrismTheme.currentVars();
+      for (const [key, value] of Object.entries(vars)) document.documentElement.style.setProperty(key, value);
+      renderedVars = { ...vars };
+      const parentRoot = window.parent.document?.documentElement;
+      if (parentRoot?.getAttribute) for (const key of ['data-theme','data-theme-group','data-theme-mode','data-chat-surface']) {
+        const value = parentRoot.getAttribute(key);
+        if (value !== null) document.documentElement.setAttribute(key, value);
+      }
+      return true;
+    } catch (_) { return false; /* Generated widgets have a separate origin. */ }
+  }
+
+  function broadcastVars(vars) {
+    const frames = [...document.querySelectorAll('.widget-body iframe')];
+    const appFrame = document.getElementById('app-frame');
+    if (appFrame) frames.push(appFrame);
+    frames.forEach(frame => { try { frame.contentWindow.postMessage({type: 'prism-theme', vars}, '*'); } catch (_) {} });
+  }
 
   function varsToCSS(vars) {
     let s = ':root{';
@@ -164,6 +201,7 @@
     const all = getAllThemes();
     if (!Object.hasOwn(all, id)) id = DEFAULT_THEME;
     const vars = all[id].vars;
+    renderedVars = { ...vars };
     const root = document.documentElement.style;
     for (const k in vars) root.setProperty(k, vars[k]);
     // data-theme drives the per-theme animated background (see style.css #bg-fx).
@@ -172,15 +210,7 @@
     document.documentElement.setAttribute('data-theme-mode', all[id].mode || vars['color-scheme']);
     document.documentElement.setAttribute('data-chat-surface', GLASS_THEMES.has(id) ? 'glass' : 'solid');
     savePreference(STORAGE_KEY, id);
-    if (broadcast) {
-      // widgets (board) + the full-pane app iframe both get live updates
-      const frames = [...document.querySelectorAll('.widget-body iframe')];
-      const appFrame = document.getElementById('app-frame');
-      if (appFrame) frames.push(appFrame);
-      frames.forEach((f) => {
-        try { f.contentWindow.postMessage({ type: 'prism-theme', vars }, '*'); } catch (_) {}
-      });
-    }
+    if (broadcast) broadcastVars(currentVars());
     // Let the animated background (bgfx.js) react: enable/disable + recolour.
     window.dispatchEvent(new CustomEvent('prism-theme-change', { detail: { id, vars } }));
   }
@@ -188,12 +218,10 @@
   // Live preview a token map without persisting it (used by the theme studio).
   function previewVars(vars) {
     vars = completeVars(vars);
+    renderedVars = { ...vars };
     const root = document.documentElement.style;
     for (const k in vars) root.setProperty(k, vars[k]);
-    const frames = [...document.querySelectorAll('.widget-body iframe')];
-    const appFrame = document.getElementById('app-frame');
-    if (appFrame) frames.push(appFrame);
-    frames.forEach((f) => { try { f.contentWindow.postMessage({ type: 'prism-theme', vars }, '*'); } catch (_) {} });
+    broadcastVars(currentVars());
     document.documentElement.setAttribute('data-theme', 'custom-preview');
     document.documentElement.setAttribute('data-theme-group', 'custom');
     document.documentElement.setAttribute('data-theme-mode', vars['color-scheme']);
@@ -282,6 +310,7 @@
     savePreference(FONT_KEY, v);
     const r = document.documentElement.style;
     if (v) r.setProperty('--sans', v); else r.removeProperty('--sans');
+    if (renderedVars) { if (v) renderedVars['--sans'] = v; else delete renderedVars['--sans']; }
   }
 
   // ─── Layout (chat panel side) ─────────────────────────────────────────────
@@ -294,7 +323,15 @@
   }
   function applyPrefs(broadcast = false) {
     applyingPreferences = true;
-    try { applyTheme(getThemeId(), broadcast); applyUIScale(); applyDensity(); applyBgfx(); applyChatSide(); applyFont(); }
+    try {
+      const inherited = inheritParentTheme();
+      if (!inherited) applyTheme(getThemeId(), broadcast);
+      applyUIScale(); applyDensity(); applyBgfx(); applyChatSide(); applyFont();
+      if (inherited) {
+        inheritParentTheme();
+        if (broadcast) broadcastVars(currentVars());
+      }
+    }
     finally { applyingPreferences = false; }
   }
 
@@ -302,7 +339,7 @@
   // shared widget stylesheet and the live-update bootstrap.
   function composeWidgetDoc(content, sessionID) {
     const head =
-      '<style id="prism-theme-vars">' + varsToCSS(activeVars()) + '</style>' +
+      '<style id="prism-theme-vars">' + varsToCSS(currentVars()) + 'html,body{background:var(--bg1);color:var(--text)}</style>' +
       '<link rel="stylesheet" href="/widget-base.css">' +
       '<script>window.PRISM_SESSION=' + JSON.stringify(sessionID || '') + ';<\/script>' +
       '<script src="/prism-widget.js"><\/script>' +
@@ -335,7 +372,7 @@
   }
 
   window.PrismTheme = {
-    THEMES, getAllThemes, getThemeId, activeVars,
+    THEMES, getAllThemes, getThemeId, activeVars, currentVars, syncFromParent: inheritParentTheme,
     applyTheme, previewVars, composeWidgetDoc, populateSelect,
     saveCustomTheme, deleteCustomTheme, generatePalette,
     applyUIScale, applyDensity, applyBgfx, applyChatSide, applyFont, getPref,

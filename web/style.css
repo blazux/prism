@@ -173,6 +173,7 @@ body {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  background: var(--bg1);
 }
 #app-frame {
   position: absolute;
@@ -639,6 +640,7 @@ body {
   overflow: hidden;
   position: relative;
   min-height: 0;
+  background: var(--bg1);
 }
 
 .widget-body iframe {
@@ -648,7 +650,19 @@ body {
   height: 100%;
   border: none;
   display: block;
+  background: var(--bg1);
 }
+
+.widget-body > .widget-loader { position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;background:var(--bg1);color:var(--text2);font:500 12px/1.5 var(--sans,system-ui,sans-serif);text-align:center; }
+.widget-loader-mark { width:60px;height:32px;flex-shrink:0;overflow:visible; }
+.widget-loader-mark path { fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round; }
+.widget-loader-mark .widget-loader-beam { stroke:var(--accent);stroke-width:1.6;stroke-dasharray:7 17;animation:widget-current 2s linear infinite; }
+.widget-loader-mark .widget-loader-ray { stroke:var(--accent); }
+.widget-loader-status { margin:0;max-width:32ch; }
+.widget-loader[data-state="error"] { color:var(--text); }
+.widget-loader[data-state="error"] .widget-loader-beam { animation:none;opacity:.35; }
+@keyframes widget-current { to { stroke-dashoffset:-24; } }
+@media(prefers-reduced-motion:reduce) { .widget-loader-mark .widget-loader-beam { animation:none;stroke-dasharray:none; } }
 
 /* ── Window resize handle ─────────────────────────────────────────────────── */
 

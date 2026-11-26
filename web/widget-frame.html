@@ -4,7 +4,31 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Prism widget</title>
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+    .widget-loader { box-sizing: border-box; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; background: var(--bg1, transparent); color: var(--text2, #91a0b9); font: 500 12px/1.5 system-ui, sans-serif; text-align: center; }
+    .widget-loader-mark { width: 60px; height: 32px; flex-shrink: 0; overflow: visible; }
+    .widget-loader-mark path { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+    .widget-loader-mark .widget-loader-beam { stroke: var(--accent, #9baeff); stroke-width: 1.6; stroke-dasharray: 7 17; animation: widget-current 2s linear infinite; }
+    .widget-loader-mark .widget-loader-ray { stroke: var(--accent, #9baeff); }
+    #widget-status { margin: 0; max-width: 32ch; }
+    .widget-loader[data-state="error"] { color: var(--text, #eef2fb); }
+    .widget-loader[data-state="error"] .widget-loader-beam { animation: none; opacity: .35; }
+    @keyframes widget-current { to { stroke-dashoffset: -24; } }
+    @media (prefers-reduced-motion: reduce) { .widget-loader-mark .widget-loader-beam { animation: none; stroke-dasharray: none; } }
+  </style>
   <script src="/widget-frame.js" defer></script>
 </head>
-<body><p id="widget-status">Opening widget…</p></body>
+<body>
+  <div class="widget-loader" aria-busy="true">
+    <svg class="widget-loader-mark" viewBox="-2 -1 48 25" aria-hidden="true">
+      <path d="M22 1 9 21h26Z"/>
+      <path class="widget-loader-ray" d="m28.5 11 15.5-6" opacity=".45"/>
+      <path class="widget-loader-ray" d="M28.5 11H44" opacity=".7"/>
+      <path class="widget-loader-ray" d="m28.5 11 15.5 6" opacity=".45"/>
+      <path class="widget-loader-beam" d="M0 11h15.5"/>
+    </svg>
+    <p id="widget-status" role="status" aria-live="polite">Opening widget…</p>
+  </div>
+</body>
 </html>

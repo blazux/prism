@@ -321,6 +321,8 @@ function widgetFrameURL() {
     const grant = new URL(WIDGET_HOSTING.grantURL, location.href)
     if (!['http:', 'https:'].includes(url.protocol) || url.origin === location.origin || grant.origin !== location.origin) return null
     url.searchParams.set('parent', location.origin)
+    const vars = window.PrismTheme.currentVars()
+    for (const [parameter, token] of Object.entries({bg:'--bg1',fg:'--text',muted:'--text2',accent:'--accent',border:'--border',scheme:'color-scheme'})) url.searchParams.set(parameter, vars[token])
     return url
   } catch (_) { return null }
 }
@@ -330,9 +332,35 @@ function widgetForMessage(event) {
     rec.el?.querySelector('.widget-body iframe')?.contentWindow === event.source)
 }
 
+function revealThemedWidget(rec, source, origin, stamp) {
+  if (!rec.contentReady) return
+  const vars = window.PrismTheme.currentVars()
+  const expected = ['--bg1','--text','--text2','--accent','--border','color-scheme'].map(key => vars[key]).join('|')
+  if (stamp !== expected) {
+    source.postMessage({type:'prism-theme',vars}, origin)
+    return
+  }
+  const frame = rec.el?.querySelector('.widget-body iframe')
+  if (frame?.contentWindow === source) {
+    clearTimeout(rec.loadingTimer)
+    rec.loadingEl?.remove()
+    rec.loadingEl = null
+    frame.style.visibility = ''
+  }
+}
+
+function widgetLoadingError(rec) {
+  clearTimeout(rec.loadingTimer)
+  const loader = rec.loadingEl
+  if (!loader) return
+  loader.dataset.state = 'error'
+  loader.setAttribute('aria-busy', 'false')
+  loader.querySelector('.widget-loader-status').textContent = 'The widget could not be opened. Reload the page to try again.'
+}
+
 function authorizeWidget(rec, source, origin, render) {
-  if (rec.authorizing) return
-  rec.authorizing = true
+  if (rec.authorizing === source) return
+  rec.authorizing = source
   fetch(WIDGET_HOSTING.grantURL, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({session: rec.sessionID})
@@ -349,8 +377,12 @@ function authorizeWidget(rec, source, origin, render) {
     } else source.postMessage({type:'prism-widget-authorize', grant:grant.token}, origin)
     rec.authorizedAt = Date.now()
   }).catch(() => {
-    if (widgets.get(rec.id) === rec) showToast({title:'Widget',message:'Unable to open the widget. Reload the page to retry.',level:'error'})
-  }).finally(() => { rec.authorizing = false })
+    if (widgets.get(rec.id) === rec && rec.el?.querySelector('.widget-body iframe')?.contentWindow === source && rec.widgetOrigin === origin) {
+      if (render) widgetLoadingError(rec)
+      if (render) source.postMessage({type:'prism-widget-error'}, origin)
+      showToast({title:'Widget',message:'Unable to open the widget. Reload the page to retry.',level:'error'})
+    }
+  }).finally(() => { if (rec.authorizing === source) rec.authorizing = null })
 }
 
 function refreshWidgetAuthorization() {
@@ -369,10 +401,6 @@ window.addEventListener('focus', refreshWidgetAuthorization)
 function addWidget(meta) {
   const id = meta.id
   const prev = widgets.get(id)
-
-  // Tear down any existing instance (update flow).
-  if (prev?.win) prev.win.destroy()
-  if (prev?.el) prev.el.remove()
 
   const cols = Math.max(1, Math.min(3, meta.cols || 1))
   const defW = cols === 1 ? 340 : cols === 2 ? 500 : 700
@@ -399,6 +427,14 @@ function addWidget(meta) {
     cols, height: meta.height || 280, locked: !!meta.locked,
     open, x, y, w, h, el: null, win: null,
   }
+  // Reconnecting replays persisted widgets. Keep an identical running app;
+  // agent updates omit `open` and still explicitly replace its document.
+  const metadata = ['title','content','sessionID','cols','height','locked','open','x','y','w','h']
+  if (meta.open !== undefined && prev && prev.loadingEl?.dataset.state !== 'error' && metadata.every(key => prev[key] === rec[key]) &&
+      (open ? prev.el?.isConnected : !prev.el)) return
+  clearTimeout(prev?.loadingTimer)
+  if (prev?.win) prev.win.destroy()
+  if (prev?.el) prev.el.remove()
   widgets.set(id, rec)
   if (open) mountWindow(rec)
   renderDock()
@@ -449,10 +485,23 @@ function mountWindow(rec) {
 
   const body = document.createElement('div')
   body.className = 'widget-body'
+  rec.contentReady = false
+  rec.authorizedAt = 0
+  const loader = document.createElement('div')
+  loader.className = 'widget-loader'
+  loader.setAttribute('aria-busy', 'true')
+  loader.innerHTML = '<svg class="widget-loader-mark" viewBox="-2 -1 48 25" aria-hidden="true">' +
+    '<path d="M22 1 9 21h26Z"/><path class="widget-loader-ray" d="m28.5 11 15.5-6" opacity=".45"/>' +
+    '<path class="widget-loader-ray" d="M28.5 11H44" opacity=".7"/><path class="widget-loader-ray" d="m28.5 11 15.5 6" opacity=".45"/>' +
+    '<path class="widget-loader-beam" d="M0 11h15.5"/></svg>' +
+    '<p class="widget-loader-status" role="status" aria-live="polite">Opening widget…</p>'
+  rec.loadingEl = loader
+  body.appendChild(loader)
 
   const frameURL = widgetFrameURL()
   if (frameURL) {
     const iframe = document.createElement('iframe')
+    iframe.style.visibility = 'hidden'
     rec.widgetOrigin = frameURL.origin
     iframe.src = frameURL.href
     iframe.referrerPolicy = 'no-referrer'
@@ -467,9 +516,7 @@ function mountWindow(rec) {
     iframe.setAttribute('sandbox', WIDGET_SANDBOX)
     body.appendChild(iframe)
   } else {
-    const unavailable = document.createElement('p')
-    unavailable.textContent = 'The widget could not be opened. Reload the page to try again.'
-    body.appendChild(unavailable)
+    widgetLoadingError(rec)
   }
 
   card.append(hdr, body)
@@ -477,6 +524,9 @@ function mountWindow(rec) {
   dashboard().appendChild(el)
 
   rec.el = el
+  if (frameURL) rec.loadingTimer = setTimeout(() => {
+    if (widgets.get(rec.id) === rec && rec.el === el) widgetLoadingError(rec)
+  }, 15000)
   rec.win = window.PrismWindows.makeWindow(el, {
     handle: hdr,
     container: dashboard(),
@@ -491,6 +541,7 @@ function mountWindow(rec) {
 function minimizeWidget(id) {
   const rec = widgets.get(id)
   if (!rec) return
+  clearTimeout(rec.loadingTimer)
   if (rec.win) { rec.win.destroy(); rec.win = null }
   if (rec.el) { rec.el.remove(); rec.el = null }
   rec.open = false
@@ -537,6 +588,7 @@ async function deleteWidget(id) {
 // removeWidget handles a plugin_unload (server confirmed the widget is gone).
 function removeWidget(id) {
   const rec = widgets.get(id)
+  clearTimeout(rec?.loadingTimer)
   if (rec?.win) rec.win.destroy()
   if (rec?.el) rec.el.remove()
   widgets.delete(id)
@@ -1565,6 +1617,50 @@ function setView(view) {
   })
 }
 
+let appFrameNavigation = 0
+function syncAppFrameTheme(frame) {
+  const child = frame.contentWindow, doc = frame.contentDocument
+  const vars = window.PrismTheme.currentVars()
+  child.PrismTheme?.syncFromParent()
+  for (const [key, value] of Object.entries(vars)) doc.documentElement.style.setProperty(key, value)
+  doc.documentElement.style.backgroundColor = 'var(--bg1)'
+  doc.documentElement.style.color = 'var(--text)'
+  for (const key of ['data-theme','data-theme-group','data-theme-mode','data-chat-surface']) {
+    const value = document.documentElement.getAttribute(key)
+    if (value !== null) doc.documentElement.setAttribute(key, value)
+  }
+}
+function openAppFrame(frame, href) {
+  const navigation = ++appFrameNavigation, target = new URL(href, location.href)
+  let previousDocument, previousURL
+  try { previousDocument = frame.contentDocument; previousURL = new URL(frame.contentWindow.location.href) } catch (_) {}
+  const hashOnly = previousDocument?.readyState === 'complete' && previousURL?.origin === target.origin &&
+    previousURL.pathname === target.pathname && previousURL.search === target.search && previousURL.hash !== target.hash
+  if (hashOnly) {
+    syncAppFrameTheme(frame)
+    frame.style.visibility = ''
+    frame.src = href
+    return
+  }
+  frame.style.visibility = 'hidden'
+  frame.onload = async () => {
+    if (navigation !== appFrameNavigation) return
+    try {
+      const doc = frame.contentDocument, loaded = new URL(frame.contentWindow.location.href)
+      if (!doc || doc === previousDocument || loaded.origin !== location.origin || loaded.href === 'about:blank') return
+      if (loaded.pathname !== target.pathname && !['/login','/signup'].includes(loaded.pathname)) return
+      if (loaded.pathname === target.pathname && loaded.search !== target.search) return
+      await frame.contentWindow.PrismPreferences?.ready
+      if (navigation !== appFrameNavigation || frame.contentDocument !== doc) return
+      syncAppFrameTheme(frame)
+      frame.style.visibility = ''
+    } catch (_) {
+      if (navigation === appFrameNavigation) showToast({title:'Window',message:'The window could not be opened. Reload the page to try again.',level:'error'})
+    }
+  }
+  frame.src = href
+}
+
 // applyView switches the main pane between the board canvas (widgets) and a
 // full-pane app iframe. Apps are the same HTML used by board widgets, just
 // maximized — same REST data underneath.
@@ -1588,7 +1684,7 @@ function applyView(view) {
     // configuration (connecting accounts, OAuth). Settings is a global page, so
     // the chat follows the same rule as the other global apps: the assistant.
     gotoSession(ASSISTANT)
-    frame.src = `/settings.html#${view.tab || 'profile'}`
+    openAppFrame(frame, `/settings.html#${view.tab || 'profile'}`)
     frame.style.display = ''
     dash.style.display = 'none'
     dock.style.display = 'none'
@@ -1608,7 +1704,7 @@ function applyView(view) {
     // chat dock) stays around it — exactly like Settings. The /admin page is
     // themed via /style.css + /theme.js. Global page → global assistant.
     gotoSession(ASSISTANT)
-    frame.src = '/admin'
+    openAppFrame(frame, '/admin')
     frame.style.display = ''
     dash.style.display = 'none'
     dock.style.display = 'none'
@@ -1630,7 +1726,7 @@ function applyView(view) {
       if (['chat', 'logs', 'outbound', 'settings'].includes(view.tab)) params.set('tab', view.tab)
       if (view.group) params.set('group', view.group)
     }
-    frame.src = `/apps/${view.name}.html?${params}`
+    openAppFrame(frame, `/apps/${view.name}.html?${params}`)
     frame.style.display = ''
     dash.style.display = 'none'
     dock.style.display = 'none'
@@ -1646,6 +1742,9 @@ function applyView(view) {
     lastWorkspace = ws_id
     if (PrismPreferences.isReady()) PrismPreferences.setItem('active-workspace', ws_id)
     gotoSession(ws_id)
+    ++appFrameNavigation
+    frame.onload = null
+    frame.style.visibility = 'hidden'
     frame.style.display = 'none'
     frame.src = 'about:blank'
     dash.style.display = ''
@@ -2733,7 +2832,21 @@ window.addEventListener('message', e => {
     return
   }
   if (d.type === 'prism-widget-ready' && remoteWidget) {
+    e.source.postMessage({type:'prism-theme',vars:window.PrismTheme.currentVars()}, e.origin)
     authorizeWidget(remoteWidget, e.source, e.origin, true)
+    return
+  }
+  if (d.type === 'prism-widget-content-ready' && remoteWidget) {
+    remoteWidget.contentReady = true
+    e.source.postMessage({type:'prism-theme',vars:window.PrismTheme.currentVars()}, e.origin)
+    return
+  }
+  if (d.type === 'prism-widget-load-error' && remoteWidget) {
+    widgetLoadingError(remoteWidget)
+    return
+  }
+  if (d.type === 'prism-widget-theme-ready' && remoteWidget) {
+    revealThemedWidget(remoteWidget, e.source, e.origin, d.theme)
     return
   }
   if (d.type === 'prism-widget-storage-migrated' && remoteWidget) {

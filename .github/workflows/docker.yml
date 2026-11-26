@@ -58,8 +58,13 @@ jobs:
             web/tests/teams-admin-browser.cjs \
             web/tests/admin-values-browser.cjs \
             web/tests/widget-origin-browser.cjs \
+            web/tests/widget-ready-browser.cjs \
             web/tests/widget-backend-browser.cjs \
             web/tests/preferences-browser.cjs \
+            web/tests/email-selection-browser.cjs \
+            web/tests/email-forward-browser.cjs \
+            web/tests/email-refresh-browser.cjs \
+            web/tests/frame-theme-browser.cjs \
             web/tests/settings-chat-browser.cjs \
             web/tests/telephony-app-browser.cjs \
             web/tests/conversation-settings-browser.cjs \

@@ -16,6 +16,23 @@
   // The dashboard remains the only source of grants; widget code never receives
   // the dashboard's cookie or an unrestricted API credential.
   const ownerOrigin = window.PRISM_PARENT_ORIGIN;
+  // Keep the dashboard loader until the authored document has loaded.
+  // The fallback also covers apps with long-lived embedded resources.
+  if (ownerOrigin && window.parent !== window) {
+    let ready = false;
+    function rendered() {
+      if (ready) return;
+      ready = true;
+      clearTimeout(deadline);
+      requestAnimationFrame(function () { requestAnimationFrame(function () {
+        window.parent.postMessage({type: 'prism-widget-content-ready'}, ownerOrigin);
+      }); });
+    }
+    const deadline = setTimeout(rendered, 8000);
+    function loaded() { Promise.resolve(document.fonts?.ready).catch(function () {}).then(rendered); }
+    if (document.readyState === 'complete') loaded();
+    else window.addEventListener('load', loaded, {once: true});
+  }
   let authorization;
   if (ownerOrigin && window.parent !== window) window.addEventListener('message', async function (event) {
     if (event.source !== window.parent || event.origin !== ownerOrigin || event.data?.type !== 'prism-widget-authorize' || typeof event.data.grant !== 'string') return;
